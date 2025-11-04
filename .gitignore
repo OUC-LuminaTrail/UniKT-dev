@@ -1,0 +1,18 @@
+# Python Cache
+__pycache__
+*.pyc
+
+# IDE Settings
+/.vscode
+
+# tensorboard
+runs/
+
+# Data files
+*.csv
+*.npy
+*.npz
+
+# Model checkpoints
+*.ckpt
+*.pt
