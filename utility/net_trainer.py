@@ -3,6 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from abc import ABC, abstractmethod
 import time
 import os
+import tqdm
 from typing import Tuple, Any
 
 
@@ -156,11 +157,11 @@ class Trainer(ABC):
         """
         total_loss = 0.0
         if is_train:
-            for batch_data in data_loader:
+            for batch_data in tqdm(data_loader):
                 loss = self.run_train_epoch(batch_data, epoch)
                 total_loss += loss
         else:
-            for batch_data in data_loader:
+            for batch_data in tqdm(data_loader):
                 loss = self.run_eval_epoch(batch_data, epoch)
                 total_loss += loss
         return total_loss
