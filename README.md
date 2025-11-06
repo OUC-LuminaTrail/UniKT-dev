@@ -4,15 +4,16 @@
 
 - Python：3.13
 - torch：2.8.0
-- torch_geometric
-- pyg-lib
-- pandas
-- scikit-learn
-- tensorboard
+- torch_geometric：2.7.0
+- pyg-lib：0.5.0
+- scikit-learn：1.7.2
+- pandas：2.2.3
+- pyarrow：22.0.0
+- tensorboard：2.20.0
 
 ```bash
 # CPU only
-conda install scikit-learn jupyterlab pandas numpy tensorboard python=3.13 -c conda-forge -y
+conda install scikit-learn jupyterlab pandas pyarrow numpy tensorboard python=3.13 -c conda-forge -y
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
 ```
