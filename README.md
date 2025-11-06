@@ -13,11 +13,7 @@
 ```bash
 # CPU only
 conda install scikit-learn jupyterlab pandas numpy tensorboard python=3.13 -c conda-forge -y
-uv pip install torch torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
-
-# XPU
-conda install scikit-learn jupyterlab pandas tensorboard -c conda-forge python=3.13 -y
-uv pip install torch --index-url https://download.pytorch.org/whl/xpu
+uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
 ```
 
