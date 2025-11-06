@@ -103,6 +103,7 @@ class Trainer(ABC):
         self,
         loss: torch.Tensor,
         y_label: torch.Tensor,
+        y_hat: torch.Tensor,
         y_predict: torch.Tensor,
         epoch: int,
         phase: str,
@@ -113,7 +114,8 @@ class Trainer(ABC):
         参数:
             loss: 当前批次的损失值
             y_label: 真实标签
-            y_predict: 模型预测标签
+            y_hat: 模型输出的预测概率
+            y_predict: 二分类预测标签
             epoch: 当前训练轮数
             phase: "train" 或 "val"，表示当前阶段
 
@@ -185,7 +187,7 @@ class Trainer(ABC):
         # 计算损失
         loss = self.loss(y_hat, y_label)
         # 计算和记录指标
-        self.compute_metrics(loss, y_label, y_predict, epoch, "train")
+        self.compute_metrics(loss, y_label, y_hat, y_predict, epoch, "train")
         # 反向传播和优化
         loss.backward()
         self.opt.step()
@@ -209,7 +211,7 @@ class Trainer(ABC):
             # 计算损失
             loss = self.loss(y_hat, y_label)
             # 计算和记录指标
-            self.compute_metrics(loss, y_label, y_predict, epoch, "val")
+            self.compute_metrics(loss, y_label, y_hat, y_predict, epoch, "val")
         return loss.item()
 
 __all__ = ["Trainer"]
