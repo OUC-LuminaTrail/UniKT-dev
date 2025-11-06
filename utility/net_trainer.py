@@ -3,7 +3,7 @@ from torch.utils.tensorboard import SummaryWriter
 from abc import ABC, abstractmethod
 import time
 import os
-import tqdm
+from tqdm import tqdm
 from typing import Tuple, Any
 
 
