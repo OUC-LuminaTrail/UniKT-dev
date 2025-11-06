@@ -45,3 +45,14 @@ class DataSource(ABC):
             data_path: 保存数据的路径
         """
         pass
+
+    def get_data(self):
+        """
+        获取预处理后的数据
+
+        返回:
+            预处理后的数据
+        """
+        if self.processed_data is None:
+            raise ValueError("无已预处理数据")
+        return self.processed_data
