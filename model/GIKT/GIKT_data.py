@@ -16,7 +16,6 @@ class GIKTDataset(Dataset):
 
     def __getitem__(self, index):
         return (
-            self.graph,
             torch.tensor(self.sequences[index], dtype=torch.long),
             torch.tensor(self.responses[index], dtype=torch.long),
             torch.tensor(self.masks[index], dtype=torch.long),
@@ -162,4 +161,4 @@ def build_data(args, data_src: DataSource):
     )
     val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
-    return train_dataloader, val_dataloader
+    return train_dataloader, val_dataloader, graph
