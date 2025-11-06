@@ -58,6 +58,7 @@ class Assistments2009Data(DataSource):
         data = data.rename(
             columns={
                 "correct": "label",
+                "problem_id": "question_id",
             }
         )
         # 转换数据类型
@@ -66,6 +67,11 @@ class Assistments2009Data(DataSource):
         data = data.dropna(subset=["user_id", "skill_id", "label"])
         # 重置索引
         data = data.reset_index(drop=True)
+
+        # 将问题ID和技能ID重编码为连续整数
+        data["user_id"] = data["user_id"].astype("category").cat.codes.astype(int)
+        data["question_id"] = data["question_id"].astype("category").cat.codes.astype(int)
+        data["skill_id"] = data["skill_id"].astype("category").cat.codes.astype(int)
 
         self.processed_data = data
 
@@ -78,5 +84,8 @@ class Assistments2009Data(DataSource):
             data_path: 保存数据的路径
         """
 
+    @override
+    def fetch_data(self):
+        pass
 
 __all__ = ["Assistments2009Data"]
