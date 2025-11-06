@@ -96,7 +96,7 @@ class Trainer(ABC):
                 - y_label: 真实标签
                 - y_predict: 预测结果
         """
-        pass
+        raise NotImplementedError("Subclasses of Trainer must implement forward_pass method")
 
     @abstractmethod
     def compute_metrics(
@@ -121,7 +121,7 @@ class Trainer(ABC):
             self.log_metric(name, value, step): 记录标量指标到 TensorBoard
             self.log_loss(loss_value): 记录损失到历史记录
         """
-        pass
+        raise NotImplementedError("Subclasses of Trainer must implement compute_metrics method")
 
     def log_metric(self, name: str, value: float, step: int):
         """
