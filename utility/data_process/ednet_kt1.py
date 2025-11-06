@@ -2,14 +2,32 @@ from .data_utility import DataSource
 
 
 class EdNetKT1Data(DataSource):
-    def __init__(self, data_path: str):
-        super().__init__(data_path)
-        self.processed_data = None
+    """
+    EdNetKT1数据集处理类
+    """
 
-    def load_data(self):
+    def __init__(self, args):
+        super().__init__(
+            dataset="ednet_kt1", data_base_path=args.data_base_path, data_url=""
+        )
+        self.args = args
+
+    def load_src_data(self):
         # 实现数据加载逻辑
         pass
 
+    def load_processed_data(self):
+        # 实现预处理数据加载逻辑
+        pass
+
     def clear_data(self):
-        # 实现数据预处理逻辑
+        # 实现数据清理逻辑
+        pass
+
+    def fetch_data(self):
+        # 实现数据下载逻辑
+        pass
+
+    def save_data(self, data_path):
+        # 实现数据保存逻辑
         pass
