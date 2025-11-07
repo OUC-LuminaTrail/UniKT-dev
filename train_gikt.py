@@ -40,12 +40,6 @@ def parse_args():
         default="./data",
         help="Path to the data files",
     )
-    data_params.add_argument(
-        "--min_seq_len", type=int, default=10, help="Minimum sequence length"
-    )
-    data_params.add_argument(
-        "--max_seq_len", type=int, default=200, help="Maximum sequence length"
-    )
 
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
@@ -101,7 +95,7 @@ def main():
 
     # 初始化模型
     print("Initializing GIKT model...")
-    model = GIKT(args, graph)
+    model = GIKT(args, graph, data_src.get_metadata())
 
     # 损失函数和优化器
     loss_fn = torch.nn.CrossEntropyLoss()  # 二分类交叉熵损失

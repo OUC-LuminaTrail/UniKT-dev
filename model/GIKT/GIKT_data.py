@@ -74,16 +74,16 @@ def build_sequence_data(data_src: DataSource, max_seq_len: int, min_seq_len: int
     from tqdm import tqdm
 
     data = data_src.get_processed_data()
-    num_user = data["user_id"].nunique()
+    num_users = data_src.get_metadata("num_users")
 
     # 构建用户答题序列
-    user_sequence = np.zeros((num_user, max_seq_len), dtype=int)
+    user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
     # 用户作答正确与否序列
-    user_response = np.zeros((num_user, max_seq_len), dtype=int)
+    user_response = np.zeros((num_users, max_seq_len), dtype=int)
     # 序列掩码，用于区分是否存在作答数据
-    user_mask = np.zeros((num_user, max_seq_len), dtype=int)
+    user_mask = np.zeros((num_users, max_seq_len), dtype=int)
     # 用户序列长度计数器，用于索引
-    num_sequence = [0] * num_user
+    num_sequence = [0] * num_users
 
     for row in tqdm(
         data.itertuples(), total=data.shape[0], desc="Building user sequences"
@@ -143,24 +143,9 @@ def split_data(sequences, responses, masks, val_ratio=0.2):
 
 
 def build_data(args, data_src: DataSource):
-    # 加载预处理后的数据
-    data_src.load_processed_data()
-    data = data_src.get_processed_data()
-    min_seq_len = args.min_seq_len
-    max_seq_len = args.max_seq_len
-
-    # 学生数量
-    num_user = data["user_id"].nunique()
-    # 问题数量
-    num_question = data["question_id"].nunique()
-    # 技能数量
-    num_skill = data["skill_id"].nunique()
-
-    print(f"user_num: {num_user}, question_num: {num_question}, skill_num: {num_skill}")
-
     # 构建用户答题序列
     user_sequence, user_response, user_mask = build_sequence_data(
-        data_src, max_seq_len, min_seq_len
+        data_src, data_src.get_metadata("max_seq_len"), data_src.get_metadata("min_seq_len")
     )
 
     # 构建异构图
