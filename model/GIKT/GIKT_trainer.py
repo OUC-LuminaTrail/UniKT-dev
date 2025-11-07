@@ -37,7 +37,6 @@ class GIKTTrainer(Trainer):
 
     def compute_metrics(
         self,
-        loss: torch.Tensor,
         y_label: torch.Tensor,
         y_hat: torch.Tensor,
         y_predict: torch.Tensor,
@@ -48,16 +47,10 @@ class GIKTTrainer(Trainer):
         GIKT模型的指标计算
 
         计算并记录以下指标：
-        - Loss: 损失值
         - ACC: 准确率
         - AUC: ROC曲线下面积
         """
         prefix = "Train/" if phase == "train" else "Val/"
-        loss_value = loss.item()
-
-        # 记录损失
-        self.log_loss(loss_value)
-        self.log_metric(f"{prefix}Loss/epoch", loss_value, epoch)
 
         # 将数据移动到CPU并转换为numpy数组
         y_label_np = y_label.cpu().numpy()

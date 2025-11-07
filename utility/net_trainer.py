@@ -34,7 +34,6 @@ class Trainer(ABC):
         self.train_data = train_data
         self.val_data = val_data
         self.lr_scheduler = lr_scheduler
-        self.loss_history = []
 
         # 以当前时间戳命名日志文件夹
         log_dir = time.strftime("%Y%m%d-%H%M%S")
@@ -105,7 +104,6 @@ class Trainer(ABC):
     @abstractmethod
     def compute_metrics(
         self,
-        loss: torch.Tensor,
         y_label: torch.Tensor,
         y_hat: torch.Tensor,
         y_predict: torch.Tensor,
@@ -116,7 +114,6 @@ class Trainer(ABC):
         计算并记录模型的各项指标（需要子类实现）
 
         参数:
-            loss: 当前批次的损失值
             y_label: 真实标签
             y_hat: 模型输出的预测概率
             y_predict: 二分类预测标签
@@ -125,7 +122,6 @@ class Trainer(ABC):
 
         可用工具:
             self.log_metric(name, value, step): 记录标量指标到 TensorBoard
-            self.log_loss(loss_value): 记录损失到历史记录
         """
         raise NotImplementedError(
             "Subclasses of Trainer must implement compute_metrics method"
@@ -141,15 +137,6 @@ class Trainer(ABC):
             step: 当前步数（通常是 epoch 或 batch 数）
         """
         self.logger.add_scalar(name, value, step)
-
-    def log_loss(self, loss_value: float):
-        """
-        记录损失值到历史记录
-
-        参数:
-            loss_value: 损失值
-        """
-        self.loss_history.append(loss_value)
 
     def process_data(self, data_loader, epoch, is_train=True):
         """
@@ -193,7 +180,7 @@ class Trainer(ABC):
         # 计算损失
         loss = self.loss(y_hat, y_label)
         # 计算和记录指标
-        self.compute_metrics(loss, y_label, y_hat, y_predict, epoch, "train")
+        self.compute_metrics(y_label, y_hat, y_predict, epoch, "train")
         # 反向传播和优化
         loss.backward()
         self.opt.step()
@@ -217,7 +204,7 @@ class Trainer(ABC):
             # 计算损失
             loss = self.loss(y_hat, y_label)
             # 计算和记录指标
-            self.compute_metrics(loss, y_label, y_hat, y_predict, epoch, "val")
+            self.compute_metrics(y_label, y_hat, y_predict, epoch, "val")
         return loss.item()
 
 
