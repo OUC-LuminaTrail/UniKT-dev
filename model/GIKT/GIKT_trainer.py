@@ -25,13 +25,26 @@ class GIKTTrainer(Trainer):
         mask = mask.to(torch.bool).to(self.device_)
 
         # 模型前向传播
-        y_hat = self.model(sequence, response, mask)
-        # 使用mask选择有效位置
-        y_hat = torch.masked_select(y_hat, mask)
+        # 模型内已将 response 右移一位作为输入，在时刻 t 的输出预测的是 t+1 的标签
+        # 因此 y_hat[:, :-1] 对应 response[:, 1:]
+        y_hat_full = self.model(sequence, response, mask)  # [B, S]
+
+        # 提取有效位置的预测和标签
+        y_hat_seq = y_hat_full[:, :-1]
+        y_label_seq = response.float()[:, 1:]
+        valid_mask = mask[:, 1:]
+
+        # 使用 mask 选择有效位置
+        y_hat = torch.masked_select(y_hat_seq, valid_mask)
+        y_label = torch.masked_select(y_label_seq, valid_mask)
+
+        # 若该批次没有任何有效位置，使用占位避免后续计算报错
+        if y_label.numel() == 0:
+            y_hat = torch.tensor([0.5], dtype=torch.float, device=self.device_)
+            y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
+
         # 生成二分类预测（阈值0.5）
         y_predict = torch.ge(y_hat, torch.tensor(0.5).to(self.device_)).to(torch.int)
-        # 获取真实标签
-        y_label = torch.masked_select(response.float(), mask)
 
         return y_hat, y_label, y_predict
 
@@ -51,6 +64,10 @@ class GIKTTrainer(Trainer):
         - AUC: ROC曲线下面积
         """
         prefix = "Train/" if phase == "train" else "Val/"
+
+        # 若当前批次无有效样本，跳过指标计算
+        if y_label.numel() == 0:
+            return
 
         # 将数据移动到CPU并转换为numpy数组
         y_label_np = y_label.cpu().numpy()
