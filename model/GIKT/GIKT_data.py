@@ -104,25 +104,41 @@ def build_sequence_data(data_src: DataSource, max_seq_len: int, min_seq_len: int
 
 
 def split_data(sequences, responses, masks, val_ratio=0.2):
-    num_users = sequences.shape[0]
-    indices = np.arange(num_users)
-    np.random.shuffle(indices)
+    from tqdm import tqdm
+    num_users, max_seq_len = sequences.shape
 
-    val_size = int(num_users * val_ratio)
-    val_indices = indices[:val_size]
-    train_indices = indices[val_size:]
+    # 计算每个用户实际的序列长度
+    seq_lengths = np.sum(masks, axis=1).astype(int)
+    
+    # 计算分割点：每个用户的验证集从哪个时间步开始
+    split_points = np.ceil(seq_lengths * (1 - val_ratio)).astype(int)
+    train_sequences = sequences.copy()
+    train_responses = responses.copy()
+    train_masks = masks.copy()
+    
+    val_sequences = sequences.copy()
+    val_responses = responses.copy()
+    val_masks = masks.copy()
+    
+    # 对每个用户，按时间步分割
+    for user_idx in tqdm(range(num_users), desc="Split dataset"):
+        split_point = split_points[user_idx]
+        actual_length = seq_lengths[user_idx]
+        
+        if actual_length == 0:
+            continue
 
-    train_data = (
-        sequences[train_indices],
-        responses[train_indices],
-        masks[train_indices],
-    )
-    val_data = (
-        sequences[val_indices],
-        responses[val_indices],
-        masks[val_indices],
-    )
-
+        # 训练集：前 split_point 个时间步
+        train_masks[user_idx, split_point:] = 0
+        train_responses[user_idx, split_point:] = 0
+        
+        # 验证集：后面的时间步
+        val_masks[user_idx, :split_point] = 0
+        val_responses[user_idx, :split_point] = 0
+    
+    train_data = (train_sequences, train_responses, train_masks)
+    val_data = (val_sequences, val_responses, val_masks)
+    
     return train_data, val_data
 
 
