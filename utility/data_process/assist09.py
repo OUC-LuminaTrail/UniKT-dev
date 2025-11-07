@@ -26,7 +26,7 @@ class Assistments2009Data(DataSource):
         加载原始数据
         """
         if not os.path.exists(self.raw_data_path):
-            raise FileNotFoundError(f"未找到数据文件: {self.raw_data_path}")
+            raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
         self.raw_data = pd.read_csv(
             self.raw_data_path, encoding="latin1", low_memory=False
         )
@@ -36,11 +36,15 @@ class Assistments2009Data(DataSource):
         """
         加载预处理后的数据
         """
-        if not os.path.exists(self.data_processed_folder):
+        self.load_metadata()
+        data_processed_path = os.path.join(
+            self.data_folder, f"{self.dataset}_processed.parquet"
+        )
+        if not os.path.exists(data_processed_path):
             raise FileNotFoundError(
-                f"未找到预处理数据文件: {self.data_processed_folder}"
+                f"Cannot find processed data file: {data_processed_path}"
             )
-        self.processed_data = pd.read_parquet(self.data_processed_folder)
+        self.processed_data = pd.read_parquet(data_processed_path)
 
     @override
     def clear_data(self):
@@ -48,7 +52,12 @@ class Assistments2009Data(DataSource):
         清理数据
         """
         if self.raw_data is None:
-            raise ValueError("请先加载数据")
+            try:
+                self.load_src_data()
+            except FileNotFoundError:
+                raise ValueError(
+                    "Original data loading failed. Please check the data file."
+                )
 
         data = self.raw_data.drop(
             columns=[
@@ -100,18 +109,23 @@ class Assistments2009Data(DataSource):
 
         self.processed_data = data
 
+        # 保存元信息
+        self.add_metadata("num_users", data["user_id"].nunique())
+        self.add_metadata("num_questions", data["question_id"].nunique())
+        self.add_metadata("num_skills", data["skill_id"].nunique())
+        self.add_metadata("max_seq_len", self.args.max_seq_len)
+        self.add_metadata("min_seq_len", self.args.min_seq_len)
+
     @override
     def save_data(self):
-        """
-        保存预处理后的数据
-        """
         if self.processed_data is None:
-            raise ValueError("请先清理数据")
+            raise ValueError("Please run clear_data() before saving processed data.")
 
         data_processed_path = os.path.join(
-            self.data_base_path, f"{self.dataset}_processed"
+            self.data_folder, f"{self.dataset}_processed.parquet"
         )
         self.processed_data.to_parquet(data_processed_path, index=False)
+        self.save_metadata()
 
     @override
     def fetch_data(self):
