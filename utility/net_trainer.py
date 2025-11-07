@@ -42,6 +42,10 @@ class Trainer(ABC):
             os.makedirs(os.path.join("runs", log_dir))
         # TensorBoard 日志记录器
         self.logger = SummaryWriter("runs/" + log_dir)
+        # 记录模型参数数量
+        total_params = sum(p.numel() for p in model.parameters())
+        self.logger.add_text("Model-Parameters", f"Total parameters: {total_params}")
+        print(f"Model Parameters: {total_params}")
 
     def try_gpu(self, device=None):
         if device is None:
@@ -58,15 +62,14 @@ class Trainer(ABC):
         self.loss = self.loss.to(self.device_)  # 将损失函数移动到GPU中
 
         for epoch in range(self.epochs):
+            print(f"Epoch {epoch+1}")
             # 训练
             train_total_loss = self.process_data(self.train_data, epoch, is_train=True)
-            self.logger.add_scalar("Train-Loss/epoch", train_total_loss, epoch)
-            print(f"epoch {epoch + 1}, train-loss {train_total_loss}")
+            self.logger.add_scalar("Train/Loss-epoch", train_total_loss, epoch)
             # 验证
             if self.val_data is not None:
                 val_total_loss = self.process_data(self.val_data, epoch, is_train=False)
-                self.logger.add_scalar("Val-Loss/epoch", val_total_loss, epoch)
-                print(f"epoch {epoch + 1}, val-loss {val_total_loss}")
+                self.logger.add_scalar("Val/Loss-epoch", val_total_loss, epoch)
 
             # 学习率调度器更新
             if self.lr_scheduler is not None:
@@ -74,7 +77,6 @@ class Trainer(ABC):
                 self.logger.add_scalar(
                     "Learning Rate", self.lr_scheduler.get_last_lr()[0], epoch
                 )
-                print(f"epoch {epoch + 1}, lr {self.lr_scheduler.get_last_lr()[0]}")
             # 刷新日志
             self.logger.flush()
         self.logger.close()
@@ -96,7 +98,9 @@ class Trainer(ABC):
                 - y_label: 真实标签
                 - y_predict: 预测结果
         """
-        raise NotImplementedError("Subclasses of Trainer must implement forward_pass method")
+        raise NotImplementedError(
+            "Subclasses of Trainer must implement forward_pass method"
+        )
 
     @abstractmethod
     def compute_metrics(
@@ -123,7 +127,9 @@ class Trainer(ABC):
             self.log_metric(name, value, step): 记录标量指标到 TensorBoard
             self.log_loss(loss_value): 记录损失到历史记录
         """
-        raise NotImplementedError("Subclasses of Trainer must implement compute_metrics method")
+        raise NotImplementedError(
+            "Subclasses of Trainer must implement compute_metrics method"
+        )
 
     def log_metric(self, name: str, value: float, step: int):
         """
@@ -213,5 +219,6 @@ class Trainer(ABC):
             # 计算和记录指标
             self.compute_metrics(loss, y_label, y_hat, y_predict, epoch, "val")
         return loss.item()
+
 
 __all__ = ["Trainer"]
