@@ -56,7 +56,7 @@ def parse_args():
     # 其他参数
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
-        "--device", type=str, default="cuda", help="Device (cuda or cpu)"
+        "--device", type=str, default=None, help="Device (cuda or cpu)"
     )
 
     return parser.parse_args()
