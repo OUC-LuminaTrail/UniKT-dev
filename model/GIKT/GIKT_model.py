@@ -37,7 +37,7 @@ class History_Recap(nn.Module):
         score1 = self.atn_w1(lstm_output).squeeze(-1)  # [B, S]
         score2 = self.atn_w2(next_q_dmb).squeeze(-1)  # [B, S]
         # 拼接成 [B, S(history), S(current)] 的两两配对打分矩阵
-        scores: torch.Tensor = score1.unsqueeze(-1) + score2.unsqueeze(1)  # [B, S, S]
+        scores: torch.Tensor = score1.unsqueeze(1) + score2.unsqueeze(2)  # [B, S, S]
         scores = torch.tanh(scores)
 
         # 将分数矩阵转为下三角矩阵以掩盖未来的信息
@@ -63,12 +63,12 @@ class History_Recap(nn.Module):
                 # 将非 top-k 位置的分数置为 -inf
                 scores = scores.masked_fill(keep < 0.5, float(-1e9))
 
-        attn = F.softmax(scores.view(B, -1), dim=1).view(B, S, S)  # [B, S, S]
+        attn = F.softmax(scores, dim=2)  # [B, S, S]
         # 处理无历史的时间步
         has_hist = valid.any(dim=1, keepdim=True)  # [B, 1, S]
         attn = attn * has_hist  # 广播到 [B, S, S]
 
-        recap = torch.matmul(attn.transpose(1, 2), lstm_output)  # [B, S, H]
+        recap = torch.matmul(attn, lstm_output)  # [B, S, H]
         return recap
 
 
