@@ -51,7 +51,7 @@ class History_Recap(nn.Module):
         mask_t = user_mask.unsqueeze(1)  # [B, 1, S]
         valid = mask_hist & mask_j & mask_t  # [B, S, S]
         # 将无效的位置填为无穷小
-        scores = scores.masked_fill(~valid, float("-inf"))
+        scores = scores.masked_fill(~valid, float(-1e9))
 
         # top-k 选择
         if self.topk is not None:
@@ -61,7 +61,7 @@ class History_Recap(nn.Module):
                 # 生成掩码，仅保留 top-k 位置
                 keep = torch.zeros_like(scores).scatter(1, topk_idx, 1.0)
                 # 将非 top-k 位置的分数置为 -inf
-                scores = scores.masked_fill(keep < 0.5, float("-inf"))
+                scores = scores.masked_fill(keep < 0.5, float(-1e9))
 
         attn = F.softmax(scores.view(B, -1), dim=1).view(B, S, S)  # [B, S, S]
         # 处理无历史的时间步
