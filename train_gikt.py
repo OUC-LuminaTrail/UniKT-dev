@@ -98,7 +98,7 @@ def main():
     model = GIKT(args, graph, data_src.get_metadata())
 
     # 损失函数和优化器
-    loss_fn = torch.nn.CrossEntropyLoss()  # 二分类交叉熵损失
+    loss_fn = torch.nn.BCELoss()  # 二分类交叉熵损失
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # 学习率调度器
