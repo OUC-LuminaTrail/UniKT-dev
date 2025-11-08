@@ -12,7 +12,9 @@ runs/
 *.csv
 *.npy
 *.npz
+*.parquet
 
 # Model checkpoints
 *.ckpt
 *.pt
+*.pth
