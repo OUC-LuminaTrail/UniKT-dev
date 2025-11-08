@@ -175,7 +175,7 @@ class GIKT(nn.Module):
         )
 
         # 历史回顾模块
-        history_topk = getattr(args, "hist_topk", None)
+        history_topk = args.top_k
         self.history_recap = History_Recap(hidden_dim=self.hidden_dim, topk=history_topk)
 
         # Sigmoid输出层
