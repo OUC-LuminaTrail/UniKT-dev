@@ -65,6 +65,7 @@ def main():
     """主训练函数"""
     args = parse_args()
     import torch
+    import numpy
 
     from model.GIKT.GIKT_model import GIKT
     from model.GIKT.GIKT_data import build_data
@@ -78,7 +79,8 @@ def main():
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
-
+    numpy.random.seed(args.seed)
+    
     # 构建数据
     print("Building datasets...")
     if args.dataset == "assistments09":
