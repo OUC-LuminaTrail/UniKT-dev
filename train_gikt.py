@@ -68,7 +68,6 @@ def main():
     import torch
     import numpy
 
-    from model.GIKT.GIKT_model import GIKT
     from model.GIKT.GIKT_data import build_data
     from model.GIKT.GIKT_trainer import GIKTTrainer
     from utility.data_process.assist09 import Assistments2009Data
@@ -94,33 +93,11 @@ def main():
         data_src = EdNetKT1Data(args=args)
     else:
         raise ValueError(f"不支持的数据集: {args.dataset}")
-    train_data, val_data, graph = build_data(args, data_src)
 
-    # 初始化模型
-    print("Initializing GIKT model...")
-    model = GIKT(args, graph, data_src.get_metadata())
-
-    # 损失函数和优化器
-    loss_fn = torch.nn.BCELoss()  # 二分类交叉熵损失
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-    # 学习率调度器
-    lr_scheduler = None
-    if args.lr_decay:
-        lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-            optimizer, gamma=args.lr_decay
-        )
-
-    # 初始化训练器
     print("Initializing trainer...")
     trainer = GIKTTrainer(
-        model=model,
-        epochs=args.epochs,
-        opt=optimizer,
-        loss=loss_fn,
-        train_data=train_data,
-        val_data=val_data,
-        lr_scheduler=lr_scheduler,
+        args=args,
+        data_src=data_src,
     )
 
     # 开始训练

@@ -2,6 +2,7 @@
 GIKT 模型训练器
 定义 GIKT 模型特定的训练逻辑
 """
+
 import torch
 from utility.net_trainer import Trainer
 from sklearn.metrics import roc_auc_score, accuracy_score
@@ -13,9 +14,51 @@ class GIKTTrainer(Trainer):
     """
 
     def __init__(
-        self, model, epochs, opt, loss, train_data, val_data=None, lr_scheduler=None
+        self,
+        args=None,
+        data_src=None,
+        log_dir=None,
     ):
-        super().__init__(model, epochs, opt, loss, train_data, val_data, lr_scheduler)
+        # 设置设备信息
+        self.try_gpu(args.device)
+        # 构建数据
+        from model.GIKT.GIKT_data import build_data
+        train_data, val_data, graph = build_data(args, data_src)
+        # 将图数据移动到设备
+        graph.to(self.device_)
+        model, opt, loss, lr_scheduler = self.init_model(
+            args, graph, data_src
+        )
+        super().__init__(
+            model,
+            args.epochs,
+            opt,
+            loss,
+            train_data,
+            val_data,
+            lr_scheduler,
+            args,
+            log_dir,
+        )
+
+    def init_model(self, args, graph, data_src):
+        from model.GIKT.GIKT_model import GIKT
+
+        print("Initializing GIKT model...")
+        model = GIKT(args, graph, data_src.get_metadata())
+
+        # 二分类交叉熵损失
+        loss_fn = torch.nn.BCELoss()
+        # 优化器
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+        # 学习率调度器
+        lr_scheduler = None
+        if args.lr_decay:
+            lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
+                optimizer, gamma=args.lr_decay
+            )
+
+        return model, optimizer, loss_fn, lr_scheduler
 
     def forward_pass(self, batch_data):
         sequence, response, mask = batch_data
@@ -84,4 +127,6 @@ class GIKTTrainer(Trainer):
             self.log_metric(f"{prefix}AUC-epoch", auc, epoch)
         except ValueError:
             # 如果只有一个类别，无法计算AUC
-            print(f"Warning: Cannot compute AUC for {phase} phase (only one class in batch)")
+            print(
+                f"Warning: Cannot compute AUC for {phase} phase (only one class in batch)"
+            )

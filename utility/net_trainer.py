@@ -5,6 +5,7 @@ import time
 import os
 from tqdm import tqdm
 from typing import Tuple, Any
+from utility.hyperparam_manager import HyperparameterManager
 
 
 class Trainer(ABC):
@@ -12,8 +13,9 @@ class Trainer(ABC):
     模型训练器
 
     子类需要实现：
-    1. forward_pass: 模型前向传播逻辑
-    2. compute_metrics: 指标计算和记录
+    1. init_model: 模型初始化
+    2. forward_pass: 模型前向传播逻辑
+    3. compute_metrics: 指标计算和记录
     """
 
     def __init__(
@@ -25,6 +27,8 @@ class Trainer(ABC):
         train_data,
         val_data=None,
         lr_scheduler=None,
+        hyperparams=None,
+        log_dir: str = None,
     ):
         self.device_: torch.device | None = None
         self.model: torch.nn.Module = model
@@ -36,15 +40,74 @@ class Trainer(ABC):
         self.lr_scheduler = lr_scheduler
 
         # 以当前时间戳命名日志文件夹
-        log_dir = time.strftime("%Y%m%d-%H%M%S")
-        if not os.path.exists(os.path.join("runs", log_dir)):
-            os.makedirs(os.path.join("runs", log_dir))
+        if log_dir is None:
+            log_dir = time.strftime("%Y%m%d-%H%M%S")
+        self.log_dir = os.path.join("runs", log_dir)
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir)
+        
         # TensorBoard 日志记录器
-        self.logger = SummaryWriter("runs/" + log_dir)
-        # 记录模型参数数量
-        total_params = sum(p.numel() for p in model.parameters())
-        self.logger.add_text("Model-Parameters", f"Total parameters: {total_params}")
-        print(f"Model Parameters: {total_params}")
+        self.logger = SummaryWriter(self.log_dir)
+        
+        # 初始化超参数管理器
+        self.hyperparam_manager = None
+        if hyperparams is not None:
+            self.setup_hyperparameters(hyperparams)
+    
+    def setup_hyperparameters(
+        self,
+        hyperparams,
+        model_name=None,
+        dataset_name=None
+    ):
+        """
+        设置并保存超参数
+        
+        Args:
+            hyperparams: 超参数（字典或Namespace对象）
+            model_name: 模型名称（可选）
+            dataset_name: 数据集名称（可选）
+        """
+        from utility.hyperparam_manager import create_hyperparameter_manager
+        
+        # 创建超参数管理器
+        self.hyperparam_manager = create_hyperparameter_manager(
+            args=hyperparams,
+            save_dir=self.log_dir,
+            model_name=model_name,
+            dataset_name=dataset_name
+        )
+        
+        # 添加训练器相关元数据
+        self.hyperparam_manager.add_metadata('total_params', sum(p.numel() for p in self.model.parameters()))
+        self.hyperparam_manager.add_metadata('optimizer', type(self.opt).__name__)
+        self.hyperparam_manager.add_metadata('loss_function', type(self.loss).__name__)
+        if self.lr_scheduler is not None:
+            self.hyperparam_manager.add_metadata('lr_scheduler', type(self.lr_scheduler).__name__)
+        
+        # 保存超参数
+        self.hyperparam_manager.save()
+        
+        # 打印摘要
+        print("\n" + self.hyperparam_manager.get_summary())
+        
+        # 将超参数摘要记录到TensorBoard
+        self.logger.add_text("Hyperparameters", self.hyperparam_manager.get_summary().replace('\n', '  \n'))
+
+    @abstractmethod
+    def init_model(self):
+        """
+        初始化模型、优化器、损失函数和学习率调度器
+
+        返回:
+            model: torch.nn.Module
+            optimizer: torch.optim.Optimizer
+            loss_function: 损失函数
+            lr_scheduler: 学习率调度器（可选）
+        """
+        raise NotImplementedError(
+            "Subclasses of Trainer must implement init_model method"
+        )
 
     def try_gpu(self, device=None):
         if device is None:
