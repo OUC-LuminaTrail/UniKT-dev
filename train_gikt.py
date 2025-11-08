@@ -43,9 +43,9 @@ def parse_args():
 
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
-    train_params.add_argument("--epochs", type=int, default=100, help="Number of epochs")
+    train_params.add_argument("--epochs", type=int, default=150, help="Number of epochs")
     train_params.add_argument(
-        "--batch_size", type=int, default=32, help="Batch size for training"
+        "--batch_size", type=int, default=128, help="Batch size for training"
     )
     train_params.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     train_params.add_argument(
