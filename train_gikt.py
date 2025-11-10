@@ -67,8 +67,6 @@ def main():
     args = parse_args()
     import torch
     import numpy
-
-    from model.GIKT.GIKT_data import build_data
     from model.GIKT.GIKT_trainer import GIKTTrainer
     from utility.data_process.assist09 import Assistments2009Data
     from utility.data_process.assist12 import Assistments2012Data
