@@ -84,6 +84,8 @@ class Trainer(ABC):
         self.hyperparam_manager.add_metadata('loss_function', type(self.loss).__name__)
         if self.lr_scheduler is not None:
             self.hyperparam_manager.add_metadata('lr_scheduler', type(self.lr_scheduler).__name__)
+        if hasattr(self.opt, 'defaults') and 'weight_decay' in self.opt.defaults:
+            self.hyperparam_manager.add_metadata('weight_decay', self.opt.defaults['weight_decay'])
         
         # 保存超参数
         self.hyperparam_manager.save()
@@ -114,7 +116,6 @@ class Trainer(ABC):
             self.device_ = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
             self.device_ = device
-        print(f"Using Device: {self.device_}")
         return self.device_
 
     def run(self):

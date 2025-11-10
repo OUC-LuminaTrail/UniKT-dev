@@ -50,7 +50,7 @@ class GIKTTrainer(Trainer):
         # 二分类交叉熵损失
         loss_fn = torch.nn.BCELoss()
         # 优化器
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
         # 学习率调度器
         lr_scheduler = None
         if args.lr_decay:

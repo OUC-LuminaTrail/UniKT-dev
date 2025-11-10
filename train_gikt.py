@@ -52,6 +52,9 @@ def parse_args():
     train_params.add_argument(
         "--lr_decay", type=float, default=None, help="Learning rate decay factor"
     )
+    train_params.add_argument(
+        "--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)"
+    )
 
     # 其他参数
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
