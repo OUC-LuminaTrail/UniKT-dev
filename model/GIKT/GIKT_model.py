@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import HeteroConv, Linear, GATConv
+from torch_geometric.nn import HeteroConv, Linear, GATv2Conv
 from torch.nn import functional as F
 
 
@@ -89,12 +89,12 @@ class GNN_QS(nn.Module):
         for _ in range(n_hop):
             conv = HeteroConv(
                 {
-                    ("question", "has_skill", "skill"): GATConv(
+                    ("question", "has_skill", "skill"): GATv2Conv(
                         (embedding_dim, embedding_dim),
                         embedding_dim,
                         add_self_loops=False,
                     ),
-                    ("skill", "rev_has_skill", "question"): GATConv(
+                    ("skill", "rev_has_skill", "question"): GATv2Conv(
                         (embedding_dim, embedding_dim),
                         embedding_dim,
                         add_self_loops=False,
