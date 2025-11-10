@@ -20,10 +20,10 @@ def parse_args():
         "--lstm_layers", type=int, default=2, help="Number of LSTM layers"
     )
     model_params.add_argument(
-        "--dropout", type=float, default=0.2, help="Dropout probability"
+        "--dropout", type=float, default=0.4, help="Dropout probability"
     )
     model_params.add_argument("--n_hop", type=int, default=3, help="Number of GNN hops")
-    model_params.add_argument("--top_k", type=int, default=None, help="Top K neighbors to consider")
+    model_params.add_argument("--top_k", type=int, default=5, help="Top K neighbors to consider")
 
     # 数据参数
     data_params = parser.add_argument_group("Data Parameters")
