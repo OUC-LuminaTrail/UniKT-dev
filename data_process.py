@@ -34,6 +34,7 @@ def add_data_process_args(parser):
         default=5,
         help="Number of folds for K-Fold cross-validation",
     )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     return parser
 

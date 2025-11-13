@@ -26,7 +26,9 @@ class DataSource(ABC):
         save_metadata(): 保存数据元信息到 JSON 文件
     """
 
-    def __init__(self, dataset: str, data_base_path: str, data_url: str = None):
+    def __init__(
+        self, dataset: str, data_base_path: str, data_url: str = None, seed: int = 42
+    ):
         super().__init__()
         self.dataset = dataset.lower()
         # 数据存储的基础路径
@@ -39,6 +41,18 @@ class DataSource(ABC):
         self.processed_data = None
         self.data_url = data_url
         self.metadata = {}
+        # 设置随机种子
+        self.seed = seed
+        self.set_random_seed()
+
+    def set_random_seed(self):
+        import random
+        import numpy as np
+
+        random.seed(42)
+        np.random.seed(42)
+
+        self.add_metadata("random_seed", self.seed)
 
     @abstractmethod
     def fetch_data(self):
