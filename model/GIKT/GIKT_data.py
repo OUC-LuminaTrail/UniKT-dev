@@ -74,16 +74,16 @@ def build_sequence_data(data_src: DataSource, max_seq_len: int, min_seq_len: int
     from tqdm import tqdm
 
     data = data_src.get_processed_data()
-    num_user = data["user_id"].nunique()
+    num_users = data_src.get_metadata("num_users")
 
     # 构建用户答题序列
-    user_sequence = np.zeros((num_user, max_seq_len), dtype=int)
+    user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
     # 用户作答正确与否序列
-    user_response = np.zeros((num_user, max_seq_len), dtype=int)
+    user_response = np.zeros((num_users, max_seq_len), dtype=int)
     # 序列掩码，用于区分是否存在作答数据
-    user_mask = np.zeros((num_user, max_seq_len), dtype=int)
+    user_mask = np.zeros((num_users, max_seq_len), dtype=int)
     # 用户序列长度计数器，用于索引
-    num_sequence = [0] * num_user
+    num_sequence = [0] * num_users
 
     for row in tqdm(
         data.itertuples(), total=data.shape[0], desc="Building user sequences"
@@ -104,59 +104,119 @@ def build_sequence_data(data_src: DataSource, max_seq_len: int, min_seq_len: int
 
 
 def split_data(sequences, responses, masks, val_ratio=0.2):
+    num_users = sequences.shape[0]
+    indices = np.arange(num_users)
+    np.random.shuffle(indices)
+
+    val_size = int(num_users * val_ratio)
+    val_indices = indices[:val_size]
+    train_indices = indices[val_size:]
+
+    train_data = (
+        sequences[train_indices],
+        responses[train_indices],
+        masks[train_indices],
+    )
+    val_data = (
+        sequences[val_indices],
+        responses[val_indices],
+        masks[val_indices],
+    )
+
+    return train_data, val_data
+
+
+def get_kfold_split_data(data_src: DataSource, sequences, responses, masks, fold_idx):
+    """
+    根据K折交叉验证的fold索引获取训练集和验证集
+
+    参数:
+        data_src: 数据源对象
+        sequences: 用户答题序列数组
+        responses: 用户作答正确与否数组
+        masks: 序列掩码数组
+        fold_idx: 当前的fold索引
+
+    返回:
+        train_data: 训练集 (sequences, responses, masks)
+        val_data: 验证集 (sequences, responses, masks)
+
+    说明:
+        - 需要数据源中已添加K折标签（通过 add_kfold_labels）
+        - 验证集为指定fold的数据，训练集为其他fold的数据
+        - 需要数据源中有用户到行索引的映射信息
+    """
     from tqdm import tqdm
-    num_users, max_seq_len = sequences.shape
 
-    # 计算每个用户实际的序列长度
-    seq_lengths = np.sum(masks, axis=1).astype(int)
+    # 加载数据以获取折信息
+    data = data_src.get_processed_data()
     
-    # 计算分割点：每个用户的验证集从哪个时间步开始
-    split_points = np.ceil(seq_lengths * (1 - val_ratio)).astype(int)
-    train_sequences = sequences.copy()
-    train_responses = responses.copy()
-    train_masks = masks.copy()
-    
-    val_sequences = sequences.copy()
-    val_responses = responses.copy()
-    val_masks = masks.copy()
-    
-    # 对每个用户，按时间步分割
-    for user_idx in tqdm(range(num_users), desc="Split dataset"):
-        split_point = split_points[user_idx]
-        actual_length = seq_lengths[user_idx]
-        
-        if actual_length == 0:
-            continue
+    # 检查是否已添加fold列
+    if "fold" not in data.columns:
+        raise ValueError(
+            "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
+        )
 
-        # 训练集：前 split_point 个时间步
-        train_masks[user_idx, split_point:] = 0
-        train_responses[user_idx, split_point:] = 0
-        
-        # 验证集：后面的时间步
-        val_masks[user_idx, :split_point] = 0
-        val_responses[user_idx, :split_point] = 0
-    
-    train_data = (train_sequences, train_responses, train_masks)
-    val_data = (val_sequences, val_responses, val_masks)
-    
+    # 获取有效的用户索引（基于序列中实际存在的用户）
+    num_users = sequences.shape[0]
+
+    # 创建用户fold信息映射
+    user_folds = np.ones(num_users, dtype=int) * -1
+    for row in tqdm(
+        data.itertuples(),
+        total=data.shape[0],
+        desc=f"Mapping users to fold {fold_idx}",
+    ):
+        user_idx = row.user_id
+        fold_label = row.fold
+        if user_idx < num_users:
+            user_folds[user_idx] = fold_label
+
+    # 根据fold标签分割用户数据
+    val_user_indices = np.where(user_folds == fold_idx)[0]
+    train_user_indices = np.where(user_folds != fold_idx)[0]
+
+    # 过滤掉fold标签为-1的用户（不在fold中的用户）
+    val_user_indices = val_user_indices[val_user_indices < num_users]
+    train_user_indices = train_user_indices[train_user_indices < num_users]
+
+    train_data = (
+        sequences[train_user_indices],
+        responses[train_user_indices],
+        masks[train_user_indices],
+    )
+    val_data = (
+        sequences[val_user_indices],
+        responses[val_user_indices],
+        masks[val_user_indices],
+    )
+
     return train_data, val_data
 
 
 def build_data(args, data_src: DataSource):
+    """
+    构建GIKT模型数据
+
+    参数:
+        args: 命令行参数对象
+        data_src: 数据源对象
+        fold_idx: 当前的fold索引
+
+    返回:
+        train_dataloader: 训练集数据加载器
+        val_dataloader: 验证集数据加载器
+        graph: 异构图
+    """
+
     # 加载预处理后的数据
     data_src.load_processed_data()
-    data = data_src.get_processed_data()
-    min_seq_len = args.min_seq_len
-    max_seq_len = args.max_seq_len
-
-    # 学生数量
-    num_user = data["user_id"].nunique()
-    # 问题数量
-    num_question = data["question_id"].nunique()
-    # 技能数量
-    num_skill = data["skill_id"].nunique()
-
-    print(f"user_num: {num_user}, question_num: {num_question}, skill_num: {num_skill}")
+    fold_idx = args.fold if args.fold > 0 else None
+    
+    # 获取元数据
+    kfold_n_splits = data_src.get_metadata("kfold_n_splits")
+    max_seq_len = data_src.get_metadata("max_seq_len")
+    min_seq_len = data_src.get_metadata("min_seq_len")
 
     # 构建用户答题序列
     user_sequence, user_response, user_mask = build_sequence_data(
@@ -167,7 +227,20 @@ def build_data(args, data_src: DataSource):
     graph = build_hetro_graph(data_src)
 
     # 划分训练集和验证集
-    train_data, val_data = split_data(user_sequence, user_response, user_mask)
+    if fold_idx is not None:
+        kfold_n_splits = data_src.get_metadata("kfold_n_splits")
+        if fold_idx < 0 or fold_idx >= kfold_n_splits:
+            raise ValueError(
+                f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
+            )
+        
+        print(f"Using K-fold cross-validation: fold {fold_idx}/{kfold_n_splits}")
+        train_data, val_data = get_kfold_split_data(
+            data_src, user_sequence, user_response, user_mask, fold_idx
+        )
+    else:
+        train_data, val_data = split_data(user_sequence, user_response, user_mask)
+
     # 构建模型数据集
     train_dataset = GIKTDataset(train_data[0], train_data[1], train_data[2], graph)
     val_dataset = GIKTDataset(val_data[0], val_data[1], val_data[2], graph)

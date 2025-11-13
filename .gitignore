@@ -1,6 +1,10 @@
-# Python Cache
-__pycache__
-*.pyc
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
 
 # IDE Settings
 /.vscode
@@ -12,7 +16,9 @@ runs/
 *.csv
 *.npy
 *.npz
+*.parquet
 
 # Model checkpoints
 *.ckpt
 *.pt
+*.pth

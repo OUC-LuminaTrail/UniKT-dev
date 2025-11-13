@@ -34,6 +34,7 @@ def add_data_process_args(parser):
         default=5,
         help="Number of folds for K-Fold cross-validation",
     )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     return parser
 
@@ -53,27 +54,28 @@ def process_data(args):
     if args.dataset == "assistments09":
         data_processor = Assistments2009Data(args=args)
     elif args.dataset == "assistments12":
-        data_processor = Assistments2012Data(data_path=args.data_path)
+        data_processor = Assistments2012Data(args=args)
     elif args.dataset == "assistments17":
-        data_processor = Assistments2017Data(data_path=args.data_path)
+        data_processor = Assistments2017Data(args=args)
     elif args.dataset == "ednet_kt1":
-        data_processor = EdNetKT1Data(data_path=args.data_path)
+        data_processor = EdNetKT1Data(args=args)
     else:
-        raise ValueError(f"不支持的数据集: {args.dataset}")
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
 
-    # 加载数据
-    data_processor.load_src_data()
     # 清理数据
     data_processor.clear_data()
+    # 添加交叉验证标签
+    if hasattr(args, "kfold") and args.kfold > 1:
+        data_processor.add_kfold_labels(n_splits=args.kfold)
     # 保存预处理后的数据
     data_processor.save_data()
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="数据处理脚本")
+    parser = ArgumentParser(description="Data Processing Script")
     parser = add_data_process_args(parser)
     args = parser.parse_args()
-    print(f"数据集: {args.dataset}")
-    print(f"数据路径: {args.data_base_path}")
+    print(f"Dataset: {args.dataset}")
+    print(f"Data path: {args.data_base_path}")
     process_data(args)
-    print("数据处理完成")
+    print("Data processing complete.")

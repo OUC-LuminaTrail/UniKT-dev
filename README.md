@@ -16,14 +16,19 @@
 conda install scikit-learn jupyterlab pandas pyarrow numpy tensorboard python=3.13 -c conda-forge -y
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
+
+# GPU
+conda install scikit-learn jupyterlab pandas pyarrow numpy tensorboard python=3.13 -c conda-forge -y
+uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
+uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cu129.html
 ```
 
 ## 项目结构
 - data/：数据目录
-  - assistment09/
-  - assistment12/
-  - assistment15/
-  - assistment17/
+  - assistments09/
+  - assistments12/
+  - assistments15/
+  - assistments17/
   - EdNet/
 - model/
   - GIKT/：GIKT 模型实现
