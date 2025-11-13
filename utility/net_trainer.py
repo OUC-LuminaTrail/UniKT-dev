@@ -15,7 +15,10 @@ class Trainer(ABC):
     子类需要实现：
     1. init_model: 模型初始化
     2. forward_pass: 模型前向传播逻辑
-    3. compute_metrics: 指标计算和记录
+    
+    指标计算：
+    - 训练器会在每个 epoch 结束时自动聚合所有 batch 的预测结果
+    - 自动计算并记录 ACC 和 AUC 指标（*/ACC-epoch, */AUC-epoch）
     """
 
     def __init__(
@@ -165,32 +168,6 @@ class Trainer(ABC):
             "Subclasses of Trainer must implement forward_pass method"
         )
 
-    @abstractmethod
-    def compute_metrics(
-        self,
-        y_label: torch.Tensor,
-        y_hat: torch.Tensor,
-        y_predict: torch.Tensor,
-        epoch: int,
-        phase: str,
-    ):
-        """
-        计算并记录模型的各项指标（需要子类实现）
-
-        参数:
-            y_label: 真实标签
-            y_hat: 模型输出的预测概率
-            y_predict: 二分类预测标签
-            epoch: 当前训练轮数
-            phase: "train" 或 "val"，表示当前阶段
-
-        可用工具:
-            self.log_metric(name, value, step): 记录标量指标到 TensorBoard
-        """
-        raise NotImplementedError(
-            "Subclasses of Trainer must implement compute_metrics method"
-        )
-
     def log_metric(self, name: str, value: float, step: int):
         """
         记录标量指标到 TensorBoard
@@ -216,16 +193,22 @@ class Trainer(ABC):
         """
         total_loss = 0.0
         if is_train:
+            self._train_accum = {"y_hat": [], "y_label": [], "y_pred": []}
             for batch_data in tqdm(data_loader, desc="Training"):
-                loss = self.run_train_epoch(batch_data, epoch)
+                loss = self.run_train_batch(batch_data, epoch)
                 total_loss += loss
+            # 训练阶段聚合指标
+            self._aggregate_and_log(epoch, phase="train")
         else:
+            self._val_accum = {"y_hat": [], "y_label": [], "y_pred": []}
             for batch_data in tqdm(data_loader, desc="Validation"):
-                loss = self.run_eval_epoch(batch_data, epoch)
+                loss = self.run_eval_batch(batch_data, epoch)
                 total_loss += loss
+            # 验证阶段聚合指标
+            self._aggregate_and_log(epoch, phase="val")
         return total_loss
 
-    def run_train_epoch(self, batch_data: Tuple[Any, ...], epoch: int) -> float:
+    def run_train_batch(self, batch_data: Tuple[Any, ...], epoch: int) -> float:
         """
         执行一个训练批次
 
@@ -243,14 +226,16 @@ class Trainer(ABC):
         y_hat, y_label, y_predict = self.forward_pass(batch_data)
         # 计算损失
         loss = self.loss(y_hat, y_label)
-        # 计算和记录指标
-        self.compute_metrics(y_label, y_hat, y_predict, epoch, "train")
+        if hasattr(self, "_train_accum"):
+            self._train_accum["y_hat"].append(y_hat.detach().cpu())
+            self._train_accum["y_label"].append(y_label.detach().cpu())
+            self._train_accum["y_pred"].append(y_predict.detach().cpu())
         # 反向传播和优化
         loss.backward()
         self.opt.step()
         return loss.item()
 
-    def run_eval_epoch(self, batch_data: Tuple[Any, ...], epoch: int) -> float:
+    def run_eval_batch(self, batch_data: Tuple[Any, ...], epoch: int) -> float:
         """
         执行一个验证批次
 
@@ -267,9 +252,44 @@ class Trainer(ABC):
             y_hat, y_label, y_predict = self.forward_pass(batch_data)
             # 计算损失
             loss = self.loss(y_hat, y_label)
-            # 计算和记录指标
-            self.compute_metrics(y_label, y_hat, y_predict, epoch, "val")
+            # 累积到 epoch 容器（用于 epoch 级别的指标计算）
+            if hasattr(self, "_val_accum"):
+                self._val_accum["y_hat"].append(y_hat.detach().cpu())
+                self._val_accum["y_label"].append(y_label.detach().cpu())
+                self._val_accum["y_pred"].append(y_predict.detach().cpu())
         return loss.item()
+
+    def _aggregate_and_log(self, epoch: int, phase: str):
+        """
+        将本轮所有 batch 的预测与标签拼接，计算并记录按 epoch 聚合的 AUC 与 ACC。
+        参数:
+            epoch: 当前轮数
+            phase: "train" 或 "val"
+        - Train/ACC-epoch, Train/AUC-epoch
+        - Val/ACC-epoch, Val/AUC-epoch
+        """
+        from sklearn.metrics import roc_auc_score, accuracy_score
+
+
+        accum = self._train_accum if phase == "train" else self._val_accum
+        # 若没有数据，直接返回
+        if not accum or len(accum["y_label"]) == 0:
+            return
+
+        y_label = torch.cat(accum["y_label"]).numpy()
+        y_pred = torch.cat(accum["y_pred"]).numpy()
+        y_hat = torch.cat(accum["y_hat"]).numpy()
+
+        prefix = "Train/" if phase == "train" else "Val/"
+        # ACC
+        acc = accuracy_score(y_label, y_pred)
+        self.log_metric(f"{prefix}ACC-epoch", acc, epoch)
+        # AUC
+        try:
+            auc = roc_auc_score(y_label, y_hat)
+            self.log_metric(f"{prefix}AUC-epoch", auc, epoch)
+        except ValueError:
+            pass
 
 
 __all__ = ["Trainer"]
