@@ -34,8 +34,6 @@ class HyperparameterManager:
         self.hyperparams: Dict[str, Any] = {}
         self.metadata: Dict[str, Any] = {
             "created_at": datetime.now().isoformat(),
-            "framework": "PyTorch",
-            "version": "1.0",
         }
 
     def add_hyperparams(
@@ -221,8 +219,6 @@ class HyperparameterManager:
             格式化的超参数摘要字符串
         """
         lines = ["=" * 60]
-        lines.append("HYPERPARAMETERS SUMMARY")
-        lines.append("=" * 60)
 
         # 元数据
         lines.append("\n[Metadata]")
