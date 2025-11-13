@@ -25,10 +25,10 @@ uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+c
 
 ## 项目结构
 - data/：数据目录
-  - assistment09/
-  - assistment12/
-  - assistment15/
-  - assistment17/
+  - assistments09/
+  - assistments12/
+  - assistments15/
+  - assistments17/
   - EdNet/
 - model/
   - GIKT/：GIKT 模型实现

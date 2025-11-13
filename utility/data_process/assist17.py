@@ -8,7 +8,7 @@ class Assistments2017Data(DataSource):
 
     def __init__(self, args):
         super().__init__(
-            dataset="assistment17", data_base_path=args.data_base_path, data_url=""
+            dataset="assistments17", data_base_path=args.data_base_path, data_url=""
         )
         self.args = args
 
