@@ -5,7 +5,7 @@ import time
 import os
 from tqdm import tqdm
 from typing import Tuple, Any
-from utility.hyperparam_manager import HyperparameterManager
+from torch_geometric.profile import count_parameters
 
 
 class Trainer(ABC):
@@ -78,7 +78,7 @@ class Trainer(ABC):
 
         # 添加训练器相关元数据
         self.hyperparam_manager.add_metadata(
-            "total_params", sum(p.numel() for p in self.model.parameters())
+            "total_params", count_parameters(self.model)
         )
         self.hyperparam_manager.add_metadata("optimizer", type(self.opt).__name__)
         self.hyperparam_manager.add_metadata("loss_function", type(self.loss).__name__)
