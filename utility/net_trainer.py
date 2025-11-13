@@ -162,10 +162,8 @@ class Trainer(ABC):
         return device_info
 
     def run(self):
-        if self.device_ is None:
-            self.try_gpu()  # 获取设备信息
-        self.model.to(self.device_)  # 将模型移动到GPU中
-        self.loss = self.loss.to(self.device_)  # 将损失函数移动到GPU中
+        self.model.to(self.device_)  # 将模型移动到设备中
+        self.loss = self.loss.to(self.device_)  # 将损失函数移动到设备中
 
         for epoch in range(self.epochs):
             print(f"Epoch {epoch+1}")
