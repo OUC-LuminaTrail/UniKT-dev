@@ -64,6 +64,9 @@ def process_data(args):
 
     # 清理数据
     data_processor.clear_data()
+    # 添加交叉验证标签
+    if hasattr(args, "kfold") and args.kfold > 1:
+        data_processor.add_kfold_labels(n_splits=args.kfold)
     # 保存预处理后的数据
     data_processor.save_data()
 

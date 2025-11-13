@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import os
+from sklearn.model_selection import KFold
 
 
 class DataSource(ABC):
@@ -24,6 +25,7 @@ class DataSource(ABC):
     已实现的方法:
         add_metadata(key, value): 添加数据元信息
         save_metadata(): 保存数据元信息到 JSON 文件
+        add_kfold_labels(n_splits, random_state, user_id_column): 添加K折交叉验证的分层划分标签
     """
 
     def __init__(
@@ -166,3 +168,64 @@ class DataSource(ABC):
         if key is None:
             return self.metadata
         return self.metadata.get(key, None)
+
+    def add_kfold_labels(self, n_splits: int = 5):
+        """
+        为数据集添加K折交叉验证的分层划分标签
+
+        按用户维度进行分层 K折划分，确保每个用户的所有数据都在同一个fold中，
+        避免数据泄露。
+
+        参数:
+            n_splits: K折的数量，默认为5
+            random_state: 随机种子，确保可重复性，默认为42
+
+        返回:
+            添加了fold标签的数据集 DataFrame（列名为 'fold'，值为 0 到 n_splits-1）
+
+        异常:
+            ValueError: 如果processed_data未加载或user_id_column列不存在
+
+        说明:
+            - 添加的新列名为 'fold'（值为 0 到 n_splits-1）
+            - 如果按用户分层，每个用户的所有数据都会分到同一个fold
+            - 元数据中会记录 'kfold_n_splits' 和 'kfold_random_state'
+            - 会覆盖已存在的 'fold' 列
+        """
+        import pandas as pd
+        from tqdm import tqdm
+
+        if self.processed_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+
+        print(f"Adding K-Fold labels with n_splits={n_splits}")
+
+        # 复制数据以避免修改原始数据
+        data = self.processed_data.copy()
+        data["fold"] = -1
+
+        # 获取唯一的用户ID
+        unique_users = data["user_id"].unique()
+        user_to_fold = {}
+
+        # 对用户ID进行KFold划分
+        kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
+        for fold_idx, (_, test_user_idx) in tqdm(
+            enumerate(kfold.split(unique_users)), total=n_splits, desc="Assigning folds"
+        ):
+            test_users = unique_users[test_user_idx]
+            for user in test_users:
+                user_to_fold[user] = fold_idx
+
+        # 为每个用户的所有行分配对应的fold值
+        data["fold"] = data["user_id"].map(user_to_fold)
+
+        # 更新processed_data
+        self.processed_data = data
+
+        # 更新元数据
+        self.add_metadata("kfold_n_splits", n_splits)
+
+        return data
