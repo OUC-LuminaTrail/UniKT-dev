@@ -5,7 +5,6 @@ GIKT 模型训练器
 
 import torch
 from utility.net_trainer import Trainer
-from sklearn.metrics import roc_auc_score, accuracy_score
 
 
 class GIKTTrainer(Trainer):
@@ -68,14 +67,15 @@ class GIKTTrainer(Trainer):
         mask = mask.to(torch.bool).to(self.device_)
 
         # 模型前向传播
-        # 模型内已将 response 右移一位作为输入，在时刻 t 的输出预测的是 t+1 的标签
-        # 因此 y_hat[:, :-1] 对应 response[:, 1:]
+        # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
         y_label_seq = response.float()[:, 1:]
-        valid_mask = mask[:, 1:]
+        mask_curr = mask[:, :-1]
+        mask_next = mask[:, 1:]
+        valid_mask = mask_curr & mask_next  # [B, S-1]
 
         # 使用 mask 选择有效位置
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
