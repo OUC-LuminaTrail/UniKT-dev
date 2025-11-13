@@ -41,6 +41,9 @@ def parse_args():
         default="./data",
         help="Path to the data files",
     )
+    data_params.add_argument(
+        "--fold", type=int, default=0, help="Index of folds for K-Fold cross-validation"
+    )
 
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
