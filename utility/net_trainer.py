@@ -90,6 +90,12 @@ class Trainer(ABC):
         if hasattr(self.opt, 'defaults') and 'weight_decay' in self.opt.defaults:
             self.hyperparam_manager.add_metadata('weight_decay', self.opt.defaults['weight_decay'])
         
+        # 添加设备信息（包括CUDA设备型号）
+        if self.device_ is not None:
+            device_info = self.get_device_info()
+            for key, value in device_info.items():
+                self.hyperparam_manager.add_metadata(key, value)
+        
         # 保存超参数
         self.hyperparam_manager.save()
         
@@ -118,8 +124,36 @@ class Trainer(ABC):
         if device is None:
             self.device_ = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         else:
-            self.device_ = device
+            # 确保 device 是 torch.device 对象
+            if isinstance(device, str):
+                self.device_ = torch.device(device)
+            else:
+                self.device_ = device
         return self.device_
+    
+    def get_device_info(self):
+        """
+        获取设备信息，包括CUDA设备型号
+        
+        Returns:
+            dict: 包含设备类型和设备名称的字典
+        """
+        device_info = {
+            "device_type": str(self.device_),
+        }
+        
+        if self.device_.type == "cuda":
+            device_info["cuda_available"] = True
+            device_info["cuda_device_count"] = torch.cuda.device_count()
+            # 获取当前设备的索引
+            device_index = self.device_.index if self.device_.index is not None else 0
+            device_info["cuda_device_name"] = torch.cuda.get_device_name(device_index)
+            device_info["cuda_device_capability"] = torch.cuda.get_device_capability(device_index)
+        else:
+            device_info["cuda_available"] = False
+            device_info["device_name"] = "CPU"
+        
+        return device_info
 
     def run(self):
         if self.device_ is None:

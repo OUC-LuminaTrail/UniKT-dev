@@ -20,6 +20,7 @@ class GIKTTrainer(Trainer):
     ):
         # 设置设备信息
         self.try_gpu(args.device)
+        args.device = self.device_
         # 构建数据
         from model.GIKT.GIKT_data import build_data
         train_data, val_data, graph = build_data(args, data_src)
