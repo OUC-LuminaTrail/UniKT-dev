@@ -42,22 +42,27 @@ class HyperparameterManager:
         self, params: Union[Dict, Namespace], group: Optional[str] = None
     ):
         """
-        添加超参数
+        添加超参数（自动识别并序列化所有传入的参数）
 
         Args:
             params: 超参数字典或argparse.Namespace对象
-            group: 参数组名称（如'model', 'training', 'data'）
+            group: 参数组名称（如'model', 'training', 'data'）。如果为None，参数将添加到根级别
         """
         # 将Namespace转换为字典
         if isinstance(params, Namespace):
             params = vars(params)
+        
+        # 序列化所有参数
+        serialized_params = self._serialize_params(params)
 
         if group:
+            # 添加到指定组
             if group not in self.hyperparams:
                 self.hyperparams[group] = {}
-            self.hyperparams[group].update(self._serialize_params(params))
+            self.hyperparams[group].update(serialized_params)
         else:
-            self.hyperparams.update(self._serialize_params(params))
+            # 添加到根级别
+            self.hyperparams.update(serialized_params)
 
     def add_metadata(self, key: str, value: Any):
         """
@@ -79,8 +84,14 @@ class HyperparameterManager:
         Returns:
             序列化后的值
         """
+        # 处理None
+        if value is None:
+            return None
+        # 处理基本类型
+        elif isinstance(value, (int, float, str, bool)):
+            return value
         # 处理PyTorch张量
-        if isinstance(value, torch.Tensor):
+        elif isinstance(value, torch.Tensor):
             return value.tolist()
         # 处理PyTorch设备
         elif isinstance(value, torch.device):
@@ -88,21 +99,32 @@ class HyperparameterManager:
         # 处理Namespace
         elif isinstance(value, Namespace):
             return vars(value)
-        # 处理None
-        elif value is None:
-            return None
-        # 处理基本类型
-        elif isinstance(value, (int, float, str, bool)):
-            return value
-        # 处理列表
+        # 处理列表和元组
         elif isinstance(value, (list, tuple)):
             return [self._serialize_value(v) for v in value]
         # 处理字典
         elif isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
-        # 其他类型转换为字符串
-        else:
+        # 处理集合
+        elif isinstance(value, set):
+            return list(value)
+        # 处理Path对象
+        elif hasattr(value, '__fspath__'):  # pathlib.Path
             return str(value)
+        # 处理可调用对象（函数、类等）
+        elif callable(value):
+            if hasattr(value, '__name__'):
+                return f"<callable: {value.__name__}>"
+            else:
+                return f"<callable: {type(value).__name__}>"
+        # 其他对象尝试转换为字符串
+        else:
+            try:
+                # 尝试直接转换
+                return str(value)
+            except Exception:
+                # 如果失败，返回类型信息
+                return f"<{type(value).__name__} object>"
 
     def _serialize_params(self, params: Dict) -> Dict:
         """
@@ -334,6 +356,7 @@ def create_hyperparameter_manager(
     save_dir: str,
     model_name: Optional[str] = None,
     dataset_name: Optional[str] = None,
+    auto_group: bool = True,
 ) -> HyperparameterManager:
     """
     便捷函数：创建并配置超参数管理器
@@ -343,6 +366,7 @@ def create_hyperparameter_manager(
         save_dir: 保存目录
         model_name: 模型名称
         dataset_name: 数据集名称
+        auto_group: 是否自动分组参数（默认True）。如果为False，则不分组直接保存所有参数
 
     Returns:
         配置好的HyperparameterManager实例
@@ -355,10 +379,14 @@ def create_hyperparameter_manager(
     if dataset_name:
         manager.add_metadata("dataset_name", dataset_name)
 
-    # 如果是Namespace，尝试按组分类参数
+    # 转换为字典（如果是Namespace）
     if isinstance(args, Namespace):
         args_dict = vars(args)
+    else:
+        args_dict = args
 
+    # 如果需要自动分组
+    if auto_group:
         # 自动分组（基于常见的命名模式）
         model_params = {}
         training_params = {}
@@ -377,21 +405,24 @@ def create_hyperparameter_manager(
                     "dim",
                     "hop",
                     "top_k",
+                    "head",
+                    "attention",
                 ]
             ):
                 model_params[key] = value
             # 训练相关参数
             elif any(
                 kw in key.lower()
-                for kw in ["epoch", "batch", "lr", "optimizer", "loss"]
+                for kw in ["epoch", "batch", "lr", "optimizer", "loss", "weight_decay", "momentum"]
             ):
                 training_params[key] = value
             # 数据相关参数
-            elif any(kw in key.lower() for kw in ["data", "dataset"]):
+            elif any(kw in key.lower() for kw in ["data", "dataset", "sequence", "max_len"]):
                 data_params[key] = value
             else:
                 other_params[key] = value
 
+        # 添加所有组（即使为空也不会影响）
         if model_params:
             manager.add_hyperparams(model_params, group="model")
         if training_params:
@@ -401,8 +432,8 @@ def create_hyperparameter_manager(
         if other_params:
             manager.add_hyperparams(other_params, group="general")
     else:
-        # 直接添加字典
-        manager.add_hyperparams(args)
+        # 不分组，直接添加所有参数
+        manager.add_hyperparams(args_dict)
 
     return manager
 
