@@ -70,14 +70,30 @@ class DataSource(ABC):
         """
         raise NotImplementedError("Subclasses should implement load_data method")
 
-    @abstractmethod
     def load_processed_data(self):
         """
         加载预处理后的数据
         """
-        raise NotImplementedError(
-            "Subclasses should implement load_processed_data method"
+        import pandas
+
+        self.load_metadata()
+        data_processed_path = os.path.join(
+            self.data_folder, f"{self.dataset}_processed.parquet"
         )
+        if not os.path.exists(data_processed_path):
+            raise FileNotFoundError(
+                f"Cannot find processed data file: {data_processed_path}"
+            )
+        # 检测文件的MD5值是否匹配
+        md5_hash = self.compute_md5(data_processed_path)
+        if (
+            "processed_data_md5" in self.metadata
+            and md5_hash != self.metadata["processed_data_md5"]
+        ):
+            raise ValueError(
+                "Processed data file integrity check failed (MD5 mismatch)."
+            )
+        self.processed_data = pandas.read_parquet(data_processed_path)
 
     @abstractmethod
     def clear_data(self):
@@ -89,14 +105,47 @@ class DataSource(ABC):
         """
         raise NotImplementedError("Subclasses should implement clear_data method")
 
-    @abstractmethod
     def save_data(self):
         """
         保存预处理后的数据
 
         注：在该方法中应调用 save_metadata() 保存元信息
         """
-        raise NotImplementedError("Subclasses should implement save_data method")
+        print("Saving processed data...")
+        if self.processed_data is None:
+            raise ValueError("Please run clear_data() before saving processed data.")
+
+        data_processed_path = os.path.join(
+            self.data_folder, f"{self.dataset}_processed.parquet"
+        )
+        self.processed_data.to_parquet(data_processed_path, index=False)
+        md5_hash = self.compute_md5(data_processed_path)
+        self.add_metadata("processed_data_md5", md5_hash)
+        self.save_metadata()
+        print("Processed data saved to:", data_processed_path)
+
+    def compute_md5(self, file_path: str) -> str:
+        """
+        计算文件的MD5值
+
+        参数:
+            file_path: 文件路径
+
+        返回:
+            文件的MD5值字符串
+        """
+        import hashlib
+        from tqdm import tqdm
+
+        hash_md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            for chunk in tqdm(
+                iter(lambda: f.read(4096), b""),
+                total=os.path.getsize(file_path) // 4096 + 1,
+                desc="Computing MD5: ",
+            ):
+                hash_md5.update(chunk)
+        return hash_md5.hexdigest()
 
     def get_processed_data(self):
         """
@@ -192,7 +241,6 @@ class DataSource(ABC):
             - 元数据中会记录 'kfold_n_splits' 和 'kfold_random_state'
             - 会覆盖已存在的 'fold' 列
         """
-        import pandas as pd
         from tqdm import tqdm
 
         if self.processed_data is None:
@@ -228,4 +276,38 @@ class DataSource(ABC):
         # 更新元数据
         self.add_metadata("kfold_n_splits", n_splits)
 
+        return data
+
+    @staticmethod
+    def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int):
+        """
+        限制序列长度在min_seq_len和max_seq_len之间
+        """
+        # 过滤答题次数少于min_seq_len的学生
+        if min_seq_len > 1:
+            is_valid_user = data.groupby("user_id").size() >= min_seq_len
+            valid_user_ids = is_valid_user[is_valid_user].index.tolist()
+            data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
+
+        # 过滤答题次数多于max_seq_len的学生
+        if max_seq_len is not None:
+            is_valid_user = data.groupby("user_id").size() <= max_seq_len
+            valid_user_ids = is_valid_user[is_valid_user].index.tolist()
+            data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
+        return data
+
+    @staticmethod
+    def map_to_continuous_ids(data, columns: list[str]):
+        """
+        将指定列映射为连续的整数ID
+
+        参数:
+            data: 输入数据 DataFrame
+            columns: 需要映射的列名列表
+
+        返回:
+            映射后的数据 DataFrame
+        """
+        for col in columns:
+            data[col] = data[col].astype("category").cat.codes.astype(int)
         return data

@@ -34,18 +34,8 @@ class Assistments2012Data(DataSource):
             self.raw_data_path, encoding="latin1", low_memory=False
         )
 
-    @override
-    def load_processed_data(self):
-        r"""
-        加载预处理后的数据
-        """
-        self.load_metadata()
-        data_processed_path = os.path.join(
-            self.data_folder, f"{self.dataset}_processed.parquet"
-        )
-        self.processed_data = pd.read_parquet(data_processed_path)
-
     def clear_data(self):
+        print("Processing Data...")
         if self.raw_data is None:
             try:
                 self.load_src_data()
@@ -85,26 +75,14 @@ class Assistments2012Data(DataSource):
         # 重置索引
         data = data.reset_index(drop=True)
 
-        # 过滤答题次数少于min_seq_len的学生
-        min_seq_len = self.args.min_seq_len
-        if min_seq_len > 1:
-            is_valid_user = data.groupby("user_id").size() >= min_seq_len
-            valid_user_ids = is_valid_user[is_valid_user].index.tolist()
-            data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
-
-        # 过滤答题次数多于max_seq_len的学生
-        max_seq_len = self.args.max_seq_len
-        if max_seq_len is not None:
-            is_valid_user = data.groupby("user_id").size() <= max_seq_len
-            valid_user_ids = is_valid_user[is_valid_user].index.tolist()
-            data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
-
-        # 将问题ID和技能ID转换为连续整数
-        data["user_id"] = data["user_id"].astype("category").cat.codes.astype(int)
-        data["question_id"] = (
-            data["question_id"].astype("category").cat.codes.astype(int)
+        # 限制序列长度
+        data = DataSource.restrains_sequence_length(
+            data, self.args.min_seq_len, self.args.max_seq_len
         )
-        data["skill_id"] = data["skill_id"].astype("category").cat.codes.astype(int)
+        # 将问题ID和技能ID转换为连续整数
+        data = DataSource.map_to_continuous_ids(
+            data, columns=["user_id", "question_id", "skill_id"]
+        )
 
         self.processed_data = data
 
@@ -114,19 +92,9 @@ class Assistments2012Data(DataSource):
         self.add_metadata("num_skills", data["skill_id"].nunique())
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
+        self.add_metadata("columns", data.columns.tolist())
 
     @override
     def fetch_data(self):
         # 实现数据下载逻辑
         pass
-
-    @override
-    def save_data(self):
-        if self.processed_data is None:
-            raise ValueError("Please run clear_data() before saving processed data.")
-
-        data_processed_path = os.path.join(
-            self.data_folder, f"{self.dataset}_processed.parquet"
-        )
-        self.processed_data.to_parquet(data_processed_path)
-        self.save_metadata()
