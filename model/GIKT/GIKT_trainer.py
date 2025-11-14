@@ -39,6 +39,7 @@ class GIKTTrainer(Trainer):
             lr_scheduler,
             args,
             log_dir,
+            device=self.device_,
         )
 
     def init_model(self, args, graph, data_src):

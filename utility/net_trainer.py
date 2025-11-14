@@ -32,8 +32,9 @@ class Trainer(ABC):
         lr_scheduler=None,
         hyperparams=None,
         log_dir: str = None,
+        device: torch.device = None,
     ):
-        self.device_: torch.device | None = None
+        self.device_: torch.device = device
         self.model: torch.nn.Module = model
         self.epochs: int = epochs
         self.opt = opt
