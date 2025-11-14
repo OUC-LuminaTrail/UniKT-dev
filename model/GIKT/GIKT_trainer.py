@@ -18,17 +18,11 @@ class GIKTTrainer(Trainer):
         data_src=None,
         log_dir=None,
     ):
-        # 设置设备信息
-        self.try_gpu(args.device)
-        args.device = self.device_
         # 构建数据
         from model.GIKT.GIKT_data import build_data
-        train_data, val_data, graph = build_data(args, data_src)
-        # 将图数据移动到设备
-        graph.to(self.device_)
-        model, opt, loss, lr_scheduler = self.init_model(
-            args, graph, data_src
-        )
+
+        train_data, val_data, self.graph = build_data(args, data_src)
+        model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model,
             args.epochs,
@@ -39,19 +33,21 @@ class GIKTTrainer(Trainer):
             lr_scheduler,
             args,
             log_dir,
-            device=self.device_,
+            device=args.device,
         )
 
-    def init_model(self, args, graph, data_src):
+    def init_model(self, args, data_src):
         from model.GIKT.GIKT_model import GIKT
 
         print("Initializing GIKT model...")
-        model = GIKT(args, graph, data_src.get_metadata())
+        model = GIKT(args, data_src.get_metadata())
 
         # 二分类交叉熵损失
         loss_fn = torch.nn.BCELoss()
         # 优化器
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.Adam(
+            model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+        )
         # 学习率调度器
         lr_scheduler = None
         if args.lr_decay:
@@ -67,10 +63,11 @@ class GIKTTrainer(Trainer):
         sequence = sequence.to(self.device_)
         response = response.to(self.device_)
         mask = mask.to(torch.bool).to(self.device_)
+        self.graph = self.graph.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(sequence, response, mask)  # [B, S]
+        y_hat_full = self.model(sequence, response, mask, self.graph)  # [B, S]
 
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
@@ -92,4 +89,3 @@ class GIKTTrainer(Trainer):
         y_predict = torch.ge(y_hat, torch.tensor(0.5).to(self.device_)).to(torch.int)
 
         return y_hat, y_label, y_predict
-
