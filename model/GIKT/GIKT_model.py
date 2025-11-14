@@ -239,12 +239,10 @@ class GNN_QS(nn.Module):
 class GIKT(nn.Module):
     r"""GIKT主模型"""
 
-    def __init__(self, args, graph, data_metadata, **kwargs):
+    def __init__(self, args, data_metadata, **kwargs):
         super().__init__(**kwargs)
         # 保存参数
         self.args = args
-        # 图
-        self.graph = graph
         # 元数据
         self.data_metadata = data_metadata
 
@@ -311,6 +309,7 @@ class GIKT(nn.Module):
         user_sequence: torch.Tensor,
         user_response: torch.Tensor,
         user_mask: torch.Tensor,
+        graph
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -327,7 +326,7 @@ class GIKT(nn.Module):
 
         # 全图卷积
         # question_conv [B, S, embedding_dim]
-        question_conv: torch.Tensor = self.conv(x, self.graph.edge_index_dict)[
+        question_conv: torch.Tensor = self.conv(x, graph.edge_index_dict)[
             "question"
         ]
 

@@ -249,41 +249,6 @@ class HyperparameterManager:
             else:
                 lines.append(f"{indent_str}{key}: {value}")
 
-    def compare_with(self, other_filepath: str) -> Dict[str, Any]:
-        """
-        与另一个超参数文件进行比较
-
-        Args:
-            other_filepath: 另一个超参数文件的路径
-
-        Returns:
-            包含差异的字典
-        """
-        # 保存当前参数
-        current = self.hyperparams.copy()
-
-        # 加载另一个文件
-        other_manager = HyperparameterManager()
-        other = other_manager.load(other_filepath)
-
-        # 找出差异
-        differences = {}
-        all_keys = set(self._flatten_dict(current).keys()) | set(
-            self._flatten_dict(other).keys()
-        )
-
-        current_flat = self._flatten_dict(current)
-        other_flat = self._flatten_dict(other)
-
-        for key in all_keys:
-            current_val = current_flat.get(key, "NOT_FOUND")
-            other_val = other_flat.get(key, "NOT_FOUND")
-
-            if current_val != other_val:
-                differences[key] = {"current": current_val, "other": other_val}
-
-        return differences
-
     def _flatten_dict(self, d: Dict, parent_key: str = "", sep: str = ".") -> Dict:
         """
         将嵌套字典展平

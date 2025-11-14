@@ -34,7 +34,10 @@ class Trainer(ABC):
         log_dir: str = None,
         device: torch.device = None,
     ):
-        self.device_: torch.device = device
+        if device is None:
+            self.device_ = self.try_gpu()
+        else:
+            self.device_ = torch.device(device)
         self.model: torch.nn.Module = model
         self.epochs: int = epochs
         self.opt = opt
@@ -92,7 +95,7 @@ class Trainer(ABC):
                 "weight_decay", self.opt.defaults["weight_decay"]
             )
 
-        # 添加设备信息（包括CUDA设备型号）
+        # 添加设备信息
         if self.device_ is not None:
             device_info = self.get_device_info()
             for key, value in device_info.items():
@@ -125,16 +128,12 @@ class Trainer(ABC):
             "Subclasses of Trainer must implement init_model method"
         )
 
-    def try_gpu(self, device=None):
-        if device is None:
-            self.device_ = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        else:
-            # 确保 device 是 torch.device 对象
-            if isinstance(device, str):
-                self.device_ = torch.device(device)
-            else:
-                self.device_ = device
-        return self.device_
+    @staticmethod
+    def try_gpu():
+        r"""
+        获取可用的GPU设备
+        """
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def get_device_info(self):
         """
@@ -143,9 +142,7 @@ class Trainer(ABC):
         Returns:
             dict: 包含设备类型和设备名称的字典
         """
-        device_info = {
-            "device_type": str(self.device_),
-        }
+        device_info = {}
 
         if self.device_.type == "cuda":
             device_info["cuda_available"] = True
@@ -158,7 +155,7 @@ class Trainer(ABC):
             )
         else:
             device_info["cuda_available"] = False
-            device_info["device_name"] = "CPU"
+            device_info["device_type"] = "CPU"
 
         return device_info
 
@@ -307,7 +304,11 @@ class Trainer(ABC):
         - Train/ACC-epoch, Train/AUC-epoch
         - Val/ACC-epoch, Val/AUC-epoch
         """
-        from sklearn.metrics import roc_auc_score, accuracy_score, root_mean_squared_error
+        from sklearn.metrics import (
+            roc_auc_score,
+            accuracy_score,
+            root_mean_squared_error,
+        )
 
         accum = self._train_accum if phase == "train" else self._val_accum
         # 若没有数据，直接返回
