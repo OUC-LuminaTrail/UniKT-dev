@@ -221,7 +221,7 @@ class HyperparameterManager:
         lines = ["=" * 60]
 
         # 元数据
-        lines.append("\n[Metadata]")
+        lines.append("[Metadata]")
         for key, value in self.metadata.items():
             lines.append(f"  {key}: {value}")
 

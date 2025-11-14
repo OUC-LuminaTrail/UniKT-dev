@@ -102,7 +102,7 @@ class Trainer(ABC):
         self.hyperparam_manager.save()
 
         # 打印摘要
-        print("\n" + self.hyperparam_manager.get_summary())
+        print(self.hyperparam_manager.get_summary())
 
         # 将超参数摘要记录到TensorBoard
         self.logger.add_text(
