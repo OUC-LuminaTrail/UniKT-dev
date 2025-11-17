@@ -38,7 +38,7 @@ class GIKTModelData(ModelData):
         min_seq_len = self.data_src.get_metadata("min_seq_len")
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask = self.build_sequence_data(
+        user_sequence, user_response, user_mask, _ = self.build_sequence_data(
             max_seq_len, min_seq_len
         )
 

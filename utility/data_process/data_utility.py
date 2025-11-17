@@ -325,7 +325,7 @@ class ModelData:
         self.data_src = data_src
         self.data_src.load_processed_data()
 
-    def get_kfold_split_data(self, sequences, responses, masks, fold_idx):
+    def get_kfold_split_data(self, sequences, responses, masks, user_id_sequence, fold_idx):
         r"""
         根据K折交叉验证的fold索引获取训练集和验证集
 
@@ -334,11 +334,12 @@ class ModelData:
             sequences: 用户答题序列数组
             responses: 用户作答正确与否数组
             masks: 序列掩码数组
+            user_id_sequence: 用户ID序列数组
             fold_idx: 当前的fold索引
 
         返回:
-            train_data: 训练集 (sequences, responses, masks)
-            val_data: 验证集 (sequences, responses, masks)
+            train_data: 训练集 (sequences, responses, masks, user_id_sequence)
+            val_data: 验证集 (sequences, responses, masks, user_id_sequence)
 
         说明:
             - 需要数据源中已添加K折标签（通过 add_kfold_labels）
@@ -346,7 +347,7 @@ class ModelData:
             - 需要数据源中有用户到行索引的映射信息
         """
         from tqdm import tqdm
-        from numpy import np
+        import numpy as np
 
         # 加载数据以获取折信息
         data = self.data_src.get_processed_data()
@@ -384,30 +385,33 @@ class ModelData:
             sequences[train_user_indices],
             responses[train_user_indices],
             masks[train_user_indices],
+            user_id_sequence[train_user_indices],
         )
         val_data = (
             sequences[val_user_indices],
             responses[val_user_indices],
             masks[val_user_indices],
+            user_id_sequence[val_user_indices],
         )
 
         return train_data, val_data
 
-    def split_data(self, sequences, responses, masks, val_ratio=0.2):
+    def split_data(self, sequences, responses, masks, user_id_sequence, val_ratio=0.2):
         r"""
         随机划分训练集和验证集
         参数:
             sequences: 用户答题序列数组
             responses: 用户作答正确与否数组
             masks: 序列掩码数组
+            user_id_sequence: 用户ID序列数组
             val_ratio: 验证集比例(默认为0.2)
         返回:
-            train_data: 训练集 (sequences, responses, masks)
-            val_data: 验证集 (sequences, responses, masks)
+            train_data: 训练集 (sequences, responses, masks, user_id_sequence)
+            val_data: 验证集 (sequences, responses, masks, user_id_sequence)
         说明:
             - 随机划分数据集为训练集和验证集
             - 验证集比例由val_ratio参数控制
-            - 需要确保输入的sequences、responses和masks具有相同的样本数量
+            - 需要确保输入的sequences、responses、masks和user_id_sequence具有相同的样本数量
         """
         import numpy as np
         num_users = sequences.shape[0]
@@ -422,11 +426,13 @@ class ModelData:
             sequences[train_indices],
             responses[train_indices],
             masks[train_indices],
+            user_id_sequence[train_indices],
         )
         val_data = (
             sequences[val_indices],
             responses[val_indices],
             masks[val_indices],
+            user_id_sequence[val_indices],
         )
 
         return train_data, val_data
@@ -447,6 +453,8 @@ class ModelData:
 
         # 构建用户答题序列
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        # 构建用户ID序列
+        user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         # 用户作答正确与否序列
         user_response = np.zeros((num_users, max_seq_len), dtype=int)
         # 序列掩码，用于区分是否存在作答数据
@@ -464,12 +472,13 @@ class ModelData:
             # 如果当前用户的序列长度未达到最大长度，则添加数据
             if num_sequence[user_idx] < max_seq_len:
                 user_sequence[user_idx, num_sequence[user_idx]] = question_idx
+                user_id_sequence[user_idx, num_sequence[user_idx]] = user_idx
                 user_response[user_idx, num_sequence[user_idx]] = label
                 user_mask[user_idx, num_sequence[user_idx]] = 1
                 # 自增对应的用户序列长度
                 num_sequence[user_idx] += 1
 
-        return user_sequence, user_response, user_mask
+        return user_sequence, user_response, user_mask, user_id_sequence
 
     def build_data_matrix(
         self, edge_type: tuple[str, str, str], value_type: str = "binary"
