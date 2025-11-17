@@ -19,9 +19,10 @@ class GIKTTrainer(Trainer):
         log_dir=None,
     ):
         # 构建数据
-        from model.GIKT.GIKT_data import build_data
+        from model.GIKT.GIKT_data import GIKTModelData
 
-        train_data, val_data, self.graph = build_data(args, data_src)
+        model_data = GIKTModelData(data_src)
+        train_data, val_data, self.graph = model_data.prepare_data(args)
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model,

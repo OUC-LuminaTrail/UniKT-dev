@@ -26,7 +26,7 @@ class HistoryRecap(nn.Module):
     """
 
     def __init__(self, hist_neighbor_num: int, att_bound: float = 0.0):
-        super().__init__()
+        super(HistoryRecap, self).__init__()
         self.hist_neighbor_num = hist_neighbor_num
         self.att_bound = att_bound
 
@@ -131,7 +131,7 @@ class GeneralInteraction(nn.Module):
     """
 
     def __init__(self, hidden_dim: int):
-        super().__init__()
+        super(GeneralInteraction, self).__init__()
         self.hidden_dim = hidden_dim
 
         # 学生相关状态权重
@@ -205,7 +205,7 @@ class GNN_QS(nn.Module):
     """
 
     def __init__(self, embedding_dim, n_hop, dropout):
-        super().__init__()
+        super(GNN_QS, self).__init__()
         self.n_hop = n_hop
         self.dropout = dropout
         self.convs = torch.nn.ModuleList()
@@ -213,10 +213,10 @@ class GNN_QS(nn.Module):
         for _ in range(n_hop):
             conv = HeteroConv(
                 {
-                    ("question", "has_skill", "skill"): GraphConv(
+                    ("question", "has", "skill"): GraphConv(
                         (embedding_dim, embedding_dim), embedding_dim, aggr="add"
                     ),
-                    ("skill", "rev_has_skill", "question"): GraphConv(
+                    ("skill", "rev_has", "question"): GraphConv(
                         (embedding_dim, embedding_dim), embedding_dim, aggr="add"
                     ),
                 },
@@ -240,7 +240,7 @@ class GIKT(nn.Module):
     r"""GIKT主模型"""
 
     def __init__(self, args, data_metadata, **kwargs):
-        super().__init__(**kwargs)
+        super(GIKT, self).__init__(**kwargs)
         # 保存参数
         self.args = args
         # 元数据
@@ -309,7 +309,7 @@ class GIKT(nn.Module):
         user_sequence: torch.Tensor,
         user_response: torch.Tensor,
         user_mask: torch.Tensor,
-        graph
+        graph,
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -326,9 +326,7 @@ class GIKT(nn.Module):
 
         # 全图卷积
         # question_conv [B, S, embedding_dim]
-        question_conv: torch.Tensor = self.conv(x, graph.edge_index_dict)[
-            "question"
-        ]
+        question_conv: torch.Tensor = self.conv(x, graph.edge_index_dict)["question"]
 
         # 按照用户序列索引获取对应的问题节点表示
         # 扩展 user_sequence 以匹配 question_conv 的维度

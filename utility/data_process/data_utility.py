@@ -311,3 +311,473 @@ class DataSource(ABC):
         for col in columns:
             data[col] = data[col].astype("category").cat.codes.astype(int)
         return data
+
+
+class ModelData:
+    r"""
+    模型数据基类
+
+    参数:
+        data_src: 数据源对象
+    """
+
+    def __init__(self, data_src: DataSource):
+        self.data_src = data_src
+        self.data_src.load_processed_data()
+
+    def get_kfold_split_data(self, sequences, responses, masks, fold_idx):
+        r"""
+        根据K折交叉验证的fold索引获取训练集和验证集
+
+        参数:
+            data_src: 数据源对象
+            sequences: 用户答题序列数组
+            responses: 用户作答正确与否数组
+            masks: 序列掩码数组
+            fold_idx: 当前的fold索引
+
+        返回:
+            train_data: 训练集 (sequences, responses, masks)
+            val_data: 验证集 (sequences, responses, masks)
+
+        说明:
+            - 需要数据源中已添加K折标签（通过 add_kfold_labels）
+            - 验证集为指定fold的数据，训练集为其他fold的数据
+            - 需要数据源中有用户到行索引的映射信息
+        """
+        from tqdm import tqdm
+        from numpy import np
+
+        # 加载数据以获取折信息
+        data = self.data_src.get_processed_data()
+        
+        # 检查是否已添加fold列
+        if "fold" not in data.columns:
+            raise ValueError(
+                "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
+            )
+
+        # 获取有效的用户索引（基于序列中实际存在的用户）
+        num_users = sequences.shape[0]
+
+        # 创建用户fold信息映射
+        user_folds = np.ones(num_users, dtype=int) * -1
+        for row in tqdm(
+            data.itertuples(),
+            total=data.shape[0],
+            desc=f"Mapping users to fold {fold_idx}",
+        ):
+            user_idx = row.user_id
+            fold_label = row.fold
+            if user_idx < num_users:
+                user_folds[user_idx] = fold_label
+
+        # 根据fold标签分割用户数据
+        val_user_indices = np.where(user_folds == fold_idx)[0]
+        train_user_indices = np.where(user_folds != fold_idx)[0]
+
+        # 过滤掉fold标签为-1的用户（不在fold中的用户）
+        val_user_indices = val_user_indices[val_user_indices < num_users]
+        train_user_indices = train_user_indices[train_user_indices < num_users]
+
+        train_data = (
+            sequences[train_user_indices],
+            responses[train_user_indices],
+            masks[train_user_indices],
+        )
+        val_data = (
+            sequences[val_user_indices],
+            responses[val_user_indices],
+            masks[val_user_indices],
+        )
+
+        return train_data, val_data
+
+    def split_data(self, sequences, responses, masks, val_ratio=0.2):
+        r"""
+        随机划分训练集和验证集
+        参数:
+            sequences: 用户答题序列数组
+            responses: 用户作答正确与否数组
+            masks: 序列掩码数组
+            val_ratio: 验证集比例(默认为0.2)
+        返回:
+            train_data: 训练集 (sequences, responses, masks)
+            val_data: 验证集 (sequences, responses, masks)
+        说明:
+            - 随机划分数据集为训练集和验证集
+            - 验证集比例由val_ratio参数控制
+            - 需要确保输入的sequences、responses和masks具有相同的样本数量
+        """
+        import numpy as np
+        num_users = sequences.shape[0]
+        indices = np.arange(num_users)
+        np.random.shuffle(indices)
+
+        val_size = int(num_users * val_ratio)
+        val_indices = indices[:val_size]
+        train_indices = indices[val_size:]
+
+        train_data = (
+            sequences[train_indices],
+            responses[train_indices],
+            masks[train_indices],
+        )
+        val_data = (
+            sequences[val_indices],
+            responses[val_indices],
+            masks[val_indices],
+        )
+
+        return train_data, val_data
+
+    @abstractmethod
+    def prepare_data(self, args):
+        """
+        准备模型所需的数据
+        """
+        raise NotImplementedError("Subclasses should implement prepare_data method")
+
+    def build_sequence_data(self, max_seq_len: int, min_seq_len: int):
+        from tqdm import tqdm
+        import numpy as np
+
+        data = self.data_src.get_processed_data()
+        num_users = self.data_src.get_metadata("num_users")
+
+        # 构建用户答题序列
+        user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        # 用户作答正确与否序列
+        user_response = np.zeros((num_users, max_seq_len), dtype=int)
+        # 序列掩码，用于区分是否存在作答数据
+        user_mask = np.zeros((num_users, max_seq_len), dtype=int)
+        # 用户序列长度计数器，用于索引
+        num_sequence = [0] * num_users
+
+        for row in tqdm(
+            data.itertuples(), total=data.shape[0], desc="Building user sequences"
+        ):
+            # 获取用户ID、问题ID和作答正确与否
+            user_idx = row.user_id
+            question_idx = row.question_id
+            label = row.label
+            # 如果当前用户的序列长度未达到最大长度，则添加数据
+            if num_sequence[user_idx] < max_seq_len:
+                user_sequence[user_idx, num_sequence[user_idx]] = question_idx
+                user_response[user_idx, num_sequence[user_idx]] = label
+                user_mask[user_idx, num_sequence[user_idx]] = 1
+                # 自增对应的用户序列长度
+                num_sequence[user_idx] += 1
+
+        return user_sequence, user_response, user_mask
+
+    def build_data_matrix(
+        self, edge_type: tuple[str, str, str], value_type: str = "binary"
+    ):
+        """
+        构建实体之间的关系矩阵
+
+        参数:
+            edge_type: 边类型三元组 (源节点类型, 边关系名, 目标节点类型)
+                      支持的节点类型: 'user', 'question', 'skill'
+                      例如: ('user', 'answers', 'question')
+                           ('question', 'has', 'skill')
+                           ('user', 'masters', 'skill')
+            value_type: 矩阵值类型，可选:
+                       'binary': 二值矩阵,表示是否存在关系 (默认)
+                       'count': 计数矩阵,表示关系出现的次数
+
+        返回:
+            data_matrix: numpy数组,形状为 (源节点数量, 目标节点数量)
+
+        示例:
+            # 构建用户-问题二值关系矩阵
+            matrix = model_data.build_data_matrix(('user', 'answers', 'question'))
+
+            # 构建问题-技能关系矩阵
+            matrix = model_data.build_data_matrix(('question', 'has', 'skill'))
+
+            # 构建用户-技能关系矩阵(间接关系)
+            matrix = model_data.build_data_matrix(('user', 'masters', 'skill'))
+
+            # 构建用户-问题计数矩阵
+            matrix = model_data.build_data_matrix(('user', 'answers', 'question'), value_type='count')
+        """
+        import numpy as np
+        from tqdm import tqdm
+
+        data = self.data_src.get_processed_data()
+
+        # 节点类型到列名和元数据键的映射
+        node_type_mapping = {
+            "user": ("user_id", "num_users"),
+            "question": ("question_id", "num_questions"),
+            "skill": ("skill_id", "num_skills"),
+        }
+
+        src_type, _, dst_type = edge_type
+
+        # 验证节点类型
+        if src_type not in node_type_mapping or dst_type not in node_type_mapping:
+            raise ValueError(
+                f"Unsupported node types: {src_type}, {dst_type}. "
+                f"Supported types: {list(node_type_mapping.keys())}"
+            )
+
+        # 获取源节点和目标节点的列名和数量
+        src_col, src_meta_key = node_type_mapping[src_type]
+        dst_col, dst_meta_key = node_type_mapping[dst_type]
+
+        num_src = self.data_src.get_metadata(src_meta_key)
+        num_dst = self.data_src.get_metadata(dst_meta_key)
+
+        # 验证列是否存在
+        if src_col not in data.columns or dst_col not in data.columns:
+            raise ValueError(
+                f"Required columns {src_col} or {dst_col} not found in data. "
+                f"Available columns: {data.columns.tolist()}"
+            )
+
+        # 初始化矩阵
+        data_matrix = np.zeros((num_src, num_dst), dtype=int)
+
+        # 填充矩阵
+        for row in tqdm(
+            data.itertuples(),
+            total=data.shape[0],
+            desc=f"Building {src_type}-{dst_type} matrix",
+        ):
+            src_idx = getattr(row, src_col)
+            dst_idx = getattr(row, dst_col)
+
+            if value_type == "binary":
+                data_matrix[src_idx, dst_idx] = 1
+            elif value_type == "count":
+                data_matrix[src_idx, dst_idx] += 1
+            else:
+                raise ValueError(
+                    f"Unsupported value_type: {value_type}. "
+                    f"Supported types: 'binary', 'count'"
+                )
+
+        return data_matrix
+
+    def build_hetero_graph(
+        self,
+        edge_types: list[tuple[str, str, str]],
+        edge_attrs: dict[tuple[str, str, str], list[str]] = None,
+        directed: bool = False,
+        node_features: dict[str, any] = None,
+    ):
+        """
+        构建异构图，支持灵活配置节点类型和边类型
+
+        参数:
+            edge_types: 边类型列表，每个元素为三元组 (源节点类型, 边关系名, 目标节点类型)
+                       例如: [('user', 'answers', 'question'), ('question', 'has', 'skill')]
+            edge_attrs: 边属性字典，键为边类型三元组，值为属性列名列表
+                       例如: {('user', 'answers', 'question'): ['label', 'order_id']}
+                       默认为 None（不添加边属性）
+            directed: 是否构建有向图，默认为 False（无向图）
+            node_features: 节点特征字典，键为节点类型，值为特征张量或None
+                          例如: {'question': question_difficulty_tensor}
+                          默认使用节点ID作为特征
+
+        返回:
+            HeteroData: PyTorch Geometric 异构图对象
+
+        示例:
+            # 示例1: 构建问题-技能无向图
+            graph = model_data.build_hetero_graph(
+                edge_types=[('question', 'has', 'skill')],
+                directed=False
+            )
+
+            # 示例2: 构建学生-问题和问题-技能的组合图
+            graph = model_data.build_hetero_graph(
+                edge_types=[
+                    ('user', 'answers', 'question'),
+                    ('question', 'has', 'skill')
+                ],
+                directed=False
+            )
+
+            # 示例3: 构建带边属性的图
+            graph = model_data.build_hetero_graph(
+                edge_types=[('user', 'answers', 'question')],
+                edge_attrs={('user', 'answers', 'question'): ['label', 'order_id']},
+                directed=True
+            )
+        """
+        from tqdm import tqdm
+        from torch_geometric.data import HeteroData
+        from torch_geometric.transforms import ToUndirected
+        import numpy as np
+        import torch
+
+        if edge_attrs is None:
+            edge_attrs = {}
+
+        # 获取数据
+        data = self.data_src.get_processed_data()
+        graph = HeteroData()
+
+        # 节点类型到列名的映射
+        node_type_to_column = {
+            "user": "user_id",
+            "question": "question_id",
+            "skill": "skill_id",
+        }
+
+        # 收集所有需要的节点类型
+        node_types = set()
+        for src_type, _, dst_type in edge_types:
+            node_types.add(src_type)
+            node_types.add(dst_type)
+
+        # 获取每种节点类型的数量
+        node_counts = {}
+        for node_type in node_types:
+            if node_type in node_type_to_column:
+                col_name = node_type_to_column[node_type]
+                if col_name in data.columns:
+                    node_counts[node_type] = data[col_name].nunique()
+                else:
+                    # 尝试从元数据获取
+                    meta_key = f"num_{node_type}s"
+                    node_counts[node_type] = self.data_src.get_metadata(meta_key)
+            else:
+                raise ValueError(f"Unknown node type: {node_type}")
+
+        # 设置节点数量和特征
+        for node_type in node_types:
+            graph[node_type].num_nodes = node_counts[node_type]
+
+            # 设置节点特征
+            if node_features and node_type in node_features:
+                graph[node_type].x = node_features[node_type]
+            else:
+                # 默认使用节点ID作为特征
+                graph[node_type].x = (
+                    torch.arange(node_counts[node_type]).view(-1, 1).float()
+                )
+
+        # 为每种边类型构建边
+        for edge_type in edge_types:
+            src_type, relation, dst_type = edge_type
+            src_col = node_type_to_column[src_type]
+            dst_col = node_type_to_column[dst_type]
+
+            # 检查列是否存在
+            if src_col not in data.columns or dst_col not in data.columns:
+                print(
+                    f"Warning: Columns {src_col} or {dst_col} not found in data. Skipping edge type {edge_type}"
+                )
+                continue
+
+            # 收集边和边属性
+            edge_dict = {}  # 使用字典存储边，key为(src, dst)，value为属性字典
+
+            # 需要提取的属性列
+            attr_cols = edge_attrs.get(edge_type, [])
+
+            # 选择需要的列
+            cols_to_select = [src_col, dst_col] + attr_cols
+
+            # 遍历数据构建边
+            for row in tqdm(
+                data[cols_to_select].itertuples(index=False),
+                total=data.shape[0],
+                desc=f"Building {src_type}-{relation}-{dst_type} edges",
+            ):
+                src_id = getattr(row, src_col)
+                dst_id = getattr(row, dst_col)
+                edge_key = (src_id, dst_id)
+
+                # 如果边已存在，更新属性（取最后一次）
+                if attr_cols:
+                    edge_attrs_dict = {attr: getattr(row, attr) for attr in attr_cols}
+                    edge_dict[edge_key] = edge_attrs_dict
+                else:
+                    edge_dict[edge_key] = None
+
+            # 转换为张量格式
+            edge_list = list(edge_dict.keys())
+            if len(edge_list) == 0:
+                print(f"Warning: No edges found for {edge_type}")
+                continue
+
+            edge_index = np.array(edge_list, dtype=np.int64).T
+            edge_index = torch.tensor(edge_index, dtype=torch.long).contiguous()
+
+            # 添加边索引到图
+            graph[src_type, relation, dst_type].edge_index = edge_index
+
+            # 添加边属性
+            if attr_cols:
+                for attr in attr_cols:
+                    attr_values = [edge_dict[edge][attr] for edge in edge_list]
+                    attr_tensor = torch.tensor(attr_values, dtype=torch.float32)
+                    # 边属性存储为 edge_attr_<attr_name>
+                    setattr(
+                        graph[src_type, relation, dst_type],
+                        f"edge_attr_{attr}",
+                        attr_tensor,
+                    )
+
+        # 如果需要无向图，应用转换
+        if not directed:
+            graph = ToUndirected()(graph)
+
+        return graph
+
+    def save_graph(self, graph, file_path: str):
+        """
+        保存异构图到文件
+
+        参数:
+            graph: HeteroData 图对象
+            file_path: 保存路径（.pt 文件）
+        """
+        import torch
+        import os
+
+        # 确保目录存在
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+        # 保存图
+        torch.save(graph, file_path)
+        print(f"Graph saved to: {file_path}")
+
+    def load_graph(self, file_path: str):
+        """
+        从文件加载异构图
+
+        参数:
+            file_path: 图文件路径（.pt 文件）
+
+        返回:
+            HeteroData: 加载的图对象
+        """
+        import torch
+        import os
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Graph file not found: {file_path}")
+
+        graph = torch.load(file_path)
+        print(f"Graph loaded from: {file_path}")
+        return graph
+
+    @staticmethod
+    def save_numpy_data(file_path: str, data: tuple):
+        """
+        保存numpy数据到文件
+
+        参数:
+            file_path: 文件路径
+            data: 需要保存的数据元组
+        """
+        import numpy as np
+
+        np.savez_compressed(file_path, *data)
