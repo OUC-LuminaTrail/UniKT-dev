@@ -325,21 +325,20 @@ class ModelData:
         self.data_src = data_src
         self.data_src.load_processed_data()
 
-    def get_kfold_split_data(self, sequences, responses, masks, user_id_sequence, fold_idx):
+    def get_kfold_split_data(self, *arrays, fold_idx: int):
         r"""
         根据K折交叉验证的fold索引获取训练集和验证集
 
         参数:
-            data_src: 数据源对象
-            sequences: 用户答题序列数组
-            responses: 用户作答正确与否数组
-            masks: 序列掩码数组
-            user_id_sequence: 用户ID序列数组
-            fold_idx: 当前的fold索引
+            *arrays: 任意个数、首维为样本数的数组或张量（与 split_data 一致）。
+                     例如：
+                     - GIKT: (sequences, responses, masks)
+                     - SQGKT: (sequences, responses, masks, user_id_sequence)
+            fold_idx: 当前的fold索引（关键字参数，必填）。
 
         返回:
-            train_data: 训练集 (sequences, responses, masks, user_id_sequence)
-            val_data: 验证集 (sequences, responses, masks, user_id_sequence)
+            train_data: 与输入相同结构的元组，包含训练集切片
+            val_data:   与输入相同结构的元组，包含验证集切片
 
         说明:
             - 需要数据源中已添加K折标签（通过 add_kfold_labels）
@@ -349,9 +348,12 @@ class ModelData:
         from tqdm import tqdm
         import numpy as np
 
+        if len(arrays) == 0:
+            raise ValueError("get_kfold_split_data 需要至少一个输入数组/张量")
+
         # 加载数据以获取折信息
         data = self.data_src.get_processed_data()
-        
+
         # 检查是否已添加fold列
         if "fold" not in data.columns:
             raise ValueError(
@@ -359,7 +361,14 @@ class ModelData:
             )
 
         # 获取有效的用户索引（基于序列中实际存在的用户）
-        num_users = sequences.shape[0]
+        num_users = arrays[0].shape[0]
+
+        # 校验所有输入的首维一致
+        for i, arr in enumerate(arrays):
+            if arr.shape[0] != num_users:
+                raise ValueError(
+                    f"第 {i} 个输入首维为 {arr.shape[0]}，与预期的 {num_users} 不一致"
+                )
 
         # 创建用户fold信息映射
         user_folds = np.ones(num_users, dtype=int) * -1
@@ -381,59 +390,106 @@ class ModelData:
         val_user_indices = val_user_indices[val_user_indices < num_users]
         train_user_indices = train_user_indices[train_user_indices < num_users]
 
-        train_data = (
-            sequences[train_user_indices],
-            responses[train_user_indices],
-            masks[train_user_indices],
-            user_id_sequence[train_user_indices],
-        )
-        val_data = (
-            sequences[val_user_indices],
-            responses[val_user_indices],
-            masks[val_user_indices],
-            user_id_sequence[val_user_indices],
-        )
+        # 索引列表
+        val_idx_list = val_user_indices.tolist()
+        train_idx_list = train_user_indices.tolist()
 
-        return train_data, val_data
+        train_slices = []
+        val_slices = []
+        for arr in arrays:
+            # 识别 torch.Tensor
+            is_torch_tensor = False
+            try:
+                import torch  # noqa: F401
+                is_torch_tensor = hasattr(arr, "dim") and hasattr(arr, "index_select")
+            except Exception:
+                is_torch_tensor = False
 
-    def split_data(self, sequences, responses, masks, user_id_sequence, val_ratio=0.2):
+            if is_torch_tensor:
+                import torch
+                train_idx = torch.tensor(train_idx_list, dtype=torch.long, device=arr.device)
+                val_idx = torch.tensor(val_idx_list, dtype=torch.long, device=arr.device)
+                train_slices.append(arr.index_select(0, train_idx))
+                val_slices.append(arr.index_select(0, val_idx))
+            else:
+                train_slices.append(arr[train_idx_list])
+                val_slices.append(arr[val_idx_list])
+
+        return tuple(train_slices), tuple(val_slices)
+
+    def split_data(self, *arrays, val_ratio: float = 0.2):
         r"""
-        随机划分训练集和验证集
+        随机划分训练集和验证集（支持可变数量的输入数组/张量）。
+
         参数:
-            sequences: 用户答题序列数组
-            responses: 用户作答正确与否数组
-            masks: 序列掩码数组
-            user_id_sequence: 用户ID序列数组
+            *arrays: 任意个数、首维为样本数的数组或张量。
+                     例如：
+                     - GIKT: (sequences, responses, masks)
+                     - SQGKT: (sequences, responses, masks, user_id_sequence)
             val_ratio: 验证集比例(默认为0.2)
+
         返回:
-            train_data: 训练集 (sequences, responses, masks, user_id_sequence)
-            val_data: 验证集 (sequences, responses, masks, user_id_sequence)
+            (train_data, val_data):
+                - train_data: 与输入相同结构的元组，包含训练集切片
+                - val_data:   与输入相同结构的元组，包含验证集切片
+
         说明:
-            - 随机划分数据集为训练集和验证集
-            - 验证集比例由val_ratio参数控制
-            - 需要确保输入的sequences、responses、masks和user_id_sequence具有相同的样本数量
+            - 将依据第一个输入的首维作为样本维度进行打乱与划分。
+            - 要求所有输入的首维大小一致。
+            - 同时兼容 numpy.ndarray 与 torch.Tensor（若可用）。
+            - GIKT 可仅传三项；SQGKT 可传四项（包含 user_id_sequence）。
         """
         import numpy as np
-        num_users = sequences.shape[0]
+
+        if len(arrays) == 0:
+            raise ValueError("split_data 需要至少一个输入数组/张量")
+
+        num_users = arrays[0].shape[0]
+
+        # 校验所有数组首维一致
+        for i, arr in enumerate(arrays):
+            if arr.shape[0] != num_users:
+                raise ValueError(
+                    f"第 {i} 个输入首维为 {arr.shape[0]}，与预期的 {num_users} 不一致"
+                )
+
         indices = np.arange(num_users)
         np.random.shuffle(indices)
+        indices = indices.tolist()
 
         val_size = int(num_users * val_ratio)
         val_indices = indices[:val_size]
         train_indices = indices[val_size:]
 
-        train_data = (
-            sequences[train_indices],
-            responses[train_indices],
-            masks[train_indices],
-            user_id_sequence[train_indices],
-        )
-        val_data = (
-            sequences[val_indices],
-            responses[val_indices],
-            masks[val_indices],
-            user_id_sequence[val_indices],
-        )
+        # 兼容 numpy 与 torch 的索引切片
+        train_slices = []
+        val_slices = []
+        for arr in arrays:
+            # 尝试识别 torch.Tensor
+            is_torch_tensor = False
+            try:
+                import torch  # noqa: F401
+
+                is_torch_tensor = hasattr(arr, "dim") and hasattr(arr, "index_select")
+            except Exception:
+                is_torch_tensor = False
+
+            if is_torch_tensor:
+                import torch
+
+                train_idx = torch.tensor(
+                    train_indices, dtype=torch.long, device=arr.device
+                )
+                val_idx = torch.tensor(val_indices, dtype=torch.long, device=arr.device)
+                train_slices.append(arr.index_select(0, train_idx))
+                val_slices.append(arr.index_select(0, val_idx))
+            else:
+                # 视作 numpy 数组或支持 list 索引的结构
+                train_slices.append(arr[train_indices])
+                val_slices.append(arr[val_indices])
+
+        train_data = tuple(train_slices)
+        val_data = tuple(val_slices)
 
         return train_data, val_data
 

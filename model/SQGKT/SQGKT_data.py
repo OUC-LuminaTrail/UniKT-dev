@@ -184,8 +184,6 @@ class SQGKTModelData(ModelData):
         """
         生成SQGKT问题-技能图的固定大小邻居数组
 
-        功能等价于原始的 gen_sqgkt_graph 函数，但使用更高效的矩阵操作
-
         参数:
             qs_matrix: 问题-技能关系矩阵，形状 (num_question, num_skill)
             q_neighbor_size: 每个问题的固定邻居数量
@@ -219,8 +217,6 @@ class SQGKTModelData(ModelData):
     ):
         """
         生成SQGKT用户-问题图的固定大小邻居数组
-
-        功能等价于原始的 gen_sqgkt_graph_uq 函数，但使用更高效的矩阵操作
 
         参数:
             uq_matrix: 用户-问题关系矩阵，形状 (num_user, num_question)
@@ -287,7 +283,7 @@ class SQGKTModelData(ModelData):
                     f"Fold index {fold_idx} is out of range for {kfold_n_splits} folds."
                 )
             train_data, val_data = self.get_kfold_split_data(
-                user_sequence, user_response, user_mask, user_id_sequence, fold_idx
+                user_sequence, user_response, user_mask, user_id_sequence, fold_idx=fold_idx
             )
         else:
             train_data, val_data = self.split_data(

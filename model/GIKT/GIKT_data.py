@@ -62,7 +62,7 @@ class GIKTModelData(ModelData):
                 )
             print(f"Using K-fold cross-validation: fold {fold_idx}/{kfold_n_splits}")
             train_data, val_data = self.get_kfold_split_data(
-                user_sequence, user_response, user_mask, fold_idx
+                user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
             train_data, val_data = self.split_data(
