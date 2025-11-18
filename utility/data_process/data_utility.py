@@ -292,12 +292,7 @@ class DataSource(ABC):
         # 答题次数多于max_seq_len的学生将多余的记录删除
         if max_seq_len is not None:
             # 保留每个用户的最后max_seq_len条记录
-            def trim_user_sequence(group):
-                if len(group) > max_seq_len:
-                    return group.iloc[-max_seq_len:]
-                return group
-
-            data = data.groupby("user_id", group_keys=False).apply(trim_user_sequence)
+            data = data.groupby("user_id", group_keys=False).tail(max_seq_len)
             data = data.reset_index(drop=True)
         return data
 
