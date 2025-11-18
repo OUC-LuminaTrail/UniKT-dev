@@ -43,15 +43,15 @@ class SQGKTTrainer(Trainer):
         
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
-            model,
-            args.epochs,
-            opt,
-            loss,
-            train_data,
-            val_data,
-            lr_scheduler,
-            args,
-            log_dir,
+            model=model,
+            epochs=args.epochs,
+            opt=opt,
+            loss=loss,
+            train_data=train_data,
+            val_data=val_data,
+            lr_scheduler=lr_scheduler,
+            hyperparams=args,
+            log_dir=log_dir,
             device=args.device,
         )
 

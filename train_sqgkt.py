@@ -88,6 +88,41 @@ def parse_args():
         help="Weight decay (L2 regularization)",
     )
 
+    # 早停参数
+    es_params = parser.add_argument_group("Early Stopping")
+    es_params.add_argument(
+        "--es_monitor",
+        type=str,
+        choices=["auc", "acc", "rmse", "loss"],
+        default="auc",
+        help="Metric to monitor for early stopping",
+    )
+    es_params.add_argument(
+        "--es_mode",
+        type=str,
+        choices=["max", "min"],
+        default="max",
+        help="Optimization mode for monitored metric",
+    )
+    es_params.add_argument(
+        "--es_patience",
+        type=int,
+        default=None,
+        help="Patience for early stopping (None to disable)",
+    )
+    es_params.add_argument(
+        "--es_min_delta",
+        type=float,
+        default=0.0,
+        help="Minimum change to qualify as improvement",
+    )
+    es_params.add_argument(
+        "--es_restore_best",
+        action="store_true",
+        default=False,
+        help="Restore best weights when early stopping triggers (flag)",
+    )
+
     # 其他参数
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--device", type=str, default=None, help="Device (cuda or cpu)")
