@@ -289,11 +289,16 @@ class DataSource(ABC):
             valid_user_ids = is_valid_user[is_valid_user].index.tolist()
             data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
 
-        # 过滤答题次数多于max_seq_len的学生
+        # 答题次数多于max_seq_len的学生将多余的记录删除
         if max_seq_len is not None:
-            is_valid_user = data.groupby("user_id").size() <= max_seq_len
-            valid_user_ids = is_valid_user[is_valid_user].index.tolist()
-            data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
+            # 保留每个用户的最后max_seq_len条记录
+            def trim_user_sequence(group):
+                if len(group) > max_seq_len:
+                    return group.iloc[-max_seq_len:]
+                return group
+
+            data = data.groupby("user_id", group_keys=False).apply(trim_user_sequence)
+            data = data.reset_index(drop=True)
         return data
 
     @staticmethod
@@ -349,7 +354,9 @@ class ModelData:
         import numpy as np
 
         if len(arrays) == 0:
-            raise ValueError("get_kfold_split_data requires at least one input array/tensor")
+            raise ValueError(
+                "get_kfold_split_data requires at least one input array/tensor"
+            )
 
         # 加载数据以获取折信息
         data = self.data_src.get_processed_data()
@@ -401,14 +408,20 @@ class ModelData:
             is_torch_tensor = False
             try:
                 import torch  # noqa: F401
+
                 is_torch_tensor = hasattr(arr, "dim") and hasattr(arr, "index_select")
             except Exception:
                 is_torch_tensor = False
 
             if is_torch_tensor:
                 import torch
-                train_idx = torch.tensor(train_idx_list, dtype=torch.long, device=arr.device)
-                val_idx = torch.tensor(val_idx_list, dtype=torch.long, device=arr.device)
+
+                train_idx = torch.tensor(
+                    train_idx_list, dtype=torch.long, device=arr.device
+                )
+                val_idx = torch.tensor(
+                    val_idx_list, dtype=torch.long, device=arr.device
+                )
                 train_slices.append(arr.index_select(0, train_idx))
                 val_slices.append(arr.index_select(0, val_idx))
             else:
