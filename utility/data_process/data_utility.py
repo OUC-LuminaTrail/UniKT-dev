@@ -349,7 +349,7 @@ class ModelData:
         import numpy as np
 
         if len(arrays) == 0:
-            raise ValueError("get_kfold_split_data 需要至少一个输入数组/张量")
+            raise ValueError("get_kfold_split_data requires at least one input array/tensor")
 
         # 加载数据以获取折信息
         data = self.data_src.get_processed_data()
@@ -442,7 +442,7 @@ class ModelData:
         import numpy as np
 
         if len(arrays) == 0:
-            raise ValueError("split_data 需要至少一个输入数组/张量")
+            raise ValueError("split_data requires at least one input array/tensor")
 
         num_users = arrays[0].shape[0]
 

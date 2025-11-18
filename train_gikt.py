@@ -134,7 +134,7 @@ def main():
     elif args.dataset == "ednet_kt1":
         data_src = EdNetKT1Data(args=args)
     else:
-        raise ValueError(f"不支持的数据集: {args.dataset}")
+        raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     print("Initializing trainer...")
     trainer = GIKTTrainer(
