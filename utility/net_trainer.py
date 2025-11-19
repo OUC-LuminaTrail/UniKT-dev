@@ -6,6 +6,7 @@ import os
 from tqdm import tqdm
 from typing import Tuple, Any
 from torch_geometric.profile import count_parameters
+from utility.early_stopping import EarlyStopping, EarlyStoppingConfig
 
 
 class Trainer(ABC):
@@ -30,6 +31,7 @@ class Trainer(ABC):
         train_data,
         val_data=None,
         lr_scheduler=None,
+        early_stopping=None,
         hyperparams=None,
         log_dir: str = None,
         device: torch.device = None,
@@ -45,6 +47,32 @@ class Trainer(ABC):
         self.train_data = train_data
         self.val_data = val_data
         self.lr_scheduler = lr_scheduler
+        # 初始化早停
+        self.early_stopping: EarlyStopping | None = None
+        if early_stopping is not None:
+            if isinstance(early_stopping, EarlyStopping):
+                self.early_stopping = early_stopping
+            elif isinstance(early_stopping, EarlyStoppingConfig):
+                self.early_stopping = EarlyStopping(early_stopping)
+            elif isinstance(early_stopping, dict):
+                self.early_stopping = EarlyStopping(**early_stopping)
+        elif hyperparams is not None:
+            # 从超参数中读取早停配置（来自命令行）
+            es_patience = getattr(hyperparams, "es_patience", None)
+            if es_patience is not None:
+                monitor = getattr(hyperparams, "es_monitor", "auc")
+                mode = getattr(hyperparams, "es_mode", "max")
+                min_delta = getattr(hyperparams, "es_min_delta", 0.0)
+                restore_best = getattr(hyperparams, "es_restore_best", False)
+                self.early_stopping = EarlyStopping(
+                    EarlyStoppingConfig(
+                        monitor=monitor,
+                        mode=mode,
+                        patience=es_patience,
+                        min_delta=min_delta,
+                        restore_best=restore_best,
+                    )
+                )
 
         # 以当前时间戳命名日志文件夹
         if log_dir is None:
@@ -172,6 +200,39 @@ class Trainer(ABC):
             if self.val_data is not None:
                 val_total_loss = self.process_data(self.val_data, epoch, is_train=False)
                 self.logger.add_scalar("Val/Loss-epoch", val_total_loss, epoch)
+                # 早停检查
+                if self.early_stopping is not None and hasattr(
+                    self, "_last_val_metrics"
+                ):
+                    monitor_value = self._select_monitor_value(
+                        self._last_val_metrics, val_total_loss
+                    )
+                    should_stop = self.early_stopping.step(monitor_value, epoch)
+                    self.logger.add_scalar(
+                        "ES/BadEpochs", self.early_stopping.num_bad_epochs, epoch
+                    )
+                    if self.early_stopping.best_score is not None:
+                        self.logger.add_scalar(
+                            "ES/Best", self.early_stopping.best_score, epoch
+                        )
+                    if should_stop:
+                        print(
+                            f"Early stopping triggered at epoch {epoch+1}. Best {self._monitor_name()} = "
+                            f"{self.early_stopping.best_score:.4f} at epoch {int(self.early_stopping.best_epoch)+1 if self.early_stopping.best_epoch is not None else '?'}"
+                        )
+                        # 按需恢复最佳权重
+                        if self.early_stopping.cfg.restore_best:
+                            checkpoint_path = os.path.join(
+                                self.log_dir, "best_model.pth"
+                            )
+                            if os.path.exists(checkpoint_path):
+                                self.model.load_state_dict(
+                                    torch.load(
+                                        checkpoint_path, map_location=self.device_
+                                    )
+                                )
+                                print("Restored best model weights from checkpoint.")
+                        break
 
             # 学习率调度器更新
             if self.lr_scheduler is not None:
@@ -296,7 +357,7 @@ class Trainer(ABC):
 
     def _aggregate_and_log(self, epoch: int, phase: str):
         r"""
-        将本轮所有 batch 的预测与标签拼接，计算并记录按 epoch 聚合的 AUC 与 ACC。
+        将本轮所有 batch 的预测与标签拼接，计算并记录按 epoch 聚合的 AUC ACC 和 RMSE。
 
         参数:
             epoch: 当前轮数
@@ -324,17 +385,50 @@ class Trainer(ABC):
         acc = accuracy_score(y_label, y_pred)
         self.log_metric(f"{prefix}ACC-epoch", acc, epoch)
         # AUC
+        auc = None
         try:
             auc = roc_auc_score(y_label, y_hat)
             self.log_metric(f"{prefix}AUC-epoch", auc, epoch)
         except ValueError:
-            pass
+            auc = None
         # RMSE
         rmse = root_mean_squared_error(y_label, y_hat)
         self.log_metric(f"{prefix}RMSE-epoch", rmse, epoch)
         # 如果是验证阶段，保存最佳模型
         if phase == "val":
-            self._save_best_model_checkpoint(auc, epoch)
+            # 保存最新一次验证指标
+            self._last_val_metrics = {
+                "acc": acc,
+                "auc": auc if "auc" in locals() else None,
+                "rmse": rmse,
+            }
+            monitor_value = self._select_monitor_value(self._last_val_metrics, None)
+            if monitor_value is not None:
+                self._save_best_model_checkpoint(monitor_value, epoch)
+
+    def _monitor_name(self) -> str:
+        if self.early_stopping is None:
+            return "auc"
+        return (self.early_stopping.cfg.monitor or "auc").lower()
+
+    def _select_monitor_value(
+        self, metrics: dict, val_loss: float | None
+    ) -> float | None:
+        """根据配置选择监控指标的值。"""
+        name = self._monitor_name()
+        if name == "loss":
+            return float(val_loss) if val_loss is not None else None
+        if name in metrics and metrics[name] is not None:
+            return float(metrics[name])
+        # 回退策略：优先 auc -> acc -> -rmse
+        if metrics.get("auc") is not None:
+            return float(metrics["auc"])
+        if metrics.get("acc") is not None:
+            return float(metrics["acc"])
+        if metrics.get("rmse") is not None:
+            # 如果要求最小化但后续比较使用 max，可在配置中选择 'min'
+            return float(metrics["rmse"])
+        return None
 
     def _save_best_model_checkpoint(self, metric: float, epoch: int):
         r"""

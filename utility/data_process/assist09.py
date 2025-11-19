@@ -20,7 +20,7 @@ class Assistments2009Data(DataSource):
         self.args = args
         # 原始数据文件路径
         self.raw_data_path = os.path.join(
-            self.data_folder, "skill_builder_data_corrected.csv"
+            self.data_folder, "skill_builder_data_corrected_collapsed.csv"
         )
 
     @override

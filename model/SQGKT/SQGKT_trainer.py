@@ -1,15 +1,15 @@
 """
-GIKT 模型训练器
-定义 GIKT 模型特定的训练逻辑
+SQGKT 模型训练器
+定义 SQGKTTrainer 类，用于训练和评估 SQGKT 模型。
 """
 
 import torch
 from utility.net_trainer import Trainer
 
 
-class GIKTTrainer(Trainer):
+class SQGKTTrainer(Trainer):
     """
-    GIKT模型训练器
+    SQGKT模型训练器
     """
 
     def __init__(
@@ -19,10 +19,28 @@ class GIKTTrainer(Trainer):
         log_dir=None,
     ):
         # 构建数据
-        from model.GIKT.GIKT_data import GIKTModelData
+        from model.SQGKT.SQGKT_data import SQGKTModelData
 
-        model_data = GIKTModelData(data_src)
-        train_data, val_data, self.graph = model_data.prepare_data(args)
+        model_data = SQGKTModelData(data_src)
+        (
+            train_data,
+            val_data,
+            self.uq_matrix,
+            self.qs_matrix,
+            self.qs_q_neighbor_list,
+            self.qs_s_neighbor_list,
+            self.uq_u_neighbor_list,
+            self.uq_q_neighbor_list,
+        ) = model_data.prepare_data(args)
+        
+        # 将numpy数组转换为torch张量
+        self.uq_matrix = torch.from_numpy(self.uq_matrix)  # 3维张量: [num_users, num_questions, 3]
+        self.qs_matrix = torch.from_numpy(self.qs_matrix)  # 2维张量: [num_questions, num_skills]
+        self.qs_q_neighbor_list = torch.from_numpy(self.qs_q_neighbor_list)
+        self.qs_s_neighbor_list = torch.from_numpy(self.qs_s_neighbor_list)
+        self.uq_u_neighbor_list = torch.from_numpy(self.uq_u_neighbor_list)
+        self.uq_q_neighbor_list = torch.from_numpy(self.uq_q_neighbor_list)
+        
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -38,10 +56,10 @@ class GIKTTrainer(Trainer):
         )
 
     def init_model(self, args, data_src):
-        from model.GIKT.GIKT_model import GIKT
+        from model.SQGKT.SQGKT_model import SQGKT
 
-        print("Initializing GIKT model...")
-        model = GIKT(args, data_src.get_metadata())
+        print("Initializing SQGKT model...")
+        model = SQGKT(args, data_src.get_metadata())
 
         # 二分类交叉熵损失
         loss_fn = torch.nn.BCELoss()
@@ -59,16 +77,27 @@ class GIKTTrainer(Trainer):
         return model, optimizer, loss_fn, lr_scheduler
 
     def forward_pass(self, batch_data):
-        sequence, response, mask = batch_data
+        sequence, response, mask, user_ids = batch_data
         # 将数据移动到设备
         sequence = sequence.to(self.device_)
         response = response.to(self.device_)
         mask = mask.to(torch.bool).to(self.device_)
-        self.graph = self.graph.to(self.device_)
+        user_ids = user_ids.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(sequence, response, mask, self.graph)  # [B, S]
+        y_hat_full = self.model(
+            user_ids,
+            sequence,
+            response,
+            mask,
+            self.uq_matrix.to(self.device_),
+            self.qs_matrix.to(self.device_),
+            self.qs_q_neighbor_list.to(self.device_),
+            self.qs_s_neighbor_list.to(self.device_),
+            self.uq_u_neighbor_list.to(self.device_),
+            self.uq_q_neighbor_list.to(self.device_),
+        )  # [B, S]
 
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]

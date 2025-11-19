@@ -1,32 +1,52 @@
 """
-GIKT 模型训练脚本
+SQGKT 模型训练脚本
 """
 
 
 def parse_args():
     """解析命令行参数"""
     import argparse
-    parser = argparse.ArgumentParser(description="GIKT Training Arguments")
-    
+
+    parser = argparse.ArgumentParser(description="SQGKT Training Arguments")
+
     # 模型参数
     model_params = parser.add_argument_group("Model Parameters")
-    model_params.add_argument(
-        "--hidden_dim", type=int, default=100, help="Dimension of hidden layers"
-    )
     model_params.add_argument(
         "--embedding_dim", type=int, default=100, help="Dimension of embeddings"
     )
     model_params.add_argument(
-        "--lstm_layers", type=int, default=2, help="Number of LSTM layers"
+        "--dropout_lstm", type=float, default=0.2, help="Dropout probability for LSTM"
     )
     model_params.add_argument(
-        "--dropout", type=float, default=0.4, help="Dropout probability"
+        "--dropout_gnn", type=float, default=0.4, help="Dropout probability for GNN"
+    )
+    model_params.add_argument(
+        "--qs_question_neighbors",
+        type=int,
+        default=5,
+        help="Question neighbors K of question-skill graph",
+    )
+    model_params.add_argument(
+        "--qs_skill_neighbors",
+        type=int,
+        default=10,
+        help="Skill neighbors K of question-skill graph",
+    )
+    model_params.add_argument(
+        "--uq_user_neighbors",
+        type=int,
+        default=5,
+        help="User neighbors K of user-question graph",
+    )
+    model_params.add_argument(
+        "--uq_question_neighbors",
+        type=int,
+        default=5,
+        help="Question neighbors K of user-question graph",
     )
     model_params.add_argument("--n_hop", type=int, default=3, help="Number of GNN hops")
-    model_params.add_argument("--heads", type=int, default=2, help="Number of GNN attention heads")
-    model_params.add_argument("--history_neighbour", type=int, default=5, help="Top K neighbors to consider")
     model_params.add_argument(
-        "--att_bound", type=float, default=0.2, help="Attention boundary value"
+        "--rank_k", type=int, default=10, help="Top K rank for soft recap"
     )
 
     # 数据参数
@@ -51,7 +71,9 @@ def parse_args():
 
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
-    train_params.add_argument("--epochs", type=int, default=150, help="Number of epochs")
+    train_params.add_argument(
+        "--epochs", type=int, default=150, help="Number of epochs"
+    )
     train_params.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training"
     )
@@ -60,7 +82,10 @@ def parse_args():
         "--lr_decay", type=float, default=None, help="Learning rate decay factor"
     )
     train_params.add_argument(
-        "--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)"
+        "--weight_decay",
+        type=float,
+        default=1e-4,
+        help="Weight decay (L2 regularization)",
     )
 
     # 早停参数
@@ -100,9 +125,7 @@ def parse_args():
 
     # 其他参数
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument(
-        "--device", type=str, default=None, help="Device (cuda or cpu)"
-    )
+    parser.add_argument("--device", type=str, default=None, help="Device (cuda or cpu)")
 
     return parser.parse_args()
 
@@ -112,7 +135,7 @@ def main():
     args = parse_args()
     import torch
     import numpy
-    from model.GIKT.GIKT_trainer import GIKTTrainer
+    from model.SQGKT.SQGKT_trainer import SQGKTTrainer
     from utility.data_process.assist09 import Assistments2009Data
     from utility.data_process.assist12 import Assistments2012Data
     from utility.data_process.assist17 import Assistments2017Data
@@ -123,7 +146,7 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
     numpy.random.seed(args.seed)
-    
+
     # 构建数据
     print("Building datasets...")
     if args.dataset == "assistments09":
@@ -138,7 +161,7 @@ def main():
         raise ValueError(f"Unsupported dataset: {args.dataset}")
 
     print("Initializing trainer...")
-    trainer = GIKTTrainer(
+    trainer = SQGKTTrainer(
         args=args,
         data_src=data_src,
     )
