@@ -181,7 +181,7 @@ class GeneralInteraction(nn.Module):
         attention_scores_flat = torch.where(
             mask_expanded,
             attention_scores_flat,
-            torch.full_like(attention_scores_flat, float("-1e9")),
+            torch.full_like(attention_scores_flat, torch.finfo(attention_scores_flat.dtype).min),
         )
         # Softmax
         attention_weights = F.softmax(attention_scores_flat, dim=-1)  # [B, S, K]
@@ -396,4 +396,4 @@ class GIKT(nn.Module):
             hist_candidates, next_candidates, user_mask
         )  # [B, S]
 
-        return self.sigmoid(logits)  # [B, S]
+        return logits  # [B, S]
