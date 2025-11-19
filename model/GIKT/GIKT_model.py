@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import HeteroConv, Linear, GraphConv
+from torch_geometric.nn import HeteroConv, Linear, TransformerConv
 from torch.nn import functional as F
 
 
@@ -204,20 +204,23 @@ class GNN_QS(nn.Module):
     - edge_index: 边索引
     """
 
-    def __init__(self, embedding_dim, n_hop, dropout):
+    def __init__(self, embedding_dim, n_hop, heads, dropout):
         super(GNN_QS, self).__init__()
         self.n_hop = n_hop
+        self.heads = heads
         self.dropout = dropout
         self.convs = torch.nn.ModuleList()
 
         for _ in range(n_hop):
             conv = HeteroConv(
                 {
-                    ("question", "has", "skill"): GraphConv(
-                        (embedding_dim, embedding_dim), embedding_dim, aggr="add"
+                    ("question", "has", "skill"): TransformerConv(
+                        (embedding_dim, embedding_dim), embedding_dim, aggr="add",
+                        heads=heads, concat=False
                     ),
-                    ("skill", "rev_has", "question"): GraphConv(
-                        (embedding_dim, embedding_dim), embedding_dim, aggr="add"
+                    ("skill", "rev_has", "question"): TransformerConv(
+                        (embedding_dim, embedding_dim), embedding_dim, aggr="add",
+                        heads=heads, concat=False
                     ),
                 },
                 aggr="sum",
@@ -271,6 +274,7 @@ class GIKT(nn.Module):
         self.conv = GNN_QS(
             embedding_dim=self.embedding_dim,
             n_hop=args.n_hop,
+            heads=args.heads,
             dropout=self.dropout,
         )
 

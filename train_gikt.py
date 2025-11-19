@@ -23,6 +23,7 @@ def parse_args():
         "--dropout", type=float, default=0.4, help="Dropout probability"
     )
     model_params.add_argument("--n_hop", type=int, default=3, help="Number of GNN hops")
+    model_params.add_argument("--heads", type=int, default=2, help="Number of GNN attention heads")
     model_params.add_argument("--history_neighbour", type=int, default=5, help="Top K neighbors to consider")
     model_params.add_argument(
         "--att_bound", type=float, default=0.2, help="Attention boundary value"
