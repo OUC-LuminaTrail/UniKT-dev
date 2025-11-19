@@ -8,11 +8,10 @@ from torch.utils.data.dataset import Dataset
 
 
 class GIKTDataset(Dataset):
-    def __init__(self, sequences, responses, masks, graph):
+    def __init__(self, sequences, responses, masks):
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
-        self.graph = graph
 
     def __getitem__(self, index):
         return (
@@ -242,8 +241,8 @@ def build_data(args, data_src: DataSource):
         train_data, val_data = split_data(user_sequence, user_response, user_mask)
 
     # 构建模型数据集
-    train_dataset = GIKTDataset(train_data[0], train_data[1], train_data[2], graph)
-    val_dataset = GIKTDataset(val_data[0], val_data[1], val_data[2], graph)
+    train_dataset = GIKTDataset(train_data[0], train_data[1], train_data[2])
+    val_dataset = GIKTDataset(val_data[0], val_data[1], val_data[2])
     # 构建数据加载器
     train_dataloader = DataLoader(
         train_dataset, batch_size=args.batch_size, shuffle=True
