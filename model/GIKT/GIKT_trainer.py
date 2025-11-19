@@ -35,6 +35,7 @@ class GIKTTrainer(Trainer):
             hyperparams=args,
             log_dir=log_dir,
             device=args.device,
+            use_amp=args.use_amp,
         )
 
     def init_model(self, args, data_src):
