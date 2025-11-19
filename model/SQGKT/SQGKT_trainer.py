@@ -63,7 +63,7 @@ class SQGKTTrainer(Trainer):
         model = SQGKT(args, data_src.get_metadata())
 
         # 二分类交叉熵损失
-        loss_fn = torch.nn.BCELoss()
+        loss_fn = torch.nn.BCEWithLogitsLoss()
         # 优化器
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.lr, weight_decay=args.weight_decay

@@ -122,9 +122,13 @@ class SQGKT(Module):
                 else:
                     emb_node_neighbor.append(self.skill_embedding(nodes))
             emb0_question_t = self.aggregate(emb_node_neighbor)
-            emb_question_t = torch.zeros(batch_size, self.emb_dim, device=DEVICE)
+            emb_question_t = torch.zeros(
+                batch_size, self.emb_dim, device=DEVICE, dtype=emb0_question_t.dtype
+            )
             emb_question_t[mask_t] = emb0_question_t
-            emb_question_t[~mask_t] = self.question_embedding_1(question_t[~mask_t])
+            emb_question_t[~mask_t] = self.question_embedding_1(
+                question_t[~mask_t]
+            ).to(emb_question_t.dtype)
 
             node_neighbors_2 = [user_t[mask_t]]
             _batch_size_2 = len(node_neighbors_2[0])
@@ -148,10 +152,16 @@ class SQGKT(Module):
                     emb_node_neighbor_2.append(self.user_embedding(nodes))
                 else:
                     emb_node_neighbor_2.append(self.question_embedding_2(nodes))
-            emb0_question_t_2 = self.aggregate_uq(emb_node_neighbor_2, node_neighbors_2)
-            emb_question_t_2 = torch.zeros(batch_size, self.emb_dim, device=DEVICE)
+            emb0_question_t_2 = self.aggregate_uq(
+                emb_node_neighbor_2, node_neighbors_2
+            )
+            emb_question_t_2 = torch.zeros(
+                batch_size, self.emb_dim, device=DEVICE, dtype=emb0_question_t_2.dtype
+            )
             emb_question_t_2[mask_t] = emb0_question_t_2
-            emb_question_t_2[~mask_t] = self.question_embedding_2(question_t[~mask_t])
+            emb_question_t_2[~mask_t] = self.question_embedding_2(
+                question_t[~mask_t]
+            ).to(emb_question_t_2.dtype)
 
             emb_hat_q = self.w1_q * emb_question_t + self.w2_q * emb_question_t_2
 
@@ -177,19 +187,26 @@ class SQGKT(Module):
                         max_num_skill = skills_index.shape[0]
 
             emb_q_next = self.question_embedding_1(q_next)
-            qs_concat = torch.zeros(batch_size, max_num_skill + 1, self.emb_dim).to(
-                DEVICE
+            qs_concat = torch.zeros(
+                batch_size,
+                max_num_skill + 1,
+                self.emb_dim,
+                device=DEVICE,
+                dtype=emb_q_next.dtype,
             )
             for i, emb_skills in enumerate(skills_related_list):
                 num_qs = 1 + emb_skills.shape[0]
                 emb_next = torch.unsqueeze(emb_q_next[i], dim=0)
-                qs_concat[i, 0:num_qs] = torch.cat((emb_next, emb_skills), dim=0)
+                # emb_skills 与 emb_next 可能为半精度；确保与目标一致
+                qs_concat[i, 0:num_qs] = torch.cat(
+                    (emb_next, emb_skills), dim=0
+                ).to(qs_concat.dtype)
 
             if t == 0:
-                y_hat[:, 0] = 0.5
+                y_hat[:, 0] = torch.tensor(0.5, device=DEVICE, dtype=y_hat.dtype)
                 y_hat[:, 1] = self.predict(
                     qs_concat, torch.unsqueeze(lstm_output, dim=1)
-                )
+                ).to(y_hat.dtype)
                 continue
 
             current_state = lstm_output.unsqueeze(dim=1)
@@ -213,8 +230,10 @@ class SQGKT(Module):
                     (current_state, select_history), dim=1
                 )
 
-            y_hat[:, t + 1] = self.predict(qs_concat, current_history_state)
-            state_history[:, t] = lstm_output
+            y_hat[:, t + 1] = self.predict(qs_concat, current_history_state).to(
+                y_hat.dtype
+            )
+            state_history[:, t] = lstm_output.to(state_history.dtype)
         return y_hat
 
     def aggregate(self, emb_node_neighbor):
@@ -311,5 +330,5 @@ class SQGKT(Module):
         tmp = torch.squeeze(tmp, dim=-1)
         alpha = torch.softmax(tmp, dim=2)
         p = torch.sum(torch.sum(alpha * output_g, dim=1), dim=1)
-        result = torch.sigmoid(torch.squeeze(p, dim=-1))
+        result = torch.squeeze(p, dim=-1)
         return result
