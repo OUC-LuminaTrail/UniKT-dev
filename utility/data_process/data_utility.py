@@ -51,8 +51,10 @@ class DataSource(ABC):
         import random
         import numpy as np
 
-        random.seed(42)
-        np.random.seed(42)
+        if self.seed is None:
+            self.seed = 42
+        random.seed(self.seed)
+        np.random.seed(self.seed)
 
         self.add_metadata("random_seed", self.seed)
 
