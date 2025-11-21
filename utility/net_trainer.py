@@ -390,6 +390,12 @@ class Trainer(ABC):
         y_pred = torch.cat(accum["y_pred"]).numpy()
         y_hat = torch.cat(accum["y_hat"]).numpy()
 
+        # 检查预测值是否为概率值
+        assert (y_hat >= 0).all() and (y_hat <= 1).all(), (
+            f"y_hat contains values out of range [0, 1] (min={y_hat.min():.4f}, max={y_hat.max():.4f}). "
+            "Did you forget to apply sigmoid to logits in forward_pass?"
+        )
+
         prefix = "Train/" if phase == "train" else "Val/"
         # ACC
         acc = accuracy_score(y_label, y_pred)

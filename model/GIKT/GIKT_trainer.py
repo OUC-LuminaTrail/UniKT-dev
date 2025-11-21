@@ -82,6 +82,9 @@ class GIKTTrainer(Trainer):
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
         y_label = torch.masked_select(y_label_seq, valid_mask)
 
+        # 将 logits 转换为概率，用于后续指标计算
+        y_hat = torch.sigmoid(y_hat)
+
         # 若该批次没有任何有效位置，使用占位避免后续计算报错
         if y_label.numel() == 0:
             y_hat = torch.tensor([0.5], dtype=torch.float, device=self.device_)
