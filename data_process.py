@@ -1,81 +1,127 @@
 from argparse import ArgumentParser
 
 
-def add_data_process_args(parser):
-    """
-    数据处理脚本参数解析
-    """
-    parser.add_argument(
-        "--data_base_path",
-        default="./data",
-        type=str,
-        help="Data base path",
-    )
-    parser.add_argument(
-        "--download", action="store_true", help="Whether to download the dataset"
-    )
+SUPPORTED_DATASETS = [
+    "assistments09",
+    "assistments12",
+    "assistments17",
+    "ednet_kt1",
+]
+
+
+def _build_common_args(parser):
     parser.add_argument(
         "-d",
         "--dataset",
         type=str,
-        choices=["assistments09", "assistments12", "assistments17", "ednet_kt1"],
+        choices=SUPPORTED_DATASETS,
         required=True,
-        help="Select dataset to process",
+        help="Dataset name",
     )
     parser.add_argument(
+        "--data_base_path",
+        default="./data",
+        type=str,
+        help="Data base path for raw/processed files",
+    )
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    return parser
+
+
+def build_parser():
+    parser = ArgumentParser(description="Data Processing CLI")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # download subcommand
+    dl = subparsers.add_parser(
+        "download", help="Download raw dataset archive and extract"
+    )
+    _build_common_args(dl)
+    dl.add_argument(
+        "--data_url",
+        type=str,
+        default=None,
+        help="Override data URL for downloading (optional)",
+    )
+    dl.set_defaults(func=cmd_download)
+
+    # process subcommand
+    proc = subparsers.add_parser(
+        "process", help="Process raw data into standardized format"
+    )
+    _build_common_args(proc)
+    proc.add_argument(
         "--min_seq_len", type=int, default=10, help="Minimum sequence length"
     )
-    parser.add_argument(
+    proc.add_argument(
         "--max_seq_len", type=int, default=200, help="Maximum sequence length"
     )
-    parser.add_argument(
+    proc.add_argument(
         "--kfold",
         type=int,
         default=5,
-        help="Number of folds for K-Fold cross-validation",
+        help="Number of folds for K-Fold cross-validation (>=2 to enable)",
     )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    proc.set_defaults(func=cmd_process)
 
     return parser
 
 
-def process_data(args):
-    """
-    根据命令行参数处理数据
-
-    参数:
-        args: 命令行参数对象
-    """
+def _create_data_processor(args):
     from utility.data_process.assist09 import Assistments2009Data
     from utility.data_process.assist12 import Assistments2012Data
     from utility.data_process.assist17 import Assistments2017Data
     from utility.data_process.ednet_kt1 import EdNetKT1Data
 
     if args.dataset == "assistments09":
-        data_processor = Assistments2009Data(args=args)
-    elif args.dataset == "assistments12":
-        data_processor = Assistments2012Data(args=args)
-    elif args.dataset == "assistments17":
-        data_processor = Assistments2017Data(args=args)
-    elif args.dataset == "ednet_kt1":
-        data_processor = EdNetKT1Data(args=args)
-    else:
-        raise ValueError(f"Unsupported dataset: {args.dataset}")
+        return Assistments2009Data(args=args)
+    if args.dataset == "assistments12":
+        return Assistments2012Data(args=args)
+    if args.dataset == "assistments17":
+        return Assistments2017Data(args=args)
+    if args.dataset == "ednet_kt1":
+        return EdNetKT1Data(args=args)
+    raise ValueError(f"Unsupported dataset: {args.dataset}")
 
+
+def cmd_download(args):
+    """Handle `download` subcommand."""
+    dp = _create_data_processor(args)
+    # override data_url if provided
+    if getattr(args, "data_url", None):
+        dp.data_url = args.data_url
+
+    if not dp.data_url:
+        raise ValueError(
+            "No data_url available for this dataset. Provide --data_url explicitly."
+        )
+
+    print(f"Downloading dataset {args.dataset} to {dp.data_folder}")
+    dp.fetch_data()
+    # 持久化元信息
+    dp.save_metadata()
+    print(f"Download complete.")
+
+
+def cmd_process(args):
+    """Handle `process` subcommand."""
+    dp = _create_data_processor(args)
     # 清理数据
-    data_processor.clear_data()
+    dp.clear_data()
     # 添加交叉验证标签
-    if hasattr(args, "kfold") and args.kfold > 1:
-        data_processor.add_kfold_labels(n_splits=args.kfold)
+    if hasattr(args, "kfold") and args.kfold and args.kfold > 1:
+        dp.add_kfold_labels(n_splits=args.kfold)
     # 保存预处理后的数据
-    data_processor.save_data()
+    dp.save_data()
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Data Processing Script")
-    parser = add_data_process_args(parser)
+    parser = build_parser()
     args = parser.parse_args()
-    print(f"Dataset: {args.dataset}")
-    print(f"Data path: {args.data_base_path}")
-    process_data(args)
-    print("Data processing complete.")
+
+    if args.command == "download":
+        cmd_download(args)
+    elif args.command == "process":
+        cmd_process(args)
+    else:
+        parser.print_help()

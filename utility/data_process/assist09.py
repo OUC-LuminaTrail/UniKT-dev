@@ -14,13 +14,13 @@ class Assistments2009Data(DataSource):
         super().__init__(
             dataset="assistments09",
             data_base_path=args.data_base_path,
-            data_url="",
+            data_url="http://cdn.lionhao.top/KTDataset/assistments09.zip",
             seed=args.seed,
         )
         self.args = args
         # 原始数据文件路径
         self.raw_data_path = os.path.join(
-            self.data_folder, "skill_builder_data_corrected_collapsed.csv"
+            self.data_folder, "raw", "skill_builder_data_corrected_collapsed.csv"
         )
 
     @override
@@ -93,10 +93,6 @@ class Assistments2009Data(DataSource):
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
         self.add_metadata("columns", data.columns.tolist())
-
-    @override
-    def fetch_data(self):
-        pass
 
 
 __all__ = ["Assistments2009Data"]

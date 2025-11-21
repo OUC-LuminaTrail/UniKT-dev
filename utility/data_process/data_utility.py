@@ -58,12 +58,110 @@ class DataSource(ABC):
 
         self.add_metadata("random_seed", self.seed)
 
-    @abstractmethod
     def fetch_data(self):
         """
         下载数据
         """
-        raise NotImplementedError("Subclasses should implement fetch_data method")
+        import os
+        import shutil
+        from pathlib import Path
+
+        try:
+            import requests
+        except Exception:
+            requests = None
+        import urllib.request
+        import tarfile
+        import zipfile
+        import gzip
+        import tqdm
+
+        if self.data_url is None:
+            raise ValueError("Data URL is not provided.")
+
+        os.makedirs(os.path.join(self.data_base_path, self.dataset), exist_ok=True)
+
+        # 推断文件名
+        file_name = self.data_url.split("/")[-1]
+        if not file_name:  # 处理以 / 结尾的 URL
+            file_name = "downloaded_data"
+        archive_path = os.path.join(self.data_folder, file_name)
+
+        # 如果文件已经存在则跳过下载
+        if not os.path.exists(archive_path):
+            print(f"Downloading data from {self.data_url}")
+            try:
+                if requests is not None:
+                    with requests.get(self.data_url, stream=True, timeout=60) as r:
+                        r.raise_for_status()
+                        total_bytes = int(r.headers.get("content-length", 0))
+                        total_mb = total_bytes / (1024 * 1024)
+                        chunk_size = 8192
+                        with open(archive_path, "wb") as f:
+                            with tqdm.tqdm(
+                                total=total_mb,
+                                unit="MB",
+                                unit_scale=False,
+                                desc="Downloading",
+                                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}, {rate_fmt}]",
+                            ) as pbar:
+                                for chunk in r.iter_content(chunk_size=chunk_size):
+                                    if chunk:
+                                        f.write(chunk)
+                                        pbar.update(len(chunk) / (1024 * 1024))
+                else:
+                    # urllib 回退
+                    urllib.request.urlretrieve(self.data_url, archive_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to download data: {e}")
+            print(f"Download finished: {archive_path}")
+        else:
+            print(f"Dataset already exists, skip downloading: {archive_path}")
+
+        # 计算并保存 MD5
+        archive_md5 = self.compute_md5(archive_path)
+        self.add_metadata("raw_archive_md5", archive_md5)
+        self.add_metadata("raw_archive_filename", file_name)
+
+        # 解压逻辑
+        extract_target = os.path.join(self.data_folder, "raw")
+        os.makedirs(extract_target, exist_ok=True)
+
+        # 判断是否已经解压
+        if any(Path(extract_target).iterdir()):
+            print(f"Raw data directory not empty, skip extraction: {extract_target}")
+            return extract_target
+
+        print(f"Extracting archive: {archive_path}")
+        lower_name = file_name.lower()
+        try:
+            if lower_name.endswith(".zip"):
+                with zipfile.ZipFile(archive_path, "r") as zf:
+                    zf.extractall(extract_target)
+            elif lower_name.endswith((".tar.gz", ".tgz")):
+                with tarfile.open(archive_path, "r:gz") as tf:
+                    tf.extractall(extract_target)
+            elif lower_name.endswith(".tar"):
+                with tarfile.open(archive_path, "r:") as tf:
+                    tf.extractall(extract_target)
+            elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
+                # 处理单文件 .gz
+                uncompressed_name = lower_name[:-3]
+                target_file = os.path.join(extract_target, uncompressed_name)
+                with gzip.open(archive_path, "rb") as f_in, open(
+                    target_file, "wb"
+                ) as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            else:
+                # 非压缩文件，直接复制
+                dest_path = os.path.join(extract_target, file_name)
+                if archive_path != dest_path:
+                    shutil.copy2(archive_path, dest_path)
+        except Exception as e:
+            raise RuntimeError(f"Failed to extract archive: {e}")
+
+        print(f"Extraction finished: {extract_target}")
+        self.add_metadata("raw_data_path", extract_target)
 
     @abstractmethod
     def load_src_data(self):
@@ -140,13 +238,24 @@ class DataSource(ABC):
         from tqdm import tqdm
 
         hash_md5 = hashlib.md5()
+        file_size = os.path.getsize(file_path)
+        file_size_mb = file_size / (1024 * 1024)
+
         with open(file_path, "rb") as f:
-            for chunk in tqdm(
-                iter(lambda: f.read(4096), b""),
-                total=os.path.getsize(file_path) // 4096 + 1,
-                desc="Computing MD5: ",
-            ):
-                hash_md5.update(chunk)
+            with tqdm(
+                total=file_size_mb,
+                unit="MB",
+                unit_scale=False,
+                desc="Computing MD5",
+                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}]",
+            ) as pbar:
+                while True:
+                    chunk = f.read(65536)  # 64KB chunks for faster processing
+                    if not chunk:
+                        break
+                    hash_md5.update(chunk)
+                    pbar.update(len(chunk) / (1024 * 1024))
+
         return hash_md5.hexdigest()
 
     def get_processed_data(self):
