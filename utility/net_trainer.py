@@ -65,7 +65,6 @@ class Trainer(ABC):
                 loader.pin_memory = is_cuda
                 if num_workers > 0:
                     loader.prefetch_factor = 2
-                    loader.persistent_workers = True
 
             _optimize_loader(self.train_data)
             if self.val_data is not None:
