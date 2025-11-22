@@ -29,8 +29,8 @@ class Trainer(ABC):
         epochs: int,
         opt: torch.optim.Optimizer,
         loss,
-        train_data,
-        val_data=None,
+        train_data: torch.utils.data.DataLoader,
+        val_data: torch.utils.data.DataLoader = None,
         lr_scheduler=None,
         early_stopping=None,
         hyperparams=None,
@@ -46,10 +46,33 @@ class Trainer(ABC):
         self.epochs: int = epochs
         self.opt = opt
         self.loss = loss
-        self.train_data = train_data
-        self.val_data = val_data
+        self.train_data: torch.utils.data.DataLoader = train_data
+        self.val_data: torch.utils.data.DataLoader = val_data
         self.lr_scheduler = lr_scheduler
         self.use_amp = use_amp
+
+        # 自动优化 DataLoader 参数
+        if isinstance(self.train_data, torch.utils.data.DataLoader):
+            # 设置 num_workers，设置为 CPU 核心数
+            cpu_count = os.cpu_count() or 1
+            num_workers = min(cpu_count, 8) # 限制最大为8以避免过多线程开销
+            is_cuda = self.device_.type == "cuda"
+
+            def _optimize_loader(loader):
+                if not isinstance(loader, torch.utils.data.DataLoader):
+                    return
+                loader.num_workers = num_workers
+                loader.pin_memory = is_cuda
+                if num_workers > 0:
+                    loader.prefetch_factor = 2
+                    loader.persistent_workers = True
+
+            _optimize_loader(self.train_data)
+            if self.val_data is not None:
+                _optimize_loader(self.val_data)
+
+            print(f"DataLoader optimized: num_workers={num_workers}, pin_memory={is_cuda}")
+        
         # 自动混合精度缩放器
         self.scaler = torch.amp.GradScaler(enabled=use_amp)
         # 初始化早停
