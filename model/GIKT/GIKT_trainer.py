@@ -16,7 +16,6 @@ class GIKTTrainer(Trainer):
         self,
         args=None,
         data_src=None,
-        log_dir=None,
     ):
         # 构建数据
         from model.GIKT.GIKT_data import GIKTModelData
@@ -33,7 +32,7 @@ class GIKTTrainer(Trainer):
             val_data=val_data,
             lr_scheduler=lr_scheduler,
             hyperparams=args,
-            log_dir=log_dir,
+            log_dir=args.log_dir,
             device=args.device,
             use_amp=args.use_amp,
         )
