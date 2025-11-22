@@ -63,33 +63,49 @@ kt-exp-graph/
 
 ### 1. 数据预处理
 
-首先需要对原始数据集进行预处理。预处理包括数据清洗、序列构建和K折交叉验证划分。
+首先需要对原始数据集进行预处理。预处理包括数据下载（可选）和数据清洗、序列构建及K折交叉验证划分。
+
+#### 下载数据 (可选)
+
+如果本地没有原始数据，可以使用 `download` 命令下载：
+
+```bash
+# 下载 ASSISTments2009 数据集
+python data_process.py download -d assistments09
+```
+
+**下载参数说明：**
+- `-d, --dataset`: 选择数据集（必需，可选值：`assistments09`, `assistments12`, `assistments17`, `ednet_kt1`）
+- `--data_base_path`: 数据基础路径（默认：`./data`）
+- `--data_url`: 自定义下载链接（可选）
+
+#### 处理数据
+
+使用 `process` 命令进行数据清洗和格式化：
 
 ```bash
 # 预处理 ASSISTments2009 数据集
-python data_process.py -d assistments09
+python data_process.py process -d assistments09
 
 # 预处理其他数据集
-python data_process.py -d assistments12
-python data_process.py -d assistments17
-python data_process.py -d ednet_kt1
+python data_process.py process -d assistments12
+python data_process.py process -d assistments17
+python data_process.py process -d ednet_kt1
 ```
 
-**数据预处理参数说明：**
+**处理参数说明：**
 
 - `-d, --dataset`: 选择数据集（必需）
-  - 可选值：`assistments09`, `assistments12`, `assistments17`, `ednet_kt1`
 - `--data_base_path`: 数据基础路径（默认：`./data`）
 - `--min_seq_len`: 最小序列长度（默认：10）
 - `--max_seq_len`: 最大序列长度（默认：200）
-- `--kfold`: K折交叉验证的折数（默认：5）
+- `--kfold`: K折交叉验证的折数（默认：5，>=2 启用交叉验证）
 - `--seed`: 随机种子（默认：42）
-- `--download`: 是否下载数据集（可选）
 
 **示例：自定义参数预处理**
 
 ```bash
-python data_process.py \
+python data_process.py process \
     -d assistments09 \
     --data_base_path ./data \
     --min_seq_len 5 \
