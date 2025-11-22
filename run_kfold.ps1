@@ -2,8 +2,8 @@
 .SYNOPSIS
     Runs K-Fold cross-validation for specified models.
 .EXAMPLE
-    .\run_kfold.ps1 GIKT 5 --dataset assistments09 --epochs 100
-    .\run_kfold.ps1 ALL 5 --dataset assistments09 --epochs 100
+    .\run_kfold.ps1 GIKT "0 1 2" --dataset assistments09 --epochs 100
+    .\run_kfold.ps1 ALL "0 1 2" --dataset assistments09 --epochs 100
 #>
 
 param(
@@ -11,7 +11,7 @@ param(
     [string]$ModelName,
 
     [Parameter(Mandatory=$true, Position=1)]
-    [int]$KFolds,
+    [string]$FoldsStr,
 
     [Parameter(ValueFromRemainingArguments=$true)]
     [string[]]$ExtraArgs
@@ -30,7 +30,7 @@ function Get-ModelScript {
     }
 }
 
-# 运行单个模型的 K 折交叉验证
+# 运行单个模型的指定折
 function Run-KFoldForModel {
     param([string]$Model)
 
@@ -46,35 +46,38 @@ function Run-KFoldForModel {
         return $false
     }
 
+    # 解析折数列表
+    $Folds = $FoldsStr -split "[, ]+" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
     Write-Host "==================================================" -ForegroundColor Cyan
-    Write-Host "Starting K-Fold Training for Model: $Model" -ForegroundColor Cyan
+    Write-Host "Starting Training for Model: $Model" -ForegroundColor Cyan
     Write-Host "Script: $Script"
-    Write-Host "Folds: $KFolds"
+    Write-Host "Folds: $Folds"
     Write-Host "Arguments: $ExtraArgs"
     Write-Host "==================================================" -ForegroundColor Cyan
 
-    for ($i = 0; $i -lt $KFolds; $i++) {
+    foreach ($fold in $Folds) {
         Write-Host ""
         Write-Host "----------------------------------------" -ForegroundColor Green
-        Write-Host "Running Fold $i / $($KFolds - 1) for $Model" -ForegroundColor Green
+        Write-Host "Running Fold $fold for $Model" -ForegroundColor Green
         Write-Host "----------------------------------------" -ForegroundColor Green
 
         # 构造参数列表
-        $PythonArgs = @($Script, "--fold", "$i") + $ExtraArgs
+        $PythonArgs = @($Script, "--fold", "$fold") + $ExtraArgs
         
         # 运行 python 脚本
         & python $PythonArgs
 
         # 检查退出代码
         if ($LASTEXITCODE -ne 0) {
-            Write-Host "Error: Fold $i failed for $Model with exit code $LASTEXITCODE." -ForegroundColor Red
+            Write-Host "Error: Fold $fold failed for $Model with exit code $LASTEXITCODE." -ForegroundColor Red
             return $false
         }
     }
 
     Write-Host ""
     Write-Host "==================================================" -ForegroundColor Cyan
-    Write-Host "All $KFolds folds completed successfully for $Model." -ForegroundColor Cyan
+    Write-Host "All specified folds ($Folds) completed successfully for $Model." -ForegroundColor Cyan
     Write-Host "==================================================" -ForegroundColor Cyan
     return $true
 }

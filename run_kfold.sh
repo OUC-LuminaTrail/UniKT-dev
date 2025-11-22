@@ -2,17 +2,20 @@
 
 # 检查参数数量
 if [ "$#" -lt 2 ]; then
-    echo "Usage: $0 <model_name|ALL> <k_folds> [args...]"
+    echo "Usage: $0 <model_name|ALL> <folds_list> [args...]"
     echo "Supported models: GIKT, SQGKT"
-    echo "Example: $0 GIKT 5 --dataset assistments09 --epochs 100"
-    echo "Example: $0 ALL 5 --dataset assistments09 --epochs 100"
+    echo "Example: $0 GIKT \"0 1 2\" --dataset assistments09 --epochs 100"
+    echo "Example: $0 ALL \"0 1 2\" --dataset assistments09 --epochs 100"
     exit 1
 fi
 
 MODEL_NAME=$1
-K_FOLDS=$2
+FOLDS_ARG=$2
 shift 2
 ARGS="$@"
+
+# 处理折数列表 (支持空格或逗号分隔)
+FOLDS_LIST=${FOLDS_ARG//,/ }
 
 # 获取模型对应的脚本
 get_model_script() {
@@ -26,7 +29,7 @@ get_model_script() {
     fi
 }
 
-# 运行单个模型的 K 折交叉验证
+# 运行单个模型的指定折
 run_kfold_for_model() {
     local model=$1
     local script=$(get_model_script "$model")
@@ -42,31 +45,31 @@ run_kfold_for_model() {
     fi
 
     echo "=================================================="
-    echo "Starting K-Fold Training for Model: $model"
+    echo "Starting Training for Model: $model"
     echo "Script: $script"
-    echo "Folds: $K_FOLDS"
+    echo "Folds: $FOLDS_LIST"
     echo "Arguments: $ARGS"
     echo "=================================================="
 
-    for ((i=0; i<K_FOLDS; i++)); do
+    for fold in $FOLDS_LIST; do
         echo ""
         echo "----------------------------------------"
-        echo "Running Fold $i / $((K_FOLDS-1)) for $model"
+        echo "Running Fold $fold for $model"
         echo "----------------------------------------"
         
         # 运行 python 脚本，传入 --fold 参数和其他参数
-        python "$script" --fold "$i" $ARGS
+        python "$script" --fold "$fold" $ARGS
         
         # 检查退出代码
         if [ $? -ne 0 ]; then
-            echo "Error: Fold $i failed for $model with exit code $?."
+            echo "Error: Fold $fold failed for $model with exit code $?."
             return 1
         fi
     done
     
     echo ""
     echo "=================================================="
-    echo "All $K_FOLDS folds completed successfully for $model."
+    echo "All specified folds ($FOLDS_LIST) completed successfully for $model."
     echo "=================================================="
 }
 
