@@ -74,15 +74,12 @@ class SQGKTModelData(ModelData):
 
         return neighbors
 
-    def build_uq_table_with_factors(self, uq_matrix):
+    def build_uq_table_with_factors(self):
         """
         构建三维的用户-问题表，包含三个因子：
         - ability_factor: 用户能力因子（用户的平均正确率）
         - attempt_factor_g: 尝试因子（基于问题的尝试次数统计）
         - hint_factor_g: 提示因子（基于问题的提示次数统计）
-
-        参数:
-            uq_matrix: 用户-问题关系矩阵，形状 (num_user, num_question)
 
         返回:
             uq_table: 形状 (num_user, num_question, 3) 的三维张量
@@ -105,75 +102,66 @@ class SQGKTModelData(ModelData):
 
         # 1. 计算用户能力因子（每个用户的平均正确率）
         print("Computing ability factors...")
-        user_ability = data.groupby("user_id")["label"].mean().to_dict()
+        
+        # 确保 user_id 和 question_id 是整数
+        user_ids = data["user_id"].astype(int).values
+        question_ids = data["question_id"].astype(int).values
+
+        # 计算每个用户的平均正确率
+        user_ability_series = data.groupby("user_id")["label"].mean()
+        # 映射回每个交互，填充默认值 0.5
+        ability_factors = data["user_id"].map(user_ability_series).fillna(0.5).values
 
         # 2. 计算问题的尝试次数和提示次数统计
         if "attempt_count" in data.columns and "hint_count" in data.columns:
             print("Computing attempt and hint factors from data...")
-            # 计算每个问题的平均尝试次数
-            question_attempt_stats = (
-                data.groupby("question_id")["attempt_count"].mean().to_dict()
-            )
-            question_hint_stats = (
-                data.groupby("question_id")["hint_count"].mean().to_dict()
-            )
+            
+            # 计算每个问题的平均尝试次数和提示次数
+            question_attempt_mean = data.groupby("question_id")["attempt_count"].mean()
+            question_hint_mean = data.groupby("question_id")["hint_count"].mean()
 
-            # 为每个用户-问题对计算因子
-            for idx, row in tqdm(
-                data.iterrows(), total=len(data), desc="Processing interactions"
-            ):
-                user_id = int(row["user_id"])
-                question_id = int(row["question_id"])
+            # 映射到每个交互
+            mean_attempts = data["question_id"].map(question_attempt_mean).fillna(1).values
+            mean_hints = data["question_id"].map(question_hint_mean).fillna(0).values
+            
+            attempt_counts = data["attempt_count"].fillna(1).values
+            hint_counts = data["hint_count"].fillna(0).values
 
-                # 能力因子
-                ability_factor = user_ability.get(user_id, 0.5)
+            # 计算 attempt_factor
+            attempt_factor = 1 - poisson.cdf(attempt_counts - 1, mean_attempts)
+            attempt_factor_g = k + (1 - k) / (1 + np.exp(-d * (attempt_factor - b)))
 
-                # 尝试因子
-                mean_attempt = question_attempt_stats.get(question_id, 1)
-                attempt_count = row.get("attempt_count", 1)
-                attempt_factor = 1 - poisson(mean_attempt).cdf(attempt_count - 1)
-                attempt_factor_g = k + (1 - k) / (1 + np.exp(-d * (attempt_factor - b)))
+            # 计算 hint_factor
+            hint_factor = np.zeros_like(hint_counts, dtype=np.float32)
+            mask_hint = mean_hints > 0
+            if np.any(mask_hint):
+                hint_factor[mask_hint] = 1 - poisson.cdf(hint_counts[mask_hint] - 1, mean_hints[mask_hint])
+            
+            hint_factor_g = k + (1 - k) / (1 + np.exp(-d * (hint_factor - b)))
 
-                # 提示因子
-                mean_hint = question_hint_stats.get(question_id, 0)
-                hint_count = row.get("hint_count", 0)
-                hint_factor = (
-                    1 - poisson(mean_hint).cdf(hint_count - 1) if mean_hint > 0 else 0
-                )
-                hint_factor_g = k + (1 - k) / (1 + np.exp(-d * (hint_factor - b)))
+            # 存储到三维表中
+            uq_table[user_ids, question_ids, 0] = ability_factors
+            uq_table[user_ids, question_ids, 1] = attempt_factor_g
+            uq_table[user_ids, question_ids, 2] = hint_factor_g
 
-                # 存储到三维表中
-                uq_table[user_id, question_id, 0] = ability_factor
-                uq_table[user_id, question_id, 1] = attempt_factor_g
-                uq_table[user_id, question_id, 2] = hint_factor_g
         else:
             print(
                 "Using simplified factors (attempt_count and hint_count not available)..."
             )
             # 简化版本：只使用能力因子和基于问题难度的估计
             # 计算每个问题的平均正确率（作为难度的反向指标）
-            question_difficulty = data.groupby("question_id")["label"].mean().to_dict()
+            question_difficulty_series = data.groupby("question_id")["label"].mean()
+            
+            # 映射到每个交互
+            difficulties = data["question_id"].map(question_difficulty_series).fillna(0.5).values
+            
+            attempt_factor_g = 1.0 - difficulties
+            hint_factor_g = 1.0 - difficulties
 
-            for idx, row in tqdm(
-                data.iterrows(), total=len(data), desc="Processing interactions"
-            ):
-                user_id = int(row["user_id"])
-                question_id = int(row["question_id"])
-
-                # 能力因子
-                ability_factor = user_ability.get(user_id, 0.5)
-
-                # 简化的尝试因子（基于问题难度）
-                difficulty = question_difficulty.get(question_id, 0.5)
-                attempt_factor_g = 1.0 - difficulty  # 难题需要更多尝试
-
-                # 简化的提示因子（也基于问题难度）
-                hint_factor_g = 1.0 - difficulty
-
-                # 存储到三维表中
-                uq_table[user_id, question_id, 0] = ability_factor
-                uq_table[user_id, question_id, 1] = attempt_factor_g
-                uq_table[user_id, question_id, 2] = hint_factor_g
+            # 存储到三维表中
+            uq_table[user_ids, question_ids, 0] = ability_factors
+            uq_table[user_ids, question_ids, 1] = attempt_factor_g
+            uq_table[user_ids, question_ids, 2] = hint_factor_g
 
         print(f"UQ table shape: {uq_table.shape}")
         return uq_table
@@ -260,7 +248,7 @@ class SQGKTModelData(ModelData):
         qs_matrix = self.build_data_matrix(("question", "has", "skill"))
 
         # 构建三维的用户-问题表（包含三个因子）
-        uq_table = self.build_uq_table_with_factors(uq_matrix_2d)
+        uq_table = self.build_uq_table_with_factors()
 
         # 生成固定大小的邻居数组（使用2D矩阵）
         qs_q_neighbors, qs_s_neighbors = self.generate_question_skill_neighbors(
