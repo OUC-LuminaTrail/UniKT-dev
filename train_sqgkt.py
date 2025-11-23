@@ -72,7 +72,7 @@ def parse_args():
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
     train_params.add_argument(
-        "--epochs", type=int, default=150, help="Number of epochs"
+        "--epochs", type=int, default=250, help="Number of epochs"
     )
     train_params.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training"
@@ -107,7 +107,7 @@ def parse_args():
     es_params.add_argument(
         "--es_patience",
         type=int,
-        default=None,
+        default=10,
         help="Patience for early stopping (None to disable)",
     )
     es_params.add_argument(
