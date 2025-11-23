@@ -87,6 +87,9 @@ def parse_args():
         default=1e-4,
         help="Weight decay (L2 regularization)",
     )
+    train_params.add_argument(
+        "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
+    )
 
     # 早停参数
     es_params = parser.add_argument_group("Early Stopping")

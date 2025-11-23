@@ -37,6 +37,7 @@ class Trainer(ABC):
         log_dir: str = None,
         device: torch.device = None,
         use_amp: bool = False,
+        checkpoint_path: str = None,
     ):
         if device is None:
             self.device_ = self.try_gpu()
@@ -50,12 +51,13 @@ class Trainer(ABC):
         self.val_data: torch.utils.data.DataLoader = val_data
         self.lr_scheduler = lr_scheduler
         self.use_amp = use_amp
+        self.start_epoch = 0
 
         # 自动优化 DataLoader 参数
         if isinstance(self.train_data, torch.utils.data.DataLoader):
             # 设置 num_workers，设置为 CPU 核心数
             cpu_count = os.cpu_count() or 1
-            num_workers = min(cpu_count, 8) # 限制最大为8以避免过多线程开销
+            num_workers = min(cpu_count, 8)  # 限制最大为8以避免过多线程开销
             is_cuda = self.device_.type == "cuda"
 
             def _optimize_loader(loader):
@@ -70,8 +72,10 @@ class Trainer(ABC):
             if self.val_data is not None:
                 _optimize_loader(self.val_data)
 
-            print(f"DataLoader optimized: num_workers={num_workers}, pin_memory={is_cuda}")
-        
+            print(
+                f"DataLoader optimized: num_workers={num_workers}, pin_memory={is_cuda}"
+            )
+
         # 自动混合精度缩放器
         self.scaler = torch.amp.GradScaler(enabled=use_amp)
         # 初始化早停
@@ -114,6 +118,10 @@ class Trainer(ABC):
         self.hyperparam_manager = None
         if hyperparams is not None:
             self.setup_hyperparameters(hyperparams)
+
+        # 断点续训
+        if checkpoint_path:
+            self.load_checkpoint(checkpoint_path)
 
     def setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
         """
@@ -167,6 +175,68 @@ class Trainer(ABC):
             self.hyperparam_manager.get_summary().replace("\n", "  \n"),
         )
 
+    def save_checkpoint(self, epoch, path, weights_only=True):
+        """
+        保存完整检查点，包含模型权重、优化器状态等
+        """
+        if weights_only:
+            torch.save(self.model.state_dict(), path)
+            print(f"Model weights saved to {path}")
+            return
+        state = {
+            "epoch": epoch,
+            "model_state_dict": self.model.state_dict(),
+            "optimizer_state_dict": self.opt.state_dict(),
+        }
+        if self.lr_scheduler is not None:
+            state["scheduler_state_dict"] = self.lr_scheduler.state_dict()
+
+        if self.early_stopping is not None:
+            state["early_stopping_state"] = {
+                "best_score": self.early_stopping.best_score,
+                "best_epoch": self.early_stopping.best_epoch,
+                "num_bad_epochs": self.early_stopping.num_bad_epochs,
+            }
+
+        torch.save(state, path)
+        print(f"Model checkpoint saved to {path}")
+
+    def load_checkpoint(self, checkpoint_path):
+        """
+        加载检查点
+        """
+        if not os.path.isfile(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
+
+        print(f"Loading checkpoint from {checkpoint_path}...")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device_)
+
+        # 检查检查点文件是否正确
+        required_keys = ["model_state_dict", "optimizer_state_dict"]
+        for key in required_keys:
+            if key not in checkpoint:
+                raise ValueError(
+                    f"Checkpoint is missing required key: {key}. Cannot resume training."
+                )
+
+        # 加载状态
+        self.model.load_state_dict(checkpoint["model_state_dict"])
+        self.opt.load_state_dict(checkpoint["optimizer_state_dict"])
+
+        if "epoch" in checkpoint:
+            self.start_epoch = checkpoint["epoch"] + 1
+
+        if self.lr_scheduler is not None and "scheduler_state_dict" in checkpoint:
+            self.lr_scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+        if self.early_stopping is not None and "early_stopping_state" in checkpoint:
+            es_state = checkpoint["early_stopping_state"]
+            self.early_stopping.best_score = es_state.get("best_score")
+            self.early_stopping.best_epoch = es_state.get("best_epoch")
+            self.early_stopping.num_bad_epochs = es_state.get("num_bad_epochs", 0)
+
+        print(f"Resumed training from epoch {self.start_epoch}")
+
     @abstractmethod
     def init_model(self):
         """
@@ -217,7 +287,7 @@ class Trainer(ABC):
         self.model.to(self.device_)  # 将模型移动到设备中
         self.loss = self.loss.to(self.device_)  # 将损失函数移动到设备中
 
-        for epoch in range(self.epochs):
+        for epoch in range(self.start_epoch, self.epochs):
             print(f"Epoch {epoch+1}")
             # 训练
             train_total_loss = self.process_data(self.train_data, epoch, is_train=True)
@@ -246,18 +316,6 @@ class Trainer(ABC):
                             f"Early stopping triggered at epoch {epoch+1}. Best {self._monitor_name()} = "
                             f"{self.early_stopping.best_score:.4f} at epoch {int(self.early_stopping.best_epoch)+1 if self.early_stopping.best_epoch is not None else '?'}"
                         )
-                        # 按需恢复最佳权重
-                        if self.early_stopping.cfg.restore_best:
-                            checkpoint_path = os.path.join(
-                                self.log_dir, "best_model.pth"
-                            )
-                            if os.path.exists(checkpoint_path):
-                                self.model.load_state_dict(
-                                    torch.load(
-                                        checkpoint_path, map_location=self.device_
-                                    )
-                                )
-                                print("Restored best model weights from checkpoint.")
                         break
 
             # 学习率调度器更新
@@ -266,6 +324,12 @@ class Trainer(ABC):
                 self.logger.add_scalar(
                     "Learning Rate", self.lr_scheduler.get_last_lr()[0], epoch
                 )
+
+            # 保存最新检查点用于续训
+            self.save_checkpoint(
+                epoch, os.path.join(self.log_dir, "last_checkpoint.pth"), weights_only=False
+            )
+
             # 刷新日志
             self.logger.flush()
         self.logger.close()
@@ -478,8 +542,8 @@ class Trainer(ABC):
         checkpoint_path = os.path.join(self.log_dir, "best_model.pth")
         if not hasattr(self, "_best_metric") or metric > self._best_metric:
             self._best_metric = metric
-            torch.save(self.model.state_dict(), checkpoint_path)
-            print(f"Best model saved at epoch {epoch+1} with metric {metric:.4f}")
+            print(f"Saving best model at epoch {epoch+1} with {self._monitor_name()} {metric:.4f}")
+            self.save_checkpoint(epoch, checkpoint_path, weights_only=True)
 
     def __del__(self):
         if hasattr(self, "logger"):
