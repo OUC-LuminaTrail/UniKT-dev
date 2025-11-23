@@ -102,9 +102,10 @@ class Trainer(ABC):
                 )
 
         # 以当前时间戳命名日志文件夹
-        if log_dir is None:
-            log_dir = time.strftime("%Y%m%d-%H%M%S")
-        self.log_dir = os.path.join("runs", log_dir)
+        dir = time.strftime("%Y%m%d-%H%M%S")
+        if log_dir is not None:
+            dir = os.path.join(log_dir, dir)
+        self.log_dir = os.path.join("runs", dir)
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
