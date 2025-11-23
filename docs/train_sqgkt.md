@@ -23,7 +23,7 @@ python train_sqgkt.py -d assistments12
 ```bash
 # 以 Loss 为监控指标，耐心 8，启用恢复最佳权重
 python train_sqgkt.py -d assistments12 \
-  --es_patience 8 --es_monitor loss --es_mode min --es_min_delta 1e-4 --es_restore_best
+  --es_patience 8 --es_monitor loss --es_mode min --es_min_delta 1e-4
 ```
 
 ## 备注

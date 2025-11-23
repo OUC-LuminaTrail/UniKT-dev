@@ -91,12 +91,6 @@ def parse_args():
         default=0.0,
         help="Minimum change to qualify as improvement",
     )
-    es_params.add_argument(
-        "--es_restore_best",
-        action="store_true",
-        default=False,
-        help="Restore best weights when early stopping triggers (flag)",
-    )
 
     # 其他参数
     parser.add_argument("--seed", type=int, default=42, help="Random seed")

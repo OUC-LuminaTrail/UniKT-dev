@@ -90,14 +90,12 @@ class Trainer(ABC):
                 monitor = getattr(hyperparams, "es_monitor", "auc")
                 mode = getattr(hyperparams, "es_mode", "max")
                 min_delta = getattr(hyperparams, "es_min_delta", 0.0)
-                restore_best = getattr(hyperparams, "es_restore_best", False)
                 self.early_stopping = EarlyStopping(
                     EarlyStoppingConfig(
                         monitor=monitor,
                         mode=mode,
                         patience=es_patience,
                         min_delta=min_delta,
-                        restore_best=restore_best,
                     )
                 )
 

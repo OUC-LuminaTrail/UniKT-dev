@@ -30,7 +30,7 @@ python train_gikt.py -d ednet_kt1
 ```bash
 # AUC 监控，耐心 10，启用恢复最佳权重
 python train_gikt.py -d assistments09 \
-  --es_patience 10 --es_monitor auc --es_mode max --es_min_delta 0.0 --es_restore_best
+  --es_patience 10 --es_monitor auc --es_mode max --es_min_delta 0.0
 ```
 
 ## 完整训练参数示例
@@ -56,8 +56,7 @@ python train_gikt.py \
   --es_patience 10 \
   --es_monitor auc \
   --es_mode max \
-  --es_min_delta 0.0 \
-  --es_restore_best
+  --es_min_delta 0.0
 ```
 
 ### 参数说明
@@ -85,7 +84,6 @@ python train_gikt.py \
   - `--es_monitor`：监控指标（`auc|acc|rmse|loss`，默认：`auc`）
   - `--es_mode`：指标方向（`max|min`，`rmse/loss` 建议 `min`）
   - `--es_min_delta`：最小改变量阈值（默认：`0.0`）
-  - `--es_restore_best`：触发早停时恢复最佳权重（默认关闭）
 - 其他：
   - `--seed`：随机种子（默认：42）
   - `--device`：设备（`cuda` 或 `cpu`，默认自动检测）
