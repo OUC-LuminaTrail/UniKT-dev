@@ -9,8 +9,8 @@ wheels/
 # IDE Settings
 /.vscode
 
-# tensorboard
-runs/
+# SwanLab logs
+swanlog/
 
 # Data files
 *.csv

@@ -101,4 +101,4 @@ done
 
 ## 训练可视化
 
-训练日志默认写入 `runs/`，可使用 TensorBoard 可视化；可参考项目 README 的“查看训练结果”部分。
+训练日志会自动记录到 SwanLab，可登录 SwanLab 查看；可参考项目 README 的“查看训练结果”部分。

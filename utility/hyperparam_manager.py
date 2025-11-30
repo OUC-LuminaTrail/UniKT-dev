@@ -36,6 +36,15 @@ class HyperparameterManager:
             "created_at": datetime.now().isoformat(),
         }
 
+    def get_hyperparameters_dict(self) -> Dict[str, Any]:
+        """
+        获取当前超参数字典
+
+        Returns:
+            超参数字典
+        """
+        return self.hyperparams
+
     def add_hyperparams(
         self, params: Union[Dict, Namespace], group: Optional[str] = None
     ):

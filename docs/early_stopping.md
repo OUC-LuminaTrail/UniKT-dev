@@ -21,5 +21,5 @@ python train_sqgkt.py -d assistments12 \
 - `loss`：验证损失，越小越好（`mode='min'`）。
 
 ## 日志与检查点
-- TensorBoard 会记录 `ES/BadEpochs`（连续未提升轮数）、`ES/Best`（最佳监控值）。
+- SwanLab 会记录 `ES/BadEpochs`（连续未提升轮数）、`ES/Best`（最佳监控值）。
 - 训练过程中会按监控指标保存最佳模型到 `runs/<time>/best_model.pth`。
