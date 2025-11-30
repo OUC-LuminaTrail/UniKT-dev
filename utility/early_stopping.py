@@ -8,7 +8,6 @@ class EarlyStoppingConfig:
     mode: str = "max"  # 'max' for auc/acc, 'min' for rmse/loss
     patience: int = 10
     min_delta: float = 0.0
-    restore_best: bool = True
 
 
 class EarlyStopping:
@@ -27,8 +26,7 @@ class EarlyStopping:
 
     def __init__(self, config: Optional[EarlyStoppingConfig] = None, *,
                  monitor: Optional[str] = None, mode: Optional[str] = None,
-                 patience: Optional[int] = None, min_delta: Optional[float] = None,
-                 restore_best: Optional[bool] = None):
+                 patience: Optional[int] = None, min_delta: Optional[float] = None):
         if config is None:
             config = EarlyStoppingConfig()
         # 允许通过关键字参数覆盖
@@ -40,8 +38,6 @@ class EarlyStopping:
             config.patience = patience
         if min_delta is not None:
             config.min_delta = min_delta
-        if restore_best is not None:
-            config.restore_best = restore_best
 
         self.cfg = config
         self.best_score: Optional[float] = None

@@ -72,7 +72,7 @@ def parse_args():
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
     train_params.add_argument(
-        "--epochs", type=int, default=150, help="Number of epochs"
+        "--epochs", type=int, default=250, help="Number of epochs"
     )
     train_params.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training"
@@ -86,6 +86,9 @@ def parse_args():
         type=float,
         default=1e-4,
         help="Weight decay (L2 regularization)",
+    )
+    train_params.add_argument(
+        "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
     )
 
     # 早停参数
@@ -107,7 +110,7 @@ def parse_args():
     es_params.add_argument(
         "--es_patience",
         type=int,
-        default=None,
+        default=10,
         help="Patience for early stopping (None to disable)",
     )
     es_params.add_argument(
@@ -115,12 +118,6 @@ def parse_args():
         type=float,
         default=0.0,
         help="Minimum change to qualify as improvement",
-    )
-    es_params.add_argument(
-        "--es_restore_best",
-        action="store_true",
-        default=False,
-        help="Restore best weights when early stopping triggers (flag)",
     )
 
     # 其他参数

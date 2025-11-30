@@ -62,6 +62,9 @@ def parse_args():
     train_params.add_argument(
         "--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)"
     )
+    train_params.add_argument(
+        "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
+    )
 
     # 早停参数
     es_params = parser.add_argument_group("Early Stopping")
@@ -90,12 +93,6 @@ def parse_args():
         type=float,
         default=0.0,
         help="Minimum change to qualify as improvement",
-    )
-    es_params.add_argument(
-        "--es_restore_best",
-        action="store_true",
-        default=False,
-        help="Restore best weights when early stopping triggers (flag)",
     )
 
     # 其他参数

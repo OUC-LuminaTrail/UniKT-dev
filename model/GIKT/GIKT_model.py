@@ -305,9 +305,6 @@ class GIKT(nn.Module):
         # 广义交互模块
         self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
-        # Sigmoid输出层
-        self.sigmoid = nn.Sigmoid()
-
     def forward(
         self,
         user_sequence: torch.Tensor,

@@ -9,18 +9,20 @@
 - scikit-learn：1.7.2
 - pandas：2.2.3
 - pyarrow：22.0.0
-- tensorboard：2.20.0
+- swanlab: 0.7.2
 
 ### 环境安装
 
 ```bash
 # CPU only
-conda install scikit-learn jupyterlab pandas pyarrow numpy tensorboard python=3.13 -c conda-forge -y
+conda install scikit-learn jupyterlab pandas pyarrow numpy python=3.13 -c conda-forge -y
+pip install swanlab
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
 
 # GPU (CUDA 12.9)
-conda install scikit-learn jupyterlab pandas pyarrow numpy tensorboard python=3.13 -c conda-forge -y
+conda install scikit-learn jupyterlab pandas pyarrow numpy python=3.13 -c conda-forge -y
+pip install swanlab
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cu129.html
 ```
@@ -53,7 +55,7 @@ kt-exp-graph/
 │   ├── hyperparam_manager.py           # 超参数管理
 │   ├── net_trainer.py                  # 基础训练器
 │   └── data_process/                   # 数据处理模块
-├── runs/                               # TensorBoard 日志目录
+├── runs/                               # 实验日志目录
 ├── data_process.py                     # 数据预处理脚本
 ├── train_gikt.py                       # GIKT 训练脚本
 └── train_sqgkt.py                      # SQGKT 训练脚本
@@ -123,25 +125,20 @@ python data_process.py process \
 
 ### 3. 查看训练结果
 
-训练过程中的指标会自动保存到 `runs/` 目录，可以使用 TensorBoard 进行可视化。
+训练过程中的指标会自动上传到 SwanLab，可以在 SwanLab 官网查看训练曲线、损失、准确率、AUC等指标。
+
+如果是首次使用，需要登录 SwanLab：
 
 ```bash
-# 启动 TensorBoard
-tensorboard --logdir runs
-
-# 指定端口
-tensorboard --logdir runs --port 6006
+swanlab login
 ```
-
-然后在浏览器中访问 `http://localhost:6006` 查看训练曲线、损失、准确率、AUC等指标。
 
 ## 输出说明
 
-### TensorBoard 日志
+### SwanLab 日志
 
-在 `runs/` 目录下，每次训练会创建一个以时间戳命名的子目录，包含：
-- `events.out.tfevents.*`: TensorBoard 事件文件
-- `hyperparameters.json`: 超参数配置文件
+训练过程中的指标、超参数和系统信息会自动记录到 SwanLab 实验中。
+本地日志文件保存在 `swanlog/` 目录下（默认）。
 
 ### 超参数配置
 

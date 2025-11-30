@@ -35,6 +35,7 @@ class GIKTTrainer(Trainer):
             log_dir=args.log_dir,
             device=args.device,
             use_amp=args.use_amp,
+            checkpoint_path=args.checkpoint_path,
         )
 
     def init_model(self, args, data_src):

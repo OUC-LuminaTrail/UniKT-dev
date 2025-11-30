@@ -9,14 +9,15 @@ wheels/
 # IDE Settings
 /.vscode
 
-# tensorboard
-runs/
+# SwanLab logs
+swanlog/
 
 # Data files
 *.csv
 *.npy
 *.npz
 *.parquet
+*.zip
 
 # Model checkpoints
 *.ckpt
