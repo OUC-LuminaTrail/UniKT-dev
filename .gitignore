@@ -17,6 +17,7 @@ swanlog/
 *.npy
 *.npz
 *.parquet
+*.zip
 
 # Model checkpoints
 *.ckpt
