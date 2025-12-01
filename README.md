@@ -16,13 +16,13 @@
 
 ```bash
 # CPU only
-conda install scikit-learn jupyterlab pandas pyarrow numpy python=3.13 -c conda-forge -y
+conda install scikit-learn pandas pyarrow numpy python=3.13 -c conda-forge -y
 uv pip install swanlab python-dotenv
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
 
 # GPU (CUDA 12.9)
-conda install scikit-learn jupyterlab pandas pyarrow numpy python=3.13 -c conda-forge -y
+conda install scikit-learn pandas pyarrow numpy python=3.13 -c conda-forge -y
 uv pip install swanlab python-dotenv
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cu129.html
