@@ -109,15 +109,13 @@ class SQGKTTrainer(Trainer):
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
         y_label = torch.masked_select(y_label_seq, valid_mask)
 
-        # 将 logits 转换为概率，用于后续指标计算
-        y_hat = torch.sigmoid(y_hat)
-
         # 若该批次没有任何有效位置，使用占位避免后续计算报错
         if y_label.numel() == 0:
-            y_hat = torch.tensor([0.5], dtype=torch.float, device=self.device_)
+            # Logits 0.0 对应概率 0.5
+            y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
             y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
 
-        # 生成二分类预测（阈值0.5）
-        y_predict = torch.ge(y_hat, torch.tensor(0.5).to(self.device_)).to(torch.int)
+        # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
+        y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
 
         return y_hat, y_label, y_predict
