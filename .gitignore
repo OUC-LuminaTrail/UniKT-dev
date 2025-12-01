@@ -9,8 +9,9 @@ wheels/
 # IDE Settings
 /.vscode
 
-# SwanLab logs
+# Logs
 swanlog/
+runs/
 
 # Data files
 *.csv
@@ -23,3 +24,4 @@ swanlog/
 *.ckpt
 *.pt
 *.pth
+.env

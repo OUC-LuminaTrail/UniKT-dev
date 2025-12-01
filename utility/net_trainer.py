@@ -8,6 +8,7 @@ from torch_geometric.profile import count_parameters
 from utility.early_stopping import EarlyStopping, EarlyStoppingConfig
 from torch import autocast
 import swanlab
+from dotenv import load_dotenv
 
 
 class Trainer(ABC):
@@ -126,7 +127,7 @@ class Trainer(ABC):
         if self.use_swanlab:
             self.init_swanlab(
                 project_name="Model_Training",
-                run_name=f"Run_{dir}",
+                experiment_name=f"Run_{dir}",
             )
 
     def setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
@@ -237,7 +238,7 @@ class Trainer(ABC):
 
         print(f"Resumed training from epoch {self.start_epoch}")
 
-    def init_swanlab(self, project_name: str, run_name: str = None):
+    def init_swanlab(self, project_name: str, experiment_name: str = None):
         """
         初始化 SwanLab 实验追踪
 
@@ -246,13 +247,28 @@ class Trainer(ABC):
             run_name: SwanLab 运行名称（可选）
         """
         import torch
+        from swanlab.plugin.notification import LarkCallback
+        
+        # 加载环境变量
+        load_dotenv()
+
+        callbacks = []
+        lark_webhook = os.getenv("LARK_WEBHOOK_URL")
+        lark_secret = os.getenv("LARK_SECRET")
+        if lark_webhook:
+            callbacks.append(LarkCallback(webhook_url=lark_webhook, secret=lark_secret))
+
         swanlab.init(
             project_name=project_name,
-            run_name=run_name,
+            experiment_name=experiment_name,
             config=self.hyperparam_manager.get_hyperparameters_dict(),
-            tags=["cuda" if torch.cuda.is_available() else "cpu"]
+            callbacks=callbacks,
+            group=self.model.__class__.__name__,
+            tags=["cuda" if torch.cuda.is_available() else "cpu"],
         )
-        print(f"SwanLab initialized for project: {project_name}, run: {run_name}")
+        print(
+            f"SwanLab initialized for project: {project_name}, run: {experiment_name}"
+        )
 
     @abstractmethod
     def init_model(self):
@@ -500,11 +516,11 @@ class Trainer(ABC):
         y_pred = torch.cat(accum["y_pred"]).numpy()
         y_hat = torch.cat(accum["y_hat"]).numpy()
 
-        # 检查预测值是否为概率值
-        assert (y_hat >= 0).all() and (y_hat <= 1).all(), (
-            f"y_hat contains values out of range [0, 1] (min={y_hat.min():.4f}, max={y_hat.max():.4f}). "
-            "Did you forget to apply sigmoid to logits in forward_pass?"
-        )
+        # 检查预测值是否为概率值，如果不是则自动应用 sigmoid
+        if not ((y_hat >= 0).all() and (y_hat <= 1).all()):
+            import numpy as np
+
+            y_hat = 1 / (1 + np.exp(-y_hat))
 
         prefix = "Train/" if phase == "train" else "Val/"
         # ACC

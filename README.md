@@ -10,22 +10,36 @@
 - pandas：2.2.3
 - pyarrow：22.0.0
 - swanlab: 0.7.2
+- python-dotenv: 1.2.1
 
 ### 环境安装
 
 ```bash
 # CPU only
-conda install scikit-learn jupyterlab pandas pyarrow numpy python=3.13 -c conda-forge -y
-pip install swanlab
+conda install scikit-learn pandas pyarrow numpy python=3.13 -c conda-forge -y
+uv pip install swanlab python-dotenv
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
 
 # GPU (CUDA 12.9)
-conda install scikit-learn jupyterlab pandas pyarrow numpy python=3.13 -c conda-forge -y
-pip install swanlab
+conda install scikit-learn pandas pyarrow numpy python=3.13 -c conda-forge -y
+uv pip install swanlab python-dotenv
 uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
 uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cu129.html
 ```
+
+### 配置说明
+
+本项目使用 `.env` 文件管理环境变量配置（如飞书通知）。
+
+1. 复制示例配置文件：
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 修改 `.env` 文件中的配置项：
+   - `LARK_WEBHOOK_URL`: 飞书机器人 Webhook 地址
+   - `LARK_SECRET`: 飞书机器人签名密钥
 
 ## 项目结构
 
