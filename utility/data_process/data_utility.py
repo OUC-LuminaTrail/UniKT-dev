@@ -113,6 +113,8 @@ class DataSource(ABC):
                     # urllib 回退
                     urllib.request.urlretrieve(self.data_url, archive_path)
             except Exception as e:
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
                 raise RuntimeError(f"Failed to download data: {e}")
             print(f"Download finished: {archive_path}")
         else:
