@@ -440,9 +440,9 @@ class HGIKT(nn.Module):
             [question_hyper_conv, question_gnn_conv], dim=-1
         )  # [num_questions, 2*embedding_dim]
         # 使用线性变换将拼接后的维度映射回 embedding_dim
-        question_conv = self.question_hyper_conv(
+        question_conv = F.leaky_relu(self.question_hyper_conv(
             question_conv
-        )  # [num_questions, embedding_dim]
+        ))  # [num_questions, embedding_dim]
 
         # 按照用户序列索引获取对应的问题节点表示
         # 扩展 user_sequence 以匹配 question_conv 的维度
