@@ -380,25 +380,32 @@ class HGIKT(nn.Module):
         self.general_interaction = GeneralInteraction(hidden_dim=self.lstm_hidden_dim)
 
     def calc_contrastive_loss(self, view1, view2, temp=0.5):
-        """
-        计算 InfoNCE 损失
-        view1, view2: [num_questions, embedding_dim]
-        """
+        """计算 NT-Xent (SimCLR) 损失"""
         # L2 归一化
         view1 = F.normalize(view1, dim=-1)
         view2 = F.normalize(view2, dim=-1)
 
-        # 计算相似度矩阵 [N, N]
-        sim_matrix = torch.matmul(view1, view2.T) / temp
+        # 拼接两种视图，按 SimCLR 方式构造 2N 个样本
+        features = torch.cat([view1, view2], dim=0)  # [2N, D]
+        sim_matrix = torch.matmul(features, features.T) / temp  # [2N, 2N]
 
-        # 标签为对角线索引
-        labels = torch.arange(view1.size(0), device=view1.device)
+        # 屏蔽自身相似度，避免其进入分母
+        batch = view1.size(0)
+        diag_mask = torch.eye(2 * batch, device=features.device, dtype=torch.bool)
+        sim_matrix = sim_matrix.masked_fill(diag_mask, float("-inf"))
 
-        # 计算交叉熵损失 (对称)
-        loss_1_2 = F.cross_entropy(sim_matrix, labels)
-        loss_2_1 = F.cross_entropy(sim_matrix.T, labels)
+        idx = torch.arange(batch, device=features.device)
+        positive_pairs = torch.cat(
+            [
+                sim_matrix[idx, idx + batch],
+                sim_matrix[idx + batch, idx],
+            ],
+            dim=0,
+        )  # [2N]
 
-        return (loss_1_2 + loss_2_1) / 2
+        logsumexp = torch.logsumexp(sim_matrix, dim=1)  # [2N]
+        loss = -positive_pairs + logsumexp
+        return loss.mean()
 
     def forward(
         self,
