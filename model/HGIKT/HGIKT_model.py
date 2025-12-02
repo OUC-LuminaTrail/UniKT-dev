@@ -317,6 +317,10 @@ class HGIKT(nn.Module):
             num_embeddings=data_metadata["num_questions"],
             embedding_dim=self.embedding_dim,
         )
+        self.question_embedding_hyper = torch.nn.Embedding(
+            num_embeddings=data_metadata["num_questions"],
+            embedding_dim=self.embedding_dim,
+        )
         self.skill_embedding = torch.nn.Embedding(
             num_embeddings=data_metadata["num_skills"],
             embedding_dim=self.embedding_dim,
@@ -395,7 +399,7 @@ class HGIKT(nn.Module):
         # 全图卷积
         # question_conv [B, S, embedding_dim]
         question_hyper_conv: torch.Tensor = self.hgnn_conv(
-            self.question_embedding.weight, hypergraph
+            self.question_embedding_hyper.weight, hypergraph
         )
         question_gnn_conv: torch.Tensor = self.gnn_conv(
             {
