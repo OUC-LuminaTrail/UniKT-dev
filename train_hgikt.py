@@ -11,7 +11,7 @@ def parse_args():
     # 模型参数
     model_params = parser.add_argument_group("Model Parameters")
     model_params.add_argument(
-        "--hidden_dim", type=int, default=100, help="Dimension of hidden layers"
+        "--lstm_hidden_dim", type=int, default=100, help="Dimension of LSTM hidden layers"
     )
     model_params.add_argument(
         "--embedding_dim", type=int, default=100, help="Dimension of embeddings"

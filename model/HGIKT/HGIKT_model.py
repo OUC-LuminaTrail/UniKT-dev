@@ -308,7 +308,7 @@ class HGIKT(nn.Module):
 
         # 模型参数
         self.embedding_dim = args.embedding_dim  # 嵌入维度
-        self.hidden_dim = args.hidden_dim  # 隐藏层维度
+        self.lstm_hidden_dim = args.lstm_hidden_dim  # LSTM 隐藏层维度
         self.lstm_layers = args.lstm_layers  # LSTM层数
         self.dropout = args.dropout  # Dropout概率，所有层共享
         self.temp = args.cl_temperature  # 对比损失温度系数
@@ -348,10 +348,10 @@ class HGIKT(nn.Module):
 
         # 全连接层，将图卷积后的特征映射到隐藏维度
         self.fc_feature = Linear(
-            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
+            self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
         )
         self.fc_next_feature = Linear(
-            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
+            self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
         )
 
         self.question_hyper_conv = Linear(
@@ -363,8 +363,8 @@ class HGIKT(nn.Module):
         # LSTM层
         self.lstm = nn.LSTM(
             # 将question和answer拼接作为输入
-            input_size=self.hidden_dim * 2,
-            hidden_size=self.hidden_dim,
+            input_size=self.lstm_hidden_dim * 2,
+            hidden_size=self.lstm_hidden_dim,
             num_layers=self.lstm_layers,
             batch_first=True,
             dropout=self.dropout,
@@ -377,7 +377,7 @@ class HGIKT(nn.Module):
         )
 
         # 广义交互模块
-        self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
+        self.general_interaction = GeneralInteraction(hidden_dim=self.lstm_hidden_dim)
 
         # Sigmoid输出层
         self.sigmoid = nn.Sigmoid()
