@@ -54,6 +54,7 @@ class Trainer(ABC):
         self.lr_scheduler = lr_scheduler
         self.use_amp = use_amp
         self.start_epoch = 0
+        self.hyperparams = hyperparams
 
         # 自动优化 DataLoader 参数
         if isinstance(self.train_data, torch.utils.data.DataLoader):
