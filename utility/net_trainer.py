@@ -126,7 +126,7 @@ class Trainer(ABC):
         self.use_swanlab = use_swanlab
         if self.use_swanlab:
             self.init_swanlab(
-                project_name="Model_Training",
+                project_name="kt-exp-graph",
                 experiment_name=f"Run_{dir}",
             )
 
