@@ -137,6 +137,10 @@ python data_process.py process \
 - GIKT 训练指南：参见 `docs/train_gikt.md`
 - SQGKT 训练指南：参见 `docs/train_sqgkt.md`
 
+### 复现性设置
+
+训练脚本中的 `--seed` 参数现在由 `utility/net_trainer.py` 统一处理。`Trainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
+
 ### 3. 查看训练结果
 
 训练过程中的指标会自动上传到 SwanLab，可以在 SwanLab 官网查看训练曲线、损失、准确率、AUC等指标。

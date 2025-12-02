@@ -2,6 +2,8 @@ import torch
 from abc import ABC, abstractmethod
 import time
 import os
+import random
+import numpy as np
 from tqdm import tqdm
 from typing import Tuple, Any
 from torch_geometric.profile import count_parameters
@@ -9,6 +11,30 @@ from utility.early_stopping import EarlyStopping, EarlyStoppingConfig
 from torch import autocast
 import swanlab
 from dotenv import load_dotenv
+
+
+def seed_everything(seed: int | None, deterministic: bool = True) -> int | None:
+    r"""Set random seeds across common libraries for reproducibility."""
+    if seed is None:
+        return None
+
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    if deterministic:
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        if hasattr(torch, "use_deterministic_algorithms"):
+            try:
+                torch.use_deterministic_algorithms(True, warn_only=True)
+            except TypeError:
+                torch.use_deterministic_algorithms(True)
+
+    return seed
 
 
 class Trainer(ABC):
@@ -40,6 +66,7 @@ class Trainer(ABC):
         use_amp: bool = False,
         checkpoint_path: str = None,
         use_swanlab: bool = True,
+        seed: int | None = None,
     ):
         if device is None:
             self.device_ = self.try_gpu()
@@ -54,6 +81,9 @@ class Trainer(ABC):
         self.lr_scheduler = lr_scheduler
         self.use_amp = use_amp
         self.start_epoch = 0
+        if seed is None and hyperparams is not None:
+            seed = getattr(hyperparams, "seed", None)
+        self.seed = seed_everything(seed)
 
         # 自动优化 DataLoader 参数
         if isinstance(self.train_data, torch.utils.data.DataLoader):
@@ -163,6 +193,8 @@ class Trainer(ABC):
             self.hyperparam_manager.add_metadata(
                 "weight_decay", self.opt.defaults["weight_decay"]
             )
+        if self.seed is not None:
+            self.hyperparam_manager.add_metadata("seed", self.seed)
 
         # 添加设备信息
         if self.device_ is not None:
@@ -589,4 +621,4 @@ class Trainer(ABC):
             self.save_checkpoint(epoch, checkpoint_path, weights_only=True)
 
 
-__all__ = ["Trainer"]
+__all__ = ["Trainer", "seed_everything"]
