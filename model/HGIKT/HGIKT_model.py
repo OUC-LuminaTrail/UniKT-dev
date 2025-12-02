@@ -311,6 +311,7 @@ class HGIKT(nn.Module):
         self.hidden_dim = args.hidden_dim  # 隐藏层维度
         self.lstm_layers = args.lstm_layers  # LSTM层数
         self.dropout = args.dropout  # Dropout概率，所有层共享
+        self.temp = args.cl_temperature  # 对比损失温度系数
 
         # Embedding
         self.question_embedding = torch.nn.Embedding(
@@ -381,6 +382,27 @@ class HGIKT(nn.Module):
         # Sigmoid输出层
         self.sigmoid = nn.Sigmoid()
 
+    def calc_contrastive_loss(self, view1, view2, temp=0.5):
+        """
+        计算 InfoNCE 损失
+        view1, view2: [num_questions, embedding_dim]
+        """
+        # L2 归一化
+        view1 = F.normalize(view1, dim=-1)
+        view2 = F.normalize(view2, dim=-1)
+        
+        # 计算相似度矩阵 [N, N]
+        sim_matrix = torch.matmul(view1, view2.T) / temp
+        
+        # 标签为对角线索引
+        labels = torch.arange(view1.size(0), device=view1.device)
+        
+        # 计算交叉熵损失 (对称)
+        loss_1_2 = F.cross_entropy(sim_matrix, labels)
+        loss_2_1 = F.cross_entropy(sim_matrix.T, labels)
+        
+        return (loss_1_2 + loss_2_1) / 2
+
     def forward(
         self,
         user_sequence: torch.Tensor,
@@ -408,6 +430,9 @@ class HGIKT(nn.Module):
             },
             hetero_graph.edge_index_dict,
         )["question"]
+
+        # 计算对比损失
+        cl_loss = self.calc_contrastive_loss(question_hyper_conv, question_gnn_conv, self.temp)
 
         # 拼接两种图卷积结果，用concat实现
         # question_hyper_conv: [num_questions, embedding_dim]
@@ -484,4 +509,4 @@ class HGIKT(nn.Module):
             hist_candidates, next_candidates, user_mask
         )  # [B, S]
 
-        return logits  # [B, S]
+        return logits, cl_loss  # [B, S]

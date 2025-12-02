@@ -69,7 +69,7 @@ class HGIKTTrainer(Trainer):
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(sequence, response, mask, self.hetero_graph, self.hypergraph)  # [B, S]
+        y_hat_full, cl_loss = self.model(sequence, response, mask, self.hetero_graph, self.hypergraph)  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
         y_label_seq = response.float()[:, 1:]
@@ -90,4 +90,14 @@ class HGIKTTrainer(Trainer):
         # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
         y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
 
-        return y_hat, y_label, y_predict
+        return y_hat, y_label, y_predict, cl_loss
+
+    def compute_loss(self, forward_outputs):
+        y_hat, y_label, _, cl_loss = forward_outputs
+        task_loss = self.loss(y_hat, y_label)
+        
+        cl_weight = getattr(self.hyperparams, 'cl_weight', 0.1)
+        total_loss = task_loss + cl_weight * cl_loss
+        return total_loss
+
+
