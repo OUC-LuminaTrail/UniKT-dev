@@ -42,7 +42,7 @@ class HGIKTTrainer(Trainer):
     def init_model(self, args, data_src):
         from model.HGIKT.HGIKT_model import HGIKT
 
-        print("Initializing GIKT model...")
+        print("Initializing HGIKT model...")
         model = HGIKT(args, data_src.get_metadata())
 
         # 二分类交叉熵损失

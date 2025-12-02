@@ -295,6 +295,36 @@ class GeneralInteraction(nn.Module):
 
         return logits
 
+class GatedFusion(nn.Module):
+    """门控融合（Gated Fusion）模块
+
+    输入两路特征 h1, h2（形状可以是 [N, D] 或 [B, S, D]），先拼接再通过门控自适应融合：
+        m = [h1; h2]
+        z = sigmoid(MLP(m))
+        p = proj(m)
+        out = z * p + (1 - z) * h1
+
+    该模块轻量、易训练且不改变原始卷积实现。
+    """
+
+    def __init__(self, dim: int):
+        super(GatedFusion, self).__init__()
+        self.dim = dim
+        # 门网络：2D -> D -> D -> sigmoid
+        self.gate = nn.Sequential(
+            nn.Linear(2 * dim, dim),
+            nn.Tanh(),
+            nn.Linear(dim, dim),
+            nn.Sigmoid(),
+        )
+        # 投影网络：将拼接的 2D 映射回 D
+        self.proj = nn.Linear(2 * dim, dim)
+
+    def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
+        m = torch.cat([h1, h2], dim=-1)
+        z = self.gate(m)
+        p = self.proj(m)
+        return z * p + (1.0 - z) * h1
 
 class HGIKT(nn.Module):
     r"""HGIKT主模型"""
@@ -344,6 +374,9 @@ class HGIKT(nn.Module):
             heads=args.heads,
             dropout=self.dropout,
         )
+
+        # 门控融合模块
+        self.fuse = GatedFusion(self.embedding_dim)
 
         # 全连接层，将图卷积后的特征映射到隐藏维度
         self.fc_feature = Linear(
