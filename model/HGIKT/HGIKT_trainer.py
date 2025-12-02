@@ -21,7 +21,7 @@ class HGIKTTrainer(Trainer):
         from model.HGIKT.HGIKT_data import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
-        train_data, val_data, self.graph = model_data.prepare_data(args)
+        train_data, val_data, self.hypergraph, self.hetero_graph = model_data.prepare_data(args)
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -64,12 +64,12 @@ class HGIKTTrainer(Trainer):
         sequence = sequence.to(self.device_)
         response = response.to(self.device_)
         mask = mask.to(torch.bool).to(self.device_)
-        self.graph = self.graph.to(self.device_)
+        self.hetero_graph = self.hetero_graph.to(self.device_)
+        self.hypergraph = self.hypergraph.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(sequence, response, mask, self.graph)  # [B, S]
-
+        y_hat_full = self.model(sequence, response, mask, self.hetero_graph, self.hypergraph)  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
         y_label_seq = response.float()[:, 1:]
@@ -81,15 +81,13 @@ class HGIKTTrainer(Trainer):
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
         y_label = torch.masked_select(y_label_seq, valid_mask)
 
-        # 将 logits 转换为概率，用于后续指标计算
-        y_hat = torch.sigmoid(y_hat)
-
         # 若该批次没有任何有效位置，使用占位避免后续计算报错
         if y_label.numel() == 0:
-            y_hat = torch.tensor([0.5], dtype=torch.float, device=self.device_)
+            # Logits 0.0 对应概率 0.5
+            y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
             y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
 
-        # 生成二分类预测（阈值0.5）
-        y_predict = torch.ge(y_hat, torch.tensor(0.5).to(self.device_)).to(torch.int)
+        # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
+        y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
 
         return y_hat, y_label, y_predict

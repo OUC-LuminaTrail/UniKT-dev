@@ -48,7 +48,18 @@ class HGIKTModelData(ModelData):
         H = self.build_data_matrix(("question", "has", "skill"), value_type="binary")
 
         # 构建超图
-        graph = self.generate_G_from_H(H, variable_weight=False)
+        hypergraph = self.generate_G_from_H(H, variable_weight=False)
+
+        # 构建异构图
+        hetero_graph = self.build_hetero_graph(
+            [
+                (
+                    "question",
+                    "has",
+                    "skill",
+                )
+            ]
+        )
 
         # 划分训练集和验证集
         if fold_idx is not None:
@@ -77,7 +88,7 @@ class HGIKTModelData(ModelData):
         val_dataloader = DataLoader(
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
-        return train_dataloader, val_dataloader, graph
+        return train_dataloader, val_dataloader, hypergraph, hetero_graph
         
     def generate_G_from_H(self, H, variable_weight=False):  #从关联矩阵H生成超图G
         """
