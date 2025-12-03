@@ -77,8 +77,8 @@ class HGNN(nn.Module):
         # is_last=False 表示使用激活函数和dropout
         self.hgc1 = HGNNConv(in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False)
         # 第二层卷积：聚合间接邻居的问题特征
-        # is_last=False 表示仍使用激活函数（与原实现保持一致，最后应用ReLU）
-        self.hgc2 = HGNNConv(n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=False)
+        # is_last=True 表示跳过内置激活和dropout，在forward中手动应用ReLU（与原实现一致）
+        self.hgc2 = HGNNConv(n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True)
 
     def forward(self, x, hg):
         """前向传播
@@ -90,8 +90,8 @@ class HGNN(nn.Module):
         Returns:
             输出特征矩阵 [num_vertices, n_class]
         """
-        x1 = self.hgc1(x, hg)  # HGNNConv已内置ReLU激活
-        x2 = self.hgc2(x1, hg)
+        x1 = self.hgc1(x, hg)  # 第一层使用内置ReLU和dropout
+        x2 = F.relu(self.hgc2(x1, hg))  # 第二层手动应用ReLU（与原实现一致）
         return x2
 
 

@@ -113,16 +113,21 @@ class HGIKTModelData(ModelData):
         t_start = time.time()
 
         num_questions = H.shape[0]  # 顶点数（题目数）
-        num_skills = H.shape[1]  # 超边数（知识点数）
 
         # 将关联矩阵转换为超边列表
-        # 每个知识点对应一个超边，超边包含所有拥有该知识点的题目
-        e_list = []
-        for skill_idx in range(num_skills):
-            # 获取包含该知识点的所有题目
-            questions_with_skill = np.where(H[:, skill_idx] > 0)[0].tolist()
-            if len(questions_with_skill) > 0:
-                e_list.append(questions_with_skill)
+        # 使用 np.nonzero 一次性获取所有非零元素的索引，效率更高
+        rows, cols = np.nonzero(H)
+        
+        # 按列（知识点）分组，每个知识点对应一个超边
+        # 使用字典收集每个超边（知识点）包含的顶点（题目）
+        edge_dict = {}
+        for question_idx, skill_idx in zip(rows, cols):
+            if skill_idx not in edge_dict:
+                edge_dict[skill_idx] = []
+            edge_dict[skill_idx].append(int(question_idx))
+        
+        # 转换为超边列表（过滤空超边）
+        e_list = [vertices for vertices in edge_dict.values() if len(vertices) > 0]
 
         # 使用 dhg 框架创建超图
         hypergraph = Hypergraph(num_v=num_questions, e_list=e_list)
