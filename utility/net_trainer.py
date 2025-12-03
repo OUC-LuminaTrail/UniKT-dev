@@ -8,7 +8,6 @@ from tqdm import tqdm
 from typing import Tuple, Any
 from torch_geometric.profile import count_parameters
 from utility.early_stopping import EarlyStopping, EarlyStoppingConfig
-from torch import autocast
 import swanlab
 from dotenv import load_dotenv
 
@@ -63,7 +62,6 @@ class Trainer(ABC):
         hyperparams=None,
         log_dir: str = None,
         device: torch.device = None,
-        use_amp: bool = False,
         checkpoint_path: str = None,
         use_swanlab: bool = True,
         seed: int | None = None,
@@ -79,7 +77,6 @@ class Trainer(ABC):
         self.train_data: torch.utils.data.DataLoader = train_data
         self.val_data: torch.utils.data.DataLoader = val_data
         self.lr_scheduler = lr_scheduler
-        self.use_amp = use_amp
         self.start_epoch = 0
         if seed is None and hyperparams is not None:
             seed = getattr(hyperparams, "seed", None)
@@ -108,8 +105,6 @@ class Trainer(ABC):
                 f"DataLoader optimized: num_workers={num_workers}, pin_memory={is_cuda}"
             )
 
-        # 自动混合精度缩放器
-        self.scaler = torch.amp.GradScaler(enabled=use_amp)
         # 初始化早停
         self.early_stopping: EarlyStopping | None = None
         if early_stopping is not None:
@@ -482,18 +477,16 @@ class Trainer(ABC):
         # 清零梯度
         self.opt.zero_grad()
         # 前向传播
-        with autocast(device_type="cuda", dtype=torch.float16, enabled=self.use_amp):
-            y_hat, y_label, y_predict = self.forward_pass(batch_data)
-            # 计算损失
-            loss = self.loss(y_hat, y_label)
+        y_hat, y_label, y_predict = self.forward_pass(batch_data)
+        # 计算损失
+        loss = self.loss(y_hat, y_label)
         if hasattr(self, "_train_accum"):
             self._train_accum["y_hat"].append(y_hat.detach().cpu())
             self._train_accum["y_label"].append(y_label.detach().cpu())
             self._train_accum["y_pred"].append(y_predict.detach().cpu())
         # 反向传播和优化
-        self.scaler.scale(loss).backward()
-        self.scaler.step(self.opt)
-        self.scaler.update()
+        loss.backward()
+        self.opt.step()
         return loss.item()
 
     def run_eval_batch(self, batch_data: Tuple[Any, ...]) -> float:
@@ -509,13 +502,10 @@ class Trainer(ABC):
         """
         self.model.eval()
         with torch.no_grad():
-            with autocast(
-                device_type="cuda", dtype=torch.float16, enabled=self.use_amp
-            ):
-                # 前向传播
-                y_hat, y_label, y_predict = self.forward_pass(batch_data)
-                # 计算损失
-                loss = self.loss(y_hat, y_label)
+            # 前向传播
+            y_hat, y_label, y_predict = self.forward_pass(batch_data)
+            # 计算损失
+            loss = self.loss(y_hat, y_label)
             # 累积到 epoch 容器（用于 epoch 级别的指标计算）
             if hasattr(self, "_val_accum"):
                 self._val_accum["y_hat"].append(y_hat.detach().cpu())

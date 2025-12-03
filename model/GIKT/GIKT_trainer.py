@@ -35,7 +35,6 @@ class GIKTTrainer(Trainer):
             hyperparams=args,
             log_dir=args.log_dir,
             device=args.device,
-            use_amp=args.use_amp,
             checkpoint_path=args.checkpoint_path,
             seed=seed_value,
         )

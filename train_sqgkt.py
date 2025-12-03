@@ -126,9 +126,6 @@ def parse_args():
         "--log_dir", type=str, default=None, help="Directory to save logs and models"
     )
     parser.add_argument("--device", type=str, default=None, help="Device (cuda or cpu)")
-    parser.add_argument(
-        "--use_amp", action="store_true", default=False, help="Use automatic mixed precision"
-    )
 
     return parser.parse_args()
 
