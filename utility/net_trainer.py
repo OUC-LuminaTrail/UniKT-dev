@@ -32,6 +32,7 @@ def seed_everything(seed: int | None, deterministic: bool = True) -> int | None:
                 torch.use_deterministic_algorithms(True, warn_only=True)
             except TypeError:
                 torch.use_deterministic_algorithms(True)
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 
     return seed
 
