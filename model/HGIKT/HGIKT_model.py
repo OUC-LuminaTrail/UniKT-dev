@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-import math
 from torch_geometric.nn import HeteroConv, Linear, TransformerConv
 from torch.nn import functional as F
-from torch.nn.parameter import Parameter
+from dhg.nn import HGNNConv
 
 
 class GNN_QS(nn.Module):
@@ -56,50 +55,44 @@ class GNN_QS(nn.Module):
 
 
 class HGNN(nn.Module):
-    def __init__(self, in_ch, n_hid, n_class):
+    """基于dhg框架的超图神经网络
+
+    使用dhg.nn.HGNNConv实现双层超图卷积，与原始实现语义一致。
+    
+    数学公式：
+        X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
+    
+    其中：
+        - X 是输入顶点特征矩阵
+        - H 是超图关联矩阵
+        - W_e 是超边权重对角矩阵（默认为单位矩阵）
+        - D_v 是顶点度数对角矩阵
+        - D_e 是超边度数对角矩阵
+        - Θ 是可学习参数
+    """
+
+    def __init__(self, in_ch, n_hid, n_class, dropout=0.0):
         super(HGNN, self).__init__()
-        self.hgc1 = HGNN_conv(in_ch, n_hid)  # 单层卷积，聚合直接邻居问题特征
-        self.hgc2 = HGNN_conv(n_hid, n_class)  # 第二层卷积，聚合间接邻居的问题特征
+        # 第一层卷积：聚合直接邻居问题特征
+        # is_last=False 表示使用激活函数和dropout
+        self.hgc1 = HGNNConv(in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False)
+        # 第二层卷积：聚合间接邻居的问题特征
+        # is_last=False 表示仍使用激活函数（与原实现保持一致，最后应用ReLU）
+        self.hgc2 = HGNNConv(n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=False)
 
-    def forward(self, x, G):
-        x1 = F.relu(self.hgc1(x, G))
-        x2 = F.relu(self.hgc2(x1, G))
+    def forward(self, x, hg):
+        """前向传播
+        
+        Args:
+            x: 输入特征矩阵 [num_vertices, in_ch]
+            hg: dhg.Hypergraph 超图结构
+            
+        Returns:
+            输出特征矩阵 [num_vertices, n_class]
+        """
+        x1 = self.hgc1(x, hg)  # HGNNConv已内置ReLU激活
+        x2 = self.hgc2(x1, hg)
         return x2
-
-
-class HGNN_conv(nn.Module):  # Inherited from module
-    #   in_features: size of each input sample
-    #   out_features: size of each output sample
-    def __init__(self, in_ft, out_ft, bias=True):
-        super(HGNN_conv, self).__init__()
-
-        # Convert a non trainable type Tensor to trainable type Parameter
-        # Parameter definition
-        self.weight = Parameter(torch.Tensor(in_ft, out_ft))
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_ft))
-        else:
-            self.register_parameter("bias", None)
-        # Parameter initialization function
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
-
-    # forward function
-    def forward(self, x: torch.Tensor, G: torch.Tensor):
-        x = x.matmul(
-            self.weight
-        )  # 对原始题目特征进行线性变换（矩阵乘法，线性变换，可学习矩阵）
-        if self.bias is not None:
-            x = x + self.bias  # 加上偏置项（特征偏置）
-        x = G.matmul(
-            x
-        )  # 超图卷积操作，用G聚合邻居特征（G中共享知识点的题目信息聚合）关注不同题目的题目特征）
-        return x
 
 
 class HistoryRecap(nn.Module):
@@ -366,8 +359,9 @@ class HGIKT(nn.Module):
         self.hgnn_conv = HGNN(
             in_ch=args.embedding_dim,  # 输入通道数
             n_hid=args.embedding_dim,  # 隐藏层通道数
-            n_class=args.embedding_dim,
-        )  # 输出通道数
+            n_class=args.embedding_dim,  # 输出通道数
+            dropout=self.dropout,  # Dropout概率
+        )
 
         # GNN层
         self.gnn_conv = GNN_QS(
