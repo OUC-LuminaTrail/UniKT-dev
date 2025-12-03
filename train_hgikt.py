@@ -28,12 +28,6 @@ def parse_args():
     model_params.add_argument(
         "--att_bound", type=float, default=0.2, help="Attention boundary value"
     )
-    model_params.add_argument(
-        "--cl_weight", type=float, default=0.1, help="Weight for contrastive loss"
-    )
-    model_params.add_argument(
-        "--cl_temperature", type=float, default=0.5, help="Temperature for contrastive loss"
-    )
 
     # 数据参数
     data_params = parser.add_argument_group("Data Parameters")

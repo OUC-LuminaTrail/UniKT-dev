@@ -311,7 +311,6 @@ class HGIKT(nn.Module):
         self.lstm_hidden_dim = args.lstm_hidden_dim  # LSTM 隐藏层维度
         self.lstm_layers = args.lstm_layers  # LSTM层数
         self.dropout = args.dropout  # Dropout概率，所有层共享
-        self.temp = args.cl_temperature  # 对比损失温度系数
 
         # Embedding
         self.question_embedding = torch.nn.Embedding(
@@ -435,11 +434,6 @@ class HGIKT(nn.Module):
             hetero_graph.edge_index_dict,
         )["question"]
 
-        # 计算对比损失
-        cl_loss = self.calc_contrastive_loss(
-            question_hyper_conv, question_gnn_conv, self.temp
-        )
-
         # 拼接两种图卷积结果，用concat实现
         # question_hyper_conv: [num_questions, embedding_dim]
         # question_conv: [num_questions, embedding_dim]
@@ -515,4 +509,4 @@ class HGIKT(nn.Module):
             hist_candidates, next_candidates, user_mask
         )  # [B, S]
 
-        return logits, cl_loss  # [B, S]
+        return logits  # [B, S]

@@ -94,12 +94,4 @@ class HGIKTTrainer(Trainer):
         # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
         y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
 
-        return y_hat, y_label, y_predict, cl_loss
-
-    def compute_loss(self, forward_outputs):
-        y_hat, y_label, _, cl_loss = forward_outputs
-        task_loss = self.loss(y_hat, y_label)
-
-        cl_weight = getattr(self.hyperparams, "cl_weight", 0.1)
-        total_loss = task_loss + cl_weight * cl_loss
-        return total_loss
+        return y_hat, y_label, y_predict
