@@ -97,27 +97,50 @@ class HGIKTModelData(ModelData):
         :param variable_weight: whether the weight of hyperedge is variable
         :return: G
         """
-        H = np.array(H)
+        import time
+        print("Start constructing hypergraph...")
+        t_start = time.time()
+
+        # Convert to sparse matrix for efficiency
+        if not sp.issparse(H):
+            H = sp.csr_matrix(H)
+        else:
+            H = H.tocsr()
+
         n_edge = H.shape[1] # Number of columns of matrix = number of hyperedge 知识点的数量（列数）
-        # the weight of the hyperedge
-        W = np.ones(n_edge)  #获得一个全1的矩阵
+        
         # the degree of the node
-        DV = np.sum(H *W, axis=1)   #节点度（题目关联多少概念）
+        DV = np.array(H.sum(axis=1)).flatten()
+        
         # the degree of the hyperedge
-        DE = np.sum(H, axis=0)     #超边度（知识点被多少题目关联）
-        invDE = np.asmatrix(np.diag(np.power(DE, float(-1))))
-        DV2 = np.asmatrix(np.diag(np.power(DV, -0.5)))
-        W = np.asmatrix(np.diag(W))
-        H = np.asmatrix(H)
+        DE = np.array(H.sum(axis=0)).flatten()
+        
+        # Handle division by zero
+        with np.errstate(divide='ignore'):
+            invDE_val = np.power(DE, -1.0)
+            DV2_val = np.power(DV, -0.5)
+            
+        invDE_val[np.isinf(invDE_val)] = 0
+        DV2_val[np.isinf(DV2_val)] = 0
+        
+        invDE = sp.diags(invDE_val)
+        DV2 = sp.diags(DV2_val)
+        
         HT = H.T
 
         if variable_weight:
-            DV2_H = DV2 * H
-            invDE_HT_DV2 = invDE * HT * DV2
+            DV2_H = DV2 @ H
+            invDE_HT_DV2 = invDE @ HT @ DV2
+            W = sp.eye(n_edge)
+            print(f"Hypergraph construction finished in {time.time() - t_start:.2f}s")
             return DV2_H, W, invDE_HT_DV2
         else:
-            G = DV2 * H * W * invDE * HT * DV2  #公式G = Dv^-1/2 * H * W * De^-1 * H.T * Dv^-1/2 归一化矩阵？
-            G = self.sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(G)) #将矩阵G转为torch中的稀疏张量
+            # G = DV2 * H * W * invDE * HT * DV2
+            # W is identity, so G = DV2 @ H @ invDE @ HT @ DV2
+            G = DV2 @ H @ invDE @ HT @ DV2
+            
+            print(f"Hypergraph construction finished in {time.time() - t_start:.2f}s")
+            G = self.sparse_mx_to_torch_sparse_tensor(G) #将矩阵G转为torch中的稀疏张量
             return G
 
 
