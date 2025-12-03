@@ -536,13 +536,12 @@ class Trainer(ABC):
 
         y_label = torch.cat(accum["y_label"]).numpy()
         y_pred = torch.cat(accum["y_pred"]).numpy()
-        y_hat = torch.cat(accum["y_hat"]).numpy()
+        y_hat = torch.cat(accum["y_hat"])
 
-        # 检查预测值是否为概率值，如果不是则自动应用 sigmoid
-        if not ((y_hat >= 0).all() and (y_hat <= 1).all()):
-            import numpy as np
-
-            y_hat = 1 / (1 + np.exp(-y_hat))
+        is_prob = torch.all((y_hat >= 0) & (y_hat <= 1)).item()
+        if not is_prob:
+            y_hat = torch.sigmoid(y_hat)
+        y_hat = y_hat.numpy()
 
         prefix = "Train/" if phase == "train" else "Val/"
         # ACC
