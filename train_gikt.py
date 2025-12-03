@@ -103,9 +103,6 @@ def parse_args():
     parser.add_argument(
         "--device", type=str, default=None, help="Device (cuda or cpu)"
     )
-    parser.add_argument(
-        "--use_amp", action="store_true", default=False, help="Use automatic mixed precision"
-    )
 
     return parser.parse_args()
 
@@ -113,19 +110,11 @@ def parse_args():
 def main():
     """主训练函数"""
     args = parse_args()
-    import torch
-    import numpy
     from model.GIKT.GIKT_trainer import GIKTTrainer
     from utility.data_process.assist09 import Assistments2009Data
     from utility.data_process.assist12 import Assistments2012Data
     from utility.data_process.assist17 import Assistments2017Data
     from utility.data_process.ednet_kt1 import EdNetKT1Data
-
-    # 设置随机种子
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(args.seed)
-    numpy.random.seed(args.seed)
     
     # 构建数据
     print("Building datasets...")

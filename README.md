@@ -2,12 +2,13 @@
 
 ## 项目依赖
 
-- Python：3.13
-- torch：2.8.0
+- Python：3.10
+- torch：1.13.1
 - torch_geometric：2.7.0
-- pyg-lib：0.5.0
+- dhg：0.9.5
+- pyg-lib：0.4.0
 - scikit-learn：1.7.2
-- pandas：2.2.3
+- pandas：2.3.3
 - pyarrow：22.0.0
 - swanlab: 0.7.2
 - python-dotenv: 1.2.1
@@ -15,17 +16,13 @@
 ### 环境安装
 
 ```bash
-# CPU only
-conda install scikit-learn pandas pyarrow numpy python=3.13 -c conda-forge -y
-uv pip install swanlab python-dotenv
-uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
-uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cpu.html
+conda create -n python=3.10
 
-# GPU (CUDA 12.9)
-conda install scikit-learn pandas pyarrow numpy python=3.13 -c conda-forge -y
-uv pip install swanlab python-dotenv
-uv pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu129
-uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-2.8.0+cu129.html
+# CPU
+uv pip install torch==1.13.1+cpu dhg torch_geometric pyg-lib pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cpu -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
+
+# CUDA>=11.7
+uv pip install torch==1.13.1+cu117 dhg torch_geometric pyg-lib pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cu117 -f https://data.pyg.org/whl/torch-1.13.1+cu117.html
 ```
 
 ### 配置说明
@@ -136,6 +133,10 @@ python data_process.py process \
 
 - GIKT 训练指南：参见 `docs/train_gikt.md`
 - SQGKT 训练指南：参见 `docs/train_sqgkt.md`
+
+### 复现性设置
+
+训练脚本中的 `--seed` 参数现在由 `utility/net_trainer.py` 统一处理。`Trainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
 
 ### 3. 查看训练结果
 
