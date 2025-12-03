@@ -36,7 +36,6 @@ class HGIKTTrainer(Trainer):
             hyperparams=args,
             log_dir=args.log_dir,
             device=args.device,
-            use_amp=args.use_amp,
         )
 
     def init_model(self, args, data_src):
@@ -71,7 +70,7 @@ class HGIKTTrainer(Trainer):
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full, cl_loss = self.model(
+        y_hat_full = self.model(
             sequence, response, mask, self.hetero_graph, self.hypergraph
         )  # [B, S]
         # 提取有效位置的预测和标签
