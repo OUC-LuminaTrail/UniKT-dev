@@ -78,6 +78,7 @@ class Trainer(ABC):
         self.val_data: torch.utils.data.DataLoader = val_data
         self.lr_scheduler = lr_scheduler
         self.start_epoch = 0
+        self.hyperparams = hyperparams
         if seed is None and hyperparams is not None:
             seed = getattr(hyperparams, "seed", None)
         self.seed = seed_everything(seed)
@@ -463,6 +464,21 @@ class Trainer(ABC):
             self._aggregate_and_log(epoch, phase="val")
         return total_loss
 
+    def compute_loss(self, forward_outputs: Tuple[Any, ...]) -> torch.Tensor:
+        """
+        计算损失函数。
+        子类可以重写此方法以支持更复杂的损失计算（如多任务损失、对比损失等）。
+        
+        参数:
+            forward_outputs: forward_pass 的返回值元组
+
+        返回:
+            loss: 计算得到的标量损失张量
+        """
+        y_hat = forward_outputs[0]
+        y_label = forward_outputs[1]
+        return self.loss(y_hat, y_label)
+
     def run_train_batch(self, batch_data: Tuple[Any, ...]) -> float:
         """
         执行一个训练批次
@@ -479,7 +495,7 @@ class Trainer(ABC):
         # 前向传播
         y_hat, y_label, y_predict = self.forward_pass(batch_data)
         # 计算损失
-        loss = self.loss(y_hat, y_label)
+        loss = self.compute_loss((y_hat, y_label, y_predict))
         if hasattr(self, "_train_accum"):
             self._train_accum["y_hat"].append(y_hat.detach().cpu())
             self._train_accum["y_label"].append(y_label.detach().cpu())
@@ -505,8 +521,8 @@ class Trainer(ABC):
             # 前向传播
             y_hat, y_label, y_predict = self.forward_pass(batch_data)
             # 计算损失
-            loss = self.loss(y_hat, y_label)
-            # 累积到 epoch 容器（用于 epoch 级别的指标计算）
+            loss = self.compute_loss((y_hat, y_label, y_predict))
+            # 累积到 epoch 容器
             if hasattr(self, "_val_accum"):
                 self._val_accum["y_hat"].append(y_hat.detach().cpu())
                 self._val_accum["y_label"].append(y_label.detach().cpu())

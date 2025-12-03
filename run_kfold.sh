@@ -24,6 +24,8 @@ get_model_script() {
         echo "train_gikt.py"
     elif [ "$model" == "SQGKT" ]; then
         echo "train_sqgkt.py"
+    elif [ "$model" == "HGIKT" ]; then
+        echo "train_hgikt.py"
     else
         echo ""
     fi

@@ -26,6 +26,7 @@ function Get-ModelScript {
     switch ($Model) {
         "GIKT" { return "train_gikt.py" }
         "SQGKT" { return "train_sqgkt.py" }
+        "HGIKT" { return "train_hgikt.py" }
         Default { return "" }
     }
 }
