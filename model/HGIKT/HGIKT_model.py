@@ -298,33 +298,35 @@ class GeneralInteraction(nn.Module):
 class GatedFusion(nn.Module):
     """门控融合（Gated Fusion）模块
 
-    输入两路特征 h1, h2（形状可以是 [N, D] 或 [B, S, D]），先拼接再通过门控自适应融合：
-        m = [h1; h2]
-        z = sigmoid(MLP(m))
-        p = proj(m)
-        out = z * p + (1 - z) * h1
-
-    该模块轻量、易训练且不改变原始卷积实现。
+    采用对称结构融合两个视图的特征，使模型能自适应地从两个图中选择或融合信息。
     """
 
     def __init__(self, dim: int):
         super(GatedFusion, self).__init__()
         self.dim = dim
-        # 门网络：2D -> D -> D -> sigmoid
+        
         self.gate = nn.Sequential(
             nn.Linear(2 * dim, dim),
             nn.Tanh(),
             nn.Linear(dim, dim),
             nn.Sigmoid(),
         )
-        # 投影网络：将拼接的 2D 映射回 D
-        self.proj = nn.Linear(2 * dim, dim)
+        
+        # 两个视图的独立变换层，增强特征适应性
+        self.proj1 = nn.Linear(dim, dim)
+        self.proj2 = nn.Linear(dim, dim)
 
     def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        m = torch.cat([h1, h2], dim=-1)
+        # 变换特征
+        h1_trans = self.proj1(h1)
+        h2_trans = self.proj2(h2)
+        
+        # 计算门控权重
+        m = torch.cat([h1_trans, h2_trans], dim=-1)
         z = self.gate(m)
-        p = self.proj(m)
-        return z * p + (1.0 - z) * h1
+        
+        # 加权融合
+        return z * h1_trans + (1.0 - z) * h2_trans
 
 class HGIKT(nn.Module):
     r"""HGIKT主模型"""
@@ -384,12 +386,6 @@ class HGIKT(nn.Module):
         )
         self.fc_next_feature = Linear(
             self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
-        )
-
-        self.question_hyper_conv = Linear(
-            in_channels=2 * self.embedding_dim,
-            out_channels=self.embedding_dim,
-            weight_initializer="uniform",
         )
 
         # LSTM层
@@ -467,16 +463,10 @@ class HGIKT(nn.Module):
             hetero_graph.edge_index_dict,
         )["question"]
 
-        # 拼接两种图卷积结果，用concat实现
+        # 使用门控融合模块融合两种图卷积结果
         # question_hyper_conv: [num_questions, embedding_dim]
-        # question_conv: [num_questions, embedding_dim]
-        question_conv = torch.cat(
-            [question_hyper_conv, question_gnn_conv], dim=-1
-        )  # [num_questions, 2*embedding_dim]
-        # 使用线性变换将拼接后的维度映射回 embedding_dim
-        question_conv = F.leaky_relu(self.question_hyper_conv(
-            question_conv
-        ))  # [num_questions, embedding_dim]
+        # question_gnn_conv: [num_questions, embedding_dim]
+        question_conv = self.fuse(question_hyper_conv, question_gnn_conv)  # [num_questions, embedding_dim]
 
         # 按照用户序列索引获取对应的问题节点表示
         # 扩展 user_sequence 以匹配 question_conv 的维度
