@@ -118,14 +118,13 @@ class HGIKTModelData(ModelData):
         else:
             G = DV2 * H * W * invDE * HT * DV2  #公式G = Dv^-1/2 * H * W * De^-1 * H.T * Dv^-1/2 归一化矩阵？
             G = self.sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(G)) #将矩阵G转为torch中的稀疏张量
-            # G = torch.Tensor(G)
             return G
 
 
     def sparse_mx_to_torch_sparse_tensor(self, sparse_mx):
         """Convert a scipy sparse matrix to a torch sparse tensor.把一个sparse matrix转为torch中的稀疏张量"""
         sparse_mx = sparse_mx.tocoo().astype(np.float32)
-        indices = torch.from_numpy(np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
-        values = torch.from_numpy(sparse_mx.data)
-        shape = torch.Size(sparse_mx.shape)
-        return torch.sparse.FloatTensor(indices, values, shape) 
+        indices = torch.tensor(np.stack([sparse_mx.row, sparse_mx.col]), dtype=torch.long)
+        values = torch.tensor(sparse_mx.data, dtype=torch.float32)
+        return torch.sparse_coo_tensor(indices, values, sparse_mx.shape).coalesce()
+    
