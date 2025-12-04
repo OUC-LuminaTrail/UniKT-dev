@@ -18,7 +18,7 @@ class HGIKTTrainer(Trainer):
         data_src=None,
     ):
         # 构建数据
-        from model.HGIKT.HGIKT_data import HGIKTModelData
+        from model.HGIKT import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
         train_data, val_data, self.hypergraph, self.hetero_graph = (

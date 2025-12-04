@@ -19,7 +19,7 @@ class GIKTTrainer(Trainer):
     ):
         seed_value = seed_everything(getattr(args, "seed", None))
         # 构建数据
-        from model.GIKT.GIKT_data import GIKTModelData
+        from model.GIKT import GIKTModelData
 
         model_data = GIKTModelData(data_src)
         train_data, val_data, self.graph = model_data.prepare_data(args)

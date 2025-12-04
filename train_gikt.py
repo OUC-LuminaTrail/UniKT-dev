@@ -110,7 +110,7 @@ def parse_args():
 def main():
     """主训练函数"""
     args = parse_args()
-    from model.GIKT.GIKT_trainer import GIKTTrainer
+    from model.GIKT import GIKTTrainer
     from utility.data_process import Assistments2009Data
     from utility.data_process import Assistments2012Data
     from utility.data_process import Assistments2017Data

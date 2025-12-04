@@ -133,7 +133,7 @@ def parse_args():
 def main():
     """主训练函数"""
     args = parse_args()
-    from model.SQGKT.SQGKT_trainer import SQGKTTrainer
+    from model.SQGKT import SQGKTTrainer
     from utility.data_process import Assistments2009Data
     from utility.data_process import Assistments2012Data
     from utility.data_process import Assistments2017Data

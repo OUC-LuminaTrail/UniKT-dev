@@ -58,7 +58,7 @@ class SQGKTTrainer(Trainer):
         )
 
     def init_model(self, args, data_src):
-        from model.SQGKT.SQGKT_model import SQGKT
+        from model.SQGKT import SQGKT
 
         print("Initializing SQGKT model...")
         model = SQGKT(args, data_src.get_metadata())

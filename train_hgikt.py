@@ -115,7 +115,7 @@ def main():
     args = parse_args()
     import torch
     import numpy
-    from model.HGIKT.HGIKT_trainer import   HGIKTTrainer
+    from model.HGIKT import HGIKTTrainer
     from utility.data_process import Assistments2009Data
     from utility.data_process import Assistments2012Data
     from utility.data_process import Assistments2017Data
