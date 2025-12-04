@@ -1,0 +1,82 @@
+[
+  {
+    "name": "lstm_hidden_dim",
+    "type": "int",
+    "low": 64,
+    "high": 256,
+    "log": true,
+    "default": 100
+  },
+  {
+    "name": "embedding_dim",
+    "type": "int",
+    "low": 64,
+    "high": 256,
+    "log": true,
+    "default": 100
+  },
+  {
+    "name": "lstm_layers",
+    "type": "int",
+    "low": 1,
+    "high": 4,
+    "default": 2
+  },
+  {
+    "name": "dropout",
+    "type": "float",
+    "low": 0.1,
+    "high": 0.6,
+    "default": 0.4
+  },
+  {
+    "name": "n_hop",
+    "type": "int",
+    "low": 1,
+    "high": 5,
+    "default": 3
+  },
+  {
+    "name": "heads",
+    "type": "int",
+    "low": 1,
+    "high": 8,
+    "default": 2
+  },
+  {
+    "name": "history_neighbour",
+    "type": "int",
+    "low": 3,
+    "high": 10,
+    "default": 5
+  },
+  {
+    "name": "att_bound",
+    "type": "float",
+    "low": 0.0,
+    "high": 0.5,
+    "default": 0.2
+  },
+  {
+    "name": "lr",
+    "type": "float",
+    "low": 0.0001,
+    "high": 0.01,
+    "log": true,
+    "default": 0.001
+  },
+  {
+    "name": "weight_decay",
+    "type": "float",
+    "low": 0.000001,
+    "high": 0.001,
+    "log": true,
+    "default": 0.0001
+  },
+  {
+    "name": "batch_size",
+    "type": "categorical",
+    "choices": [32, 64, 128, 256],
+    "default": 128
+  }
+]

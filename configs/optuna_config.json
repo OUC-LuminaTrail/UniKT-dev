@@ -1,0 +1,20 @@
+{
+  "sampler": "tpe",
+  "sampler_kwargs": {
+    "seed": 42,
+    "n_startup_trials": 10
+  },
+  "pruner": "median",
+  "pruner_kwargs": {
+    "n_startup_trials": 5,
+    "n_warmup_steps": 10
+  },
+  "n_trials": 100,
+  "n_jobs": 1,
+  "timeout": null,
+  "directions": ["maximize"],
+  "study_name": "gikt_hyperparameter_search",
+  "db_url": null,
+  "save_dir": "./optuna_results",
+  "verbose": 1
+}
