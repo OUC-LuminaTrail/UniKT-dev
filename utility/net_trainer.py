@@ -288,6 +288,7 @@ class Trainer(ABC):
             callbacks.append(LarkCallback(webhook_url=lark_webhook, secret=lark_secret))
 
         swanlab.init(
+            workspace=os.getenv("SWANLAB_WORKSPACE", None),
             project_name=project_name,
             experiment_name=experiment_name,
             config=self.hyperparam_manager.get_hyperparameters_dict(),
