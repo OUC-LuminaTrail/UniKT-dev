@@ -567,12 +567,12 @@ class Trainer(ABC):
         acc = accuracy_score(y_label, y_pred)
         self.log_metric(f"{prefix}ACC-epoch", acc, epoch)
         # AUC
-        auc = None
+        auc = 0.0 # 默认值
         try:
             auc = roc_auc_score(y_label, y_hat)
             self.log_metric(f"{prefix}AUC-epoch", auc, epoch)
         except ValueError:
-            auc = None
+            auc = 0.0
         # RMSE
         rmse = root_mean_squared_error(y_label, y_hat)
         self.log_metric(f"{prefix}RMSE-epoch", rmse, epoch)
@@ -595,22 +595,32 @@ class Trainer(ABC):
 
     def _select_monitor_value(
         self, metrics: dict, val_loss: float | None
-    ) -> float | None:
+    ) -> float:
         """根据配置选择监控指标的值。"""
         name = self._monitor_name()
+        value = None
         if name == "loss":
-            return float(val_loss) if val_loss is not None else None
-        if name in metrics and metrics[name] is not None:
-            return float(metrics[name])
-        # 回退策略：优先 auc -> acc -> -rmse
-        if metrics.get("auc") is not None:
-            return float(metrics["auc"])
-        if metrics.get("acc") is not None:
-            return float(metrics["acc"])
-        if metrics.get("rmse") is not None:
-            # 如果要求最小化但后续比较使用 max，可在配置中选择 'min'
-            return float(metrics["rmse"])
-        return None
+            value = float(val_loss) if val_loss is not None else None
+        elif name in metrics:
+            value = metrics[name]
+
+        # 回退策略
+        if value is None:
+            if metrics.get("auc") is not None:
+                value = float(metrics["auc"])
+            elif metrics.get("acc") is not None:
+                value = float(metrics["acc"])
+            elif metrics.get("rmse") is not None:
+                value = float(metrics["rmse"])
+        
+        # 如果仍然是 None，返回一个极差的值以避免 EarlyStopping 崩溃
+        if value is None:
+            # 如果是 loss 或 rmse (min 模式)，返回 inf
+            # 如果是 auc 或 acc (max 模式)，返回 -inf
+            if name in ["loss", "rmse"]:
+                return float("inf")
+            return float("-inf")
+        return float(value)
 
     def _save_best_model_checkpoint(self, metric: float, epoch: int):
         r"""
@@ -621,7 +631,27 @@ class Trainer(ABC):
             - epoch: 当前轮数
         """
         checkpoint_path = os.path.join(self.log_dir, "best_model.pth")
-        if not hasattr(self, "_best_metric") or metric > self._best_metric:
+        
+        # 确定比较模式 (min 或 max)
+        mode = "max"
+        if self.early_stopping:
+            mode = self.early_stopping.cfg.mode
+        else:
+            # 默认推断
+            name = self._monitor_name()
+            if name in ["rmse", "loss"]:
+                mode = "min"
+        
+        is_better = False
+        if not hasattr(self, "_best_metric"):
+            is_better = True
+        else:
+            if mode == "max":
+                is_better = metric > self._best_metric
+            else:
+                is_better = metric < self._best_metric
+
+        if is_better:
             self._best_metric = metric
             print(
                 f"Saving best model at epoch {epoch+1} with {self._monitor_name()} {metric:.4f}"
