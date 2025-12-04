@@ -116,10 +116,10 @@ def main():
     import torch
     import numpy
     from model.HGIKT.HGIKT_trainer import   HGIKTTrainer
-    from utility.data_process.assist09 import Assistments2009Data
-    from utility.data_process.assist12 import Assistments2012Data
-    from utility.data_process.assist17 import Assistments2017Data
-    from utility.data_process.ednet_kt1 import EdNetKT1Data
+    from utility.data_process import Assistments2009Data
+    from utility.data_process import Assistments2012Data
+    from utility.data_process import Assistments2017Data
+    from utility.data_process import EdNetKT1Data
 
     # 设置随机种子
     torch.manual_seed(args.seed)

@@ -111,10 +111,10 @@ def main():
     """主训练函数"""
     args = parse_args()
     from model.GIKT.GIKT_trainer import GIKTTrainer
-    from utility.data_process.assist09 import Assistments2009Data
-    from utility.data_process.assist12 import Assistments2012Data
-    from utility.data_process.assist17 import Assistments2017Data
-    from utility.data_process.ednet_kt1 import EdNetKT1Data
+    from utility.data_process import Assistments2009Data
+    from utility.data_process import Assistments2012Data
+    from utility.data_process import Assistments2017Data
+    from utility.data_process import EdNetKT1Data
     
     # 构建数据
     print("Building datasets...")
