@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
-import math
 from torch_geometric.nn import HeteroConv, Linear, TransformerConv
 from torch.nn import functional as F
-from torch.nn.parameter import Parameter
+from dhg.nn import HGNNConv
 
 
 class GNN_QS(nn.Module):
@@ -56,50 +55,44 @@ class GNN_QS(nn.Module):
 
 
 class HGNN(nn.Module):
-    def __init__(self, in_ch, n_hid, n_class):
+    """基于dhg框架的超图神经网络
+
+    使用dhg.nn.HGNNConv实现双层超图卷积，与原始实现语义一致。
+    
+    数学公式：
+        X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
+    
+    其中：
+        - X 是输入顶点特征矩阵
+        - H 是超图关联矩阵
+        - W_e 是超边权重对角矩阵（默认为单位矩阵）
+        - D_v 是顶点度数对角矩阵
+        - D_e 是超边度数对角矩阵
+        - Θ 是可学习参数
+    """
+
+    def __init__(self, in_ch, n_hid, n_class, dropout=0.0):
         super(HGNN, self).__init__()
-        self.hgc1 = HGNN_conv(in_ch, n_hid)  # 单层卷积，聚合直接邻居问题特征
-        self.hgc2 = HGNN_conv(n_hid, n_class)  # 第二层卷积，聚合间接邻居的问题特征
+        # 第一层卷积：聚合直接邻居问题特征
+        # is_last=False 表示使用激活函数和dropout
+        self.hgc1 = HGNNConv(in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False)
+        # 第二层卷积：聚合间接邻居的问题特征
+        # is_last=True 表示跳过内置激活和dropout，在forward中手动应用ReLU（与原实现一致）
+        self.hgc2 = HGNNConv(n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True)
 
-    def forward(self, x, G):
-        x1 = F.relu(self.hgc1(x, G))
-        x2 = F.relu(self.hgc2(x1, G))
+    def forward(self, x, hg):
+        """前向传播
+        
+        Args:
+            x: 输入特征矩阵 [num_vertices, in_ch]
+            hg: dhg.Hypergraph 超图结构
+            
+        Returns:
+            输出特征矩阵 [num_vertices, n_class]
+        """
+        x1 = self.hgc1(x, hg)  # 第一层使用内置ReLU和dropout
+        x2 = F.relu(self.hgc2(x1, hg))  # 第二层手动应用ReLU（与原实现一致）
         return x2
-
-
-class HGNN_conv(nn.Module):  # Inherited from module
-    #   in_features: size of each input sample
-    #   out_features: size of each output sample
-    def __init__(self, in_ft, out_ft, bias=True):
-        super(HGNN_conv, self).__init__()
-
-        # Convert a non trainable type Tensor to trainable type Parameter
-        # Parameter definition
-        self.weight = Parameter(torch.Tensor(in_ft, out_ft))
-        if bias:
-            self.bias = Parameter(torch.Tensor(out_ft))
-        else:
-            self.register_parameter("bias", None)
-        # Parameter initialization function
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
-
-    # forward function
-    def forward(self, x: torch.Tensor, G: torch.Tensor):
-        x = x.matmul(
-            self.weight
-        )  # 对原始题目特征进行线性变换（矩阵乘法，线性变换，可学习矩阵）
-        if self.bias is not None:
-            x = x + self.bias  # 加上偏置项（特征偏置）
-        x = G.matmul(
-            x
-        )  # 超图卷积操作，用G聚合邻居特征（G中共享知识点的题目信息聚合）关注不同题目的题目特征）
-        return x
 
 
 class HistoryRecap(nn.Module):
@@ -298,33 +291,35 @@ class GeneralInteraction(nn.Module):
 class GatedFusion(nn.Module):
     """门控融合（Gated Fusion）模块
 
-    输入两路特征 h1, h2（形状可以是 [N, D] 或 [B, S, D]），先拼接再通过门控自适应融合：
-        m = [h1; h2]
-        z = sigmoid(MLP(m))
-        p = proj(m)
-        out = z * p + (1 - z) * h1
-
-    该模块轻量、易训练且不改变原始卷积实现。
+    采用对称结构融合两个视图的特征，使模型能自适应地从两个图中选择或融合信息。
     """
 
     def __init__(self, dim: int):
         super(GatedFusion, self).__init__()
         self.dim = dim
-        # 门网络：2D -> D -> D -> sigmoid
+        
         self.gate = nn.Sequential(
             nn.Linear(2 * dim, dim),
             nn.Tanh(),
             nn.Linear(dim, dim),
             nn.Sigmoid(),
         )
-        # 投影网络：将拼接的 2D 映射回 D
-        self.proj = nn.Linear(2 * dim, dim)
+        
+        # 两个视图的独立变换层，增强特征适应性
+        self.proj1 = nn.Linear(dim, dim)
+        self.proj2 = nn.Linear(dim, dim)
 
     def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        m = torch.cat([h1, h2], dim=-1)
+        # 变换特征
+        h1_trans = self.proj1(h1)
+        h2_trans = self.proj2(h2)
+        
+        # 计算门控权重
+        m = torch.cat([h1_trans, h2_trans], dim=-1)
         z = self.gate(m)
-        p = self.proj(m)
-        return z * p + (1.0 - z) * h1
+        
+        # 加权融合
+        return z * h1_trans + (1.0 - z) * h2_trans
 
 class HGIKT(nn.Module):
     r"""HGIKT主模型"""
@@ -364,8 +359,9 @@ class HGIKT(nn.Module):
         self.hgnn_conv = HGNN(
             in_ch=args.embedding_dim,  # 输入通道数
             n_hid=args.embedding_dim,  # 隐藏层通道数
-            n_class=args.embedding_dim,
-        )  # 输出通道数
+            n_class=args.embedding_dim,  # 输出通道数
+            dropout=self.dropout,  # Dropout概率
+        )
 
         # GNN层
         self.gnn_conv = GNN_QS(
@@ -384,12 +380,6 @@ class HGIKT(nn.Module):
         )
         self.fc_next_feature = Linear(
             self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
-        )
-
-        self.question_hyper_conv = Linear(
-            in_channels=2 * self.embedding_dim,
-            out_channels=self.embedding_dim,
-            weight_initializer="uniform",
         )
 
         # LSTM层
@@ -467,16 +457,10 @@ class HGIKT(nn.Module):
             hetero_graph.edge_index_dict,
         )["question"]
 
-        # 拼接两种图卷积结果，用concat实现
+        # 使用门控融合模块融合两种图卷积结果
         # question_hyper_conv: [num_questions, embedding_dim]
-        # question_conv: [num_questions, embedding_dim]
-        question_conv = torch.cat(
-            [question_hyper_conv, question_gnn_conv], dim=-1
-        )  # [num_questions, 2*embedding_dim]
-        # 使用线性变换将拼接后的维度映射回 embedding_dim
-        question_conv = F.leaky_relu(self.question_hyper_conv(
-            question_conv
-        ))  # [num_questions, embedding_dim]
+        # question_gnn_conv: [num_questions, embedding_dim]
+        question_conv = self.fuse(question_hyper_conv, question_gnn_conv)  # [num_questions, embedding_dim]
 
         # 按照用户序列索引获取对应的问题节点表示
         # 扩展 user_sequence 以匹配 question_conv 的维度

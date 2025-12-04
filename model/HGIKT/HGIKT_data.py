@@ -1,6 +1,6 @@
 import torch
 import numpy as np
-import scipy.sparse as sp
+from dhg import Hypergraph
 from utility.data_process.data_utility import DataSource, ModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
@@ -47,8 +47,8 @@ class HGIKTModelData(ModelData):
         # 使用工具库的 build_data_matrix 直接从已处理数据生成二值矩阵，值为 0/1
         H = self.build_data_matrix(("question", "has", "skill"), value_type="binary")
 
-        # 构建超图
-        hypergraph = self.generate_G_from_H(H, variable_weight=False)
+        # 使用 dhg 框架构建超图
+        hypergraph = self.build_dhg_hypergraph(H)
 
         # 构建异构图
         hetero_graph = self.build_hetero_graph(
@@ -89,42 +89,45 @@ class HGIKTModelData(ModelData):
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
         return train_dataloader, val_dataloader, hypergraph, hetero_graph
+
+    def build_dhg_hypergraph(self, H):
+        """使用 dhg 框架从关联矩阵 H 构建超图
         
-    def generate_G_from_H(self, H, variable_weight=False):  #从关联矩阵H生成超图G
+        其中：
+            - H 是关联矩阵（题目 × 知识点）
+            - 每个知识点作为一个超边，连接拥有该知识点的所有题目
+            - W_e 默认为单位矩阵（超边权重为1）
+
+        Args:
+            H: 关联矩阵，形状为 (num_questions, num_skills)
+               H[i,j] = 1 表示题目 i 包含知识点 j
+
+        Returns:
+            dhg.Hypergraph: dhg 框架的超图对象
         """
-        calculate G from hypgraph incidence matrix H
-        :param H: hypergraph incidence matrix H
-        :param variable_weight: whether the weight of hyperedge is variable
-        :return: G
-        """
-        H = np.array(H)
-        n_edge = H.shape[1] # Number of columns of matrix = number of hyperedge 知识点的数量（列数）
-        # the weight of the hyperedge
-        W = np.ones(n_edge)  #获得一个全1的矩阵
-        # the degree of the node
-        DV = np.sum(H *W, axis=1)   #节点度（题目关联多少概念）
-        # the degree of the hyperedge
-        DE = np.sum(H, axis=0)     #超边度（知识点被多少题目关联）
-        invDE = np.asmatrix(np.diag(np.power(DE, float(-1))))
-        DV2 = np.asmatrix(np.diag(np.power(DV, -0.5)))
-        W = np.asmatrix(np.diag(W))
-        H = np.asmatrix(H)
-        HT = H.T
+        from tqdm import tqdm
 
-        if variable_weight:
-            DV2_H = DV2 * H
-            invDE_HT_DV2 = invDE * HT * DV2
-            return DV2_H, W, invDE_HT_DV2
-        else:
-            G = DV2 * H * W * invDE * HT * DV2  #公式G = Dv^-1/2 * H * W * De^-1 * H.T * Dv^-1/2 归一化矩阵？
-            G = self.sparse_mx_to_torch_sparse_tensor(sp.coo_matrix(G)) #将矩阵G转为torch中的稀疏张量
-            return G
+        num_questions = H.shape[0]  # 顶点数（题目数）
 
+        # 将关联矩阵转换为超边列表
+        rows, cols = np.nonzero(H)
 
-    def sparse_mx_to_torch_sparse_tensor(self, sparse_mx):
-        """Convert a scipy sparse matrix to a torch sparse tensor.把一个sparse matrix转为torch中的稀疏张量"""
-        sparse_mx = sparse_mx.tocoo().astype(np.float32)
-        indices = torch.tensor(np.stack([sparse_mx.row, sparse_mx.col]), dtype=torch.long)
-        values = torch.tensor(sparse_mx.data, dtype=torch.float32)
-        return torch.sparse_coo_tensor(indices, values, sparse_mx.shape).coalesce()
-    
+        # 按列（知识点）分组，每个知识点对应一个超边
+        # 使用字典收集每个超边（知识点）包含的顶点（题目）
+        edge_dict = {}
+        for question_idx, skill_idx in tqdm(zip(rows, cols), total=len(rows), desc="Building hyperedges"):
+            if skill_idx not in edge_dict:
+                edge_dict[skill_idx] = []
+            edge_dict[skill_idx].append(int(question_idx))
+        
+        # 转换为超边列表（过滤空超边）
+        e_list = [vertices for vertices in edge_dict.values() if len(vertices) > 0]
+
+        # 使用 dhg 框架创建超图
+        hypergraph = Hypergraph(num_v=num_questions, e_list=e_list)
+
+        print("Hypergraph constructed:")
+        print(f"  - Number of vertices (questions): {hypergraph.num_v}")
+        print(f"  - Number of hyperedges (skills): {hypergraph.num_e}")
+
+        return hypergraph
