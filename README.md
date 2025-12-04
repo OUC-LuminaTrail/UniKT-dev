@@ -19,10 +19,10 @@
 conda create -n python=3.10
 
 # CPU
-uv pip install torch==1.13.1+cpu dhg torch_geometric pyg-lib pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cpu -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
+uv pip install torch==1.13.1+cpu dhg torch_geometric pyg-lib optuna pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cpu -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
 
 # CUDA>=11.7
-uv pip install torch==1.13.1+cu117 dhg torch_geometric pyg-lib pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cu117 -f https://data.pyg.org/whl/torch-1.13.1+cu117.html
+uv pip install torch==1.13.1+cu117 dhg torch_geometric pyg-lib optuna pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cu117 -f https://data.pyg.org/whl/torch-1.13.1+cu117.html
 ```
 
 ### 配置说明
