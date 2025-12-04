@@ -92,9 +92,6 @@ class HGIKTModelData(ModelData):
 
     def build_dhg_hypergraph(self, H):
         """使用 dhg 框架从关联矩阵 H 构建超图
-
-        dhg 的 Hypergraph 使用与原实现相同的 HGNN 卷积公式：
-            X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
         
         其中：
             - H 是关联矩阵（题目 × 知识点）
@@ -108,20 +105,17 @@ class HGIKTModelData(ModelData):
         Returns:
             dhg.Hypergraph: dhg 框架的超图对象
         """
-        import time
-        print("Start constructing hypergraph using dhg framework...")
-        t_start = time.time()
+        from tqdm import tqdm
 
         num_questions = H.shape[0]  # 顶点数（题目数）
 
         # 将关联矩阵转换为超边列表
-        # 使用 np.nonzero 一次性获取所有非零元素的索引，效率更高
         rows, cols = np.nonzero(H)
-        
+
         # 按列（知识点）分组，每个知识点对应一个超边
         # 使用字典收集每个超边（知识点）包含的顶点（题目）
         edge_dict = {}
-        for question_idx, skill_idx in zip(rows, cols):
+        for question_idx, skill_idx in tqdm(zip(rows, cols), total=len(rows), desc="Building hyperedges"):
             if skill_idx not in edge_dict:
                 edge_dict[skill_idx] = []
             edge_dict[skill_idx].append(int(question_idx))
@@ -132,9 +126,8 @@ class HGIKTModelData(ModelData):
         # 使用 dhg 框架创建超图
         hypergraph = Hypergraph(num_v=num_questions, e_list=e_list)
 
-        print(f"Hypergraph construction finished in {time.time() - t_start:.2f}s")
+        print("Hypergraph constructed:")
         print(f"  - Number of vertices (questions): {hypergraph.num_v}")
         print(f"  - Number of hyperedges (skills): {hypergraph.num_e}")
 
         return hypergraph
-    
