@@ -43,6 +43,24 @@ def build_parser():
         default=None,
         help="Override data URL for downloading (optional)",
     )
+    dl.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force re-download even if file already exists",
+    )
+    dl.add_argument(
+        "--max_retries",
+        type=int,
+        default=3,
+        help="Maximum number of download retries (default: 3)",
+    )
+    dl.add_argument(
+        "--num_threads",
+        type=int,
+        default=4,
+        help="Number of threads for parallel download (default: 4)",
+    )
     dl.set_defaults(func=cmd_download)
 
     # process subcommand
@@ -97,7 +115,18 @@ def cmd_download(args):
         )
 
     print(f"Downloading dataset {args.dataset} to {dp.data_folder}")
-    dp.fetch_data()
+    
+    # 获取下载参数
+    force_download = getattr(args, "force", False)
+    max_retries = getattr(args, "max_retries", 3)
+    num_threads = getattr(args, "num_threads", 4)
+    
+    # 调用 fetch_data 并传递参数
+    dp.fetch_data(
+        force_download=force_download,
+        max_retries=max_retries,
+        num_threads=num_threads
+    )
     # 持久化元信息
     dp.save_metadata()
     print(f"Download complete.")

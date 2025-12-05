@@ -58,13 +58,155 @@ class DataSource(ABC):
 
         self.add_metadata("random_seed", self.seed)
 
-    def fetch_data(self):
+    def _download_chunk(self, url, start, end, chunk_path, pbar, chunk_size=8192):
         """
-        下载数据
+        下载文件的一个块（用于多线程下载）
+        
+        参数:
+            url: 下载URL
+            start: 起始字节
+            end: 结束字节
+            chunk_path: 块文件保存路径
+            pbar: 进度条对象
+            chunk_size: 每次读取的块大小
+        """
+        import requests
+        
+        headers = {"Range": f"bytes={start}-{end}"}
+        response = requests.get(url, headers=headers, stream=True, timeout=60)
+        response.raise_for_status()
+        
+        with open(chunk_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=chunk_size):
+                if chunk:
+                    f.write(chunk)
+                    if pbar:
+                        pbar.update(len(chunk) / (1024 * 1024))
+    
+    def _download_with_requests(self, archive_path, num_threads, attempt, max_retries):
+        """
+        使用requests库下载文件（支持多线程）
+        
+        参数:
+            archive_path: 文件保存路径
+            num_threads: 线程数
+            attempt: 当前尝试次数
+            max_retries: 最大重试次数
+        """
+        import requests
+        from concurrent.futures import ThreadPoolExecutor
+        import tqdm
+        
+        # 首先发送HEAD请求检查服务器是否支持Range请求
+        head_response = requests.head(self.data_url, timeout=30)
+        head_response.raise_for_status()
+        
+        total_bytes = int(head_response.headers.get("content-length", 0))
+        accept_ranges = head_response.headers.get("accept-ranges", "none")
+        
+        # 如果服务器不支持Range或文件太小，使用单线程下载
+        if accept_ranges != "bytes" or total_bytes < 10 * 1024 * 1024:  # 小于10MB
+            if accept_ranges != "bytes":
+                print("Server does not support range requests, using single-threaded download")
+            self._download_single_thread(archive_path)
+            return
+        
+        # 多线程下载
+        total_mb = total_bytes / (1024 * 1024)
+        chunk_size = total_bytes // num_threads
+        
+        # 创建临时目录存储分块文件
+        temp_dir = archive_path + ".parts"
+        import os
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        try:
+            with tqdm.tqdm(
+                total=total_mb,
+                unit="MB",
+                unit_scale=False,
+                desc=f"Downloading (attempt {attempt}/{max_retries})",
+                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}, {rate_fmt}]",
+            ) as pbar:
+                # 创建下载任务
+                futures = []
+                with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    for i in range(num_threads):
+                        start = i * chunk_size
+                        end = start + chunk_size - 1 if i < num_threads - 1 else total_bytes - 1
+                        chunk_path = os.path.join(temp_dir, f"chunk_{i}")
+                        
+                        future = executor.submit(
+                            self._download_chunk,
+                            self.data_url,
+                            start,
+                            end,
+                            chunk_path,
+                            pbar
+                        )
+                        futures.append((i, future, chunk_path))
+                    
+                    # 等待所有任务完成
+                    for i, future, chunk_path in futures:
+                        future.result()  # 如果有异常会在这里抛出
+            
+            # 合并所有分块文件
+            print("Merging downloaded chunks...")
+            with open(archive_path, "wb") as outfile:
+                for i in range(num_threads):
+                    chunk_path = os.path.join(temp_dir, f"chunk_{i}")
+                    with open(chunk_path, "rb") as infile:
+                        import shutil
+                        shutil.copyfileobj(infile, outfile)
+            
+        finally:
+            # 清理临时文件
+            import shutil
+            if os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+    
+    def _download_single_thread(self, archive_path):
+        """
+        单线程下载文件
+        
+        参数:
+            archive_path: 文件保存路径
+        """
+        import requests
+        import tqdm
+        
+        with requests.get(self.data_url, stream=True, timeout=60) as r:
+            r.raise_for_status()
+            total_bytes = int(r.headers.get("content-length", 0))
+            total_mb = total_bytes / (1024 * 1024)
+            chunk_size = 8192
+            
+            with open(archive_path, "wb") as f:
+                with tqdm.tqdm(
+                    total=total_mb,
+                    unit="MB",
+                    unit_scale=False,
+                    desc="Downloading",
+                    bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}, {rate_fmt}]",
+                ) as pbar:
+                    for chunk in r.iter_content(chunk_size=chunk_size):
+                        if chunk:
+                            f.write(chunk)
+                            pbar.update(len(chunk) / (1024 * 1024))
+
+    def fetch_data(self, force_download=False, max_retries=3, num_threads=4):
+        """
+        下载数据（支持多线程下载、自动重试和强制覆盖）
+        
+        参数:
+            force_download: 是否强制重新下载（即使文件已存在）
+            max_retries: 最大重试次数
+            num_threads: 多线程下载的线程数（仅在支持Range请求时使用）
         """
         import os
         import shutil
         from pathlib import Path
+        import time
 
         try:
             import requests
@@ -74,7 +216,6 @@ class DataSource(ABC):
         import tarfile
         import zipfile
         import gzip
-        import tqdm
 
         if self.data_url is None:
             raise ValueError("Data URL is not provided.")
@@ -87,38 +228,46 @@ class DataSource(ABC):
             file_name = "downloaded_data"
         archive_path = os.path.join(self.data_folder, file_name)
 
-        # 如果文件已经存在则跳过下载
-        if not os.path.exists(archive_path):
-            print(f"Downloading data from {self.data_url}")
-            try:
-                if requests is not None:
-                    with requests.get(self.data_url, stream=True, timeout=60) as r:
-                        r.raise_for_status()
-                        total_bytes = int(r.headers.get("content-length", 0))
-                        total_mb = total_bytes / (1024 * 1024)
-                        chunk_size = 8192
-                        with open(archive_path, "wb") as f:
-                            with tqdm.tqdm(
-                                total=total_mb,
-                                unit="MB",
-                                unit_scale=False,
-                                desc="Downloading",
-                                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}, {rate_fmt}]",
-                            ) as pbar:
-                                for chunk in r.iter_content(chunk_size=chunk_size):
-                                    if chunk:
-                                        f.write(chunk)
-                                        pbar.update(len(chunk) / (1024 * 1024))
-                else:
-                    # urllib 回退
-                    urllib.request.urlretrieve(self.data_url, archive_path)
-            except Exception as e:
-                if os.path.exists(archive_path):
-                    os.remove(archive_path)
-                raise RuntimeError(f"Failed to download data: {e}")
-            print(f"Download finished: {archive_path}")
-        else:
+        # 检查是否需要下载
+        if os.path.exists(archive_path) and not force_download:
             print(f"Dataset already exists, skip downloading: {archive_path}")
+        else:
+            if force_download and os.path.exists(archive_path):
+                print(f"Force download enabled, removing existing file: {archive_path}")
+                os.remove(archive_path)
+            
+            print(f"Downloading data from {self.data_url}")
+            
+            # 尝试下载，支持重试
+            for attempt in range(max_retries):
+                try:
+                    if requests is not None:
+                        self._download_with_requests(
+                            archive_path, num_threads, attempt + 1, max_retries
+                        )
+                    else:
+                        # urllib 回退
+                        print("Using urllib as fallback (no multi-threading support)")
+                        urllib.request.urlretrieve(self.data_url, archive_path)
+                    
+                    print(f"Download finished: {archive_path}")
+                    break  # 下载成功，跳出重试循环
+                    
+                except Exception as e:
+                    # 清理失败的下载文件
+                    if os.path.exists(archive_path):
+                        os.remove(archive_path)
+                        print(f"Removed incomplete download: {archive_path}")
+                    
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** attempt  # 指数退避
+                        print(f"Download failed (attempt {attempt + 1}/{max_retries}): {e}")
+                        print(f"Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        raise RuntimeError(
+                            f"Failed to download data after {max_retries} attempts: {e}"
+                        )
 
         # 计算并保存 MD5
         archive_md5 = self.compute_md5(archive_path)
