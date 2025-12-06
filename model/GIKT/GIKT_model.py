@@ -374,7 +374,7 @@ class GIKT(nn.Module):
         # 历史回顾模块：采样历史邻居
         # question_emb: [B, S, E], next_q_emb: [B, S, E], lstm_output: [B, S, H]
         history_question_neighbors = self.history_recap(
-            question_emb, next_q_emb, question_emb, user_mask
+            question_emb, next_q_emb, q_trans, user_mask
         )  # history_question_neighbors: [B, S, M, H]
 
         # 构造学生相关状态集合：当前LSTM输出 + 历史邻居
