@@ -15,8 +15,10 @@
 
 ### 环境安装
 
+该环境配置命令只支持 Linux 系统。
+
 ```bash
-conda create -n python=3.10
+conda create -n ktexp python=3.10
 
 # CPU
 uv pip install torch==1.13.1+cpu dhg torch_geometric pyg-lib optuna pandas pyarrow swanlab python-dotenv --extra-index-url https://download.pytorch.org/whl/cpu -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
