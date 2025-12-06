@@ -64,7 +64,7 @@ class Assistments2017Data(DataSource):
                 # "skill",
                 # "problemId",
                 "problemType",
-                "assignmentId",
+                # "assignmentId",
                 "assistmentId",
                 # "startTime",
                 "endTime",
@@ -133,23 +133,24 @@ class Assistments2017Data(DataSource):
         # 重命名列
         data = data.rename(
             columns={
-                "studentId": "user_id",
-                "problemId": "question_id",
+                "studentId": "user",
+                "problemId": "question",
                 "correct": "label",
-                "skill": "skill_id",
+                "skill": "skill",
+                "assignmentId": "assignment",
             }
         )
         # 将技能列映射为唯一的整数ID
-        unique_skills = data["skill_id"].unique()
+        unique_skills = data["skill"].unique()
         skill_id_map = {skill: idx for idx, skill in enumerate(unique_skills)}
-        data["skill_id"] = data["skill_id"].map(skill_id_map)
+        data["skill"] = data["skill"].map(skill_id_map)
 
         # 按时间排序
-        data = data.sort_values(by=["user_id", "startTime"])
+        data = data.sort_values(by=["user", "startTime"])
         # 转换数据类型
-        data["user_id"] = data["user_id"].astype(int)
+        data["user"] = data["user"].astype(int)
         # 清除没有技能的问题
-        data = data[data["skill_id"].notna()]
+        data = data[data["skill"].notna()]
         # 清理label列中的异常值，只保留0和1
         data = data[data["label"].isin([0, 1])]
         # 重置索引
@@ -160,14 +161,15 @@ class Assistments2017Data(DataSource):
         )
         # 将问题ID和技能ID转换为连续整数
         data = DataSource.map_to_continuous_ids(
-            data, columns=["user_id", "question_id", "skill_id"]
+            data, columns=["user", "question", "skill", "assignment"]
         )
         self.processed_data = data
 
         # 保存元信息
-        self.add_metadata("num_users", data["user_id"].nunique())
-        self.add_metadata("num_questions", data["question_id"].nunique())
-        self.add_metadata("num_skills", data["skill_id"].nunique())
+        self.add_metadata("num_users", data["user"].nunique())
+        self.add_metadata("num_questions", data["question"].nunique())
+        self.add_metadata("num_skills", data["skill"].nunique())
+        self.add_metadata("num_assignments", data["assignment"].nunique())
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
         self.add_metadata("columns", data.columns.tolist())

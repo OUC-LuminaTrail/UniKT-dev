@@ -103,26 +103,26 @@ class SQGKTModelData(ModelData):
         # 1. 计算用户能力因子（每个用户的平均正确率）
         print("Computing ability factors...")
         
-        # 确保 user_id 和 question_id 是整数
-        user_ids = data["user_id"].astype(int).values
-        question_ids = data["question_id"].astype(int).values
+        # 确保 user 和 question 是整数
+        user_ids = data["user"].astype(int).values
+        question_ids = data["question"].astype(int).values
 
         # 计算每个用户的平均正确率
-        user_ability_series = data.groupby("user_id")["label"].mean()
+        user_ability_series = data.groupby("user")["label"].mean()
         # 映射回每个交互，填充默认值 0.5
-        ability_factors = data["user_id"].map(user_ability_series).fillna(0.5).values
+        ability_factors = data["user"].map(user_ability_series).fillna(0.5).values
 
         # 2. 计算问题的尝试次数和提示次数统计
         if "attempt_count" in data.columns and "hint_count" in data.columns:
             print("Computing attempt and hint factors from data...")
             
             # 计算每个问题的平均尝试次数和提示次数
-            question_attempt_mean = data.groupby("question_id")["attempt_count"].mean()
-            question_hint_mean = data.groupby("question_id")["hint_count"].mean()
+            question_attempt_mean = data.groupby("question")["attempt_count"].mean()
+            question_hint_mean = data.groupby("question")["hint_count"].mean()
 
             # 映射到每个交互
-            mean_attempts = data["question_id"].map(question_attempt_mean).fillna(1).values
-            mean_hints = data["question_id"].map(question_hint_mean).fillna(0).values
+            mean_attempts = data["question"].map(question_attempt_mean).fillna(1).values
+            mean_hints = data["question"].map(question_hint_mean).fillna(0).values
             
             attempt_counts = data["attempt_count"].fillna(1).values
             hint_counts = data["hint_count"].fillna(0).values
