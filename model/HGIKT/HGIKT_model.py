@@ -23,6 +23,7 @@ class GNN_QS(nn.Module):
         for _ in range(n_hop):
             conv = HeteroConv(
                 {
+                    # 问题技能图
                     ("question", "has", "skill"): TransformerConv(
                         (embedding_dim, embedding_dim),
                         embedding_dim,
@@ -37,6 +38,7 @@ class GNN_QS(nn.Module):
                         heads=heads,
                         concat=False,
                     ),
+                    # 技能作业图
                     ("skill", "related_to", "assignment"): TransformerConv(
                         (embedding_dim, embedding_dim),
                         embedding_dim,
@@ -51,20 +53,7 @@ class GNN_QS(nn.Module):
                         heads=heads,
                         concat=False,
                     ),
-                    ("question", "contains", "assignment"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                    ("assignment", "rev_contains", "question"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
+                    # 问题模板图
                     ("question", "belongs_to", "template"): TransformerConv(
                         (embedding_dim, embedding_dim),
                         embedding_dim,
