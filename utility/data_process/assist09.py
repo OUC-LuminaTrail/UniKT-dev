@@ -103,7 +103,7 @@ class Assistments2009Data(DataSource):
         )
         # 将数据重编码为连续整数
         data = DataSource.map_to_continuous_ids(
-            data, columns=["user", "question", "skill", "assignment"]
+            data, columns=["user", "question", "skill", "assignment", "template"]
         )
         # 安装时间排序
         data = data.sort_values(by=["user", "order_id"])

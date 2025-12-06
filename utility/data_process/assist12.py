@@ -64,6 +64,7 @@ class Assistments2012Data(DataSource):
                 "correct": "label",
                 "assignment_id": "assignment",
                 "skill_id": "skill",
+                "template_id": "template",
             },
             inplace=True,
         )
@@ -84,7 +85,7 @@ class Assistments2012Data(DataSource):
         )
         # 将问题ID和技能ID转换为连续整数
         data = DataSource.map_to_continuous_ids(
-            data, columns=["user", "question", "skill", "assignment"]
+            data, columns=["user", "question", "skill", "assignment", "template"]
         )
 
         self.processed_data = data
