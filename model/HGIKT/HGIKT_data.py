@@ -62,6 +62,16 @@ class HGIKTModelData(ModelData):
                     "skill",
                     "related_to",
                     "assignment",
+                ),
+                (
+                    "assignment",
+                    "contains",
+                    "question",
+                ),
+                (
+                    "question",
+                    "belongs_to",
+                    "template",
                 )
             ]
         )
