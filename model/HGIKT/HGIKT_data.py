@@ -123,11 +123,59 @@ class HGIKTModelData(ModelData):
         # 转换为超边列表（过滤空超边）
         e_list = [vertices for vertices in edge_dict.values() if len(vertices) > 0]
 
+        # 额外添加同一作业内的问题超边
+        assignment_edges = self._build_assignment_hyperedges(num_questions)
+        if assignment_edges:
+            e_list.extend(assignment_edges)
+            print(f"  - Assignment hyperedges added: {len(assignment_edges)}")
+        else:
+            print("  - Assignment hyperedges added: 0 (column missing or no valid groups)")
+
         # 使用 dhg 框架创建超图
         hypergraph = Hypergraph(num_v=num_questions, e_list=e_list)
 
         print("Hypergraph constructed:")
         print(f"  - Number of vertices (questions): {hypergraph.num_v}")
-        print(f"  - Number of hyperedges (skills): {hypergraph.num_e}")
+        print(f"  - Number of hyperedges (skills + assignments): {hypergraph.num_e}")
 
         return hypergraph
+
+    def _build_assignment_hyperedges(self, num_questions: int):
+        """构建基于 assignment_id 的超边，将同一作业的题目节点连接起来"""
+        data = self.data_src.get_processed_data()
+
+        # 支持不同命名约定
+        assignment_col = None
+        for candidate in ("assignment_id", "assignmentId"):
+            if candidate in data.columns:
+                assignment_col = candidate
+                break
+
+        if assignment_col is None:
+            return []
+
+        question_col = None
+        for candidate in ("question_id", "problem_id"):
+            if candidate in data.columns:
+                question_col = candidate
+                break
+
+        if question_col is None:
+            return []
+
+        # 分组汇总同一作业内的题目
+        grouped = (
+            data[[assignment_col, question_col]]
+            .dropna()
+            .groupby(assignment_col)[question_col]
+            .unique()
+        )
+
+        assignment_edges = []
+        for assignment_id, questions in grouped.items():
+            # 过滤无效或重复的题目索引
+            vertices = [int(q) for q in questions if 0 <= int(q) < num_questions]
+            if len(vertices) > 1:
+                assignment_edges.append(vertices)
+
+        return assignment_edges
