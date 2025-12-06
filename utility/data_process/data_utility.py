@@ -517,7 +517,7 @@ class DataSource(ABC):
         data["fold"] = -1
 
         # 获取唯一的用户ID
-        unique_users = data["user_id"].unique()
+        unique_users = data["user"].unique()
         user_to_fold = {}
 
         # 对用户ID进行KFold划分
@@ -530,7 +530,7 @@ class DataSource(ABC):
                 user_to_fold[user] = fold_idx
 
         # 为每个用户的所有行分配对应的fold值
-        data["fold"] = data["user_id"].map(user_to_fold)
+        data["fold"] = data["user"].map(user_to_fold)
 
         # 更新processed_data
         self.processed_data = data
@@ -547,14 +547,14 @@ class DataSource(ABC):
         """
         # 过滤答题次数少于min_seq_len的学生
         if min_seq_len > 1:
-            is_valid_user = data.groupby("user_id").size() >= min_seq_len
+            is_valid_user = data.groupby("user").size() >= min_seq_len
             valid_user_ids = is_valid_user[is_valid_user].index.tolist()
-            data = data[data["user_id"].isin(valid_user_ids)].reset_index(drop=True)
+            data = data[data["user"].isin(valid_user_ids)].reset_index(drop=True)
 
         # 答题次数多于max_seq_len的学生将多余的记录删除
         if max_seq_len is not None:
             # 保留每个用户的最后max_seq_len条记录
-            data = data.groupby("user_id", group_keys=False).tail(max_seq_len)
+            data = data.groupby("user", group_keys=False).tail(max_seq_len)
             data = data.reset_index(drop=True)
         return data
 
@@ -641,7 +641,7 @@ class ModelData:
             total=data.shape[0],
             desc=f"Mapping users to fold {fold_idx}",
         ):
-            user_idx = row.user_id
+            user_idx = row.user
             fold_label = row.fold
             if user_idx < num_users:
                 user_folds[user_idx] = fold_label
@@ -792,8 +792,8 @@ class ModelData:
             data.itertuples(), total=data.shape[0], desc="Building user sequences"
         ):
             # 获取用户ID、问题ID和作答正确与否
-            user_idx = row.user_id
-            question_idx = row.question_id
+            user_idx = row.user
+            question_idx = row.question
             label = row.label
             # 如果当前用户的序列长度未达到最大长度，则添加数据
             if num_sequence[user_idx] < max_seq_len:
@@ -845,9 +845,9 @@ class ModelData:
 
         # 节点类型到列名和元数据键的映射
         node_type_mapping = {
-            "user": ("user_id", "num_users"),
-            "question": ("question_id", "num_questions"),
-            "skill": ("skill_id", "num_skills"),
+            "user": ("user", "num_users"),
+            "question": ("question", "num_questions"),
+            "skill": ("skill", "num_skills"),
         }
 
         src_type, _, dst_type = edge_type
@@ -957,13 +957,6 @@ class ModelData:
         data = self.data_src.get_processed_data()
         graph = HeteroData()
 
-        # 节点类型到列名的映射
-        node_type_to_column = {
-            "user": "user_id",
-            "question": "question_id",
-            "skill": "skill_id",
-        }
-
         # 收集所有需要的节点类型
         node_types = set()
         for src_type, _, dst_type in edge_types:
@@ -973,16 +966,12 @@ class ModelData:
         # 获取每种节点类型的数量
         node_counts = {}
         for node_type in node_types:
-            if node_type in node_type_to_column:
-                col_name = node_type_to_column[node_type]
-                if col_name in data.columns:
-                    node_counts[node_type] = data[col_name].nunique()
-                else:
-                    # 尝试从元数据获取
-                    meta_key = f"num_{node_type}s"
-                    node_counts[node_type] = self.data_src.get_metadata(meta_key)
+            if node_type in data.columns:
+                node_counts[node_type] = data[node_type].nunique()
             else:
-                raise ValueError(f"Unknown node type: {node_type}")
+                # 尝试从元数据获取
+                meta_key = f"num_{node_type}s"
+                node_counts[node_type] = self.data_src.get_metadata(meta_key)
 
         # 设置节点数量和特征
         for node_type in node_types:
@@ -1000,8 +989,8 @@ class ModelData:
         # 为每种边类型构建边
         for edge_type in edge_types:
             src_type, relation, dst_type = edge_type
-            src_col = node_type_to_column[src_type]
-            dst_col = node_type_to_column[dst_type]
+            src_col = f"{src_type}"
+            dst_col = f"{dst_type}"
 
             # 检查列是否存在
             if src_col not in data.columns or dst_col not in data.columns:

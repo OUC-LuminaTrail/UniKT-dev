@@ -59,17 +59,20 @@ class Assistments2012Data(DataSource):
         # 重命名列
         data.rename(
             columns={
-                "problem_id": "question_id",
+                "user_id": "user",
+                "problem_id": "question",
                 "correct": "label",
+                "assignment_id": "assignment",
+                "skill_id": "skill",
             },
             inplace=True,
         )
         # 按时间排序
-        data.sort_values(by=["user_id", "start_time"], inplace=True)
+        data.sort_values(by=["user", "start_time"], inplace=True)
         # 转换数据类型
-        data["user_id"] = data["user_id"].astype(int)
+        data["user"] = data["user"].astype(int)
         # 清除没有技能的问题
-        data = data[data["skill_id"].notna()]
+        data = data[data["skill"].notna()]
         # 清理label列中的异常值，只保留0和1
         data = data[data["label"].isin([0, 1])]
         # 重置索引
@@ -81,15 +84,16 @@ class Assistments2012Data(DataSource):
         )
         # 将问题ID和技能ID转换为连续整数
         data = DataSource.map_to_continuous_ids(
-            data, columns=["user_id", "question_id", "skill_id"]
+            data, columns=["user", "question", "skill", "assignment"]
         )
 
         self.processed_data = data
 
         # 保存元信息
-        self.add_metadata("num_users", data["user_id"].nunique())
-        self.add_metadata("num_questions", data["question_id"].nunique())
-        self.add_metadata("num_skills", data["skill_id"].nunique())
+        self.add_metadata("num_users", data["user"].nunique())
+        self.add_metadata("num_questions", data["question"].nunique())
+        self.add_metadata("num_skills", data["skill"].nunique())
+        self.add_metadata("num_assignments", data["assignment"].nunique())
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
         self.add_metadata("columns", data.columns.tolist())

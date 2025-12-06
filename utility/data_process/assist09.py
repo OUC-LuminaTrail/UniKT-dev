@@ -48,48 +48,73 @@ class Assistments2009Data(DataSource):
 
         data = self.raw_data.drop(
             columns=[
-                "school_id",
+                # "order_id",
+                # "assignment_id",
+                # "user_id",
+                "assistment_id",
+                # "problem_id",
+                # "original",
+                # "correct",
+                "attempt_count",
+                "ms_first_response",
+                "tutor_mode",
+                "answer_type",
+                "sequence_id",
+                "student_class_id",
+                "position",
+                "type",
+                "base_sequence_id",
+                # "skill_id",
                 "skill_name",
                 "teacher_id",
+                "school_id",
+                "hint_count",
+                "hint_total",
+                "overlap_time",
+                # "template_id",
+                "answer_id",
+                "answer_text",
+                "first_action",
+                "bottom_hint",
                 "opportunity",
                 "opportunity_original",
-                "overlap_time",
-                "type",
-                "tutor_mode",
-                "bottom_hint",
-                "position",
-                "answer_text",
-                "answer_id",
             ]
         )
         # 重新命名列
         data = data.rename(
             columns={
                 "correct": "label",
-                "problem_id": "question_id",
+                "user_id": "user",
+                "problem_id": "question",
+                "assignment_id": "assignment",
+                "skill_id": "skill",
+                "template_id": "template",
             }
         )
         # 转换数据类型
-        data["user_id"] = data["user_id"].astype(int)
+        data["user"] = data["user"].astype(int)
         # 清除缺失值
-        data = data.dropna(subset=["user_id", "skill_id", "label"])
+        data = data.dropna(subset=["user", "skill", "label"])
         # 重置索引
         data = data.reset_index(drop=True)
         # 限制序列长度
         data = DataSource.restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
-        # 将问题ID和技能ID重编码为连续整数
+        # 将数据重编码为连续整数
         data = DataSource.map_to_continuous_ids(
-            data, columns=["user_id", "question_id", "skill_id"]
+            data, columns=["user", "question", "skill", "assignment"]
         )
+        # 安装时间排序
+        data = data.sort_values(by=["user", "order_id"])
 
         self.processed_data = data
 
         # 保存元信息
-        self.add_metadata("num_users", data["user_id"].nunique())
-        self.add_metadata("num_questions", data["question_id"].nunique())
-        self.add_metadata("num_skills", data["skill_id"].nunique())
+        self.add_metadata("num_users", data["user"].nunique())
+        self.add_metadata("num_questions", data["question"].nunique())
+        self.add_metadata("num_skills", data["skill"].nunique())
+        self.add_metadata("num_assignments", data["assignment"].nunique())
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
         self.add_metadata("columns", data.columns.tolist())
