@@ -57,6 +57,11 @@ class HGIKTModelData(ModelData):
                     "question",
                     "has",
                     "skill",
+                ),
+                (
+                    "skill",
+                    "related_to",
+                    "assignment",
                 )
             ]
         )
@@ -141,28 +146,16 @@ class HGIKTModelData(ModelData):
         return hypergraph
 
     def _build_assignment_hyperedges(self, num_questions: int):
-        """构建基于 assignment_id 的超边，将同一作业的题目节点连接起来"""
+        """构建基于 assignment 的超边，将同一作业的题目节点连接起来"""
         data = self.data_src.get_processed_data()
 
-        # 支持不同命名约定
-        assignment_col = None
-        for candidate in ("assignment_id", "assignmentId"):
-            if candidate in data.columns:
-                assignment_col = candidate
-                break
-
+        assignment_col = "assignment"
         if assignment_col is None:
-            return []
+            raise ValueError("assignment column is missing in the data.")
 
-        question_col = None
-        for candidate in ("question_id", "problem_id"):
-            if candidate in data.columns:
-                question_col = candidate
-                break
-
+        question_col = "question"
         if question_col is None:
-            return []
-
+            raise ValueError("Neither question nor problem_id column is present in the data.")
         # 分组汇总同一作业内的题目
         grouped = (
             data[[assignment_col, question_col]]
@@ -172,7 +165,7 @@ class HGIKTModelData(ModelData):
         )
 
         assignment_edges = []
-        for assignment_id, questions in grouped.items():
+        for _, questions in grouped.items():
             # 过滤无效或重复的题目索引
             vertices = [int(q) for q in questions if 0 <= int(q) < num_questions]
             if len(vertices) > 1:

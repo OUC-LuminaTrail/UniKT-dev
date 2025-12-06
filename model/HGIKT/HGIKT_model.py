@@ -37,6 +37,20 @@ class GNN_QS(nn.Module):
                         heads=heads,
                         concat=False,
                     ),
+                    ("skill", "related_to", "assignment"): TransformerConv(
+                        (embedding_dim, embedding_dim),
+                        embedding_dim,
+                        aggr="add",
+                        heads=heads,
+                        concat=False,
+                    ),
+                    ("assignment", "rev_related_to", "skill"): TransformerConv(
+                        (embedding_dim, embedding_dim),
+                        embedding_dim,
+                        aggr="add",
+                        heads=heads,
+                        concat=False,
+                    ),
                 },
                 aggr="sum",
             )
@@ -350,6 +364,10 @@ class HGIKT(nn.Module):
             num_embeddings=data_metadata["num_skills"],
             embedding_dim=self.embedding_dim,
         )
+        self.assignment_embedding = torch.nn.Embedding(
+            num_embeddings=data_metadata["num_assignments"],
+            embedding_dim=self.embedding_dim,
+        )
         self.answer_embedding = torch.nn.Embedding(
             num_embeddings=2,
             embedding_dim=self.embedding_dim,
@@ -453,6 +471,7 @@ class HGIKT(nn.Module):
             {
                 "question": self.question_embedding.weight,
                 "skill": self.skill_embedding.weight,
+                "assignment": self.assignment_embedding.weight,
             },
             hetero_graph.edge_index_dict,
         )["question"]
