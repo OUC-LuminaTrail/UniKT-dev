@@ -95,6 +95,7 @@ class Assistments2012Data(DataSource):
         self.add_metadata("num_questions", data["question"].nunique())
         self.add_metadata("num_skills", data["skill"].nunique())
         self.add_metadata("num_assignments", data["assignment"].nunique())
+        self.add_metadata("num_templates", data["template"].nunique())
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
         self.add_metadata("columns", data.columns.tolist())
