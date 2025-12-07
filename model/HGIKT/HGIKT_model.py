@@ -89,10 +89,10 @@ class HGNN(nn.Module):
     """基于dhg框架的超图神经网络
 
     使用dhg.nn.HGNNConv实现双层超图卷积，与原始实现语义一致。
-    
+
     数学公式：
         X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
-    
+
     其中：
         - X 是输入顶点特征矩阵
         - H 是超图关联矩阵
@@ -106,18 +106,22 @@ class HGNN(nn.Module):
         super(HGNN, self).__init__()
         # 第一层卷积：聚合直接邻居问题特征
         # is_last=False 表示使用激活函数和dropout
-        self.hgc1 = HGNNConv(in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False)
+        self.hgc1 = HGNNConv(
+            in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False
+        )
         # 第二层卷积：聚合间接邻居的问题特征
         # is_last=True 表示跳过内置激活和dropout，在forward中手动应用ReLU（与原实现一致）
-        self.hgc2 = HGNNConv(n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True)
+        self.hgc2 = HGNNConv(
+            n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True
+        )
 
     def forward(self, x, hg):
         """前向传播
-        
+
         Args:
             x: 输入特征矩阵 [num_vertices, in_ch]
             hg: dhg.Hypergraph 超图结构
-            
+
         Returns:
             输出特征矩阵 [num_vertices, n_class]
         """
@@ -319,38 +323,106 @@ class GeneralInteraction(nn.Module):
 
         return logits
 
-class GatedFusion(nn.Module):
-    """门控融合（Gated Fusion）模块
 
-    采用对称结构融合两个视图的特征，使模型能自适应地从两个图中选择或融合信息。
+class LearnedSubspaceFusion(nn.Module):
+    """带子空间投影的学习式融合模块
+
+    该模块通过可学习的线性投影将两种视图
+    映射到语义子空间，然后在对应子空间进行门控融合，最后投影回原始维度。
+
+    参数:
+        dim (int): 输入/输出特征维度
+        num_subspaces (int): 子空间数量，默认为 4
+        sub_dim (int): 每个子空间的维度，默认为 32
+
+    输入:
+        view1: 第一个视图特征 [..., dim]
+        view2: 第二个视图特征 [..., dim]
+
+    输出:
+        融合后的特征 [..., dim]
     """
 
-    def __init__(self, dim: int):
-        super(GatedFusion, self).__init__()
+    def __init__(self, dim: int, num_subspaces: int = 4, sub_dim: int = 32):
+        super(LearnedSubspaceFusion, self).__init__()
         self.dim = dim
-        
-        self.gate = nn.Sequential(
-            nn.Linear(2 * dim, dim),
-            nn.Tanh(),
-            nn.Linear(dim, dim),
-            nn.Sigmoid(),
-        )
-        
-        # 两个视图的独立变换层，增强特征适应性
-        self.proj1 = nn.Linear(dim, dim)
-        self.proj2 = nn.Linear(dim, dim)
+        self.num_subspaces = num_subspaces
+        self.sub_dim = sub_dim
+        self.proj_dim = num_subspaces * sub_dim
 
-    def forward(self, h1: torch.Tensor, h2: torch.Tensor) -> torch.Tensor:
-        # 变换特征
-        h1_trans = self.proj1(h1)
-        h2_trans = self.proj2(h2)
-        
-        # 计算门控权重
-        m = torch.cat([h1_trans, h2_trans], dim=-1)
-        z = self.gate(m)
-        
-        # 加权融合
-        return z * h1_trans + (1.0 - z) * h2_trans
+        # 将两种视图分别投影到子空间堆叠形式 [dim -> num_subspaces * sub_dim]
+        self.proj_hyper = nn.Linear(dim, self.proj_dim)
+        self.proj_gnn = nn.Linear(dim, self.proj_dim)
+
+        # 对每个子空间单独建一个门控网络
+        self.gates = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(2 * sub_dim, sub_dim),
+                    nn.Tanh(),
+                    nn.Linear(sub_dim, sub_dim),
+                    nn.Sigmoid(),
+                )
+                for _ in range(num_subspaces)
+            ]
+        )
+
+        # 将融合后的子空间堆叠投影回原始维度 [num_subspaces * sub_dim -> dim]
+        self.out_proj = nn.Linear(self.proj_dim, dim)
+
+        # Xavier 初始化
+        nn.init.xavier_uniform_(self.proj_hyper.weight)
+        nn.init.xavier_uniform_(self.proj_gnn.weight)
+        nn.init.xavier_uniform_(self.out_proj.weight)
+
+    def forward(self, view1: torch.Tensor, view2: torch.Tensor) -> torch.Tensor:
+        """带投影的子空间门控融合
+
+        Args:
+            view1: 第一个视图特征 [..., dim]
+            view2: 第二个视图特征 [..., dim]
+
+        Returns:
+            融合后的特征 [..., dim]
+        """
+        # 保存原始形状
+        B_shape = view1.shape[:-1]
+        N = int(torch.prod(torch.tensor(B_shape)).item()) if len(B_shape) > 0 else 1
+
+        # 展平并投影到子空间
+        h = view1.view(N, -1)  # [N, dim]
+        g = view2.view(N, -1)  # [N, dim]
+
+        h_sub = self.proj_hyper(h).view(
+            N, self.num_subspaces, self.sub_dim
+        )  # [N, k, d_s]
+        g_sub = self.proj_gnn(g).view(
+            N, self.num_subspaces, self.sub_dim
+        )  # [N, k, d_s]
+
+        # 在每个子空间内进行门控融合
+        fused_list = []
+        for i in range(self.num_subspaces):
+            h_i = h_sub[:, i, :]  # [N, sub_dim]
+            g_i = g_sub[:, i, :]  # [N, sub_dim]
+
+            # 拼接作为门控输入
+            m_i = torch.cat([h_i, g_i], dim=-1)  # [N, 2*sub_dim]
+
+            # 计算门控权重
+            z_i = self.gates[i](m_i)  # [N, sub_dim]
+
+            # 门控融合
+            f_i = z_i * h_i + (1.0 - z_i) * g_i
+            fused_list.append(f_i)
+
+        # 拼接所有子空间并投影回原始维度
+        fused_sub = torch.cat(fused_list, dim=-1)  # [N, proj_dim]
+        fused = self.out_proj(fused_sub)  # [N, dim]
+
+        # 恢复原始形状
+        return fused.view(*B_shape, self.dim)
+
 
 class HGIKT(nn.Module):
     r"""HGIKT主模型"""
@@ -410,8 +482,12 @@ class HGIKT(nn.Module):
             dropout=self.dropout,
         )
 
-        # 门控融合模块
-        self.fuse = GatedFusion(self.embedding_dim)
+        # 带子空间投影的学习式融合
+        self.fuse = LearnedSubspaceFusion(
+            dim=self.embedding_dim,
+            num_subspaces=getattr(args, "num_subspaces", 4),
+            sub_dim=getattr(args, "sub_dim", 32),
+        )
 
         # 全连接层，将图卷积后的特征映射到隐藏维度
         self.fc_feature = Linear(
@@ -501,7 +577,9 @@ class HGIKT(nn.Module):
         # 使用门控融合模块融合两种图卷积结果
         # question_hyper_conv: [num_questions, embedding_dim]
         # question_gnn_conv: [num_questions, embedding_dim]
-        question_conv = self.fuse(question_hyper_conv, question_gnn_conv)  # [num_questions, embedding_dim]
+        question_conv = self.fuse(
+            question_hyper_conv, question_gnn_conv
+        )  # [num_questions, embedding_dim]
 
         # 按照用户序列索引获取对应的问题节点表示
         # 扩展 user_sequence 以匹配 question_conv 的维度
