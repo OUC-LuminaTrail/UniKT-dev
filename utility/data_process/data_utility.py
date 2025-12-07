@@ -814,10 +814,11 @@ class ModelData:
 
         参数:
             edge_type: 边类型三元组 (源节点类型, 边关系名, 目标节点类型)
-                      支持的节点类型: 'user', 'question', 'skill'
+                      节点类型对应数据中的列名（如 'user', 'question', 'skill', 'template', 'assignment'等）
                       例如: ('user', 'answers', 'question')
                            ('question', 'has', 'skill')
-                           ('user', 'masters', 'skill')
+                           ('question', 'belongs_to', 'template')
+                           ('skill', 'related_to', 'assignment')
             value_type: 矩阵值类型，可选:
                        'binary': 二值矩阵,表示是否存在关系 (默认)
                        'count': 计数矩阵,表示关系出现的次数
@@ -832,8 +833,11 @@ class ModelData:
             # 构建问题-技能关系矩阵
             matrix = model_data.build_data_matrix(('question', 'has', 'skill'))
 
-            # 构建用户-技能关系矩阵(间接关系)
-            matrix = model_data.build_data_matrix(('user', 'masters', 'skill'))
+            # 构建问题-模板关系矩阵
+            matrix = model_data.build_data_matrix(('question', 'belongs_to', 'template'))
+
+            # 构建技能-作业关系矩阵
+            matrix = model_data.build_data_matrix(('skill', 'related_to', 'assignment'))
 
             # 构建用户-问题计数矩阵
             matrix = model_data.build_data_matrix(('user', 'answers', 'question'), value_type='count')
@@ -843,35 +847,37 @@ class ModelData:
 
         data = self.data_src.get_processed_data()
 
-        # 节点类型到列名和元数据键的映射
-        node_type_mapping = {
-            "user": ("user", "num_users"),
-            "question": ("question", "num_questions"),
-            "skill": ("skill", "num_skills"),
-        }
-
         src_type, _, dst_type = edge_type
-
-        # 验证节点类型
-        if src_type not in node_type_mapping or dst_type not in node_type_mapping:
-            raise ValueError(
-                f"Unsupported node types: {src_type}, {dst_type}. "
-                f"Supported types: {list(node_type_mapping.keys())}"
-            )
-
-        # 获取源节点和目标节点的列名和数量
-        src_col, src_meta_key = node_type_mapping[src_type]
-        dst_col, dst_meta_key = node_type_mapping[dst_type]
-
-        num_src = self.data_src.get_metadata(src_meta_key)
-        num_dst = self.data_src.get_metadata(dst_meta_key)
+        
+        # 直接使用节点类型作为列名
+        src_col = src_type
+        dst_col = dst_type
 
         # 验证列是否存在
         if src_col not in data.columns or dst_col not in data.columns:
             raise ValueError(
-                f"Required columns {src_col} or {dst_col} not found in data. "
+                f"Required columns '{src_col}' or '{dst_col}' not found in data. "
                 f"Available columns: {data.columns.tolist()}"
             )
+
+        # 获取节点数量
+        # 首先尝试从元数据获取
+        src_meta_key = f"num_{src_type}s"
+        dst_meta_key = f"num_{dst_type}s"
+        
+        try:
+            num_src = self.data_src.get_metadata(src_meta_key)
+        except (KeyError, AttributeError):
+            # 如果元数据中没有，从数据中计算
+            num_src = data[src_col].nunique()
+            print(f"Warning: {src_meta_key} not found in metadata, calculated from data: {num_src}")
+        
+        try:
+            num_dst = self.data_src.get_metadata(dst_meta_key)
+        except (KeyError, AttributeError):
+            # 如果元数据中没有，从数据中计算
+            num_dst = data[dst_col].nunique()
+            print(f"Warning: {dst_meta_key} not found in metadata, calculated from data: {num_dst}")
 
         # 初始化矩阵
         data_matrix = np.zeros((num_src, num_dst), dtype=int)
@@ -884,11 +890,20 @@ class ModelData:
         ):
             src_idx = getattr(row, src_col)
             dst_idx = getattr(row, dst_col)
+            
+            # 跳过无效索引（NaN或超出范围）
+            if (
+                src_idx is None or dst_idx is None or
+                np.isnan(src_idx) or np.isnan(dst_idx) or
+                src_idx < 0 or dst_idx < 0 or
+                src_idx >= num_src or dst_idx >= num_dst
+            ):
+                continue
 
             if value_type == "binary":
-                data_matrix[src_idx, dst_idx] = 1
+                data_matrix[int(src_idx), int(dst_idx)] = 1
             elif value_type == "count":
-                data_matrix[src_idx, dst_idx] += 1
+                data_matrix[int(src_idx), int(dst_idx)] += 1
             else:
                 raise ValueError(
                     f"Unsupported value_type: {value_type}. "
