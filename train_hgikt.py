@@ -40,12 +40,6 @@ def parse_args():
     # 动态权重超图参数
     hypergraph_params = parser.add_argument_group("Hypergraph Parameters")
     hypergraph_params.add_argument(
-        "--use_difficulty_weighted_hypergraph",
-        action="store_true",
-        default=True,
-        help="Use difficulty-weighted hypergraph as main hypergraph (can be combined with contrastive hypergraph)",
-    )
-    hypergraph_params.add_argument(
         "--num_difficulty_clusters",
         type=int,
         default=3,
@@ -69,12 +63,6 @@ def parse_args():
 
     # 对比学习超图参数
     contrastive_params = parser.add_argument_group("Contrastive Learning Hypergraph Parameters")
-    contrastive_params.add_argument(
-        "--use_contrastive_hypergraph",
-        action="store_true",
-        default=True,
-        help="Use contrastive learning hypergraph (distinguishes easy vs hard questions, can be combined with difficulty-weighted hypergraph)",
-    )
     contrastive_params.add_argument(
         "--contrastive_easy_threshold",
         type=float,
@@ -133,6 +121,9 @@ def parse_args():
     )
     train_params.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training"
+    )
+    train_params.add_argument(
+        "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
     )
     train_params.add_argument("--lr", type=float, default=0.001, help="Learning rate")
     train_params.add_argument(
@@ -193,19 +184,12 @@ def parse_args():
 def main():
     """主训练函数"""
     args = parse_args()
-    import torch
-    import numpy
     from model.HGIKT import HGIKTTrainer
     from utility.data_process import Assistments2009Data
     from utility.data_process import Assistments2012Data
     from utility.data_process import Assistments2017Data
     from utility.data_process import EdNetKT1Data
 
-    # 设置随机种子
-    torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(args.seed)
-    numpy.random.seed(args.seed)
 
     # 构建数据
     print("Building datasets...")

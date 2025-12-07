@@ -4,7 +4,7 @@ GIKT 模型训练器
 """
 
 import torch
-from utility.net_trainer import Trainer
+from utility.net_trainer import Trainer, seed_everything
 
 
 class HGIKTTrainer(Trainer):
@@ -17,26 +17,25 @@ class HGIKTTrainer(Trainer):
         args=None,
         data_src=None,
     ):
+        seed_value = seed_everything(getattr(args, "seed", None))
         # 构建数据
         from model.HGIKT import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
-        
+
         # 解包数据
-        train_data = data_dict['train_dataloader']
-        val_data = data_dict['val_dataloader']
-        self.hypergraph = data_dict['skill_hypergraph']
-        self.hetero_graph = data_dict['hetero_graph']
-        self.edge_weights = data_dict.get('edge_weights', None)
-        
+        train_data = data_dict["train_dataloader"]
+        val_data = data_dict["val_dataloader"]
+        self.hypergraph = data_dict["skill_hypergraph"]
+        self.hetero_graph = data_dict["hetero_graph"]
+
         # 对比学习超图
-        self.pos_hypergraph = data_dict.get('pos_hypergraph', None)
-        self.neg_hypergraph = data_dict.get('neg_hypergraph', None)
-        self.pos_edge_weights = data_dict.get('pos_edge_weights', None)
-        self.neg_edge_weights = data_dict.get('neg_edge_weights', None)
-        self.use_contrastive = getattr(args, 'use_contrastive_hypergraph', False)
-        
+        self.pos_hypergraph = data_dict.get("pos_hypergraph", None)
+        self.neg_hypergraph = data_dict.get("neg_hypergraph", None)
+        self.pos_edge_weights = data_dict.get("pos_edge_weights", None)
+        self.neg_edge_weights = data_dict.get("neg_edge_weights", None)
+
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -49,6 +48,8 @@ class HGIKTTrainer(Trainer):
             hyperparams=args,
             log_dir=args.log_dir,
             device=args.device,
+            checkpoint_path=args.checkpoint_path,
+            seed=seed_value,
         )
 
     def init_model(self, args, data_src):
@@ -80,39 +81,19 @@ class HGIKTTrainer(Trainer):
         mask = mask.to(torch.bool).to(self.device_)
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
-        
-        # 如果有边权重，将其转换为张量并移动到设备
-        edge_weights_tensor = None
-        if self.edge_weights is not None:
-            edge_weights_tensor = torch.tensor(
-                self.edge_weights, dtype=torch.float32, device=self.device_
-            )
-
-        # 对比学习超图处理
-        pos_hg_device = None
-        neg_hg_device = None
-        pos_weights_tensor = None
-        neg_weights_tensor = None
-        
-        if self.use_contrastive:
-            if self.pos_hypergraph is not None:
-                pos_hg_device = self.pos_hypergraph.to(self.device_)
-            if self.neg_hypergraph is not None:
-                neg_hg_device = self.neg_hypergraph.to(self.device_)
-            if self.pos_edge_weights is not None:
-                pos_weights_tensor = torch.tensor(
-                    self.pos_edge_weights, dtype=torch.float32, device=self.device_
-                )
-            if self.neg_edge_weights is not None:
-                neg_weights_tensor = torch.tensor(
-                    self.neg_edge_weights, dtype=torch.float32, device=self.device_
-                )
+        pos_hg = self.pos_hypergraph.to(self.device_)
+        neg_hg = self.neg_hypergraph.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(
-            sequence, response, mask, self.hetero_graph, self.hypergraph, edge_weights_tensor,
-            pos_hg_device, neg_hg_device, pos_weights_tensor, neg_weights_tensor
+            sequence,
+            response,
+            mask,
+            self.hetero_graph,
+            self.hypergraph,
+            pos_hg,
+            neg_hg,
         )  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
@@ -131,18 +112,20 @@ class HGIKTTrainer(Trainer):
             y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
             y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
 
-        # 计算对比损失（如果启用）
+        # 计算对比损失
         contrastive_loss = 0.0
-        if self.use_contrastive and hasattr(self.model, '_pos_features') and \
-           self.model._pos_features is not None and self.model._neg_features is not None:
+        if (
+            hasattr(self.model, "_pos_features")
+            and self.model._pos_features is not None
+            and self.model._neg_features is not None
+        ):
             # 计算正负特征的对比损失
             contrastive_loss = self.model.calc_contrastive_loss(
                 self.model._pos_features,
                 self.model._neg_features,
-                temp=self.model.contrastive_temp
+                temp=self.model.contrastive_temp,
             )
-            # 添加到总损失中（在trainer的train_step中会自动处理）
-            # 这里我们将对比损失作为额外信息返回
+            # 添加到总损失中
             self._contrastive_loss = contrastive_loss
         else:
             self._contrastive_loss = torch.tensor(0.0, device=self.device_)
@@ -155,21 +138,21 @@ class HGIKTTrainer(Trainer):
     def compute_loss(self, data):
         """
         计算总损失（包含对比损失）
-        
+
         参数:
             data: (y_hat, y_label, y_predict) 元组
-            
+
         返回:
             总损失值
         """
         y_hat, y_label, y_predict = data
-        
-        # 主任务损失（BCE）
+
+        # 主任务损失
         bce_loss = self.loss(y_hat, y_label)
-        
+
         # 添加对比损失
-        if self.use_contrastive and hasattr(self, '_contrastive_loss'):
-            contrastive_weight = getattr(self.model, 'contrastive_weight', 0.1)
+        if hasattr(self, "_contrastive_loss"):
+            contrastive_weight = getattr(self.model, "contrastive_weight", 0.1)
             total_loss = bce_loss + contrastive_weight * self._contrastive_loss
             return total_loss
         else:
