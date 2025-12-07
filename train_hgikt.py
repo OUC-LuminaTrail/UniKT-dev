@@ -42,8 +42,8 @@ def parse_args():
     hypergraph_params.add_argument(
         "--use_difficulty_weighted_hypergraph",
         action="store_true",
-        default=False,
-        help="Use difficulty-weighted hypergraph instead of regular hypergraph",
+        default=True,
+        help="Use difficulty-weighted hypergraph as main hypergraph (can be combined with contrastive hypergraph)",
     )
     hypergraph_params.add_argument(
         "--num_difficulty_clusters",
@@ -73,7 +73,7 @@ def parse_args():
         "--use_contrastive_hypergraph",
         action="store_true",
         default=True,
-        help="Use contrastive learning hypergraph (distinguishes easy vs hard questions)",
+        help="Use contrastive learning hypergraph (distinguishes easy vs hard questions, can be combined with difficulty-weighted hypergraph)",
     )
     contrastive_params.add_argument(
         "--contrastive_easy_threshold",

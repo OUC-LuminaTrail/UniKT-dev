@@ -42,8 +42,31 @@ class HGIKTModelData(ModelData):
         )
 
         # 知识点超图：支持普通超图、难度加权超图和对比学习超图
-        if getattr(args, 'use_contrastive_hypergraph', False):
-            # 使用对比学习超图
+        # 注意：难度加权超图和对比学习超图可以共存！
+        use_contrastive = getattr(args, 'use_contrastive_hypergraph', False)
+        use_difficulty = getattr(args, 'use_difficulty_weighted_hypergraph', False)
+        
+        # 初始化变量
+        pos_hypergraph = None
+        neg_hypergraph = None
+        pos_edge_weights = None
+        neg_edge_weights = None
+        
+        # 1. 构建主超图（难度加权 或 普通）
+        if use_difficulty:
+            # 使用难度加权超图作为主超图
+            skill_hypergraph, edge_weights = self.build_difficulty_weighted_hypergraph(
+                ("question", "has", "skill"),
+                num_difficulty_clusters=getattr(args, 'num_difficulty_clusters', 3)
+            )
+        else:
+            # 使用普通超图作为主超图
+            skill_hypergraph = self.build_hypergraph(("question", "has", "skill"))
+            edge_weights = None
+        
+        # 2. 如果启用对比学习，额外构建正负超图
+        if use_contrastive:
+            # 构建对比学习超图（正负超边）
             (
                 pos_hypergraph, 
                 neg_hypergraph, 
@@ -55,27 +78,12 @@ class HGIKTModelData(ModelData):
                 hard_threshold=getattr(args, 'contrastive_hard_threshold', 0.6),
                 min_samples=getattr(args, 'contrastive_min_samples', 5)
             )
-            # 主超图使用正超图
-            skill_hypergraph = pos_hypergraph
-            edge_weights = pos_edge_weights
-        elif getattr(args, 'use_difficulty_weighted_hypergraph', False):
-            # 使用难度加权超图
-            skill_hypergraph, edge_weights = self.build_difficulty_weighted_hypergraph(
-                ("question", "has", "skill"),
-                num_difficulty_clusters=getattr(args, 'num_difficulty_clusters', 3)
-            )
-            pos_hypergraph = None
-            neg_hypergraph = None
-            pos_edge_weights = None
-            neg_edge_weights = None
-        else:
-            # 使用普通超图
-            skill_hypergraph = self.build_hypergraph(("question", "has", "skill"))
-            edge_weights = None
-            pos_hypergraph = None
-            neg_hypergraph = None
-            pos_edge_weights = None
-            neg_edge_weights = None
+            
+            # 如果同时启用了难度加权，打印组合模式提示
+            if use_difficulty:
+                print("使用组合模式: 难度加权超图 + 对比学习超图")
+                print(f"  - 主超图: 难度加权超图（{skill_hypergraph.num_e}个超边）")
+                print(f"  - 对比超图: 正超边{pos_hypergraph.num_e}个，负超边{neg_hypergraph.num_e}个")
 
         # 构建异构图
         hetero_graph = self.build_hetero_graph(

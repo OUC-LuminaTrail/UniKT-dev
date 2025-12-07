@@ -588,7 +588,12 @@ class HGIKT(nn.Module):
         answers_emb: torch.Tensor = self.answer_embedding(user_response)
 
         # 全图卷积
-        # 对比学习模式：分别处理正负超图
+        # 1. 主超图卷积（可能是普通超图或难度加权超图）
+        question_hyper_conv_main: torch.Tensor = self.hgnn_conv(
+            self.question_embedding_hyper.weight, hypergraph, edge_weights
+        )
+        
+        # 2. 对比学习模式：分别处理正负超图
         if self.use_contrastive and pos_hypergraph is not None and neg_hypergraph is not None:
             # 正超图卷积（简单题目）
             question_hyper_conv_pos: torch.Tensor = self.hgnn_conv(
@@ -598,17 +603,21 @@ class HGIKT(nn.Module):
             question_hyper_conv_neg: torch.Tensor = self.hgnn_conv_neg(
                 self.question_embedding_hyper.weight, neg_hypergraph, neg_edge_weights
             )
-            # 融合正负视图（简单相加，也可用门控）
-            question_hyper_conv = (question_hyper_conv_pos + question_hyper_conv_neg) / 2.0
+            
+            # 三视图融合：主超图 + 正超图 + 负超图
+            # 主超图提供整体结构，正负超图提供对比信息
+            question_hyper_conv = (
+                question_hyper_conv_main + 
+                question_hyper_conv_pos + 
+                question_hyper_conv_neg
+            ) / 3.0
             
             # 保存用于对比损失计算
             self._pos_features = question_hyper_conv_pos
             self._neg_features = question_hyper_conv_neg
         else:
-            # 普通超图卷积
-            question_hyper_conv: torch.Tensor = self.hgnn_conv(
-                self.question_embedding_hyper.weight, hypergraph, edge_weights
-            )
+            # 仅使用主超图
+            question_hyper_conv = question_hyper_conv_main
             self._pos_features = None
             self._neg_features = None
         
