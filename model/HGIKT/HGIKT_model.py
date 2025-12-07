@@ -525,7 +525,25 @@ class HGIKT(nn.Module):
         self.general_interaction = GeneralInteraction(hidden_dim=self.lstm_hidden_dim)
 
     def calc_contrastive_loss(self, view1, view2, temp=0.5):
-        """计算 NT-Xent (SimCLR) 损失"""
+        """计算 NT-Xent (SimCLR) 损失
+        
+        处理正负样本数量不匹配的情况：
+        - 如果数量不同，采样到相同数量
+        - 使用较小的数量作为基准
+        """
+        # 处理数量不匹配：采样到相同数量
+        n1, n2 = view1.size(0), view2.size(0)
+        if n1 != n2:
+            min_n = min(n1, n2)
+            if n1 > min_n:
+                # 随机采样 view1
+                indices = torch.randperm(n1, device=view1.device)[:min_n]
+                view1 = view1[indices]
+            if n2 > min_n:
+                # 随机采样 view2
+                indices = torch.randperm(n2, device=view2.device)[:min_n]
+                view2 = view2[indices]
+        
         # L2 归一化
         view1 = F.normalize(view1, dim=-1)
         view2 = F.normalize(view2, dim=-1)
