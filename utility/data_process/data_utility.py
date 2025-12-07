@@ -1091,6 +1091,147 @@ class ModelData:
 
         graph = torch.load(file_path)
         print(f"Graph loaded from: {file_path}")
+
+        return graph
+
+    def build_hypergraph(
+        self,
+        edge_type: tuple[str, str, str],
+        vertex_type: str = None,
+    ):
+        """
+        构建超图，支持灵活配置超边类型
+        
+        超图定义：
+            - 顶点(vertices): 通常是问题(question)节点
+            - 超边(hyperedges): 每个超边连接一组相关的顶点
+              例如：具有相同知识点/技能的题目、属于相同模板的题目等
+        
+        参数:
+            edge_type: 边类型三元组 (顶点类型, 边关系名, 超边类型)
+                      例如: ('question', 'has', 'skill') - 知识点超边
+                           ('question', 'belongs_to', 'template') - 模板超边
+                           ('question', 'in', 'assignment') - 作业超边
+            vertex_type: 顶点类型（可选），默认使用 edge_type 的第一个元素
+                        通常是 'question'
+        
+        返回:
+            dhg.Hypergraph: DHG框架的超图对象
+        
+        工作原理:
+            1. 从数据中提取顶点-超边的关联关系
+            2. 将相同超边类型(如相同skill_id)的所有顶点分组
+            3. 每组顶点形成一个超边
+            4. 使用DHG框架创建超图对象
+        
+        示例:
+            # 构建知识点超图：每个知识点连接包含它的所有题目
+            skill_hg = model_data.build_hypergraph(
+                ('question', 'has', 'skill')
+            )
+            
+            # 构建模板超图：每个模板连接属于它的所有题目
+            template_hg = model_data.build_hypergraph(
+                ('question', 'belongs_to', 'template')
+            )
+            
+            # 构建作业超图：每个作业连接其中的所有题目
+            assignment_hg = model_data.build_hypergraph(
+                ('question', 'in', 'assignment')
+            )
+        """
+        from dhg import Hypergraph
+        from tqdm import tqdm
+        import numpy as np
+
+        vertex_node_type, relation, hyperedge_node_type = edge_type
+        
+        # 如果未指定顶点类型，使用边类型的第一个元素
+        if vertex_type is None:
+            vertex_type = vertex_node_type
+        
+        # 获取关联矩阵
+        H = self.build_data_matrix(edge_type, value_type="binary")
+        
+        # 获取顶点数量
+        num_vertices = H.shape[0]
+        
+        # 将关联矩阵转换为超边列表
+        rows, cols = np.nonzero(H)
+        
+        # 按列（超边类型）分组，每个超边类型对应一个超边
+        # 使用字典收集每个超边包含的顶点
+        edge_dict = {}
+        for vertex_idx, hyperedge_idx in tqdm(
+            zip(rows, cols), 
+            total=len(rows), 
+            desc=f"Building {hyperedge_node_type} hyperedges"
+        ):
+            if hyperedge_idx not in edge_dict:
+                edge_dict[hyperedge_idx] = []
+            edge_dict[hyperedge_idx].append(int(vertex_idx))
+        
+        # 转换为超边列表（过滤空超边）
+        e_list = [vertices for vertices in edge_dict.values() if len(vertices) > 0]
+        
+        # 处理没有超边的情况
+        if len(e_list) == 0:
+            print(f"Warning: No hyperedges found for {edge_type}. Creating self-loop hypergraph.")
+            # 创建自环超图：每个顶点自成一个超边
+            e_list = [[i] for i in range(num_vertices)]
+        
+        # 使用 DHG 框架创建超图
+        hypergraph = Hypergraph(num_v=num_vertices, e_list=e_list)
+        
+        print(f"{hyperedge_node_type.capitalize()} Hypergraph constructed:")
+        print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
+        print(f"  - Number of hyperedges ({hyperedge_node_type}s): {hypergraph.num_e}")
+        
+        return hypergraph
+
+    def build_multiple_hypergraphs(
+        self,
+        edge_types: list[tuple[str, str, str]],
+        vertex_type: str = None,
+    ):
+        """
+        批量构建多个超图
+        
+        参数:
+            edge_types: 边类型列表，每个元素为三元组 (顶点类型, 边关系名, 超边类型)
+                       例如: [
+                           ('question', 'has', 'skill'),
+                           ('question', 'belongs_to', 'template'),
+                           ('question', 'in', 'assignment')
+                       ]
+            vertex_type: 顶点类型（可选），默认使用每个edge_type的第一个元素
+        
+        返回:
+            dict: 字典，键为超边类型名称，值为对应的超图对象
+                 例如: {
+                     'skill': skill_hypergraph,
+                     'template': template_hypergraph,
+                     'assignment': assignment_hypergraph
+                 }
+        
+        示例:
+            # 批量构建多个超图
+            hypergraphs = model_data.build_multiple_hypergraphs([
+                ('question', 'has', 'skill'),
+                ('question', 'belongs_to', 'template'),
+            ])
+            
+            skill_hg = hypergraphs['skill']
+            template_hg = hypergraphs['template']
+        """
+        hypergraphs = {}
+        
+        for edge_type in edge_types:
+            _, _, hyperedge_type = edge_type
+            hypergraph = self.build_hypergraph(edge_type, vertex_type=vertex_type)
+            hypergraphs[hyperedge_type] = hypergraph
+        
+        return hypergraphs
         return graph
 
     @staticmethod
