@@ -1244,6 +1244,33 @@ class ModelData:
         
         return difficulty_scores
 
+    def calculate_question_error_rate(self):
+        """
+        计算每个(问题, 技能)对的错误率，用于对比学习超图构建
+
+        Returns:
+            error_patterns: Dict[tuple[int, int], Dict[str, float]]
+                键为(question_id, skill_id)，值为包含错误率和计数的字典
+                - error_rate: 错误率（0-1）
+                - count: 该(问题,技能)对的出现次数
+        """
+        data = self.data_src.get_processed_data()
+
+        # 统计每个(问题, 技能)对的错误率
+        error_patterns = {}
+        
+        grouped = data.groupby(["question", "skill"])["label"].agg(["mean", "count"])
+        
+        for (question_id, skill_id), row in grouped.iterrows():
+            error_rate = 1 - row["mean"]  # 错误率 = 1 - 正确率
+            count = row["count"]
+            error_patterns[(int(question_id), int(skill_id))] = {
+                "error_rate": float(error_rate),
+                "count": int(count)
+            }
+
+        return error_patterns
+
     def build_difficulty_weighted_hypergraph(
         self,
         edge_type: tuple[str, str, str],
@@ -1427,7 +1454,140 @@ class ModelData:
             hypergraphs[hyperedge_type] = hypergraph
         
         return hypergraphs
-        return graph
+
+    def build_contrastive_hypergraph(
+        self,
+        edge_type: tuple[str, str, str],
+        vertex_type: str = None,
+        easy_threshold: float = 0.3,
+        hard_threshold: float = 0.6,
+        min_samples: int = 5,
+    ):
+        """
+        构建对比学习超图：区分"正确超边"和"易错超边"
+
+        核心思想：
+        - 正超边（positive hyperedges）：连接学生易于正确回答的同技能题目
+        - 负超边（negative hyperedges）：连接学生容易出错的同技能题目
+        - 通过对比损失最大化正负超边特征的区分度
+
+        参数:
+            edge_type: 边类型 (source_type, relation, target_type)
+                例如：("question", "has", "skill")
+            vertex_type: 超图顶点类型（默认为source_type）
+            easy_threshold: 简单题目的错误率阈值（低于此值视为简单）
+            hard_threshold: 困难题目的错误率阈值（高于此值视为困难）
+            min_samples: 每个(问题,技能)对的最小样本数阈值（用于过滤噪声）
+
+        返回:
+            positive_hg: dhg.Hypergraph 正超图（简单题目）
+            negative_hg: dhg.Hypergraph 负超图（困难题目）
+            pos_edge_weights: List[float] 正超边权重（基于内部一致性）
+            neg_edge_weights: List[float] 负超边权重
+        """
+        import dhg
+        import numpy as np
+        from tqdm import tqdm
+
+        source_type, relation, target_type = edge_type
+
+        if vertex_type is None:
+            vertex_type = source_type
+
+        if vertex_type != source_type:
+            raise ValueError(
+                f"vertex_type ({vertex_type}) 必须与 edge_type 的源类型 ({source_type}) 一致"
+            )
+
+        # 获取节点数量
+        num_vertices = self.data_src.get_metadata(f"num_{source_type}s")
+        num_targets = self.data_src.get_metadata(f"num_{target_type}s")
+
+        print(f"构建对比学习超图: {num_vertices} {vertex_type}s, {num_targets} {target_type}s")
+        print(f"阈值: 简单题<{easy_threshold}, 困难题>{hard_threshold}")
+
+        # 计算(问题, 技能)对的错误率
+        error_patterns = self.calculate_question_error_rate()
+
+        # 为每个技能构建正负超边
+        pos_hyperedge_list = []
+        neg_hyperedge_list = []
+        pos_edge_weights = []
+        neg_edge_weights = []
+
+        data = self.data_src.get_processed_data()
+        target_groups = data.groupby(target_type)[source_type].apply(lambda x: list(set(x)))
+
+        for target_id, source_list in tqdm(
+            target_groups.items(), desc=f"构建对比超边 ({target_type})"
+        ):
+            # 过滤出该技能下的题目及其错误率
+            easy_questions = []
+            hard_questions = []
+
+            for question_id in source_list:
+                key = (int(question_id), int(target_id))
+                if key not in error_patterns:
+                    continue
+
+                pattern = error_patterns[key]
+                if pattern["count"] < min_samples:
+                    continue  # 过滤样本数不足的题目
+
+                error_rate = pattern["error_rate"]
+                if error_rate < easy_threshold:
+                    easy_questions.append(int(question_id))
+                elif error_rate > hard_threshold:
+                    hard_questions.append(int(question_id))
+
+            # 只保留至少有2个题目的超边（单个题目无法形成超边）
+            if len(easy_questions) >= 2:
+                pos_hyperedge_list.append(easy_questions)
+                # 计算正超边权重：基于题目之间的错误率一致性
+                error_rates = [
+                    error_patterns[(q, int(target_id))]["error_rate"]
+                    for q in easy_questions
+                ]
+                # 权重 = 1 - 错误率标准差（越一致权重越高）
+                weight = 1.0 - np.std(error_rates)
+                pos_edge_weights.append(max(0.1, weight))  # 确保权重至少为0.1
+
+            if len(hard_questions) >= 2:
+                neg_hyperedge_list.append(hard_questions)
+                # 计算负超边权重
+                error_rates = [
+                    error_patterns[(q, int(target_id))]["error_rate"]
+                    for q in hard_questions
+                ]
+                weight = 1.0 - np.std(error_rates)
+                neg_edge_weights.append(max(0.1, weight))
+
+        # 创建正负超图
+        if len(pos_hyperedge_list) == 0:
+            print(f"警告: 未找到足够的简单题目超边 (阈值={easy_threshold})")
+            # 创建空超图
+            positive_hg = dhg.Hypergraph(num_vertices, [])
+            pos_edge_weights = []
+        else:
+            positive_hg = dhg.Hypergraph(
+                num_vertices, pos_hyperedge_list, e_weight=pos_edge_weights
+            )
+
+        if len(neg_hyperedge_list) == 0:
+            print(f"警告: 未找到足够的困难题目超边 (阈值={hard_threshold})")
+            # 创建空超图
+            negative_hg = dhg.Hypergraph(num_vertices, [])
+            neg_edge_weights = []
+        else:
+            negative_hg = dhg.Hypergraph(
+                num_vertices, neg_hyperedge_list, e_weight=neg_edge_weights
+            )
+
+        print(
+            f"对比超图构建完成: 正超边={len(pos_hyperedge_list)}, 负超边={len(neg_hyperedge_list)}"
+        )
+
+        return positive_hg, negative_hg, pos_edge_weights, neg_edge_weights
 
     @staticmethod
     def save_numpy_data(file_path: str, data: tuple):

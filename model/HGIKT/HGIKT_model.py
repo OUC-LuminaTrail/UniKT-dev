@@ -105,7 +105,7 @@ class HGNN(nn.Module):
     def __init__(self, in_ch, n_hid, n_class, dropout=0.0, use_edge_weights=False):
         super(HGNN, self).__init__()
         self.use_edge_weights = use_edge_weights
-        
+
         # 第一层卷积：聚合直接邻居问题特征
         # is_last=False 表示使用激活函数和dropout
         self.hgc1 = HGNNConv(
@@ -133,7 +133,7 @@ class HGNN(nn.Module):
         # edge_weights 参数仅用于兼容性，保证调用接口一致
         x1 = self.hgc1(x, hg)
         x2 = F.relu(self.hgc2(x1, hg))
-        
+
         return x2
 
 
@@ -479,7 +479,7 @@ class HGIKT(nn.Module):
             n_hid=args.embedding_dim,  # 隐藏层通道数
             n_class=args.embedding_dim,  # 输出通道数
             dropout=self.dropout,  # Dropout概率
-            use_edge_weights=getattr(args, 'use_difficulty_weighted_hypergraph', False),
+            use_edge_weights=getattr(args, "use_difficulty_weighted_hypergraph", False),
         )
 
         # GNN层
@@ -496,6 +496,21 @@ class HGIKT(nn.Module):
             num_subspaces=getattr(args, "num_subspaces", 4),
             sub_dim=getattr(args, "sub_dim", 32),
         )
+
+        # 对比学习超图支持
+        self.use_contrastive = getattr(args, "use_contrastive_hypergraph", False)
+        if self.use_contrastive:
+            # 为负超图添加单独的HGNN卷积层
+            self.hgnn_conv_neg = HGNN(
+                in_ch=args.embedding_dim,
+                n_hid=args.embedding_dim,
+                n_class=args.embedding_dim,
+                dropout=self.dropout,
+                use_edge_weights=True,
+            )
+            # 对比损失权重
+            self.contrastive_weight = getattr(args, "contrastive_loss_weight", 0.1)
+            self.contrastive_temp = getattr(args, "contrastive_temperature", 0.5)
 
         # 全连接层，将图卷积后的特征映射到隐藏维度
         self.fc_feature = Linear(
@@ -560,6 +575,10 @@ class HGIKT(nn.Module):
         hetero_graph: torch.Tensor,
         hypergraph: torch.Tensor,
         edge_weights: torch.Tensor = None,
+        pos_hypergraph: torch.Tensor = None,
+        neg_hypergraph: torch.Tensor = None,
+        pos_edge_weights: torch.Tensor = None,
+        neg_edge_weights: torch.Tensor = None,
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -569,10 +588,31 @@ class HGIKT(nn.Module):
         answers_emb: torch.Tensor = self.answer_embedding(user_response)
 
         # 全图卷积
-        # question_conv [B, S, embedding_dim]
-        question_hyper_conv: torch.Tensor = self.hgnn_conv(
-            self.question_embedding_hyper.weight, hypergraph, edge_weights
-        )
+        # 对比学习模式：分别处理正负超图
+        if self.use_contrastive and pos_hypergraph is not None and neg_hypergraph is not None:
+            # 正超图卷积（简单题目）
+            question_hyper_conv_pos: torch.Tensor = self.hgnn_conv(
+                self.question_embedding_hyper.weight, pos_hypergraph, pos_edge_weights
+            )
+            # 负超图卷积（困难题目）
+            question_hyper_conv_neg: torch.Tensor = self.hgnn_conv_neg(
+                self.question_embedding_hyper.weight, neg_hypergraph, neg_edge_weights
+            )
+            # 融合正负视图（简单相加，也可用门控）
+            question_hyper_conv = (question_hyper_conv_pos + question_hyper_conv_neg) / 2.0
+            
+            # 保存用于对比损失计算
+            self._pos_features = question_hyper_conv_pos
+            self._neg_features = question_hyper_conv_neg
+        else:
+            # 普通超图卷积
+            question_hyper_conv: torch.Tensor = self.hgnn_conv(
+                self.question_embedding_hyper.weight, hypergraph, edge_weights
+            )
+            self._pos_features = None
+            self._neg_features = None
+        
+        # 异构图卷积
         question_gnn_conv: torch.Tensor = self.gnn_conv(
             {
                 "question": self.question_embedding.weight,

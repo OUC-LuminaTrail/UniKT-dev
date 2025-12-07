@@ -42,7 +42,7 @@ def parse_args():
     hypergraph_params.add_argument(
         "--use_difficulty_weighted_hypergraph",
         action="store_true",
-        default=True,
+        default=False,
         help="Use difficulty-weighted hypergraph instead of regular hypergraph",
     )
     hypergraph_params.add_argument(
@@ -65,6 +65,45 @@ def parse_args():
         type=int,
         default=32,
         help="Dimension of each subspace for learned fusion (default: 32)",
+    )
+
+    # 对比学习超图参数
+    contrastive_params = parser.add_argument_group("Contrastive Learning Hypergraph Parameters")
+    contrastive_params.add_argument(
+        "--use_contrastive_hypergraph",
+        action="store_true",
+        default=True,
+        help="Use contrastive learning hypergraph (distinguishes easy vs hard questions)",
+    )
+    contrastive_params.add_argument(
+        "--contrastive_easy_threshold",
+        type=float,
+        default=0.3,
+        help="Error rate threshold for easy questions (default: 0.3)",
+    )
+    contrastive_params.add_argument(
+        "--contrastive_hard_threshold",
+        type=float,
+        default=0.6,
+        help="Error rate threshold for hard questions (default: 0.6)",
+    )
+    contrastive_params.add_argument(
+        "--contrastive_min_samples",
+        type=int,
+        default=5,
+        help="Minimum samples per (question, skill) pair to be included (default: 5)",
+    )
+    contrastive_params.add_argument(
+        "--contrastive_loss_weight",
+        type=float,
+        default=0.1,
+        help="Weight for contrastive loss in total loss (default: 0.1)",
+    )
+    contrastive_params.add_argument(
+        "--contrastive_temperature",
+        type=float,
+        default=0.5,
+        help="Temperature parameter for contrastive loss (default: 0.5)",
     )
 
     # 数据参数
