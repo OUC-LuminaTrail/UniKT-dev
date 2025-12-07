@@ -88,7 +88,7 @@ class GNN_QS(nn.Module):
 class HGNN(nn.Module):
     """基于dhg框架的超图神经网络
 
-    使用dhg.nn.HGNNConv实现双层超图卷积，与原始实现语义一致。
+    使用dhg.nn.HGNNConv实现双层超图卷积，支持加权超图。
 
     数学公式：
         X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
@@ -96,14 +96,16 @@ class HGNN(nn.Module):
     其中：
         - X 是输入顶点特征矩阵
         - H 是超图关联矩阵
-        - W_e 是超边权重对角矩阵（默认为单位矩阵）
+        - W_e 是超边权重对角矩阵（可自定义或默认为单位矩阵）
         - D_v 是顶点度数对角矩阵
         - D_e 是超边度数对角矩阵
         - Θ 是可学习参数
     """
 
-    def __init__(self, in_ch, n_hid, n_class, dropout=0.0):
+    def __init__(self, in_ch, n_hid, n_class, dropout=0.0, use_edge_weights=False):
         super(HGNN, self).__init__()
+        self.use_edge_weights = use_edge_weights
+        
         # 第一层卷积：聚合直接邻居问题特征
         # is_last=False 表示使用激活函数和dropout
         self.hgc1 = HGNNConv(
@@ -115,18 +117,23 @@ class HGNN(nn.Module):
             n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True
         )
 
-    def forward(self, x, hg):
+    def forward(self, x, hg, edge_weights=None):
         """前向传播
 
         Args:
             x: 输入特征矩阵 [num_vertices, in_ch]
-            hg: dhg.Hypergraph 超图结构
+            hg: dhg.Hypergraph 超图结构（可能已包含权重）
+            edge_weights: 可选的超边权重列表（保留用于兼容性，实际不使用）
 
         Returns:
             输出特征矩阵 [num_vertices, n_class]
         """
-        x1 = self.hgc1(x, hg)  # 第一层使用内置ReLU和dropout
-        x2 = F.relu(self.hgc2(x1, hg))  # 第二层手动应用ReLU（与原实现一致）
+        # dhg.Hypergraph 如果在构造时传入了 e_weight，会自动在卷积时使用
+        # HGNNConv 会自动处理带权重的超图
+        # edge_weights 参数仅用于兼容性，保证调用接口一致
+        x1 = self.hgc1(x, hg)
+        x2 = F.relu(self.hgc2(x1, hg))
+        
         return x2
 
 
@@ -472,6 +479,7 @@ class HGIKT(nn.Module):
             n_hid=args.embedding_dim,  # 隐藏层通道数
             n_class=args.embedding_dim,  # 输出通道数
             dropout=self.dropout,  # Dropout概率
+            use_edge_weights=getattr(args, 'use_difficulty_weighted_hypergraph', False),
         )
 
         # GNN层
@@ -551,6 +559,7 @@ class HGIKT(nn.Module):
         user_mask: torch.Tensor,
         hetero_graph: torch.Tensor,
         hypergraph: torch.Tensor,
+        edge_weights: torch.Tensor = None,
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -562,7 +571,7 @@ class HGIKT(nn.Module):
         # 全图卷积
         # question_conv [B, S, embedding_dim]
         question_hyper_conv: torch.Tensor = self.hgnn_conv(
-            self.question_embedding_hyper.weight, hypergraph
+            self.question_embedding_hyper.weight, hypergraph, edge_weights
         )
         question_gnn_conv: torch.Tensor = self.gnn_conv(
             {

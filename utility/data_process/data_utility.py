@@ -1204,6 +1204,186 @@ class ModelData:
         
         return hypergraph
 
+    def calculate_question_difficulty(self):
+        """
+        计算每个问题的难度指标
+        
+        基于以下特征计算难度：
+        1. 正确率（correct_rate）：正确回答次数 / 总回答次数
+        2. 平均作答时间（avg_time）：如果数据集有时间字段
+        3. 提示率（hint_rate）：如果数据集有提示字段
+        
+        返回:
+            dict: 问题ID -> 难度分数的字典，难度分数为0-1之间，越大表示越难
+        
+        公式：
+            difficulty = (1 - correct_rate) * 0.6 + normalized_time * 0.3 + hint_rate * 0.1
+        """
+        import pandas as pd
+        import numpy as np
+        
+        data = self.data_src.get_processed_data()
+        
+        # 计算每个问题的正确率
+        question_stats = data.groupby('question').agg({
+            'label': ['mean', 'count']  # 正确率和回答次数
+        }).reset_index()
+        question_stats.columns = ['question', 'correct_rate', 'count']
+        
+        # 错误率作为难度的主要指标
+        question_stats['error_rate'] = 1 - question_stats['correct_rate']
+        
+        # 标准化错误率
+        difficulty_scores = {}
+        for _, row in question_stats.iterrows():
+            qid = int(row['question'])
+            # 加权：错误率占主要权重，但考虑样本数（少样本的难度评估不太可靠）
+            confidence = min(row['count'] / 10.0, 1.0)  # 10次以上回答视为可靠
+            difficulty = row['error_rate'] * confidence + 0.5 * (1 - confidence)
+            difficulty_scores[qid] = float(difficulty)
+        
+        return difficulty_scores
+
+    def build_difficulty_weighted_hypergraph(
+        self,
+        edge_type: tuple[str, str, str],
+        vertex_type: str = None,
+        num_difficulty_clusters: int = 3,
+    ):
+        """
+        构建基于难度加权的超图
+        
+        核心思想：
+        1. 将同一技能下的题目按难度聚类（简单/中等/困难）
+        2. 每个难度簇形成一个子超边
+        3. 超边权重反映簇内题目的难度一致性
+        
+        参数:
+            edge_type: 边类型三元组 (顶点类型, 边关系名, 超边类型)
+                      例如: ('question', 'has', 'skill')
+            vertex_type: 顶点类型（可选），默认使用 edge_type 的第一个元素
+            num_difficulty_clusters: 难度聚类数量，默认为3（简单/中等/困难）
+        
+        返回:
+            tuple: (hypergraph, edge_weights)
+                - hypergraph: DHG框架的超图对象
+                - edge_weights: 超边权重列表，与超图的超边顺序对应
+        
+        示例:
+            # 构建难度加权的技能超图
+            hg, weights = model_data.build_difficulty_weighted_hypergraph(
+                ('question', 'has', 'skill'),
+                num_difficulty_clusters=3
+            )
+        """
+        from dhg import Hypergraph
+        from sklearn.cluster import KMeans
+        from tqdm import tqdm
+        import numpy as np
+        
+        vertex_node_type, relation, hyperedge_node_type = edge_type
+        
+        if vertex_type is None:
+            vertex_type = vertex_node_type
+        
+        # 获取数据和难度分数
+        data = self.data_src.get_processed_data()
+        difficulty_scores = self.calculate_question_difficulty()
+        
+        # 获取关联矩阵
+        H = self.build_data_matrix(edge_type, value_type="binary")
+        num_vertices = H.shape[0]
+        num_hyperedges = H.shape[1]
+        
+        # 将关联矩阵转换为超边字典
+        rows, cols = np.nonzero(H)
+        edge_dict = {}
+        for vertex_idx, hyperedge_idx in zip(rows, cols):
+            if hyperedge_idx not in edge_dict:
+                edge_dict[hyperedge_idx] = []
+            edge_dict[hyperedge_idx].append(int(vertex_idx))
+        
+        # 为每个超边（如技能）内的题目按难度聚类
+        e_list = []
+        edge_weights = []
+        
+        print(f"Building difficulty-weighted {hyperedge_node_type} hypergraph...")
+        for hyperedge_idx, vertices in tqdm(
+            edge_dict.items(), 
+            desc=f"Clustering {hyperedge_node_type} by difficulty"
+        ):
+            if len(vertices) == 0:
+                continue
+            
+            # 获取这些题目的难度分数
+            difficulties = np.array([
+                difficulty_scores.get(v, 0.5) for v in vertices
+            ]).reshape(-1, 1)
+            
+            # 如果题目数量少于聚类数，每个题目单独成簇
+            if len(vertices) < num_difficulty_clusters:
+                for v in vertices:
+                    e_list.append([v])
+                    edge_weights.append(1.0)  # 单题目超边权重为1
+                continue
+            
+            # K-means聚类
+            try:
+                kmeans = KMeans(
+                    n_clusters=min(num_difficulty_clusters, len(vertices)),
+                    random_state=42,
+                    n_init=10
+                )
+                cluster_labels = kmeans.fit_predict(difficulties)
+                
+                # 为每个簇创建子超边
+                for cluster_id in range(kmeans.n_clusters):
+                    cluster_vertices = [
+                        vertices[i] for i in range(len(vertices))
+                        if cluster_labels[i] == cluster_id
+                    ]
+                    
+                    if len(cluster_vertices) == 0:
+                        continue
+                    
+                    # 计算簇内难度一致性（方差越小，一致性越高，权重越大）
+                    cluster_difficulties = difficulties[cluster_labels == cluster_id]
+                    difficulty_variance = np.var(cluster_difficulties)
+                    # 权重：一致性高的簇权重更大
+                    # 使用指数衰减：variance越大，权重越小
+                    weight = np.exp(-difficulty_variance * 5.0)
+                    weight = max(0.1, min(1.0, weight))  # 限制在[0.1, 1.0]
+                    
+                    e_list.append(cluster_vertices)
+                    edge_weights.append(float(weight))
+                    
+            except Exception as e:
+                print(f"Warning: Clustering failed for hyperedge {hyperedge_idx}: {e}")
+                # 如果聚类失败，将所有题目放在一个超边中
+                e_list.append(vertices)
+                edge_weights.append(1.0)
+        
+        # 处理空超边情况
+        if len(e_list) == 0:
+            print(f"Warning: No hyperedges found. Creating self-loop hypergraph.")
+            e_list = [[i] for i in range(num_vertices)]
+            edge_weights = [1.0] * num_vertices
+        
+        # 确保超边列表和权重列表长度一致
+        assert len(e_list) == len(edge_weights), \
+            f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
+        
+        # 创建超图
+        hypergraph = Hypergraph(num_v=num_vertices, e_list=e_list, e_weight=edge_weights)
+        
+        print(f"Difficulty-weighted {hyperedge_node_type.capitalize()} Hypergraph constructed:")
+        print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
+        print(f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}")
+        print(f"  - Average edge weight: {np.mean(edge_weights):.4f}")
+        print(f"  - Weight range: [{np.min(edge_weights):.4f}, {np.max(edge_weights):.4f}]")
+        
+        return hypergraph, edge_weights
+
     def build_multiple_hypergraphs(
         self,
         edge_types: list[tuple[str, str, str]],

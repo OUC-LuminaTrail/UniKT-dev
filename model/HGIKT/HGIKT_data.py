@@ -41,8 +41,17 @@ class HGIKTModelData(ModelData):
             max_seq_len, min_seq_len
         )
 
-        # 知识点超图：每个知识点作为一个超边，连接包含该知识点的所有题目
-        skill_hypergraph = self.build_hypergraph(("question", "has", "skill"))
+        # 知识点超图：支持普通超图和难度加权超图
+        if getattr(args, 'use_difficulty_weighted_hypergraph', False):
+            # 使用难度加权超图
+            skill_hypergraph, edge_weights = self.build_difficulty_weighted_hypergraph(
+                ("question", "has", "skill"),
+                num_difficulty_clusters=getattr(args, 'num_difficulty_clusters', 3)
+            )
+        else:
+            # 使用普通超图
+            skill_hypergraph = self.build_hypergraph(("question", "has", "skill"))
+            edge_weights = None
 
         # 构建异构图
         hetero_graph = self.build_hetero_graph(
@@ -97,4 +106,14 @@ class HGIKTModelData(ModelData):
         val_dataloader = DataLoader(
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
-        return train_dataloader, val_dataloader, skill_hypergraph, hetero_graph
+        
+        # 返回数据时包含边权重信息
+        return_data = {
+            'train_dataloader': train_dataloader,
+            'val_dataloader': val_dataloader,
+            'skill_hypergraph': skill_hypergraph,
+            'hetero_graph': hetero_graph,
+            'edge_weights': edge_weights
+        }
+        
+        return return_data

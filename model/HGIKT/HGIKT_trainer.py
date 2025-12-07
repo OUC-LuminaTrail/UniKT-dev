@@ -21,9 +21,14 @@ class HGIKTTrainer(Trainer):
         from model.HGIKT import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
-        train_data, val_data, self.hypergraph, self.hetero_graph = (
-            model_data.prepare_data(args)
-        )
+        data_dict = model_data.prepare_data(args)
+        
+        # 解包数据
+        train_data = data_dict['train_dataloader']
+        val_data = data_dict['val_dataloader']
+        self.hypergraph = data_dict['skill_hypergraph']
+        self.hetero_graph = data_dict['hetero_graph']
+        self.edge_weights = data_dict.get('edge_weights', None)
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -67,11 +72,18 @@ class HGIKTTrainer(Trainer):
         mask = mask.to(torch.bool).to(self.device_)
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
+        
+        # 如果有边权重，将其转换为张量并移动到设备
+        edge_weights_tensor = None
+        if self.edge_weights is not None:
+            edge_weights_tensor = torch.tensor(
+                self.edge_weights, dtype=torch.float32, device=self.device_
+            )
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(
-            sequence, response, mask, self.hetero_graph, self.hypergraph
+            sequence, response, mask, self.hetero_graph, self.hypergraph, edge_weights_tensor
         )  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
