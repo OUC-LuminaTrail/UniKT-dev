@@ -30,9 +30,6 @@ class HGIKTTrainer(Trainer):
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
 
-        # 聚类元数据
-        self.cluster_metadata = data_dict.get("cluster_metadata", None)
-
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -87,7 +84,6 @@ class HGIKTTrainer(Trainer):
             mask,
             self.hetero_graph,
             self.hypergraph,
-            self.cluster_metadata,
         )  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
@@ -106,48 +102,7 @@ class HGIKTTrainer(Trainer):
             y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
             y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
 
-        # 计算对比损失
-        contrastive_loss = 0.0
-        if (
-            hasattr(self.model, "_pos_features")
-            and self.model._pos_features is not None
-            and self.model._neg_features is not None
-        ):
-            # 计算正负特征的对比损失
-            contrastive_loss = self.model.calc_contrastive_loss(
-                self.model._pos_features,
-                self.model._neg_features,
-                temp=self.model.contrastive_temp,
-            )
-            # 添加到总损失中
-            self._contrastive_loss = contrastive_loss
-        else:
-            self._contrastive_loss = torch.tensor(0.0, device=self.device_)
-
         # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
         y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
 
         return y_hat, y_label, y_predict
-
-    def compute_loss(self, data):
-        """
-        计算总损失（包含对比损失）
-
-        参数:
-            data: (y_hat, y_label, y_predict) 元组
-
-        返回:
-            总损失值
-        """
-        y_hat, y_label, y_predict = data
-
-        # 主任务损失
-        bce_loss = self.loss(y_hat, y_label)
-
-        # 添加对比损失
-        if hasattr(self, "_contrastive_loss"):
-            contrastive_weight = getattr(self.model, "contrastive_weight", 0.1)
-            total_loss = bce_loss + contrastive_weight * self._contrastive_loss
-            return total_loss
-        else:
-            return bce_loss

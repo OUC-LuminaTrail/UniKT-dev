@@ -31,8 +31,6 @@ class HGIKTModelData(ModelData):
         r"""
         准备HGIKT模型所需的数据
         """
-        import dhg
-
         fold_idx = args.fold if args.fold > 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         max_seq_len = self.data_src.get_metadata("max_seq_len")
@@ -44,7 +42,7 @@ class HGIKTModelData(ModelData):
         )
 
         # 构建难度加权超图
-        skill_hypergraph, cluster_metadata = self.build_difficulty_weighted_hypergraph(
+        skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
             num_difficulty_clusters=args.num_difficulty_clusters,
         )
@@ -107,13 +105,12 @@ class HGIKTModelData(ModelData):
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
 
-        # 返回数据时包含聚类元数据
+        # 返回数据
         return_data = {
             "train_dataloader": train_dataloader,
             "val_dataloader": val_dataloader,
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
-            "cluster_metadata": cluster_metadata,
         }
 
         return return_data
@@ -291,5 +288,5 @@ class HGIKTModelData(ModelData):
         )
         print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
         print(f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}")
-
-        return hypergraph, cluster_metadata
+        
+        return hypergraph

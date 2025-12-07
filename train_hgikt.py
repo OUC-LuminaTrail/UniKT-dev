@@ -61,21 +61,6 @@ def parse_args():
         help="Dimension of each subspace for learned fusion (default: 32)",
     )
 
-    # 对比学习超图参数
-    contrastive_params = parser.add_argument_group("Contrastive Learning Hypergraph Parameters")
-    contrastive_params.add_argument(
-        "--contrastive_loss_weight",
-        type=float,
-        default=0.1,
-        help="Weight for contrastive loss in total loss (default: 0.1)",
-    )
-    contrastive_params.add_argument(
-        "--contrastive_temperature",
-        type=float,
-        default=0.5,
-        help="Temperature parameter for contrastive loss (default: 0.5)",
-    )
-
     # 数据参数
     data_params = parser.add_argument_group("Data Parameters")
     data_params.add_argument(

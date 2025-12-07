@@ -442,9 +442,6 @@ class HGIKT(nn.Module):
         self.lstm_hidden_dim = args.lstm_hidden_dim  # LSTM 隐藏层维度
         self.lstm_layers = args.lstm_layers  # LSTM层数
         self.dropout = args.dropout  # Dropout概率，所有层共享
-        # 对比损失权重
-        self.contrastive_weight = args.contrastive_loss_weight
-        self.contrastive_temp = args.contrastive_temperature
 
         # Embedding
         self.question_embedding = torch.nn.Embedding(
@@ -524,52 +521,6 @@ class HGIKT(nn.Module):
         # 广义交互模块
         self.general_interaction = GeneralInteraction(hidden_dim=self.lstm_hidden_dim)
 
-    def calc_contrastive_loss(self, view1, view2, temp=0.5):
-        """计算 NT-Xent (SimCLR) 损失
-        
-        处理正负样本数量不匹配的情况：
-        - 如果数量不同，采样到相同数量
-        - 使用较小的数量作为基准
-        """
-        # 处理数量不匹配：采样到相同数量
-        n1, n2 = view1.size(0), view2.size(0)
-        if n1 != n2:
-            min_n = min(n1, n2)
-            if n1 > min_n:
-                # 随机采样 view1
-                indices = torch.randperm(n1, device=view1.device)[:min_n]
-                view1 = view1[indices]
-            if n2 > min_n:
-                # 随机采样 view2
-                indices = torch.randperm(n2, device=view2.device)[:min_n]
-                view2 = view2[indices]
-        
-        # L2 归一化
-        view1 = F.normalize(view1, dim=-1)
-        view2 = F.normalize(view2, dim=-1)
-
-        # 拼接两种视图，按 SimCLR 方式构造 2N 个样本
-        features = torch.cat([view1, view2], dim=0)  # [2N, D]
-        sim_matrix = torch.matmul(features, features.T) / temp  # [2N, 2N]
-
-        # 屏蔽自身相似度，避免其进入分母
-        batch = view1.size(0)
-        diag_mask = torch.eye(2 * batch, device=features.device, dtype=torch.bool)
-        sim_matrix = sim_matrix.masked_fill(diag_mask, float("-inf"))
-
-        idx = torch.arange(batch, device=features.device)
-        positive_pairs = torch.cat(
-            [
-                sim_matrix[idx, idx + batch],
-                sim_matrix[idx + batch, idx],
-            ],
-            dim=0,
-        )  # [2N]
-
-        logsumexp = torch.logsumexp(sim_matrix, dim=1)  # [2N]
-        loss = -positive_pairs + logsumexp
-        return loss.mean()
-
     def forward(
         self,
         user_sequence: torch.Tensor,
@@ -577,7 +528,6 @@ class HGIKT(nn.Module):
         user_mask: torch.Tensor,
         hetero_graph: torch.Tensor,
         hypergraph: torch.Tensor,
-        cluster_metadata: list = None,
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -590,34 +540,6 @@ class HGIKT(nn.Module):
         question_hyper_conv: torch.Tensor = self.hgnn_conv(
             self.question_embedding_hyper.weight, hypergraph
         )
-
-        # 从卷积结果中提取正负样本对
-        if cluster_metadata is not None and len(cluster_metadata) > 0:
-            # 提取Easy和Hard簇的节点
-            pos_nodes = []
-            neg_nodes = []
-            for cluster in cluster_metadata:
-                if cluster["type"] == "easy":
-                    pos_nodes.extend(cluster["vertices"])
-                elif cluster["type"] == "hard":
-                    neg_nodes.extend(cluster["vertices"])
-            
-            # 去重并转为tensor
-            if len(pos_nodes) > 0 and len(neg_nodes) > 0:
-                pos_nodes = list(set(pos_nodes))
-                neg_nodes = list(set(neg_nodes))
-                pos_idx = torch.tensor(pos_nodes, device=question_hyper_conv.device)
-                neg_idx = torch.tensor(neg_nodes, device=question_hyper_conv.device)
-                
-                # 从卷积后的特征中提取对应节点
-                self._pos_features = question_hyper_conv[pos_idx]  # [N_pos, D]
-                self._neg_features = question_hyper_conv[neg_idx]  # [N_neg, D]
-            else:
-                self._pos_features = None
-                self._neg_features = None
-        else:
-            self._pos_features = None
-            self._neg_features = None
 
         # 异构图卷积
         question_gnn_conv: torch.Tensor = self.gnn_conv(
