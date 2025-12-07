@@ -30,11 +30,8 @@ class HGIKTTrainer(Trainer):
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
 
-        # 对比学习超图
-        self.pos_hypergraph = data_dict.get("pos_hypergraph", None)
-        self.neg_hypergraph = data_dict.get("neg_hypergraph", None)
-        self.pos_edge_weights = data_dict.get("pos_edge_weights", None)
-        self.neg_edge_weights = data_dict.get("neg_edge_weights", None)
+        # 聚类元数据
+        self.cluster_metadata = data_dict.get("cluster_metadata", None)
 
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
@@ -81,8 +78,6 @@ class HGIKTTrainer(Trainer):
         mask = mask.to(torch.bool).to(self.device_)
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
-        pos_hg = self.pos_hypergraph.to(self.device_)
-        neg_hg = self.neg_hypergraph.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
@@ -92,8 +87,7 @@ class HGIKTTrainer(Trainer):
             mask,
             self.hetero_graph,
             self.hypergraph,
-            pos_hg,
-            neg_hg,
+            self.cluster_metadata,
         )  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]

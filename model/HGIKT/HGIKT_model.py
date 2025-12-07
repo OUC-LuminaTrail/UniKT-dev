@@ -495,15 +495,7 @@ class HGIKT(nn.Module):
             sub_dim=getattr(args, "sub_dim", 32),
         )
 
-        # 对比学习超图
-        # 为负超图添加单独的HGNN卷积层
-        self.hgnn_conv_neg = HGNN(
-            in_ch=args.embedding_dim,
-            n_hid=args.embedding_dim,
-            n_class=args.embedding_dim,
-            dropout=self.dropout,
-            use_edge_weights=True,
-        )
+        # 移除独立的负超图卷积层，统一使用主图卷积
 
         # 全连接层，将图卷积后的特征映射到隐藏维度
         self.fc_feature = Linear(
@@ -567,8 +559,7 @@ class HGIKT(nn.Module):
         user_mask: torch.Tensor,
         hetero_graph: torch.Tensor,
         hypergraph: torch.Tensor,
-        pos_hypergraph: torch.Tensor = None,
-        neg_hypergraph: torch.Tensor = None,
+        cluster_metadata: list = None,
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -577,30 +568,38 @@ class HGIKT(nn.Module):
         # [B, S, embedding_dim]
         answers_emb: torch.Tensor = self.answer_embedding(user_response)
 
-        # 带权超图卷积
-        question_hyper_conv_main: torch.Tensor = self.hgnn_conv(
+        # 加权超图卷积
+        question_hyper_conv: torch.Tensor = self.hgnn_conv(
             self.question_embedding_hyper.weight, hypergraph
         )
 
-        # 对比学习：分别处理正负超图
-        # 正超图卷积（简单题目）
-        question_hyper_conv_pos: torch.Tensor = self.hgnn_conv(
-            self.question_embedding_hyper.weight, pos_hypergraph
-        )
-        # 负超图卷积（困难题目）
-        question_hyper_conv_neg: torch.Tensor = self.hgnn_conv_neg(
-            self.question_embedding_hyper.weight, neg_hypergraph
-        )
-
-        # 三视图融合：主超图 + 正超图 + 负超图
-        # 主超图提供整体结构，正负超图提供对比信息
-        question_hyper_conv = (
-            question_hyper_conv_main + question_hyper_conv_pos + question_hyper_conv_neg
-        ) / 3.0
-
-        # 保存用于对比损失计算
-        self._pos_features = question_hyper_conv_pos
-        self._neg_features = question_hyper_conv_neg
+        # 从卷积结果中提取正负样本对
+        if cluster_metadata is not None and len(cluster_metadata) > 0:
+            # 提取Easy和Hard簇的节点
+            pos_nodes = []
+            neg_nodes = []
+            for cluster in cluster_metadata:
+                if cluster["type"] == "easy":
+                    pos_nodes.extend(cluster["vertices"])
+                elif cluster["type"] == "hard":
+                    neg_nodes.extend(cluster["vertices"])
+            
+            # 去重并转为tensor
+            if len(pos_nodes) > 0 and len(neg_nodes) > 0:
+                pos_nodes = list(set(pos_nodes))
+                neg_nodes = list(set(neg_nodes))
+                pos_idx = torch.tensor(pos_nodes, device=question_hyper_conv.device)
+                neg_idx = torch.tensor(neg_nodes, device=question_hyper_conv.device)
+                
+                # 从卷积后的特征中提取对应节点
+                self._pos_features = question_hyper_conv[pos_idx]  # [N_pos, D]
+                self._neg_features = question_hyper_conv[neg_idx]  # [N_neg, D]
+            else:
+                self._pos_features = None
+                self._neg_features = None
+        else:
+            self._pos_features = None
+            self._neg_features = None
 
         # 异构图卷积
         question_gnn_conv: torch.Tensor = self.gnn_conv(

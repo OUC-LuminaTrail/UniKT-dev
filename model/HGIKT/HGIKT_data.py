@@ -31,6 +31,8 @@ class HGIKTModelData(ModelData):
         r"""
         准备HGIKT模型所需的数据
         """
+        import dhg
+
         fold_idx = args.fold if args.fold > 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         max_seq_len = self.data_src.get_metadata("max_seq_len")
@@ -41,29 +43,14 @@ class HGIKTModelData(ModelData):
             max_seq_len, min_seq_len
         )
 
-        # 初始化变量
-        pos_hypergraph = None
-        neg_hypergraph = None
-
-        # 构建主超图（难度加权超图）
-        # 使用难度加权超图作为主超图
-        skill_hypergraph = self.build_difficulty_weighted_hypergraph(
+        # 构建难度加权超图
+        skill_hypergraph, cluster_metadata = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
-            num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),
+            num_difficulty_clusters=args.num_difficulty_clusters,
         )
 
-        # 构建正负超图
-        # 构建对比学习超图（正负超边）
-        pos_hypergraph, neg_hypergraph = self.build_contrastive_hypergraph(
-            ("question", "has", "skill"),
-            easy_threshold=getattr(args, "contrastive_easy_threshold", 0.3),
-            hard_threshold=getattr(args, "contrastive_hard_threshold", 0.6),
-            min_samples=getattr(args, "contrastive_min_samples", 5),
-        )
-
-        print(f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)")
         print(
-            f"  - Contrastive hypergraph: {pos_hypergraph.num_e} positive hyperedges, {neg_hypergraph.num_e} negative hyperedges"
+            f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)"
         )
 
         # 构建异构图
@@ -120,153 +107,16 @@ class HGIKTModelData(ModelData):
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
 
-        # 返回数据时包含边权重信息和对比超图
+        # 返回数据时包含聚类元数据
         return_data = {
             "train_dataloader": train_dataloader,
             "val_dataloader": val_dataloader,
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
-            "pos_hypergraph": pos_hypergraph,
-            "neg_hypergraph": neg_hypergraph,
+            "cluster_metadata": cluster_metadata,
         }
 
         return return_data
-
-    def build_contrastive_hypergraph(
-        self,
-        edge_type: tuple[str, str, str],
-        vertex_type: str = None,
-        easy_threshold: float = 0.3,
-        hard_threshold: float = 0.6,
-        min_samples: int = 5,
-    ):
-        """
-        构建对比学习超图：区分"正确超边"和"易错超边"
-
-        核心思想：
-        - 正超边（positive hyperedges）：连接学生易于正确回答的同技能题目
-        - 负超边（negative hyperedges）：连接学生容易出错的同技能题目
-        - 通过对比损失最大化正负超边特征的区分度
-
-        参数:
-            edge_type: 边类型 (source_type, relation, target_type)
-                例如：("question", "has", "skill")
-            vertex_type: 超图顶点类型（默认为source_type）
-            easy_threshold: 简单题目的错误率阈值（低于此值视为简单）
-            hard_threshold: 困难题目的错误率阈值（高于此值视为困难）
-            min_samples: 每个(问题,技能)对的最小样本数阈值（用于过滤噪声）
-
-        返回:
-            positive_hg: dhg.Hypergraph 正超图（简单题目）
-            negative_hg: dhg.Hypergraph 负超图（困难题目）
-        """
-        import dhg
-        import numpy as np
-        from tqdm import tqdm
-
-        source_type, _, target_type = edge_type
-
-        if vertex_type is None:
-            vertex_type = source_type
-
-        if vertex_type != source_type:
-            raise ValueError(
-                f"vertex_type ({vertex_type}) must match the source type ({source_type}) of edge_type"
-            )
-
-        # 获取节点数量
-        num_vertices = self.data_src.get_metadata(f"num_{source_type}s")
-        num_targets = self.data_src.get_metadata(f"num_{target_type}s")
-
-        print(
-            f"Building contrastive hypergraph: {num_vertices} {vertex_type}s, {num_targets} {target_type}s"
-        )
-        print(f"Thresholds: Easy < {easy_threshold}, Hard > {hard_threshold}")
-
-        # 计算(问题, 技能)对的错误率
-        error_patterns = self.calculate_question_error_rate()
-
-        # 为每个技能构建正负超边
-        pos_hyperedge_list = []
-        neg_hyperedge_list = []
-        pos_edge_weights = []
-        neg_edge_weights = []
-
-        data = self.data_src.get_processed_data()
-        target_groups = data.groupby(target_type)[source_type].apply(
-            lambda x: list(set(x))
-        )
-
-        for target_id, source_list in tqdm(
-            target_groups.items(), desc=f"构建对比超边 ({target_type})"
-        ):
-            # 过滤出该技能下的题目及其错误率
-            easy_questions = []
-            hard_questions = []
-
-            for question_id in source_list:
-                key = (int(question_id), int(target_id))
-                if key not in error_patterns:
-                    continue
-
-                pattern = error_patterns[key]
-                if pattern["count"] < min_samples:
-                    continue  # 过滤样本数不足的题目
-
-                error_rate = pattern["error_rate"]
-                if error_rate < easy_threshold:
-                    easy_questions.append(int(question_id))
-                elif error_rate > hard_threshold:
-                    hard_questions.append(int(question_id))
-
-            # 只保留至少有2个题目的超边（单个题目无法形成超边）
-            if len(easy_questions) >= 2:
-                pos_hyperedge_list.append(easy_questions)
-                # 计算正超边权重：基于题目之间的错误率一致性
-                error_rates = [
-                    error_patterns[(q, int(target_id))]["error_rate"]
-                    for q in easy_questions
-                ]
-                # 权重 = 1 - 错误率标准差（越一致权重越高）
-                weight = 1.0 - np.std(error_rates)
-                pos_edge_weights.append(max(0.1, weight))  # 确保权重至少为0.1
-
-            if len(hard_questions) >= 2:
-                neg_hyperedge_list.append(hard_questions)
-                # 计算负超边权重
-                error_rates = [
-                    error_patterns[(q, int(target_id))]["error_rate"]
-                    for q in hard_questions
-                ]
-                weight = 1.0 - np.std(error_rates)
-                neg_edge_weights.append(max(0.1, weight))
-
-        # 创建正负超图
-        if len(pos_hyperedge_list) == 0:
-            print(f"Warning: Not enough easy-question hyperedges found (threshold={easy_threshold})")
-            # 创建空超图
-            positive_hg = dhg.Hypergraph(num_vertices, [])
-            pos_edge_weights = []
-        else:
-            positive_hg = dhg.Hypergraph(
-                num_vertices, pos_hyperedge_list, e_weight=pos_edge_weights
-            )
-
-        if len(neg_hyperedge_list) == 0:
-            print(f"Warning: Not enough hard-question hyperedges found (threshold={hard_threshold})")
-            # 创建空超图
-            negative_hg = dhg.Hypergraph(num_vertices, [])
-            neg_edge_weights = []
-        else:
-            negative_hg = dhg.Hypergraph(
-                num_vertices, neg_hyperedge_list, e_weight=neg_edge_weights
-            )
-
-        print(
-            f"Contrastive hypergraph construction finished: positive_hyperedges={len(pos_hyperedge_list)}, negative_hyperedges={len(neg_hyperedge_list)}"
-        )
-
-        return positive_hg, negative_hg
 
     def build_difficulty_weighted_hypergraph(
         self,
@@ -329,6 +179,7 @@ class HGIKTModelData(ModelData):
         # 为每个超边（如技能）内的题目按难度聚类
         e_list = []
         edge_weights = []
+        cluster_metadata = []
 
         print(f"Building difficulty-weighted {hyperedge_node_type} hypergraph...")
         for hyperedge_idx, vertices in tqdm(
@@ -358,7 +209,9 @@ class HGIKTModelData(ModelData):
                 )
                 cluster_labels = kmeans.fit_predict(difficulties)
 
-                # 为每个簇创建子超边
+                # Store clusters to sort them
+                current_skill_clusters = []
+
                 for cluster_id in range(kmeans.n_clusters):
                     cluster_vertices = [
                         vertices[i]
@@ -372,17 +225,48 @@ class HGIKTModelData(ModelData):
                     # 计算簇内难度一致性（方差越小，一致性越高，权重越大）
                     cluster_difficulties = difficulties[cluster_labels == cluster_id]
                     difficulty_variance = np.var(cluster_difficulties)
+                    avg_difficulty = np.mean(cluster_difficulties)
+
                     # 权重：一致性高的簇权重更大
                     # 使用指数衰减：variance越大，权重越小
                     weight = np.exp(-difficulty_variance * 5.0)
                     weight = max(0.1, min(1.0, weight))  # 限制在[0.1, 1.0]
 
-                    e_list.append(cluster_vertices)
-                    edge_weights.append(float(weight))
+                    current_skill_clusters.append(
+                        {
+                            "vertices": cluster_vertices,
+                            "weight": float(weight),
+                            "avg_difficulty": avg_difficulty,
+                        }
+                    )
+
+                # Sort by difficulty (Easy to Hard)
+                current_skill_clusters.sort(key=lambda x: x["avg_difficulty"])
+
+                # Add to main lists and metadata
+                for rank, cluster in enumerate(current_skill_clusters):
+                    e_list.append(cluster["vertices"])
+                    edge_weights.append(cluster["weight"])
+
+                    # Determine type based on rank
+                    c_type = "neutral"
+                    if len(current_skill_clusters) >= 2:
+                        if rank == 0:
+                            c_type = "easy"
+                        elif rank == len(current_skill_clusters) - 1:
+                            c_type = "hard"
+
+                    cluster_metadata.append(
+                        {
+                            "vertices": cluster["vertices"],
+                            "weight": cluster["weight"],
+                            "type": c_type,
+                            "skill_id": hyperedge_idx,
+                            "avg_difficulty": cluster["avg_difficulty"],
+                        }
+                    )
 
             except Exception as e:
-                print(f"Warning: Clustering failed for hyperedge {hyperedge_idx}: {e}")
-                # 如果聚类失败，将所有题目放在一个超边中
                 e_list.append(vertices)
                 edge_weights.append(1.0)
 
@@ -407,5 +291,5 @@ class HGIKTModelData(ModelData):
         )
         print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
         print(f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}")
-        
-        return hypergraph
+
+        return hypergraph, cluster_metadata

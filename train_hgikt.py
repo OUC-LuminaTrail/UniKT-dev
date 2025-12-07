@@ -64,24 +64,6 @@ def parse_args():
     # 对比学习超图参数
     contrastive_params = parser.add_argument_group("Contrastive Learning Hypergraph Parameters")
     contrastive_params.add_argument(
-        "--contrastive_easy_threshold",
-        type=float,
-        default=0.3,
-        help="Error rate threshold for easy questions (default: 0.3)",
-    )
-    contrastive_params.add_argument(
-        "--contrastive_hard_threshold",
-        type=float,
-        default=0.6,
-        help="Error rate threshold for hard questions (default: 0.6)",
-    )
-    contrastive_params.add_argument(
-        "--contrastive_min_samples",
-        type=int,
-        default=5,
-        help="Minimum samples per (question, skill) pair to be included (default: 5)",
-    )
-    contrastive_params.add_argument(
         "--contrastive_loss_weight",
         type=float,
         default=0.1,
