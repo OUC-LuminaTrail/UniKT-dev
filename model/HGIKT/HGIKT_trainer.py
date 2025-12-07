@@ -4,7 +4,7 @@ GIKT 模型训练器
 """
 
 import torch
-from utility.net_trainer import Trainer
+from utility.net_trainer import Trainer, seed_everything
 
 
 class HGIKTTrainer(Trainer):
@@ -17,13 +17,19 @@ class HGIKTTrainer(Trainer):
         args=None,
         data_src=None,
     ):
+        seed_value = seed_everything(getattr(args, "seed", None))
         # 构建数据
         from model.HGIKT import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
-        train_data, val_data, self.hypergraph, self.hetero_graph = (
-            model_data.prepare_data(args)
-        )
+        data_dict = model_data.prepare_data(args)
+
+        # 解包数据
+        train_data = data_dict["train_dataloader"]
+        val_data = data_dict["val_dataloader"]
+        self.hypergraph = data_dict["skill_hypergraph"]
+        self.hetero_graph = data_dict["hetero_graph"]
+
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -36,6 +42,8 @@ class HGIKTTrainer(Trainer):
             hyperparams=args,
             log_dir=args.log_dir,
             device=args.device,
+            checkpoint_path=args.checkpoint_path,
+            seed=seed_value,
         )
 
     def init_model(self, args, data_src):
@@ -71,7 +79,11 @@ class HGIKTTrainer(Trainer):
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(
-            sequence, response, mask, self.hetero_graph, self.hypergraph
+            sequence,
+            response,
+            mask,
+            self.hetero_graph,
+            self.hypergraph,
         )  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]

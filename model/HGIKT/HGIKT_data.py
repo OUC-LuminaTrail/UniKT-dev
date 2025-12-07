@@ -41,8 +41,15 @@ class HGIKTModelData(ModelData):
             max_seq_len, min_seq_len
         )
 
-        # 知识点超图：每个知识点作为一个超边，连接包含该知识点的所有题目
-        skill_hypergraph = self.build_hypergraph(("question", "has", "skill"))
+        # 构建难度加权超图
+        skill_hypergraph = self.build_difficulty_weighted_hypergraph(
+            ("question", "has", "skill"),
+            num_difficulty_clusters=args.num_difficulty_clusters,
+        )
+
+        print(
+            f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)"
+        )
 
         # 构建异构图
         hetero_graph = self.build_hetero_graph(
@@ -66,7 +73,7 @@ class HGIKTModelData(ModelData):
                     "question",
                     "belongs_to",
                     "template",
-                )
+                ),
             ]
         )
 
@@ -97,4 +104,189 @@ class HGIKTModelData(ModelData):
         val_dataloader = DataLoader(
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
-        return train_dataloader, val_dataloader, skill_hypergraph, hetero_graph
+
+        # 返回数据
+        return_data = {
+            "train_dataloader": train_dataloader,
+            "val_dataloader": val_dataloader,
+            "skill_hypergraph": skill_hypergraph,
+            "hetero_graph": hetero_graph,
+        }
+
+        return return_data
+
+    def build_difficulty_weighted_hypergraph(
+        self,
+        edge_type: tuple[str, str, str],
+        vertex_type: str = None,
+        num_difficulty_clusters: int = 3,
+    ):
+        """
+        构建基于难度加权的超图
+
+        核心思想：
+        1. 将同一技能下的题目按难度聚类（简单/中等/困难）
+        2. 每个难度簇形成一个子超边
+        3. 超边权重反映簇内题目的难度一致性
+
+        参数:
+            edge_type: 边类型三元组 (顶点类型, 边关系名, 超边类型)
+                      例如: ('question', 'has', 'skill')
+            vertex_type: 顶点类型（可选），默认使用 edge_type 的第一个元素
+            num_difficulty_clusters: 难度聚类数量，默认为3（简单/中等/困难）
+
+        返回:
+            tuple: (hypergraph, edge_weights)
+                - hypergraph: DHG框架的超图对象
+                - edge_weights: 超边权重列表，与超图的超边顺序对应
+
+        示例:
+            # 构建难度加权的技能超图
+            hg, weights = model_data.build_difficulty_weighted_hypergraph(
+                ('question', 'has', 'skill'),
+                num_difficulty_clusters=3
+            )
+        """
+        from dhg import Hypergraph
+        from sklearn.cluster import KMeans
+        from tqdm import tqdm
+        import numpy as np
+
+        vertex_node_type, _, hyperedge_node_type = edge_type
+
+        if vertex_type is None:
+            vertex_type = vertex_node_type
+
+        # 获取数据和难度分数
+        data = self.data_src.get_processed_data()
+        difficulty_scores = self.calculate_question_difficulty()
+
+        # 获取关联矩阵
+        H = self.build_data_matrix(edge_type, value_type="binary")
+        num_vertices = H.shape[0]
+
+        # 将关联矩阵转换为超边字典
+        rows, cols = np.nonzero(H)
+        edge_dict = {}
+        for vertex_idx, hyperedge_idx in zip(rows, cols):
+            if hyperedge_idx not in edge_dict:
+                edge_dict[hyperedge_idx] = []
+            edge_dict[hyperedge_idx].append(int(vertex_idx))
+
+        # 为每个超边（如技能）内的题目按难度聚类
+        e_list = []
+        edge_weights = []
+        cluster_metadata = []
+
+        print(f"Building difficulty-weighted {hyperedge_node_type} hypergraph...")
+        for hyperedge_idx, vertices in tqdm(
+            edge_dict.items(), desc=f"Clustering {hyperedge_node_type} by difficulty"
+        ):
+            if len(vertices) == 0:
+                continue
+
+            # 获取这些题目的难度分数
+            difficulties = np.array(
+                [difficulty_scores.get(v, 0.5) for v in vertices]
+            ).reshape(-1, 1)
+
+            # 如果题目数量少于聚类数，每个题目单独成簇
+            if len(vertices) < num_difficulty_clusters:
+                for v in vertices:
+                    e_list.append([v])
+                    edge_weights.append(1.0)  # 单题目超边权重为1
+                continue
+
+            # K-means聚类
+            try:
+                kmeans = KMeans(
+                    n_clusters=min(num_difficulty_clusters, len(vertices)),
+                    random_state=42,
+                    n_init=10,
+                )
+                cluster_labels = kmeans.fit_predict(difficulties)
+
+                # Store clusters to sort them
+                current_skill_clusters = []
+
+                for cluster_id in range(kmeans.n_clusters):
+                    cluster_vertices = [
+                        vertices[i]
+                        for i in range(len(vertices))
+                        if cluster_labels[i] == cluster_id
+                    ]
+
+                    if len(cluster_vertices) == 0:
+                        continue
+
+                    # 计算簇内难度一致性（方差越小，一致性越高，权重越大）
+                    cluster_difficulties = difficulties[cluster_labels == cluster_id]
+                    difficulty_variance = np.var(cluster_difficulties)
+                    avg_difficulty = np.mean(cluster_difficulties)
+
+                    # 权重：一致性高的簇权重更大
+                    # 使用指数衰减：variance越大，权重越小
+                    weight = np.exp(-difficulty_variance * 5.0)
+                    weight = max(0.1, min(1.0, weight))  # 限制在[0.1, 1.0]
+
+                    current_skill_clusters.append(
+                        {
+                            "vertices": cluster_vertices,
+                            "weight": float(weight),
+                            "avg_difficulty": avg_difficulty,
+                        }
+                    )
+
+                # Sort by difficulty (Easy to Hard)
+                current_skill_clusters.sort(key=lambda x: x["avg_difficulty"])
+
+                # Add to main lists and metadata
+                for rank, cluster in enumerate(current_skill_clusters):
+                    e_list.append(cluster["vertices"])
+                    edge_weights.append(cluster["weight"])
+
+                    # Determine type based on rank
+                    c_type = "neutral"
+                    if len(current_skill_clusters) >= 2:
+                        if rank == 0:
+                            c_type = "easy"
+                        elif rank == len(current_skill_clusters) - 1:
+                            c_type = "hard"
+
+                    cluster_metadata.append(
+                        {
+                            "vertices": cluster["vertices"],
+                            "weight": cluster["weight"],
+                            "type": c_type,
+                            "skill_id": hyperedge_idx,
+                            "avg_difficulty": cluster["avg_difficulty"],
+                        }
+                    )
+
+            except Exception as e:
+                e_list.append(vertices)
+                edge_weights.append(1.0)
+
+        # 处理空超边情况
+        if len(e_list) == 0:
+            print(f"Warning: No hyperedges found. Creating self-loop hypergraph.")
+            e_list = [[i] for i in range(num_vertices)]
+            edge_weights = [1.0] * num_vertices
+
+        # 确保超边列表和权重列表长度一致
+        assert len(e_list) == len(
+            edge_weights
+        ), f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
+
+        # 创建超图
+        hypergraph = Hypergraph(
+            num_v=num_vertices, e_list=e_list, e_weight=edge_weights
+        )
+
+        print(
+            f"Difficulty-weighted {hyperedge_node_type.capitalize()} Hypergraph constructed:"
+        )
+        print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
+        print(f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}")
+        
+        return hypergraph

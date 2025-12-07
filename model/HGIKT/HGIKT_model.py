@@ -88,7 +88,7 @@ class GNN_QS(nn.Module):
 class HGNN(nn.Module):
     """基于dhg框架的超图神经网络
 
-    使用dhg.nn.HGNNConv实现双层超图卷积，与原始实现语义一致。
+    使用dhg.nn.HGNNConv实现双层超图卷积，支持加权超图。
 
     数学公式：
         X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
@@ -96,14 +96,16 @@ class HGNN(nn.Module):
     其中：
         - X 是输入顶点特征矩阵
         - H 是超图关联矩阵
-        - W_e 是超边权重对角矩阵（默认为单位矩阵）
+        - W_e 是超边权重对角矩阵（可自定义或默认为单位矩阵）
         - D_v 是顶点度数对角矩阵
         - D_e 是超边度数对角矩阵
         - Θ 是可学习参数
     """
 
-    def __init__(self, in_ch, n_hid, n_class, dropout=0.0):
+    def __init__(self, in_ch, n_hid, n_class, dropout=0.0, use_edge_weights=True):
         super(HGNN, self).__init__()
+        self.use_edge_weights = use_edge_weights
+
         # 第一层卷积：聚合直接邻居问题特征
         # is_last=False 表示使用激活函数和dropout
         self.hgc1 = HGNNConv(
@@ -120,13 +122,14 @@ class HGNN(nn.Module):
 
         Args:
             x: 输入特征矩阵 [num_vertices, in_ch]
-            hg: dhg.Hypergraph 超图结构
+            hg: dhg.Hypergraph 超图
 
         Returns:
             输出特征矩阵 [num_vertices, n_class]
         """
-        x1 = self.hgc1(x, hg)  # 第一层使用内置ReLU和dropout
-        x2 = F.relu(self.hgc2(x1, hg))  # 第二层手动应用ReLU（与原实现一致）
+        x1 = self.hgc1(x, hg)
+        x2 = F.relu(self.hgc2(x1, hg))
+
         return x2
 
 
@@ -489,6 +492,8 @@ class HGIKT(nn.Module):
             sub_dim=getattr(args, "sub_dim", 32),
         )
 
+        # 移除独立的负超图卷积层，统一使用主图卷积
+
         # 全连接层，将图卷积后的特征映射到隐藏维度
         self.fc_feature = Linear(
             self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
@@ -516,34 +521,6 @@ class HGIKT(nn.Module):
         # 广义交互模块
         self.general_interaction = GeneralInteraction(hidden_dim=self.lstm_hidden_dim)
 
-    def calc_contrastive_loss(self, view1, view2, temp=0.5):
-        """计算 NT-Xent (SimCLR) 损失"""
-        # L2 归一化
-        view1 = F.normalize(view1, dim=-1)
-        view2 = F.normalize(view2, dim=-1)
-
-        # 拼接两种视图，按 SimCLR 方式构造 2N 个样本
-        features = torch.cat([view1, view2], dim=0)  # [2N, D]
-        sim_matrix = torch.matmul(features, features.T) / temp  # [2N, 2N]
-
-        # 屏蔽自身相似度，避免其进入分母
-        batch = view1.size(0)
-        diag_mask = torch.eye(2 * batch, device=features.device, dtype=torch.bool)
-        sim_matrix = sim_matrix.masked_fill(diag_mask, float("-inf"))
-
-        idx = torch.arange(batch, device=features.device)
-        positive_pairs = torch.cat(
-            [
-                sim_matrix[idx, idx + batch],
-                sim_matrix[idx + batch, idx],
-            ],
-            dim=0,
-        )  # [2N]
-
-        logsumexp = torch.logsumexp(sim_matrix, dim=1)  # [2N]
-        loss = -positive_pairs + logsumexp
-        return loss.mean()
-
     def forward(
         self,
         user_sequence: torch.Tensor,
@@ -559,11 +536,12 @@ class HGIKT(nn.Module):
         # [B, S, embedding_dim]
         answers_emb: torch.Tensor = self.answer_embedding(user_response)
 
-        # 全图卷积
-        # question_conv [B, S, embedding_dim]
+        # 加权超图卷积
         question_hyper_conv: torch.Tensor = self.hgnn_conv(
             self.question_embedding_hyper.weight, hypergraph
         )
+
+        # 异构图卷积
         question_gnn_conv: torch.Tensor = self.gnn_conv(
             {
                 "question": self.question_embedding.weight,
