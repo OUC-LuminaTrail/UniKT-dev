@@ -2,18 +2,21 @@ import torch
 from abc import ABC, abstractmethod
 import time
 import os
-import random
-import numpy as np
 from tqdm import tqdm
 from typing import Tuple, Any
 from torch_geometric.profile import count_parameters
-from utility.early_stopping import EarlyStopping, EarlyStoppingConfig
+from utils.early_stopping import EarlyStopping, EarlyStoppingConfig
 import swanlab
 from dotenv import load_dotenv
 
 
 def seed_everything(seed: int | None, deterministic: bool = True) -> int | None:
     r"""Set random seeds across common libraries for reproducibility."""
+    import os
+    import random
+    import numpy as np
+    import torch
+
     if seed is None:
         return None
 
@@ -166,7 +169,7 @@ class Trainer(ABC):
             model_name: 模型名称（可选）
             dataset_name: 数据集名称（可选）
         """
-        from utility.hyperparam_manager import create_hyperparameter_manager
+        from utils.hyperparam_manager import create_hyperparameter_manager
 
         # 创建超参数管理器
         self.hyperparam_manager = create_hyperparameter_manager(
@@ -277,7 +280,7 @@ class Trainer(ABC):
         """
         import torch
         from swanlab.plugin.notification import LarkCallback
-        
+
         # 加载环境变量
         load_dotenv()
 
@@ -470,7 +473,7 @@ class Trainer(ABC):
         """
         计算损失函数。
         子类可以重写此方法以支持更复杂的损失计算（如多任务损失、对比损失等）。
-        
+
         参数:
             forward_outputs: forward_pass 的返回值元组
 
@@ -567,7 +570,7 @@ class Trainer(ABC):
         acc = accuracy_score(y_label, y_pred)
         self.log_metric(f"{prefix}ACC-epoch", acc, epoch)
         # AUC
-        auc = 0.0 # 默认值
+        auc = 0.0  # 默认值
         try:
             auc = roc_auc_score(y_label, y_hat)
             self.log_metric(f"{prefix}AUC-epoch", auc, epoch)
@@ -593,9 +596,7 @@ class Trainer(ABC):
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
 
-    def _select_monitor_value(
-        self, metrics: dict, val_loss: float | None
-    ) -> float:
+    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
         """根据配置选择监控指标的值。"""
         name = self._monitor_name()
         value = None
@@ -612,7 +613,7 @@ class Trainer(ABC):
                 value = float(metrics["acc"])
             elif metrics.get("rmse") is not None:
                 value = float(metrics["rmse"])
-        
+
         # 如果仍然是 None，返回一个极差的值以避免 EarlyStopping 崩溃
         if value is None:
             # 如果是 loss 或 rmse (min 模式)，返回 inf
@@ -631,7 +632,7 @@ class Trainer(ABC):
             - epoch: 当前轮数
         """
         checkpoint_path = os.path.join(self.log_dir, "best_model.pth")
-        
+
         # 确定比较模式 (min 或 max)
         mode = "max"
         if self.early_stopping:
@@ -641,7 +642,7 @@ class Trainer(ABC):
             name = self._monitor_name()
             if name in ["rmse", "loss"]:
                 mode = "min"
-        
+
         is_better = False
         if not hasattr(self, "_best_metric"):
             is_better = True

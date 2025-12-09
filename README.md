@@ -63,7 +63,7 @@ kt-exp-graph/
 │       ├── SQGKT_data.py               # 数据加载
 │       ├── SQGKT_model.py              # 模型定义
 │       └── SQGKT_trainer.py            # 训练逻辑
-├── utility/                            # 工具模块
+├── utils/                            # 工具模块
 │   ├── early_stopping.py               # 通用早停器
 │   ├── hyperparam_manager.py           # 超参数管理
 │   ├── net_trainer.py                  # 基础训练器
@@ -138,7 +138,7 @@ python data_process.py process \
 
 ### 复现性设置
 
-训练脚本中的 `--seed` 参数现在由 `utility/net_trainer.py` 统一处理。`Trainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
+训练脚本中的 `--seed` 参数现在由 `utils/net_trainer.py` 统一处理。`Trainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
 
 ### 3. 查看训练结果
 

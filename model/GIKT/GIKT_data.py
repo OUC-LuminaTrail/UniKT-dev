@@ -1,6 +1,6 @@
 import torch
-import numpy as np
-from utility.data_process.data_utility import DataSource, ModelData
+from utils.data_process import DataSource
+from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
@@ -23,7 +23,7 @@ class GIKTDataset(Dataset):
         return len(self.sequences)
 
 
-class GIKTModelData(ModelData):
+class GIKTModelData(GraphModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
@@ -61,7 +61,7 @@ class GIKTModelData(ModelData):
                     f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
                 )
             print(f"Using K-fold cross-validation: fold {fold_idx}/{kfold_n_splits}")
-            train_data, val_data = self.get_kfold_split_data(
+            train_data, val_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:

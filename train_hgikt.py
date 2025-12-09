@@ -152,24 +152,11 @@ def main():
     """主训练函数"""
     args = parse_args()
     from model.HGIKT import HGIKTTrainer
-    from utility.data_process import Assistments2009Data
-    from utility.data_process import Assistments2012Data
-    from utility.data_process import Assistments2017Data
-    from utility.data_process import EdNetKT1Data
-
+    from utils.data_process import get_data_source
 
     # 构建数据
     print("Building datasets...")
-    if args.dataset == "assistments09":
-        data_src = Assistments2009Data(args=args)
-    elif args.dataset == "assistments12":
-        data_src = Assistments2012Data(args=args)
-    elif args.dataset == "assistments17":
-        data_src = Assistments2017Data(args=args)
-    elif args.dataset == "ednet_kt1":
-        data_src = EdNetKT1Data(args=args)
-    else:
-        raise ValueError(f"Unsupported dataset: {args.dataset}")
+    data_src = get_data_source(dataset_name=args.dataset, args=args)
 
     print("Initializing trainer...")
     trainer = HGIKTTrainer(
