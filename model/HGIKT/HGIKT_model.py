@@ -509,7 +509,7 @@ class HGIKT(nn.Module):
             hidden_size=self.lstm_hidden_dim,
             num_layers=self.lstm_layers,
             batch_first=True,
-            dropout=self.dropout,
+            dropout=self.dropout if self.lstm_layers > 1 else 0.0,  # 仅在多层时使用dropout
         )
 
         # 历史回顾模块
