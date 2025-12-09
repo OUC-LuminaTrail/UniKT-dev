@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+from utils.data_process import get_data_source
 
 
 SUPPORTED_DATASETS = [
@@ -85,26 +86,9 @@ def build_parser():
     return parser
 
 
-def _create_data_processor(args):
-    from utils.data_process.assist09 import Assistments2009Data
-    from utils.data_process.assist12 import Assistments2012Data
-    from utils.data_process.assist17 import Assistments2017Data
-    from utils.data_process.ednet_kt1 import EdNetKT1Data
-
-    if args.dataset == "assistments09":
-        return Assistments2009Data(args=args)
-    if args.dataset == "assistments12":
-        return Assistments2012Data(args=args)
-    if args.dataset == "assistments17":
-        return Assistments2017Data(args=args)
-    if args.dataset == "ednet_kt1":
-        return EdNetKT1Data(args=args)
-    raise ValueError(f"Unsupported dataset: {args.dataset}")
-
-
 def cmd_download(args):
     """Handle `download` subcommand."""
-    dp = _create_data_processor(args)
+    dp = get_data_source(args)
     # override data_url if provided
     if getattr(args, "data_url", None):
         dp.data_url = args.data_url
@@ -134,7 +118,7 @@ def cmd_download(args):
 
 def cmd_process(args):
     """Handle `process` subcommand."""
-    dp = _create_data_processor(args)
+    dp = get_data_source(args)
     # 清理数据
     dp.clear_data()
     # 添加交叉验证标签
