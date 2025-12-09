@@ -48,6 +48,7 @@ class Assistments2009Data(DataSource):
 
         data = self.raw_data.drop(
             columns=[
+                "Unnamed: 0",
                 # "order_id",
                 # "assignment_id",
                 # "user_id",
@@ -91,10 +92,15 @@ class Assistments2009Data(DataSource):
                 "template_id": "template",
             }
         )
-        # 转换数据类型
-        data["user"] = data["user"].astype(int)
         # 清除缺失值
         data = data.dropna(subset=["user", "skill", "label"])
+        # 展开skill_id列，将多个知识点拆分为多行
+        data = data.assign(skill=data["skill"].str.split("_")).explode("skill")
+        # 转换数据类型
+        data["user"] = data["user"].astype(int)
+        data["skill"] = data["skill"].astype(int)
+        # 删除重复的行
+        data = data.drop_duplicates()
         # 重置索引
         data = data.reset_index(drop=True)
         # 限制序列长度
@@ -105,7 +111,7 @@ class Assistments2009Data(DataSource):
         data = DataSource.map_to_continuous_ids(
             data, columns=["user", "question", "skill", "assignment", "template"]
         )
-        # 安装时间排序
+        # 按照时间排序
         data = data.sort_values(by=["user", "order_id"])
 
         self.processed_data = data
