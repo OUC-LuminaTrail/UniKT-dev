@@ -1,4 +1,4 @@
-from .data_utility import DataSource 
+from .data_source import DataSource
 
 
 class EdNetKT1Data(DataSource):

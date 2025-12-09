@@ -4,7 +4,7 @@ GIKT 模型训练器
 """
 
 import torch
-from utility.net_trainer import Trainer, seed_everything
+from utils.net_trainer import Trainer
 
 
 class HGIKTTrainer(Trainer):
@@ -17,7 +17,6 @@ class HGIKTTrainer(Trainer):
         args=None,
         data_src=None,
     ):
-        seed_value = seed_everything(getattr(args, "seed", None))
         # 构建数据
         from model.HGIKT import HGIKTModelData
 
@@ -43,8 +42,12 @@ class HGIKTTrainer(Trainer):
             log_dir=args.log_dir,
             device=args.device,
             checkpoint_path=args.checkpoint_path,
-            seed=seed_value,
+            seed=args.seed,
         )
+
+        # 将静态数据移动到设备
+        self.hetero_graph = self.hetero_graph.to(self.device_)
+        self.hypergraph = self.hypergraph.to(self.device_)
 
     def init_model(self, args, data_src):
         from model.HGIKT.HGIKT_model import HGIKT
@@ -73,8 +76,6 @@ class HGIKTTrainer(Trainer):
         sequence = sequence.to(self.device_)
         response = response.to(self.device_)
         mask = mask.to(torch.bool).to(self.device_)
-        self.hetero_graph = self.hetero_graph.to(self.device_)
-        self.hypergraph = self.hypergraph.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签

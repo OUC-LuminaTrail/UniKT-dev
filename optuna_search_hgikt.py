@@ -7,14 +7,10 @@ HGIKT 模型 Optuna 超参数搜索脚本
 import argparse
 import os
 import logging
-from argparse import Namespace
 
 from model.HGIKT.HGIKT_trainer import HGIKTTrainer
-from utility.data_process import Assistments2009Data
-from utility.data_process import Assistments2012Data
-from utility.data_process import Assistments2017Data
-from utility.data_process import EdNetKT1Data
-from utility.optuna_utils import (
+from utils.data_process import get_data_source
+from utils.optuna_utils import (
     load_config_from_json,
     load_param_space_from_json,
     TrainerObjectiveWrapper,
@@ -28,7 +24,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description="HGIKT Optuna Hyperparameter Search")
-    
+
     # Optuna配置
     optuna_group = parser.add_argument_group("Optuna Configuration")
     optuna_group.add_argument(
@@ -50,7 +46,7 @@ def parse_args():
         default="auc",
         help="Metric to optimize",
     )
-    
+
     # 数据参数
     data_params = parser.add_argument_group("Data Parameters")
     data_params.add_argument(
@@ -70,10 +66,12 @@ def parse_args():
     data_params.add_argument(
         "--fold", type=int, default=0, help="Index of folds for K-Fold cross-validation"
     )
-    
+
     # 基础训练参数（用作默认值）
     train_params = parser.add_argument_group("Base Training Parameters")
-    train_params.add_argument("--epochs", type=int, default=200, help="Number of epochs")
+    train_params.add_argument(
+        "--epochs", type=int, default=200, help="Number of epochs"
+    )
     train_params.add_argument(
         "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
     )
@@ -100,53 +98,43 @@ def parse_args():
     # 其他参数
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument(
-        "--log_dir", type=str, default="./runs/optuna_search", help="Directory to save logs"
+        "--log_dir",
+        type=str,
+        default="./runs/optuna_search",
+        help="Directory to save logs",
     )
+    parser.add_argument("--device", type=str, default=None, help="Device (cuda or cpu)")
     parser.add_argument(
-        "--device", type=str, default=None, help="Device (cuda or cpu)"
+        "--use_swanlab",
+        action="store_true",
+        default=True,
+        help="Use SwanLab for tracking",
     )
-    parser.add_argument(
-        "--use_swanlab", action="store_true", default=True, help="Use SwanLab for tracking"
-    )
-    
+
     return parser.parse_args()
-
-
-def get_data_src(dataset_name: str, args: Namespace):
-    """创建数据源"""
-    if dataset_name == "assistments09":
-        return Assistments2009Data(args=args)
-    elif dataset_name == "assistments12":
-        return Assistments2012Data(args=args)
-    elif dataset_name == "assistments17":
-        return Assistments2017Data(args=args)
-    elif dataset_name == "ednet_kt1":
-        return EdNetKT1Data(args=args)
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset_name}")
 
 
 def main():
     """主函数"""
     args = parse_args()
-    
+
     logger.info("=" * 60)
     logger.info("HGIKT Optuna Hyperparameter Search")
     logger.info("=" * 60)
-    
+
     # 加载Optuna配置
     logger.info(f"Loading Optuna config from: {args.optuna_config}")
     optuna_config = load_config_from_json(args.optuna_config)
     optuna_config.save_dir = args.log_dir
-    
+
     # 加载参数空间
     logger.info(f"Loading parameter space from: {args.param_space}")
     param_spaces = load_param_space_from_json(args.param_space)
-    
+
     # 创建数据源工厂函数
     def data_src_factory():
-        return get_data_src(args.dataset, args)
-    
+        return get_data_source(dataset_name=args.dataset, args=args)
+
     # 创建目标函数包装器
     objective_wrapper = TrainerObjectiveWrapper(
         trainer_class=HGIKTTrainer,
@@ -155,7 +143,7 @@ def main():
         metric_name=args.metric,
         max_epochs=args.epochs,
     )
-    
+
     # 使用构建器创建OptunaTuner
     tuner = (
         OptunaTunerBuilder()
@@ -164,14 +152,16 @@ def main():
         .with_objective(objective_wrapper)
         .build()
     )
-    
+
     # 执行超参数搜索
-    logger.info(f"Starting hyperparameter search with {optuna_config.n_trials} trials...")
+    logger.info(
+        f"Starting hyperparameter search with {optuna_config.n_trials} trials..."
+    )
     best_params = tuner.search()
-    
+
     # 打印结果
     tuner.print_summary()
-    
+
     # 获取和保存数据框
     df = tuner.get_dataframe()
     if df is not None:
@@ -179,11 +169,11 @@ def main():
         df_path = os.path.join(args.log_dir, "trials_history_hgikt.csv")
         df.to_csv(df_path, index=False)
         logger.info(f"Trials history saved to: {df_path}")
-    
+
     logger.info("=" * 60)
     logger.info("Search completed successfully!")
     logger.info("=" * 60)
-    
+
     return best_params
 
 

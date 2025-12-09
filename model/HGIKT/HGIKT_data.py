@@ -1,5 +1,6 @@
 import torch
-from utility.data_process.data_utility import DataSource, ModelData
+from utils.data_process import DataSource
+from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
@@ -22,7 +23,7 @@ class HGIKTDataset(Dataset):
         return len(self.sequences)
 
 
-class HGIKTModelData(ModelData):
+class HGIKTModelData(GraphModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
@@ -44,7 +45,7 @@ class HGIKTModelData(ModelData):
         # 构建难度加权超图
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
-            num_difficulty_clusters=args.num_difficulty_clusters,
+            num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),
         )
 
         print(
@@ -85,7 +86,7 @@ class HGIKTModelData(ModelData):
                     f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
                 )
             print(f"Using K-fold cross-validation: fold {fold_idx}/{kfold_n_splits}")
-            train_data, val_data = self.get_kfold_split_data(
+            train_data, val_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
@@ -158,11 +159,10 @@ class HGIKTModelData(ModelData):
             vertex_type = vertex_node_type
 
         # 获取数据和难度分数
-        data = self.data_src.get_processed_data()
         difficulty_scores = self.calculate_question_difficulty()
 
         # 获取关联矩阵
-        H = self.build_data_matrix(edge_type, value_type="binary")
+        H = self.build_relationship_matrix(edge_type, value_type="binary")
         num_vertices = H.shape[0]
 
         # 将关联矩阵转换为超边字典

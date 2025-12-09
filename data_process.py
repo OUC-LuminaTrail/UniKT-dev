@@ -86,10 +86,10 @@ def build_parser():
 
 
 def _create_data_processor(args):
-    from utility.data_process.assist09 import Assistments2009Data
-    from utility.data_process.assist12 import Assistments2012Data
-    from utility.data_process.assist17 import Assistments2017Data
-    from utility.data_process.ednet_kt1 import EdNetKT1Data
+    from utils.data_process.assist09 import Assistments2009Data
+    from utils.data_process.assist12 import Assistments2012Data
+    from utils.data_process.assist17 import Assistments2017Data
+    from utils.data_process.ednet_kt1 import EdNetKT1Data
 
     if args.dataset == "assistments09":
         return Assistments2009Data(args=args)

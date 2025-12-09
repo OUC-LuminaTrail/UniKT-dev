@@ -1,30 +1,31 @@
 import os
 import pandas as pd
 from typing_extensions import override
-from .data_utility import DataSource
+from .data_source import DataSource
 
 
-class Assistments2012Data(DataSource):
+class Assistments2009Data(DataSource):
     """
-    Assistments 2012 数据集处理类
+    Assistments 2009-2010 数据集处理类
+    数据集来源: https://sites.google.com/site/assistmentsdata/home/2009-2010-assistment-data
     """
 
     def __init__(self, args):
         super().__init__(
-            dataset="assistments12",
+            dataset="assistments09",
             data_base_path=args.data_base_path,
-            data_url="http://cdn.lionhao.top/KTDataset/assistments12.zip",
+            data_url="http://cdn.lionhao.top/KTDataset/assistments09.zip",
             seed=args.seed,
         )
         self.args = args
         # 原始数据文件路径
         self.raw_data_path = os.path.join(
-            self.data_folder, "raw", "2012-2013-data-with-predictions-4-final.csv"
+            self.data_folder, "raw", "skill_builder_data_corrected_collapsed.csv"
         )
 
     @override
     def load_src_data(self):
-        r"""
+        """
         加载原始数据
         """
         if not os.path.exists(self.raw_data_path):
@@ -34,59 +35,78 @@ class Assistments2012Data(DataSource):
             self.raw_data_path, encoding="latin1", low_memory=False
         )
 
+    @override
     def clear_data(self):
         print("Processing Data...")
         if self.raw_data is None:
             try:
                 self.load_src_data()
             except FileNotFoundError:
-                raise FileNotFoundError(
-                    "Raw data not found. Please fetch the data first."
+                raise ValueError(
+                    "Original data loading failed. Please check the data file."
                 )
-        # 放弃不需要的列
+
         data = self.raw_data.drop(
             columns=[
+                # "order_id",
+                # "assignment_id",
+                # "user_id",
+                "assistment_id",
+                # "problem_id",
+                # "original",
+                # "correct",
+                "attempt_count",
+                "ms_first_response",
+                "tutor_mode",
+                "answer_type",
+                "sequence_id",
+                "student_class_id",
                 "position",
+                "type",
+                "base_sequence_id",
+                # "skill_id",
+                "skill_name",
+                "teacher_id",
+                "school_id",
+                "hint_count",
+                "hint_total",
+                "overlap_time",
+                # "template_id",
                 "answer_id",
                 "answer_text",
-                "problemlogid",
-                "overlap_time",
-                "ms_first_response",
-                "problem_type",
-                "skill",
+                "first_action",
+                "bottom_hint",
+                "opportunity",
+                "opportunity_original",
             ]
         )
-        # 重命名列
-        data.rename(
+        # 重新命名列
+        data = data.rename(
             columns={
+                "correct": "label",
                 "user_id": "user",
                 "problem_id": "question",
-                "correct": "label",
                 "assignment_id": "assignment",
                 "skill_id": "skill",
                 "template_id": "template",
-            },
-            inplace=True,
+            }
         )
-        # 按时间排序
-        data.sort_values(by=["user", "start_time"], inplace=True)
         # 转换数据类型
         data["user"] = data["user"].astype(int)
-        # 清除没有技能的问题
-        data = data[data["skill"].notna()]
-        # 清理label列中的异常值，只保留0和1
-        data = data[data["label"].isin([0, 1])]
+        # 清除缺失值
+        data = data.dropna(subset=["user", "skill", "label"])
         # 重置索引
         data = data.reset_index(drop=True)
-
         # 限制序列长度
         data = DataSource.restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
-        # 将问题ID和技能ID转换为连续整数
+        # 将数据重编码为连续整数
         data = DataSource.map_to_continuous_ids(
             data, columns=["user", "question", "skill", "assignment", "template"]
         )
+        # 安装时间排序
+        data = data.sort_values(by=["user", "order_id"])
 
         self.processed_data = data
 
@@ -99,3 +119,6 @@ class Assistments2012Data(DataSource):
         self.add_metadata("max_seq_len", self.args.max_seq_len)
         self.add_metadata("min_seq_len", self.args.min_seq_len)
         self.add_metadata("columns", data.columns.tolist())
+
+
+__all__ = ["Assistments2009Data"]

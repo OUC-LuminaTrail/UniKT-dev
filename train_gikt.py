@@ -6,8 +6,9 @@ GIKT 模型训练脚本
 def parse_args():
     """解析命令行参数"""
     import argparse
+
     parser = argparse.ArgumentParser(description="GIKT Training Arguments")
-    
+
     # 模型参数
     model_params = parser.add_argument_group("Model Parameters")
     model_params.add_argument(
@@ -23,8 +24,12 @@ def parse_args():
         "--dropout", type=float, default=0.4, help="Dropout probability"
     )
     model_params.add_argument("--n_hop", type=int, default=3, help="Number of GNN hops")
-    model_params.add_argument("--heads", type=int, default=2, help="Number of GNN attention heads")
-    model_params.add_argument("--history_neighbour", type=int, default=5, help="Top K neighbors to consider")
+    model_params.add_argument(
+        "--heads", type=int, default=2, help="Number of GNN attention heads"
+    )
+    model_params.add_argument(
+        "--history_neighbour", type=int, default=5, help="Top K neighbors to consider"
+    )
     model_params.add_argument(
         "--att_bound", type=float, default=0.2, help="Attention boundary value"
     )
@@ -51,7 +56,9 @@ def parse_args():
 
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
-    train_params.add_argument("--epochs", type=int, default=150, help="Number of epochs")
+    train_params.add_argument(
+        "--epochs", type=int, default=150, help="Number of epochs"
+    )
     train_params.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training"
     )
@@ -60,7 +67,10 @@ def parse_args():
         "--lr_decay", type=float, default=None, help="Learning rate decay factor"
     )
     train_params.add_argument(
-        "--weight_decay", type=float, default=1e-4, help="Weight decay (L2 regularization)"
+        "--weight_decay",
+        type=float,
+        default=1e-4,
+        help="Weight decay (L2 regularization)",
     )
     train_params.add_argument(
         "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
@@ -100,9 +110,7 @@ def parse_args():
     parser.add_argument(
         "--log_dir", type=str, default=None, help="Directory to save logs and models"
     )
-    parser.add_argument(
-        "--device", type=str, default=None, help="Device (cuda or cpu)"
-    )
+    parser.add_argument("--device", type=str, default=None, help="Device (cuda or cpu)")
 
     return parser.parse_args()
 
@@ -111,23 +119,11 @@ def main():
     """主训练函数"""
     args = parse_args()
     from model.GIKT import GIKTTrainer
-    from utility.data_process import Assistments2009Data
-    from utility.data_process import Assistments2012Data
-    from utility.data_process import Assistments2017Data
-    from utility.data_process import EdNetKT1Data
-    
+    from utils.data_process import get_data_source
+
     # 构建数据
     print("Building datasets...")
-    if args.dataset == "assistments09":
-        data_src = Assistments2009Data(args=args)
-    elif args.dataset == "assistments12":
-        data_src = Assistments2012Data(args=args)
-    elif args.dataset == "assistments17":
-        data_src = Assistments2017Data(args=args)
-    elif args.dataset == "ednet_kt1":
-        data_src = EdNetKT1Data(args=args)
-    else:
-        raise ValueError(f"Unsupported dataset: {args.dataset}")
+    data_src = get_data_source(dataset_name=args.dataset, args=args)
 
     print("Initializing trainer...")
     trainer = GIKTTrainer(

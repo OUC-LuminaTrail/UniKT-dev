@@ -4,7 +4,7 @@ GIKT 模型训练器
 """
 
 import torch
-from utility.net_trainer import Trainer, seed_everything
+from utils.net_trainer import Trainer
 
 
 class GIKTTrainer(Trainer):
@@ -17,7 +17,6 @@ class GIKTTrainer(Trainer):
         args=None,
         data_src=None,
     ):
-        seed_value = seed_everything(getattr(args, "seed", None))
         # 构建数据
         from model.GIKT import GIKTModelData
 
@@ -36,7 +35,7 @@ class GIKTTrainer(Trainer):
             log_dir=args.log_dir,
             device=args.device,
             checkpoint_path=args.checkpoint_path,
-            seed=seed_value,
+            seed=args.seed,
         )
 
     def init_model(self, args, data_src):

@@ -1,8 +1,8 @@
 import torch
 import numpy as np
 from tqdm import tqdm
-from utility.data_process.data_utility import DataSource
-from utility.data_process.data_utility import ModelData
+from utils.data_process.data_source import DataSource
+from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
@@ -27,7 +27,7 @@ class SQGKTDataset(Dataset):
         return len(self.sequences)
 
 
-class SQGKTModelData(ModelData):
+class SQGKTModelData(GraphModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
@@ -270,7 +270,7 @@ class SQGKTModelData(ModelData):
                 raise ValueError(
                     f"Fold index {fold_idx} is out of range for {kfold_n_splits} folds."
                 )
-            train_data, val_data = self.get_kfold_split_data(
+            train_data, val_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, user_id_sequence, fold_idx=fold_idx
             )
         else:
