@@ -25,4 +25,5 @@ __all__ = [
     "Assistments2017Data",
     "EdNetKT1Data",
     "DataSource",
+    "get_data_source",
 ]
