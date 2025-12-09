@@ -14,27 +14,27 @@ def parse_args():
     model_params.add_argument(
         "--lstm_hidden_dim",
         type=int,
-        default=100,
+        default=210,
         help="Dimension of LSTM hidden layers",
     )
     model_params.add_argument(
-        "--embedding_dim", type=int, default=100, help="Dimension of embeddings"
+        "--embedding_dim", type=int, default=75, help="Dimension of embeddings"
     )
     model_params.add_argument(
-        "--lstm_layers", type=int, default=2, help="Number of LSTM layers"
+        "--lstm_layers", type=int, default=1, help="Number of LSTM layers"
     )
     model_params.add_argument(
-        "--dropout", type=float, default=0.4, help="Dropout probability"
+        "--dropout", type=float, default=0.37, help="Dropout probability"
     )
-    model_params.add_argument("--n_hop", type=int, default=3, help="Number of GNN hops")
+    model_params.add_argument("--n_hop", type=int, default=4, help="Number of GNN hops")
     model_params.add_argument(
-        "--heads", type=int, default=2, help="Number of GNN attention heads"
-    )
-    model_params.add_argument(
-        "--history_neighbour", type=int, default=5, help="Top K neighbors to consider"
+        "--heads", type=int, default=1, help="Number of GNN attention heads"
     )
     model_params.add_argument(
-        "--att_bound", type=float, default=0.2, help="Attention boundary value"
+        "--history_neighbour", type=int, default=3, help="Top K neighbors to consider"
+    )
+    model_params.add_argument(
+        "--att_bound", type=float, default=0.0042, help="Attention boundary value"
     )
 
     # 动态权重超图参数
@@ -42,7 +42,7 @@ def parse_args():
     hypergraph_params.add_argument(
         "--num_difficulty_clusters",
         type=int,
-        default=3,
+        default=5,
         help="Number of difficulty clusters for weighted hypergraph (default: 3 for easy/medium/hard)",
     )
 
@@ -51,13 +51,13 @@ def parse_args():
     fusion_params.add_argument(
         "--num_subspaces",
         type=int,
-        default=4,
+        default=6,
         help="Number of subspaces for learned fusion (default: 4)",
     )
     fusion_params.add_argument(
         "--sub_dim",
         type=int,
-        default=32,
+        default=24,
         help="Dimension of each subspace for learned fusion (default: 32)",
     )
 
@@ -84,7 +84,7 @@ def parse_args():
     # 训练参数
     train_params = parser.add_argument_group("Training Parameters")
     train_params.add_argument(
-        "--epochs", type=int, default=150, help="Number of epochs"
+        "--epochs", type=int, default=100, help="Number of epochs"
     )
     train_params.add_argument(
         "--batch_size", type=int, default=128, help="Batch size for training"
@@ -92,14 +92,14 @@ def parse_args():
     train_params.add_argument(
         "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
     )
-    train_params.add_argument("--lr", type=float, default=0.001, help="Learning rate")
+    train_params.add_argument("--lr", type=float, default=4e-4, help="Learning rate")
     train_params.add_argument(
         "--lr_decay", type=float, default=None, help="Learning rate decay factor"
     )
     train_params.add_argument(
         "--weight_decay",
         type=float,
-        default=1e-4,
+        default=3e-6,
         help="Weight decay (L2 regularization)",
     )
 
@@ -122,7 +122,7 @@ def parse_args():
     es_params.add_argument(
         "--es_patience",
         type=int,
-        default=None,
+        default=10,
         help="Patience for early stopping (None to disable)",
     )
     es_params.add_argument(
