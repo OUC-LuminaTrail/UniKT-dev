@@ -88,7 +88,7 @@ def build_parser():
 
 def cmd_download(args):
     """Handle `download` subcommand."""
-    dp = get_data_source(args)
+    dp = get_data_source(args.dataset, args)
     # override data_url if provided
     if getattr(args, "data_url", None):
         dp.data_url = args.data_url
@@ -118,7 +118,7 @@ def cmd_download(args):
 
 def cmd_process(args):
     """Handle `process` subcommand."""
-    dp = get_data_source(args)
+    dp = get_data_source(args.dataset, args)
     # 清理数据
     dp.clear_data()
     # 添加交叉验证标签
