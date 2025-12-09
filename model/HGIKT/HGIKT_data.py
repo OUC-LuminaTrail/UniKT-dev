@@ -55,21 +55,19 @@ class HGIKTModelData(GraphModelData):
         # 构建异构图
         hetero_graph = self.build_hetero_graph(
             [
+                # 问题技能图
                 (
                     "question",
                     "has",
                     "skill",
                 ),
+                # 技能作业图
                 (
                     "skill",
                     "related_to",
                     "assignment",
                 ),
-                (
-                    "assignment",
-                    "contains",
-                    "question",
-                ),
+                # 题目模板图
                 (
                     "question",
                     "belongs_to",
