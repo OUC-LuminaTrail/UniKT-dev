@@ -40,7 +40,9 @@ class DataSource(ABC):
         # 元数据JSON文件路径
         self.metadata_path = os.path.join(self.data_folder, "metadata.json")
         self.raw_data = None
-        self.processed_data = None
+        self.cleared_data = None  # 预处理前的中间数据
+        self.sequence_data = None  # 预处理后的答题序列数据
+        self.question_data = None  # 预处理后的题目信息数据
         self.data_url = data_url
         self.metadata = {}
         # 设置随机种子
@@ -289,40 +291,53 @@ class DataSource(ABC):
         extract_target = os.path.join(self.data_folder, "raw")
         os.makedirs(extract_target, exist_ok=True)
 
-        # 判断是否已经解压
-        if any(Path(extract_target).iterdir()):
+        # 判断是否需要重新解压
+        should_extract = False
+        if force_download:
+            # 强制模式：清空并重新解压
+            if any(Path(extract_target).iterdir()):
+                print(f"Force mode enabled, removing existing raw data: {extract_target}")
+                shutil.rmtree(extract_target)
+                os.makedirs(extract_target, exist_ok=True)
+            should_extract = True
+        elif not any(Path(extract_target).iterdir()):
+            # 目录为空，需要解压
+            should_extract = True
+        else:
             print(f"Raw data directory not empty, skip extraction: {extract_target}")
             return extract_target
 
-        print(f"Extracting archive: {archive_path}")
-        lower_name = file_name.lower()
-        try:
-            if lower_name.endswith(".zip"):
-                with zipfile.ZipFile(archive_path, "r") as zf:
-                    zf.extractall(extract_target)
-            elif lower_name.endswith((".tar.gz", ".tgz")):
-                with tarfile.open(archive_path, "r:gz") as tf:
-                    tf.extractall(extract_target)
-            elif lower_name.endswith(".tar"):
-                with tarfile.open(archive_path, "r:") as tf:
-                    tf.extractall(extract_target)
-            elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
-                # 处理单文件 .gz
-                uncompressed_name = lower_name[:-3]
-                target_file = os.path.join(extract_target, uncompressed_name)
-                with gzip.open(archive_path, "rb") as f_in, open(
-                    target_file, "wb"
-                ) as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            else:
-                # 非压缩文件，直接复制
-                dest_path = os.path.join(extract_target, file_name)
-                if archive_path != dest_path:
-                    shutil.copy2(archive_path, dest_path)
-        except Exception as e:
-            raise RuntimeError(f"Failed to extract archive: {e}")
+        if should_extract:
+            print(f"Extracting archive: {archive_path}")
+            lower_name = file_name.lower()
+            try:
+                if lower_name.endswith(".zip"):
+                    with zipfile.ZipFile(archive_path, "r") as zf:
+                        zf.extractall(extract_target)
+                elif lower_name.endswith((".tar.gz", ".tgz")):
+                    with tarfile.open(archive_path, "r:gz") as tf:
+                        tf.extractall(extract_target)
+                elif lower_name.endswith(".tar"):
+                    with tarfile.open(archive_path, "r:") as tf:
+                        tf.extractall(extract_target)
+                elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
+                    # 处理单文件 .gz
+                    uncompressed_name = lower_name[:-3]
+                    target_file = os.path.join(extract_target, uncompressed_name)
+                    with gzip.open(archive_path, "rb") as f_in, open(
+                        target_file, "wb"
+                    ) as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                else:
+                    # 非压缩文件，直接复制
+                    dest_path = os.path.join(extract_target, file_name)
+                    if archive_path != dest_path:
+                        shutil.copy2(archive_path, dest_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to extract archive: {e}")
 
-        print(f"Extraction finished: {extract_target}")
+            print(f"Extraction finished: {extract_target}")
+        
         self.add_metadata("raw_data_path", extract_target)
 
     @abstractmethod
@@ -339,23 +354,39 @@ class DataSource(ABC):
         import pandas
 
         self.load_metadata()
-        data_processed_path = os.path.join(
-            self.data_folder, f"{self.dataset}_processed.parquet"
+        # 加载预处理后的数据文件
+        sequence_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_sequence.parquet"
         )
-        if not os.path.exists(data_processed_path):
+        data_processed_path = os.path.join(
+            self.data_folder, f"{self.dataset}_question.parquet"
+        )
+        if not os.path.exists(sequence_data_path) or not os.path.exists(
+            data_processed_path
+        ):
             raise FileNotFoundError(
-                f"Cannot find processed data file: {data_processed_path}"
+                f"Cannot find processed data file: {sequence_data_path} or {data_processed_path}"
             )
         # 检测文件的MD5值是否匹配
-        md5_hash = self.compute_md5(data_processed_path)
+        md5_hash = self.compute_md5(sequence_data_path)
         if (
-            "processed_data_md5" in self.metadata
-            and md5_hash != self.metadata["processed_data_md5"]
+            "sequence_data_md5" in self.metadata
+            and md5_hash != self.metadata["sequence_data_md5"]
         ):
             raise ValueError(
                 "Processed data file integrity check failed (MD5 mismatch)."
             )
-        self.processed_data = pandas.read_parquet(data_processed_path)
+        md5_hash = self.compute_md5(data_processed_path)
+        if (
+            "question_data_md5" in self.metadata
+            and md5_hash != self.metadata["question_data_md5"]
+        ):
+            raise ValueError(
+                "Processed data file integrity check failed (MD5 mismatch)."
+            )
+        # 加载数据
+        self.sequence_data = pandas.read_parquet(sequence_data_path)
+        self.question_data = pandas.read_parquet(data_processed_path)
 
     @abstractmethod
     def clear_data(self):
@@ -374,17 +405,24 @@ class DataSource(ABC):
         注：在该方法中应调用 save_metadata() 保存元信息
         """
         print("Saving processed data...")
-        if self.processed_data is None:
+        if self.sequence_data is None or self.question_data is None:
             raise ValueError("Please run clear_data() before saving processed data.")
 
-        data_processed_path = os.path.join(
-            self.data_folder, f"{self.dataset}_processed.parquet"
+        # 保存预处理后的答题序列数据
+        sequence_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_sequence.parquet"
         )
-        self.processed_data.to_parquet(data_processed_path, index=False)
-        md5_hash = self.compute_md5(data_processed_path)
-        self.add_metadata("processed_data_md5", md5_hash)
+        question_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_question.parquet"
+        )
+        self.question_data.to_parquet(question_data_path, index=False)
+        md5_hash = self.compute_md5(question_data_path)
+        self.add_metadata("question_data_md5", md5_hash)
+        self.sequence_data.to_parquet(sequence_data_path, index=False)
+        md5_hash = self.compute_md5(sequence_data_path)
+        self.add_metadata("sequence_data_md5", md5_hash)
         self.save_metadata()
-        print("Processed data saved to:", data_processed_path)
+        print("Processed data saved.")
 
     def compute_md5(self, file_path: str) -> str:
         """
@@ -420,21 +458,53 @@ class DataSource(ABC):
 
         return hash_md5.hexdigest()
 
-    def get_processed_data(self):
+    def get_sequence_data(self):
         """
         获取预处理后的数据
 
         返回:
             预处理后的数据
         """
-        if self.processed_data is None:
+        if self.sequence_data is None:
             try:
                 self.load_processed_data()
             except FileNotFoundError:
                 raise ValueError(
                     "No processed data available. Please run clear_data() first."
                 )
-        return self.processed_data
+        return self.sequence_data
+
+    def get_question_data(self):
+        """
+        获取题目信息数据
+
+        返回:
+            题目信息数据
+        """
+        if self.question_data is None:
+            try:
+                self.load_processed_data()
+            except FileNotFoundError:
+                raise ValueError(
+                    "No processed data available. Please run clear_data() first."
+                )
+        return self.question_data
+
+    def get_processed_data(self):
+        """
+        获取预处理后的数据和题目信息数据
+
+        返回:
+            预处理后的数据和题目信息数据的元组 (sequence_data, question_data)
+        """
+        if self.sequence_data is None or self.question_data is None:
+            try:
+                self.load_processed_data()
+            except FileNotFoundError:
+                raise ValueError(
+                    "No processed data available. Please run clear_data() first."
+                )
+        return self.sequence_data, self.question_data
 
     def add_metadata(self, key: str, value):
         """
@@ -446,16 +516,19 @@ class DataSource(ABC):
         """
         self.metadata[key] = value
 
+    def add_metadatas(self, meta_dict: dict):
+        """
+        批量添加数据元信息
+
+        参数:
+            meta_dict: 元信息字典
+        """
+        for key, value in meta_dict.items():
+            self.add_metadata(key, value)
+
     def save_metadata(self):
         """
         保存数据元信息
-
-        必须保存的元信息:
-        - num_users: 学生总数
-        - num_questions: 题目总数
-        - num_skills: 技能总数
-        - max_seq_len: 最大序列长度
-        - min_seq_len: 最小序列长度
         """
         self.add_metadata("dataset", self.dataset)
         self.add_metadata("data_base_path", self.data_base_path)
@@ -516,7 +589,7 @@ class DataSource(ABC):
         """
         from tqdm import tqdm
 
-        if self.processed_data is None:
+        if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
@@ -524,7 +597,7 @@ class DataSource(ABC):
         print(f"Adding K-Fold labels with n_splits={n_splits}")
 
         # 复制数据以避免修改原始数据
-        data = self.processed_data.copy()
+        data = self.sequence_data.copy()
         data["fold"] = -1
 
         # 获取唯一的用户ID
@@ -544,43 +617,93 @@ class DataSource(ABC):
         data["fold"] = data["user"].map(user_to_fold)
 
         # 更新processed_data
-        self.processed_data = data
+        self.sequence_data = data
 
         # 更新元数据
         self.add_metadata("kfold_n_splits", n_splits)
 
         return data
 
-    @staticmethod
-    def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int):
-        """
-        限制序列长度在min_seq_len和max_seq_len之间
-        """
-        # 过滤答题次数少于min_seq_len的学生
-        if min_seq_len > 1:
-            is_valid_user = data.groupby("user").size() >= min_seq_len
-            valid_user_ids = is_valid_user[is_valid_user].index.tolist()
-            data = data[data["user"].isin(valid_user_ids)].reset_index(drop=True)
 
-        # 答题次数多于max_seq_len的学生将多余的记录删除
-        if max_seq_len is not None:
-            # 保留每个用户的最后max_seq_len条记录
-            data = data.groupby("user", group_keys=False).tail(max_seq_len)
-            data = data.reset_index(drop=True)
-        return data
+def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
+    """
+    限制序列长度在min_seq_len和max_seq_len之间
+    """
+    # 过滤答题次数少于min_seq_len的学生
+    if min_seq_len > 1:
+        is_valid_user = data.groupby("user").size() >= min_seq_len
+        valid_user_ids = is_valid_user[is_valid_user].index.tolist()
+        data = data[data["user"].isin(valid_user_ids)].reset_index(drop=True)
 
-    @staticmethod
-    def map_to_continuous_ids(data, columns: list[str]):
-        """
-        将指定列映射为连续的整数ID
+    # 答题次数多于max_seq_len的学生将多余的记录删除
+    if max_seq_len is not None:
+        # 保留每个用户的最后max_seq_len条记录
+        data = data.groupby("user", group_keys=False).tail(max_seq_len)
+        data = data.reset_index(drop=True)
+    return data
 
-        参数:
-            data: 输入数据 DataFrame
-            columns: 需要映射的列名列表
 
-        返回:
-            映射后的数据 DataFrame
-        """
-        for col in columns:
-            data[col] = data[col].astype("category").cat.codes.astype(int)
-        return data
+def map_to_continuous_ids(data, columns: list[str]):
+    """
+    将指定列映射为连续的整数ID
+
+    参数:
+        data: 输入数据 DataFrame
+        columns: 需要映射的列名列表
+
+    返回:
+        映射后的数据 DataFrame
+    """
+    for col in columns:
+        data[col] = data[col].astype("category").cat.codes.astype(int)
+    return data
+
+
+def build_question_data_from_cleared(
+    cleared_data, skill_column: str = "skill", question_column: str = "question"
+):
+    """
+    从清理后的数据中构建题目信息数据
+    
+    该方法会处理技能列中可能存在的多技能情况（使用_分隔）
+    并将其展开为多行，确保每个问题-技能对唯一
+    
+    参数:
+        cleared_data: 清理后的数据 DataFrame
+        skill_column: 技能列名，默认为"skill"
+        question_column: 问题列名，默认为"question"
+    
+    返回:
+        处理后的题目信息数据 DataFrame
+    """
+    data = cleared_data.copy()
+    
+    # 检查技能列是否包含多技能（以_分隔）
+    if data[skill_column].dtype == "object" and data[skill_column].str.contains("_").any():
+        # 技能ID列是以_分隔的多个技能组成，将其展开为多行
+        data_expanded = (
+            data.assign(**{skill_column: data[skill_column].str.split("_")})
+            .explode(skill_column)
+            .drop_duplicates(subset=[question_column, skill_column])
+            .reset_index(drop=True)
+        )
+        # 转换为整数类型
+        data_expanded[skill_column] = data_expanded[skill_column].astype(int)
+    else:
+        # 直接去重
+        data_expanded = data.drop_duplicates(
+            subset=[question_column, skill_column]
+        ).reset_index(drop=True)
+    
+    # 将技能映射为连续ID
+    data_expanded = map_to_continuous_ids(data_expanded, columns=[skill_column])
+    
+    return data_expanded
+
+
+__all__ = [
+    "DataSource",
+    "restrains_sequence_length",
+    "map_to_continuous_ids",
+    "build_question_data_from_cleared",
+]

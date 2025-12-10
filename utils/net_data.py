@@ -50,7 +50,7 @@ class BaseModelData(ABC):
             )
 
         # 加载数据以获取折信息
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
 
         # 检查是否已添加fold列
         if "fold" not in data.columns:
@@ -213,7 +213,7 @@ class BaseModelData(ABC):
         """
         import tqdm
 
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
 
         # 计算每个问题的正确率
         question_stats = (
@@ -251,7 +251,7 @@ class BaseModelData(ABC):
                 - error_rate: 错误率（0-1）
                 - count: 该(问题,技能)对的出现次数
         """
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
 
         # 统计每个(问题, 技能)对的错误率
         error_patterns = {}
@@ -307,7 +307,7 @@ class BaseModelData(ABC):
         import numpy as np
         from tqdm import tqdm
 
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_question_data()
 
         src_type, _, dst_type = edge_type
 
@@ -382,19 +382,6 @@ class BaseModelData(ABC):
 
         return data_matrix
 
-    @staticmethod
-    def save_numpy_data(file_path: str, data: tuple):
-        """
-        保存numpy数据到文件
-
-        参数:
-            file_path: 文件路径
-            data: 需要保存的数据元组
-        """
-        import numpy as np
-
-        np.savez_compressed(file_path, *data)
-
 
 class GraphModelData(BaseModelData):
     r"""
@@ -456,7 +443,7 @@ class GraphModelData(BaseModelData):
         from tqdm import tqdm
         import numpy as np
 
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
         num_users = self.data_src.get_metadata("num_users")
 
         # 构建用户答题序列
@@ -535,17 +522,15 @@ class GraphModelData(BaseModelData):
                 directed=True
             )
         """
-        from tqdm import tqdm
         from torch_geometric.data import HeteroData
         from torch_geometric.transforms import ToUndirected
         import numpy as np
         import torch
+        from tqdm import tqdm
 
         if edge_attrs is None:
             edge_attrs = {}
 
-        # 获取数据
-        data = self.data_src.get_processed_data()
         graph = HeteroData()
 
         # 收集所有需要的节点类型
@@ -557,12 +542,19 @@ class GraphModelData(BaseModelData):
         # 获取每种节点类型的数量
         node_counts = {}
         for node_type in node_types:
-            if node_type in data.columns:
-                node_counts[node_type] = data[node_type].nunique()
-            else:
-                # 尝试从元数据获取
-                meta_key = f"num_{node_type}s"
+            # 尝试从元数据获取
+            meta_key = f"num_{node_type}s"
+            try:
                 node_counts[node_type] = self.data_src.get_metadata(meta_key)
+            except (KeyError, AttributeError):
+                # 如果元数据中没有，从数据中计算
+                data = self.data_src.get_question_data()
+                if node_type in data.columns:
+                    node_counts[node_type] = data[node_type].nunique()
+                else:
+                    raise ValueError(
+                        f"Cannot determine node count for type '{node_type}'"
+                    )
 
         # 设置节点数量和特征
         for node_type in node_types:
@@ -580,58 +572,74 @@ class GraphModelData(BaseModelData):
         # 为每种边类型构建边
         for edge_type in edge_types:
             src_type, relation, dst_type = edge_type
-            src_col = f"{src_type}"
-            dst_col = f"{dst_type}"
 
-            # 检查列是否存在
-            if src_col not in data.columns or dst_col not in data.columns:
-                print(
-                    f"Warning: Columns {src_col} or {dst_col} not found in data. Skipping edge type {edge_type}"
-                )
-                continue
+            # 使用 build_relationship_matrix 构建关联矩阵
+            print(f"Building relationship matrix for {src_type}-{relation}-{dst_type}")
+            rel_matrix = self.build_relationship_matrix(edge_type, value_type="binary")
 
-            # 收集边和边属性
-            edge_dict = {}  # 使用字典存储边，key为(src, dst)，value为属性字典
+            # 从关联矩阵中提取边索引
+            # nonzero 返回非零元素的行列索引
+            src_indices, dst_indices = np.nonzero(rel_matrix)
 
-            # 需要提取的属性列
-            attr_cols = edge_attrs.get(edge_type, [])
-
-            # 选择需要的列
-            cols_to_select = [src_col, dst_col] + attr_cols
-
-            # 遍历数据构建边
-            for row in tqdm(
-                data[cols_to_select].itertuples(index=False),
-                total=data.shape[0],
-                desc=f"Building {src_type}-{relation}-{dst_type} edges",
-            ):
-                src_id = getattr(row, src_col)
-                dst_id = getattr(row, dst_col)
-                edge_key = (src_id, dst_id)
-
-                # 如果边已存在，更新属性（取最后一次）
-                if attr_cols:
-                    edge_attrs_dict = {attr: getattr(row, attr) for attr in attr_cols}
-                    edge_dict[edge_key] = edge_attrs_dict
-                else:
-                    edge_dict[edge_key] = None
-
-            # 转换为张量格式
-            edge_list = list(edge_dict.keys())
-            if len(edge_list) == 0:
+            if len(src_indices) == 0:
                 print(f"Warning: No edges found for {edge_type}")
                 continue
 
-            edge_index = np.array(edge_list, dtype=np.int64).T
-            edge_index = torch.tensor(edge_index, dtype=torch.long).contiguous()
+            # 转换为 PyTorch 张量
+            edge_index = torch.tensor(
+                np.vstack([src_indices, dst_indices]), dtype=torch.long
+            ).contiguous()
 
             # 添加边索引到图
             graph[src_type, relation, dst_type].edge_index = edge_index
 
-            # 添加边属性
+            # 处理边属性
+            attr_cols = edge_attrs.get(edge_type, [])
             if attr_cols:
+                # 需要从原始数据中提取边属性
+                data = self.data_src.get_sequence_data()
+                src_col = src_type
+                dst_col = dst_type
+
+                # 检查列是否存在
+                if src_col not in data.columns or dst_col not in data.columns:
+                    print(
+                        f"Warning: Columns {src_col} or {dst_col} not found. Skipping edge attributes."
+                    )
+                    continue
+
+                # 构建边到属性的映射
+                edge_attr_dict = {}
+                cols_to_select = [src_col, dst_col] + attr_cols
+
+                for row in tqdm(
+                    data[cols_to_select].itertuples(index=False),
+                    total=len(data),
+                    desc=f"Extracting edge attributes for {src_type}-{relation}-{dst_type}",
+                ):
+                    src_id = int(getattr(row, src_col))
+                    dst_id = int(getattr(row, dst_col))
+                    edge_key = (src_id, dst_id)
+
+                    # 如果边已存在，更新属性（取最后一次出现）
+                    edge_attr_dict[edge_key] = {
+                        attr: getattr(row, attr) for attr in attr_cols
+                    }
+
+                # 按照 edge_index 的顺序提取属性值
                 for attr in attr_cols:
-                    attr_values = [edge_dict[edge][attr] for edge in edge_list]
+                    attr_values = []
+                    for i in range(edge_index.shape[1]):
+                        src_id = int(edge_index[0, i].item())
+                        dst_id = int(edge_index[1, i].item())
+                        edge_key = (src_id, dst_id)
+
+                        if edge_key in edge_attr_dict:
+                            attr_values.append(edge_attr_dict[edge_key][attr])
+                        else:
+                            # 如果找不到属性，使用默认值 0
+                            attr_values.append(0.0)
+
                     attr_tensor = torch.tensor(attr_values, dtype=torch.float32)
                     # 边属性存储为 edge_attr_<attr_name>
                     setattr(
