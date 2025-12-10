@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from typing_extensions import override
-from .data_source import DataSource
+from .data_source import *
 
 
 class Assistments2017Data(DataSource):
@@ -24,7 +24,7 @@ class Assistments2017Data(DataSource):
 
     @override
     def load_src_data(self):
-        r"""
+        """
         加载原始数据
         """
         if not os.path.exists(self.raw_data_path):
@@ -153,23 +153,37 @@ class Assistments2017Data(DataSource):
         data = data[data["skill"].notna()]
         # 清理label列中的异常值，只保留0和1
         data = data[data["label"].isin([0, 1])]
+        # 移除重复的行
+        data = data.drop_duplicates()
         # 重置索引
         data = data.reset_index(drop=True)
         # 限制序列长度
-        data = DataSource.restrains_sequence_length(
+        data = restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
         # 将问题ID和技能ID转换为连续整数
-        data = DataSource.map_to_continuous_ids(
+        data = map_to_continuous_ids(
             data, columns=["user", "question", "skill", "assignment"]
         )
-        self.processed_data = data
+
+        self.cleared_data = data.copy()
+        self.sequence_data = data.copy()
+        self.question_data = build_question_data_from_cleared(
+            self.cleared_data, skill_column="skill", question_column="question"
+        )
 
         # 保存元信息
-        self.add_metadata("num_users", data["user"].nunique())
-        self.add_metadata("num_questions", data["question"].nunique())
-        self.add_metadata("num_skills", data["skill"].nunique())
-        self.add_metadata("num_assignments", data["assignment"].nunique())
-        self.add_metadata("max_seq_len", self.args.max_seq_len)
-        self.add_metadata("min_seq_len", self.args.min_seq_len)
-        self.add_metadata("columns", data.columns.tolist())
+        self.add_metadatas(
+            {
+                "num_users": self.cleared_data["user"].nunique(),
+                "num_questions": self.question_data["question"].nunique(),
+                "num_skills": self.question_data["skill"].nunique(),
+                "num_assignments": self.question_data["assignment"].nunique(),
+                "max_seq_len": self.args.max_seq_len,
+                "min_seq_len": self.args.min_seq_len,
+                "columns": data.columns.tolist(),
+            }
+        )
+
+
+__all__ = ["Assistments2017Data"]

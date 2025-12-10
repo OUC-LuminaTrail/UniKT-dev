@@ -88,7 +88,7 @@ class SQGKTModelData(GraphModelData):
         from scipy.stats import poisson
 
         # 获取数据
-        data = self.data_src.processed_data
+        data = self.data_src.sequence_data
         num_users = self.data_src.get_metadata("num_users")
         num_questions = self.data_src.get_metadata("num_questions")
 

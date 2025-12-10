@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from typing_extensions import override
-from .data_source import DataSource
+from .data_source import *
 
 
 class Assistments2009Data(DataSource):
@@ -94,37 +94,37 @@ class Assistments2009Data(DataSource):
         )
         # 清除缺失值
         data = data.dropna(subset=["user", "skill", "label"])
-        # 展开skill_id列，将多个知识点拆分为多行
-        data = data.assign(skill=data["skill"].str.split("_")).explode("skill")
-        # 转换数据类型
-        data["user"] = data["user"].astype(int)
-        data["skill"] = data["skill"].astype(int)
-        # 删除重复的行
+        # 移除重复的行
         data = data.drop_duplicates()
-        # 重置索引
-        data = data.reset_index(drop=True)
-        # 限制序列长度
-        data = DataSource.restrains_sequence_length(
+        # 按照时间排序
+        data = data.sort_values(by=["user", "order_id"])
+        # 限制序列长度到指定范围
+        data = restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
         # 将数据重编码为连续整数
-        data = DataSource.map_to_continuous_ids(
-            data, columns=["user", "question", "skill", "assignment", "template"]
+        data = map_to_continuous_ids(
+            data, columns=["user", "question", "assignment", "template"]
         )
-        # 按照时间排序
-        data = data.sort_values(by=["user", "order_id"])
-
-        self.processed_data = data
+        self.cleared_data = data.copy()
+        self.sequence_data = data.copy()
+        self.question_data = build_question_data_from_cleared(
+            self.cleared_data, skill_column="skill", question_column="question"
+        )
 
         # 保存元信息
-        self.add_metadata("num_users", data["user"].nunique())
-        self.add_metadata("num_questions", data["question"].nunique())
-        self.add_metadata("num_skills", data["skill"].nunique())
-        self.add_metadata("num_assignments", data["assignment"].nunique())
-        self.add_metadata("num_templates", data["template"].nunique())
-        self.add_metadata("max_seq_len", self.args.max_seq_len)
-        self.add_metadata("min_seq_len", self.args.min_seq_len)
-        self.add_metadata("columns", data.columns.tolist())
+        self.add_metadatas(
+            {
+                "num_users": self.cleared_data["user"].nunique(),
+                "num_questions": self.question_data["question"].nunique(),
+                "num_skills": self.question_data["skill"].nunique(),
+                "num_assignments": self.question_data["assignment"].nunique(),
+                "num_templates": self.question_data["template"].nunique(),
+                "max_seq_len": self.args.max_seq_len,
+                "min_seq_len": self.args.min_seq_len,
+                "columns": data.columns.tolist(),
+            }
+        )
 
 
 __all__ = ["Assistments2009Data"]

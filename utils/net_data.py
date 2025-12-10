@@ -50,7 +50,7 @@ class BaseModelData(ABC):
             )
 
         # 加载数据以获取折信息
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
 
         # 检查是否已添加fold列
         if "fold" not in data.columns:
@@ -213,7 +213,7 @@ class BaseModelData(ABC):
         """
         import tqdm
 
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
 
         # 计算每个问题的正确率
         question_stats = (
@@ -251,7 +251,7 @@ class BaseModelData(ABC):
                 - error_rate: 错误率（0-1）
                 - count: 该(问题,技能)对的出现次数
         """
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
 
         # 统计每个(问题, 技能)对的错误率
         error_patterns = {}
@@ -307,7 +307,7 @@ class BaseModelData(ABC):
         import numpy as np
         from tqdm import tqdm
 
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_question_data()
 
         src_type, _, dst_type = edge_type
 
@@ -382,19 +382,6 @@ class BaseModelData(ABC):
 
         return data_matrix
 
-    @staticmethod
-    def save_numpy_data(file_path: str, data: tuple):
-        """
-        保存numpy数据到文件
-
-        参数:
-            file_path: 文件路径
-            data: 需要保存的数据元组
-        """
-        import numpy as np
-
-        np.savez_compressed(file_path, *data)
-
 
 class GraphModelData(BaseModelData):
     r"""
@@ -456,7 +443,7 @@ class GraphModelData(BaseModelData):
         from tqdm import tqdm
         import numpy as np
 
-        data = self.data_src.get_processed_data()
+        data = self.data_src.get_sequence_data()
         num_users = self.data_src.get_metadata("num_users")
 
         # 构建用户答题序列
@@ -561,7 +548,7 @@ class GraphModelData(BaseModelData):
                 node_counts[node_type] = self.data_src.get_metadata(meta_key)
             except (KeyError, AttributeError):
                 # 如果元数据中没有，从数据中计算
-                data = self.data_src.get_processed_data()
+                data = self.data_src.get_question_data()
                 if node_type in data.columns:
                     node_counts[node_type] = data[node_type].nunique()
                 else:
@@ -610,7 +597,7 @@ class GraphModelData(BaseModelData):
             attr_cols = edge_attrs.get(edge_type, [])
             if attr_cols:
                 # 需要从原始数据中提取边属性
-                data = self.data_src.get_processed_data()
+                data = self.data_src.get_sequence_data()
                 src_col = src_type
                 dst_col = dst_type
 
