@@ -291,40 +291,53 @@ class DataSource(ABC):
         extract_target = os.path.join(self.data_folder, "raw")
         os.makedirs(extract_target, exist_ok=True)
 
-        # 判断是否已经解压
-        if any(Path(extract_target).iterdir()):
+        # 判断是否需要重新解压
+        should_extract = False
+        if force_download:
+            # 强制模式：清空并重新解压
+            if any(Path(extract_target).iterdir()):
+                print(f"Force mode enabled, removing existing raw data: {extract_target}")
+                shutil.rmtree(extract_target)
+                os.makedirs(extract_target, exist_ok=True)
+            should_extract = True
+        elif not any(Path(extract_target).iterdir()):
+            # 目录为空，需要解压
+            should_extract = True
+        else:
             print(f"Raw data directory not empty, skip extraction: {extract_target}")
             return extract_target
 
-        print(f"Extracting archive: {archive_path}")
-        lower_name = file_name.lower()
-        try:
-            if lower_name.endswith(".zip"):
-                with zipfile.ZipFile(archive_path, "r") as zf:
-                    zf.extractall(extract_target)
-            elif lower_name.endswith((".tar.gz", ".tgz")):
-                with tarfile.open(archive_path, "r:gz") as tf:
-                    tf.extractall(extract_target)
-            elif lower_name.endswith(".tar"):
-                with tarfile.open(archive_path, "r:") as tf:
-                    tf.extractall(extract_target)
-            elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
-                # 处理单文件 .gz
-                uncompressed_name = lower_name[:-3]
-                target_file = os.path.join(extract_target, uncompressed_name)
-                with gzip.open(archive_path, "rb") as f_in, open(
-                    target_file, "wb"
-                ) as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            else:
-                # 非压缩文件，直接复制
-                dest_path = os.path.join(extract_target, file_name)
-                if archive_path != dest_path:
-                    shutil.copy2(archive_path, dest_path)
-        except Exception as e:
-            raise RuntimeError(f"Failed to extract archive: {e}")
+        if should_extract:
+            print(f"Extracting archive: {archive_path}")
+            lower_name = file_name.lower()
+            try:
+                if lower_name.endswith(".zip"):
+                    with zipfile.ZipFile(archive_path, "r") as zf:
+                        zf.extractall(extract_target)
+                elif lower_name.endswith((".tar.gz", ".tgz")):
+                    with tarfile.open(archive_path, "r:gz") as tf:
+                        tf.extractall(extract_target)
+                elif lower_name.endswith(".tar"):
+                    with tarfile.open(archive_path, "r:") as tf:
+                        tf.extractall(extract_target)
+                elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
+                    # 处理单文件 .gz
+                    uncompressed_name = lower_name[:-3]
+                    target_file = os.path.join(extract_target, uncompressed_name)
+                    with gzip.open(archive_path, "rb") as f_in, open(
+                        target_file, "wb"
+                    ) as f_out:
+                        shutil.copyfileobj(f_in, f_out)
+                else:
+                    # 非压缩文件，直接复制
+                    dest_path = os.path.join(extract_target, file_name)
+                    if archive_path != dest_path:
+                        shutil.copy2(archive_path, dest_path)
+            except Exception as e:
+                raise RuntimeError(f"Failed to extract archive: {e}")
 
-        print(f"Extraction finished: {extract_target}")
+            print(f"Extraction finished: {extract_target}")
+        
         self.add_metadata("raw_data_path", extract_target)
 
     @abstractmethod
