@@ -124,15 +124,15 @@ class HGIKTModelData(GraphModelData):
         构建基于难度加权的超图
 
         核心思想：
-        1. 将同一技能下的题目按难度聚类（简单/中等/困难）
+        1. 将同一技能下的题目按难度聚类
         2. 每个难度簇形成一个子超边
-        3. 超边权重反映簇内题目的难度一致性
+        3. 超边权重反映簇内题目的平均难度
 
         参数:
             edge_type: 边类型三元组 (顶点类型, 边关系名, 超边类型)
                       例如: ('question', 'has', 'skill')
             vertex_type: 顶点类型（可选），默认使用 edge_type 的第一个元素
-            num_difficulty_clusters: 难度聚类数量，默认为3（简单/中等/困难）
+            num_difficulty_clusters: 难度聚类数量，默认为3
 
         返回:
             tuple: (hypergraph, edge_weights)
@@ -174,7 +174,6 @@ class HGIKTModelData(GraphModelData):
         # 为每个超边（如技能）内的题目按难度聚类
         e_list = []
         edge_weights = []
-        cluster_metadata = []
 
         print(f"Building difficulty-weighted {hyperedge_node_type} hypergraph...")
         for hyperedge_idx, vertices in tqdm(
@@ -204,7 +203,7 @@ class HGIKTModelData(GraphModelData):
                 )
                 cluster_labels = kmeans.fit_predict(difficulties)
 
-                # Store clusters to sort them
+                # 存储每个簇的信息以便排序
                 current_skill_clusters = []
 
                 for cluster_id in range(kmeans.n_clusters):
@@ -217,49 +216,25 @@ class HGIKTModelData(GraphModelData):
                     if len(cluster_vertices) == 0:
                         continue
 
-                    # 计算簇内难度一致性（方差越小，一致性越高，权重越大）
+                    # 计算簇内题目的平均难度作为边权
                     cluster_difficulties = difficulties[cluster_labels == cluster_id]
-                    difficulty_variance = np.var(cluster_difficulties)
-                    avg_difficulty = np.mean(cluster_difficulties)
-
-                    # 权重：一致性高的簇权重更大
-                    # 使用指数衰减：variance越大，权重越小
-                    weight = np.exp(-difficulty_variance * 5.0)
-                    weight = max(0.1, min(1.0, weight))  # 限制在[0.1, 1.0]
+                    avg_difficulty = float(np.mean(cluster_difficulties))
 
                     current_skill_clusters.append(
                         {
                             "vertices": cluster_vertices,
-                            "weight": float(weight),
+                            "weight": avg_difficulty,
                             "avg_difficulty": avg_difficulty,
                         }
                     )
 
-                # Sort by difficulty (Easy to Hard)
+                # 按照平均难度对簇进行排序
                 current_skill_clusters.sort(key=lambda x: x["avg_difficulty"])
 
-                # Add to main lists and metadata
-                for rank, cluster in enumerate(current_skill_clusters):
+                # 构建超边和权重
+                for cluster in current_skill_clusters:
                     e_list.append(cluster["vertices"])
                     edge_weights.append(cluster["weight"])
-
-                    # Determine type based on rank
-                    c_type = "neutral"
-                    if len(current_skill_clusters) >= 2:
-                        if rank == 0:
-                            c_type = "easy"
-                        elif rank == len(current_skill_clusters) - 1:
-                            c_type = "hard"
-
-                    cluster_metadata.append(
-                        {
-                            "vertices": cluster["vertices"],
-                            "weight": cluster["weight"],
-                            "type": c_type,
-                            "skill_id": hyperedge_idx,
-                            "avg_difficulty": cluster["avg_difficulty"],
-                        }
-                    )
 
             except Exception as e:
                 e_list.append(vertices)
@@ -286,5 +261,5 @@ class HGIKTModelData(GraphModelData):
         )
         print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
         print(f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}")
-        
+
         return hypergraph
