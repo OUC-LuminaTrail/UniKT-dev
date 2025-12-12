@@ -81,6 +81,11 @@ def build_parser():
         default=5,
         help="Number of folds for K-Fold cross-validation (>=2 to enable)",
     )
+    proc.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode to process a smaller subset of data(for EdNet dataset only)",
+    )
     proc.set_defaults(func=cmd_process)
 
     return parser
