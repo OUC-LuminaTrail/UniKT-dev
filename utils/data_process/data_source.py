@@ -296,7 +296,9 @@ class DataSource(ABC):
         if force_download:
             # 强制模式：清空并重新解压
             if any(Path(extract_target).iterdir()):
-                print(f"Force mode enabled, removing existing raw data: {extract_target}")
+                print(
+                    f"Force mode enabled, removing existing raw data: {extract_target}"
+                )
                 shutil.rmtree(extract_target)
                 os.makedirs(extract_target, exist_ok=True)
             should_extract = True
@@ -337,7 +339,7 @@ class DataSource(ABC):
                 raise RuntimeError(f"Failed to extract archive: {e}")
 
             print(f"Extraction finished: {extract_target}")
-        
+
         self.add_metadata("raw_data_path", extract_target)
 
     @abstractmethod
@@ -660,29 +662,36 @@ def map_to_continuous_ids(data, columns: list[str]):
 
 
 def build_question_data_from_cleared(
-    cleared_data, skill_column: str = "skill", question_column: str = "question"
+    cleared_data,
+    skill_column: str = "skill",
+    question_column: str = "question",
+    seperator: str = "_",
 ):
     """
     从清理后的数据中构建题目信息数据
-    
+
     该方法会处理技能列中可能存在的多技能情况（使用_分隔）
     并将其展开为多行，确保每个问题-技能对唯一
-    
+
     参数:
         cleared_data: 清理后的数据 DataFrame
         skill_column: 技能列名，默认为"skill"
         question_column: 问题列名，默认为"question"
-    
+        seperator: 多技能分隔符，默认为"_"
+
     返回:
         处理后的题目信息数据 DataFrame
     """
     data = cleared_data.copy()
-    
+
     # 检查技能列是否包含多技能（以_分隔）
-    if data[skill_column].dtype == "object" and data[skill_column].str.contains("_").any():
-        # 技能ID列是以_分隔的多个技能组成，将其展开为多行
+    if (
+        data[skill_column].dtype == "object"
+        and data[skill_column].str.contains(seperator).any()
+    ):
+        # 技能ID列是seperator分隔的多个技能组成，将其展开为多行
         data_expanded = (
-            data.assign(**{skill_column: data[skill_column].str.split("_")})
+            data.assign(**{skill_column: data[skill_column].str.split(seperator)})
             .explode(skill_column)
             .drop_duplicates(subset=[question_column, skill_column])
             .reset_index(drop=True)
@@ -694,10 +703,10 @@ def build_question_data_from_cleared(
         data_expanded = data.drop_duplicates(
             subset=[question_column, skill_column]
         ).reset_index(drop=True)
-    
+
     # 将技能映射为连续ID
     data_expanded = map_to_continuous_ids(data_expanded, columns=[skill_column])
-    
+
     return data_expanded
 
 
