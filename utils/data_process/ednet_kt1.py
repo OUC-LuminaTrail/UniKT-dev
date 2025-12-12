@@ -49,7 +49,7 @@ class EdNetKT1Data(DataSource):
 
         # 检查是否开启调试模式
         is_debug = hasattr(self.args, "debug") and self.args.debug
-        debug_limit = 5000 if is_debug else None
+        debug_limit = 200 if is_debug else None
         if is_debug:
             print(f"Debug mode enabled: processing only {debug_limit} files.")
 
@@ -144,101 +144,103 @@ class EdNetKT1Data(DataSource):
             raise ValueError("No data processed from EdNet files.")
 
         print("Concatenating all batches...")
-        self.raw_data = pa.concat_tables(processed_batches).to_pandas()
-        print(f"Loaded {len(self.raw_data)} raw interactions.")
+        self.sequence_data_raw = pa.concat_tables(processed_batches).to_pandas()
+        print(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
 
     @override
     def clear_data(self):
         print("Processing Data...")
 
-        if not hasattr(self, "raw_data") or self.raw_data is None:
+        # 加载原始数据
+        if (
+            not hasattr(self, "sequence_data_raw")
+            or not hasattr(self, "question_data_raw")
+            or self.sequence_data_raw is None
+            or self.question_data_raw is None
+        ):
             self.load_src_data()
 
         # 处理题目信息
-        questions = self.question_data_raw.copy()
-        questions["question_id"] = questions["question_id"].astype(str)
-
+        question_data = self.question_data_raw.copy()  # 复制一份以防修改原数据
+        # 重命名列
+        question_data = question_data.rename(
+            columns={
+                "tags": "skill",
+                "question_id": "question",
+                "bundle_id": "assignment",
+            }
+        )
+        question_data["question"] = question_data["question"].astype(str)
+        # 移除缺失值
+        question_data.dropna(subset=["correct_answer", "skill"], inplace=True)
         # 将bundle_id列转换为连续的整数ID
-        bundles = questions["bundle_id"].unique()
+        bundles = question_data["assignment"].unique()
         bundles_id_map = {skill: idx for idx, skill in enumerate(bundles)}
-        questions["bundle_id"] = questions["bundle_id"].map(bundles_id_map)
-        questions.rename(columns={"bundle_id": "assignment"}, inplace=True)
+        question_data["assignment"] = question_data["assignment"].map(bundles_id_map)
+        # 将question_id列转换为连续的整数id
+        questions = question_data["question"].unique()
+        questions_id_map = {q: idx for idx, q in enumerate(questions)}
+        question_data["question"] = question_data["question"].map(questions_id_map)
 
-        # 确保题目有正确答案和技能标签
-        questions.dropna(subset=["correct_answer", "tags"], inplace=True)
-
-        q_ans_map = questions.set_index("question_id")["correct_answer"].to_dict()
-        q_tag_map = questions.set_index("question_id")["tags"].to_dict()
-
-        self.cleared_data = self.raw_data.copy()
-
-        # 确保question_id是字符串
-        self.cleared_data["question_id"] = self.cleared_data["question_id"].astype(str)
-
+        # 处理用户回答数据
+        sequence_data = self.sequence_data_raw.copy()
+        # 将question_id列映射为整数id
+        sequence_data["question_id"] = sequence_data["question_id"].map(
+            questions_id_map
+        )
+        # 从question_data中构建question到correct_answer的映射
+        q_ans_map = question_data.set_index("question")["correct_answer"].to_dict()
         # 过滤掉不在题目元数据中的题目
-        valid_questions = self.cleared_data["question_id"].isin(q_ans_map.keys())
-        self.cleared_data = self.cleared_data[valid_questions].copy()
-
-        # 映射正确答案和技能
-        self.cleared_data["correct_answer"] = self.cleared_data["question_id"].map(
-            q_ans_map
-        )
-        self.cleared_data["skill"] = self.cleared_data["question_id"].map(q_tag_map)
-
+        valid_questions = sequence_data["question_id"].isin(q_ans_map.keys())
+        sequence_data = sequence_data[valid_questions]
+        # 按照question_id映射正确答案
+        sequence_data["correct_answer"] = sequence_data["question_id"].map(q_ans_map)
         # 计算label
-        self.cleared_data["user_answer"] = (
-            self.cleared_data["user_answer"].astype(str).str.strip().str.lower()
-        )
-        self.cleared_data["correct_answer"] = (
-            self.cleared_data["correct_answer"].astype(str).str.strip().str.lower()
-        )
-
-        self.cleared_data["label"] = (
-            self.cleared_data["user_answer"] == self.cleared_data["correct_answer"]
+        sequence_data["label"] = (
+            sequence_data["user_answer"] == sequence_data["correct_answer"]
         ).astype(int)
-
+        # 抛弃不需要的列
+        sequence_data = sequence_data[["user_id", "question_id", "label", "timestamp"]]
         # 重命名
-        self.cleared_data.rename(
+        sequence_data.rename(
             columns={"question_id": "question", "user_id": "user"}, inplace=True
         )
-
         # 移除缺失值
-        self.cleared_data.dropna(
-            subset=["user", "question", "skill", "label"], inplace=True
-        )
-        # 确保label是0/1
-        self.cleared_data = self.cleared_data[self.cleared_data["label"].isin([0, 1])]
+        sequence_data.dropna(subset=["user", "question", "label"], inplace=True)
         # 排序
-        self.cleared_data.sort_values(by=["user", "timestamp"], inplace=True)
+        sequence_data.sort_values(by=["user", "timestamp"], inplace=True)
 
+        # 其他数据清理步骤
         # 限制序列长度
-        self.cleared_data = restrains_sequence_length(
-            self.cleared_data, self.args.min_seq_len, self.args.max_seq_len
+        sequence_data = restrains_sequence_length(
+            sequence_data, self.args.min_seq_len, self.args.max_seq_len
         )
         # 映射ID
-        self.cleared_data = map_to_continuous_ids(
-            self.cleared_data, columns=["user", "question"]
+        sequence_data = map_to_continuous_ids(
+            sequence_data, columns=["user", "question"]
         )
-        self.sequence_data = self.cleared_data.copy()
+        self.sequence_data = sequence_data.copy()
 
         # 构建question_data
         self.question_data = build_question_data_from_cleared(
-            self.cleared_data,
+            question_data,
             skill_column="skill",
             question_column="question",
             seperator=";",
         )
 
-        print(f"Processed {len(self.cleared_data)} interactions.")
+        print(f"Processed {len(sequence_data)} interactions.")
 
         self.add_metadatas(
             {
-                "num_users": self.cleared_data["user"].nunique(),
+                "num_users": sequence_data["user"].nunique(),
                 "num_questions": self.question_data["question"].nunique(),
                 "num_skills": self.question_data["skill"].nunique(),
+                "num_assignments": self.question_data["assignment"].nunique(),
                 "max_seq_len": self.args.max_seq_len,
                 "min_seq_len": self.args.min_seq_len,
-                "columns": self.cleared_data.columns.tolist(),
+                "sequence_columns": sequence_data.columns.tolist(),
+                "question_columns": self.question_data.columns.tolist(),
             }
         )
 
