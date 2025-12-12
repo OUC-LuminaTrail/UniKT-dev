@@ -44,34 +44,42 @@ uv pip install torch==1.13.1+cu117 dhg torch_geometric pyg-lib optuna pandas pya
 
 ```
 kt-exp-graph/
-├── data/                           # 数据目录
+├── configs/                           # 配置与参数空间
+│   ├── optuna_config.json             # Optuna 搜索配置
+│   ├── param_space_gikt.json          # GIKT 超参空间
+│   └── param_space_hgikt.json         # HGIKT 超参空间
+├── data/                              # 数据目录
 │   ├── assistments09/
 │   ├── assistments12/
 │   ├── assistments15/
 │   ├── assistments17/
-│   └── EdNet/
-├── docs/                               # 文档
-│   ├── early_stopping.md               # 早停机制说明
-│   ├── train_gikt.md                   # GIKT 训练指南
-│   └── train_sqgkt.md                  # SQGKT 训练指南
-├── model/                              # 模型实现
+│   └── ednet/
+├── model/                             # 模型实现
 │   ├── GIKT/
-│   │   ├── GIKT_data.py                # 数据加载
-│   │   ├── GIKT_model.py               # 模型定义
-│   │   └── GIKT_trainer.py             # 训练逻辑
-│   └── SQGKT/
-│       ├── SQGKT_data.py               # 数据加载
-│       ├── SQGKT_model.py              # 模型定义
-│       └── SQGKT_trainer.py            # 训练逻辑
-├── utils/                            # 工具模块
-│   ├── early_stopping.py               # 通用早停器
-│   ├── hyperparam_manager.py           # 超参数管理
-│   ├── net_trainer.py                  # 基础训练器
-│   └── data_process/                   # 数据处理模块
-├── runs/                               # 实验日志目录
-├── data_process.py                     # 数据预处理脚本
-├── train_gikt.py                       # GIKT 训练脚本
-└── train_sqgkt.py                      # SQGKT 训练脚本
+│   │   ├── GIKT_data.py               # 数据加载
+│   │   ├── GIKT_model.py              # 模型定义
+│   │   └── GIKT_trainer.py            # 训练逻辑
+│   ├── HGIKT/
+│   │   ├── HGIKT_data.py              # 数据加载
+│   │   ├── HGIKT_model.py             # 模型定义
+│   │   └── HGIKT_trainer.py           # 训练逻辑
+│   ├── SQGKT/
+│   │   ├── SQGKT_data.py              # 数据加载
+│   │   ├── SQGKT_model.py             # 模型定义
+│   │   └── SQGKT_trainer.py           # 训练逻辑
+├── runs/                              # 实验运行日志与检查点
+├── swanlog/                           # SwanLab 本地日志
+├── utils/                             # 工具模块
+│   ├── early_stopping.py              # 通用早停器
+│   ├── hyperparam_manager.py          # 超参数管理
+│   └── net_trainer.py                 # 基础训练器（统一种子/日志/指标）
+├── data_process.py                    # 数据预处理脚本（下载/清洗/划分）
+├── optuna_search_gikt.py              # GIKT 超参数搜索脚本
+├── optuna_search_hgikt.py             # HGIKT 超参数搜索脚本
+├── run_kfold.sh                       # K 折训练脚本
+├── train_gikt.py                      # GIKT 训练脚本
+├── train_hgikt.py                     # HGIKT 训练脚本
+└── train_sqgkt.py                     # SQGKT 训练脚本
 ```
 
 ## 快速开始
