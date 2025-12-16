@@ -14,6 +14,11 @@ FOLDS_ARG=$2
 shift 2
 ARGS="$@"
 
+# 确保无论从哪个目录运行脚本，都切换到仓库根目录（脚本位于 scripts/ 下）
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT" || { echo "Error: Failed to change directory to repository root: $REPO_ROOT"; exit 1; }
+
 # 处理折数列表 (支持空格或逗号分隔)
 FOLDS_LIST=${FOLDS_ARG//,/ }
 
