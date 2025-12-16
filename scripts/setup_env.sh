@@ -16,7 +16,7 @@ FORCE_CPU=0
 FORCE_CUDA=0
 CUDA_VER="$DEFAULT_CUDA_VER"
 
-function usage() {
+usage() {
   cat <<EOF
 Usage: $0 [--env-name NAME|-n NAME] [--cpu] [--cuda] [--cuda-ver cu117] [--force] [--yes]
 
@@ -80,14 +80,53 @@ if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
     if [ "$ASSUME_YES" -eq 1 ]; then
       echo "Environment $ENV_NAME already exists; skipping creation (--yes specified)."
     else
-      read -rp "Environment $ENV_NAME already exists. Recreate? [y/N]: " yn
-      yn=${yn:-N}
-      if [[ "$yn" =~ ^[Yy]$ ]]; then
-        conda remove -n "$ENV_NAME" --all -y
-      else
-        echo "Using existing environment $ENV_NAME."
-        # Activate and continue installing dependencies
-      fi
+      # Present options to the user. Default action is to exit.
+      while true; do
+        echo "Environment '$ENV_NAME' already exists. Choose an action:"
+        echo "  1) Force recreate the environment (delete and recreate)"
+        echo "  2) Continue and install into the existing environment"
+        echo "  3) Enter a new environment name"
+        echo "  4) Exit (default)"
+        read -rp "Select 1/2/3/4 [4]: " choice
+        choice=${choice:-4}
+        case "$choice" in
+          1)
+            echo "Removing environment '$ENV_NAME'..."
+            conda remove -n "$ENV_NAME" --all -y
+            # After removal, the script will create the env below
+            break
+            ;;
+          2)
+            echo "Using existing environment '$ENV_NAME'."
+            USE_EXISTING=1
+            break
+            ;;
+          3)
+            read -rp "Enter new environment name: " newname
+            newname=${newname:-}
+            if [ -z "$newname" ] || [[ "$newname" =~ [[:space:]] ]]; then
+              echo "Invalid name. Name must be non-empty and contain no spaces."
+              continue
+            fi
+            ENV_NAME="$newname"
+            # If the new name exists, loop again to present options for the new name
+            if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+              echo "Environment '$ENV_NAME' already exists; repeating options for the new name."
+              continue
+            else
+              # New name does not exist; proceed to create it below
+              break
+            fi
+            ;;
+          4)
+            echo "Exiting without changes."
+            exit 0
+            ;;
+          *)
+            echo "Invalid selection; please enter 1, 2, 3, or 4."
+            ;;
+        esac
+      done
     fi
   fi
 fi
@@ -138,11 +177,11 @@ fi
 
 # Installation steps
 if [ "$INSTALL_TARGET" = "cpu" ]; then
-  echo "Installing CPU dependencies (torch cpu + torch_geometric, etc.)..."
+  echo "Installing CPU dependencies"
   pip_install "torch==1.13.1+cpu" --extra-index-url https://download.pytorch.org/whl/cpu
   pip_install "torch_geometric" "pyg-lib" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
 else
-  echo "Installing CUDA($CUDA_VER) dependencies (torch + torch_geometric, etc.)..."
+  echo "Installing CUDA($CUDA_VER) dependencies"
   pip_install "torch==1.13.1+$CUDA_VER" --extra-index-url https://download.pytorch.org/whl/$CUDA_VER
   pip_install "torch_geometric" "pyg-lib" -f https://data.pyg.org/whl/torch-1.13.1+$CUDA_VER.html || {
     # Fallback install attempt (indexes or link formats may differ)
@@ -151,11 +190,11 @@ else
 fi
 
 # Common dependencies
-echo "Installing common Python packages: dhg, optuna, pandas, pyarrow, swanlab, python-dotenv..."
+echo "Installing Other Python packages: dhg, optuna, pandas, pyarrow, swanlab, python-dotenv"
 pip_install dhg optuna pandas pyarrow swanlab python-dotenv
 
 # Print version info for verification
-echo "\nInstallation completed — verification info:"
+echo "Installation completed — verification info:"
 python - <<PY
 import sys
 import importlib
@@ -172,8 +211,7 @@ import torch
 print('torch.cuda.is_available():', torch.cuda.is_available())
 PY
 
-echo "\n✅ Environment is ready. To use it:"
-echo "  conda activate $ENV_NAME"
-echo "To rerun this script, ensure it is executable: chmod +x $0"
+echo "✅ Environment is ready. To use it:"
+echo "   conda activate $ENV_NAME"
 
 exit 0
