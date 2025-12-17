@@ -42,6 +42,11 @@ class HGIKTModelData(GraphModelData):
             max_seq_len, min_seq_len
         )
 
+        # 构建问题-技能关联矩阵，并转换为torch张量
+        question_skill_matrix = torch.from_numpy(
+            self.build_relationship_matrix(("question", "has", "skill"))
+        ).float()
+
         # 构建难度加权超图
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
@@ -110,6 +115,7 @@ class HGIKTModelData(GraphModelData):
             "val_dataloader": val_dataloader,
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
+            "question_skill_matrix": question_skill_matrix,
         }
 
         return return_data

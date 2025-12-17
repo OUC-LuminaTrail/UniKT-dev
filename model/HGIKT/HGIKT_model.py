@@ -166,7 +166,7 @@ class HistoryRecap(nn.Module):
         qa_emb: torch.Tensor,  # [B, S, H]
         user_mask: torch.Tensor,  # [B, S]
     ):
-        B, S, D = input_q_emb.size()
+        B, S, _ = input_q_emb.size()
         H = qa_emb.size(-1)
         device = input_q_emb.device
 
@@ -240,88 +240,111 @@ class HistoryRecap(nn.Module):
 
 
 class GeneralInteraction(nn.Module):
-    r"""广义交互预测模块
+    r"""广义交互模块
 
-    核心思想：
-    - 计算学生相关状态 Nh 与知识相关状态 Nn 的两两内积得分
-    - 使用可学习的因子分解注意力：score[i,j] = f1[i] + f2[j]
-    - Softmax 归一化后加权求和得到最终预测分数
+    参数：
+    - student_dim: 学生状态集合的维度
+    - knowledge_dim: 知识状态集合的维度
+    - attention_dim: 注意力网络中间层维度
 
-    参数:
-        hidden_dim (int): 特征维度 H
+    输入：
+    - hist_candidates: 学生相关状态集合 [B, S, M+1, student_dim]
+    - next_candidates: 知识相关状态集合 [B, S, N+1, knowledge_dim]
+    - user_mask: 用户有效位置掩码 [B, S]
 
-    输入:
-        hist_candidates: [B, S, M+1, H] 学生相关状态
-        next_candidates: [B, S, N+1, H] 知识相关状态
-        user_mask: [B, S] 有效位置掩码
-
-    输出:
-        logits: [B, S] 每个时间步的预测分数
+    输出：
+    - logits: 预测分数 [B, S]
     """
 
-    def __init__(self, hidden_dim: int):
+    def __init__(self, student_dim: int, knowledge_dim: int, attention_dim: int = 64):
         super(GeneralInteraction, self).__init__()
-        self.hidden_dim = hidden_dim
+        self.student_dim = student_dim
+        self.knowledge_dim = knowledge_dim
+        self.attention_dim = attention_dim
 
-        # 学生相关状态权重
-        self.linear1 = nn.Linear(hidden_dim, 1)
-        # 知识相关状态权重
-        self.linear2 = nn.Linear(hidden_dim, 1)
+        # 统一投影维度：取两者中较小的维度
+        self.unified_dim = min(student_dim, knowledge_dim)
 
-        # Xavier 初始化
-        nn.init.xavier_uniform_(self.linear1.weight)
-        nn.init.xavier_uniform_(self.linear2.weight)
+        # 线性投影层：将两个集合投影到相同维度
+        self.student_proj = (
+            nn.Linear(student_dim, self.unified_dim)
+            if student_dim != self.unified_dim
+            else nn.Identity()
+        )
+        self.knowledge_proj = (
+            nn.Linear(knowledge_dim, self.unified_dim)
+            if knowledge_dim != self.unified_dim
+            else nn.Identity()
+        )
 
-    def forward(
-        self,
-        hist_candidates: torch.Tensor,  # [B, S, M+1, H]
-        next_candidates: torch.Tensor,  # [B, S, N+1, H]
-        user_mask: torch.Tensor,  # [B, S]
-    ):
-        B, S, M_plus_1, H = hist_candidates.size()
+        # 初始化投影层权重
+        if isinstance(self.student_proj, nn.Linear):
+            nn.init.xavier_uniform_(self.student_proj.weight)
+        if isinstance(self.knowledge_proj, nn.Linear):
+            nn.init.xavier_uniform_(self.knowledge_proj.weight)
+
+        # 加性注意力：输入拼接向量，输出注意力分数
+        self.attention_net = nn.Sequential(
+            nn.Linear(2 * self.unified_dim, attention_dim),
+            nn.Tanh(),
+            nn.Linear(attention_dim, 1),
+        )
+
+        # 初始化权重
+        nn.init.xavier_uniform_(self.attention_net[0].weight)
+        nn.init.xavier_uniform_(self.attention_net[2].weight)
+
+    def forward(self, hist_candidates, next_candidates, user_mask):
+        B, S, M_plus_1, H_student = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
+        H_knowledge = next_candidates.size(3)
+
+        # 投影到统一维度
+        # hist_candidates: [B, S, M+1, student_dim] -> [B, S, M+1, unified_dim]
+        hist_projected = self.student_proj(
+            hist_candidates.reshape(-1, H_student)
+        ).reshape(B, S, M_plus_1, self.unified_dim)
+        # next_candidates: [B, S, N+1, knowledge_dim] -> [B, S, N+1, unified_dim]
+        next_projected = self.knowledge_proj(
+            next_candidates.reshape(-1, H_knowledge)
+        ).reshape(B, S, N_plus_1, self.unified_dim)
 
         # 计算两两内积得分
-        # hist_candidates: [B, S, M+1, H] -> [B, S, M+1, 1, H]
-        # next_candidates: [B, S, N+1, H] -> [B, S, 1, N+1, H]
-        # interaction: [B, S, M+1, N+1, H]
-        interaction = hist_candidates.unsqueeze(3) * next_candidates.unsqueeze(2)
-        # 在特征维度上求和得到内积
+        interaction = hist_projected.unsqueeze(3) * next_projected.unsqueeze(2)
         logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
 
-        # 历史侧得分: [B, S, M+1, H] -> [B*S*(M+1), H] -> [B*S*(M+1), 1]
-        f1 = self.linear1(hist_candidates.reshape(-1, H))  # [B*S*(M+1), 1]
-        f1 = f1.reshape(B, S, M_plus_1, 1)  # [B, S, M+1, 1]
+        # 扩展维度以便拼接
+        hist_expanded = hist_projected.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
+        next_expanded = next_projected.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
 
-        # 未来侧得分: [B, S, N+1, H] -> [B*S*(N+1), H] -> [B*S*(N+1), 1]
-        f2 = self.linear2(next_candidates.reshape(-1, H))  # [B*S*(N+1), 1]
-        f2 = f2.reshape(B, S, 1, N_plus_1)  # [B, S, 1, N+1]
+        # 拼接交互对向量
+        interaction_pairs = torch.cat([hist_expanded, next_expanded], dim=-1)
 
-        # 广播相加: [B, S, M+1, 1] + [B, S, 1, N+1] -> [B, S, M+1, N+1]
-        attention_scores = torch.tanh(f1 + f2)  # [B, S, M+1, N+1]
+        # 通过注意力网络计算分数
+        attention_scores = self.attention_net(
+            interaction_pairs.reshape(-1, 2 * self.unified_dim)
+        ).reshape(B, S, M_plus_1, N_plus_1)  # [B, S, M+1, N+1]
 
-        # Step 3: Softmax 归一化
-        # 将二维配对展平: [B, S, M+1, N+1] -> [B, S, (M+1)*(N+1)]
-        attention_scores_flat = attention_scores.reshape(B, S, -1)  # [B, S, K]
-        logits_raw_flat = logits_raw.reshape(B, S, -1)  # [B, S, K]
+        # 展平维度进行softmax
+        attention_scores_flat = attention_scores.reshape(
+            B, S, -1
+        )  # [B, S, (M+1)*(N+1)]
+        logits_raw_flat = logits_raw.reshape(B, S, -1)  # [B, S, (M+1)*(N+1)]
 
-        # 对无效位置（user_mask=0）的注意力分数设为 -inf
-        mask_expanded = user_mask.unsqueeze(-1)  # [B, S, 1]
+        # 应用掩码和softmax
+        mask_expanded = user_mask.unsqueeze(-1)
         attention_scores_flat = torch.where(
             mask_expanded,
             attention_scores_flat,
-            torch.full_like(
-                attention_scores_flat, torch.finfo(attention_scores_flat.dtype).min
-            ),
+            torch.full_like(attention_scores_flat, -1e9),
         )
-        # Softmax
-        attention_weights = F.softmax(attention_scores_flat, dim=-1)  # [B, S, K]
+
+        attention_weights = F.softmax(
+            attention_scores_flat, dim=-1
+        )  # [B, S, (M+1)*(N+1)]
 
         # 加权求和
-        # logits_raw_flat: [B, S, K], attention_weights: [B, S, K]
         logits = torch.sum(logits_raw_flat * attention_weights, dim=-1)  # [B, S]
-
-        # 将无效位置的 logits 清零
         logits = logits * user_mask.float()
 
         return logits
@@ -371,7 +394,7 @@ class HGIKT(nn.Module):
         self.embedding_dropout = torch.nn.Dropout(p=self.dropout)
 
         # 异质图模块
-        self.gnn_conv = HeteroGNN(
+        self.hetero_conv = HeteroGNN(
             embedding_dim=self.embedding_dim,
             n_hop=args.n_hop,
             heads=args.heads,
@@ -391,34 +414,36 @@ class HGIKT(nn.Module):
             self.embedding_dim * 2, self.embedding_dim, weight_initializer="uniform"
         )
 
-        # 全连接层，将图卷积后的特征映射到隐藏维度
-        self.fc_feature = Linear(
-            self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
-        )
-        self.fc_next_feature = Linear(
-            self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
+        # 全连接层，将练习嵌入投影到隐藏维度
+        self.fc_exercise = Linear(
+            self.embedding_dim * 2, self.lstm_hidden_dim, weight_initializer="uniform"
         )
 
         # LSTM层
         self.lstm = nn.LSTM(
             # 将question和answer拼接作为输入
-            input_size=self.lstm_hidden_dim * 2,
+            input_size=self.lstm_hidden_dim,
             hidden_size=self.lstm_hidden_dim,
             num_layers=self.lstm_layers,
             batch_first=True,
-            dropout=(
-                self.dropout if self.lstm_layers > 1 else 0.0
-            ),  # 仅在多层时使用dropout
+            dropout=self.dropout,
+        )
+
+        # 全连接层，将图卷积后的技能嵌入投影到隐藏维度
+        self.fc_next_skill = Linear(
+            self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
         )
 
         # 历史回顾模块
-        self.history_recap = HistoryRecap(
+        self.history_review = HistoryRecap(
             hist_neighbor_num=args.history_neighbour,
             att_bound=args.att_bound,
         )
 
         # 广义交互模块
-        self.general_interaction = GeneralInteraction(hidden_dim=self.lstm_hidden_dim)
+        self.general_interaction = GeneralInteraction(
+            student_dim=self.lstm_hidden_dim, knowledge_dim=self.embedding_dim
+        )
 
     def forward(
         self,
@@ -427,13 +452,14 @@ class HGIKT(nn.Module):
         user_mask: torch.Tensor,
         hetero_graph: torch.Tensor,
         hypergraph: torch.Tensor,
+        question_skill_matrix: torch.Tensor,
     ):
         # 批量大小
         B, _ = user_sequence.size()
 
         # 获取用户答题序列的回复嵌入
         # [B, S, embedding_dim]
-        answers_emb: torch.Tensor = self.answer_embedding(user_response)
+        answers_embedding: torch.Tensor = self.answer_embedding(user_response)
 
         # 加权超图卷积
         question_hyper_conv: torch.Tensor = self.hgnn_conv(
@@ -441,7 +467,7 @@ class HGIKT(nn.Module):
         )
 
         # 异构图卷积
-        question_gnn_conv: torch.Tensor = self.gnn_conv(
+        conv = self.hetero_conv(
             {
                 "question": self.question_embedding.weight,
                 "skill": self.skill_embedding.weight,
@@ -449,77 +475,150 @@ class HGIKT(nn.Module):
                 "template": self.template_embedding.weight,
             },
             hetero_graph.edge_index_dict,
-        )["question"]
+        )
+
+        # 图卷积得到的问题嵌入 [num_questions, embedding_dim]
+        question_hetero_conv: torch.Tensor = conv["question"]
+        # 图卷积得到的技能嵌入 [num_skills, embedding_dim]
+        skill_hetero_conv: torch.Tensor = conv["skill"]
 
         # 融合异构图与超图的题目表示
         # question_hyper_conv: [num_questions, embedding_dim]
-        # question_gnn_conv: [num_questions, embedding_dim]
-        question_conv = self.fuse(
-            torch.cat([question_gnn_conv, question_hyper_conv], dim=-1)
+        # question_hetero_conv: [num_questions, embedding_dim]
+        question_conv_fused = self.fuse(
+            torch.cat([question_hetero_conv, question_hyper_conv], dim=-1)
         )  # [num_questions, embedding_dim]
 
-        # 按照用户序列索引获取对应的问题节点表示
-        # 扩展 user_sequence 以匹配 question_conv 的维度
-        # user_sequence: [B, S] -> [B, S, embedding_dim]
-        user_sequence_expanded = user_sequence.unsqueeze(-1).expand(
-            -1, -1, self.embedding_dim
-        )
-        # 从图卷积后的 question_conv 中按用户序列 ID 取出特征
-        # question_emb: [B, S, embedding_dim]
-        question_emb = torch.gather(
-            question_conv.unsqueeze(0).expand(B, -1, -1),
-            1,
-            user_sequence_expanded,
-        )
+        # 按照用户序列索引获取对应的问题的嵌入表示
+        # user_sequence: [B, S], question_conv: [num_questions, embedding_dim]
+        # question_embedding_sequence: [B, S, embedding_dim]
+        question_embedding_sequence = question_conv_fused[user_sequence]
 
-        # 变换问题与答案嵌入到隐藏维度后再拼接，作为 LSTM 输入
-        q_trans = F.relu(self.fc_feature(question_emb))  # [B, S, H]
-        a_trans = F.relu(self.fc_feature(answers_emb))  # [B, S, H]
-        exercise_emb = torch.cat([q_trans, a_trans], dim=-1)  # [B, S, 2H]
+        # 组合问题和答案嵌入得到练习嵌入
+        exercise_emb = torch.cat(
+            [question_embedding_sequence, answers_embedding], dim=-1
+        )  # [B, S, 2*E]
+
+        # 将练习嵌入投影到隐藏维度
+        exercise_emb = F.relu(self.fc_exercise(exercise_emb))  # [B, S, H]
+        exercise_emb = self.embedding_dropout(exercise_emb)
 
         # lstm_output [B, S, H]
         lstm_output, _ = self.lstm(exercise_emb)
 
-        # 提取下一题特征，最后一个时间步用零向量占位
-        # 构造下一题 ID
-        next_user_sequence = torch.zeros_like(user_sequence)
+        # 获取下一题问题序列，最后一个时间步用零向量占位
+        next_user_sequence = torch.zeros_like(user_sequence)  # [B, S]
         if user_sequence.size(1) > 1:
             # 将 user_sequence 向左移动一位，最后一位用0填充
             next_user_sequence[:, :-1] = user_sequence[:, 1:]
             next_user_sequence[:, -1] = 0
 
-        next_user_sequence_expanded = next_user_sequence.unsqueeze(-1).expand(
-            -1, -1, self.embedding_dim
-        )
-        # 从图卷积后的 question_conv 中按下一题 ID 取出特征
-        # next_q_emb: [B, S, E]
-        next_q_emb = torch.gather(
-            question_conv.unsqueeze(0).expand(B, -1, -1),
-            1,
-            next_user_sequence_expanded,
-        )
-        next_q_trans = F.relu(self.fc_next_feature(next_q_emb))  # [B, S, H]
+        # 获取下一题的问题序列嵌入
+        # next_question_embedding: [B, S, embedding_dim]
+        next_question_embedding: torch.Tensor = question_conv_fused[next_user_sequence]
 
-        # 历史回顾模块：采样历史邻居
-        # question_emb: [B, S, E], next_q_emb: [B, S, E], lstm_output: [B, S, H]
-        history_question_neighbors = self.history_recap(
-            question_emb, next_q_emb, q_trans, user_mask
+        # 获取下一题学生回复，最后一个时间步用0占位
+        next_user_response = torch.zeros_like(user_response)  # [B, S]
+        if user_response.size(1) > 1:
+            next_user_response[:, :-1] = user_response[:, 1:]
+            next_user_response[:, -1] = 0
+
+        # 获取下一题的回复嵌入
+        # next_answer_embedding: [B, S, embedding_dim]
+        next_answer_embedding: torch.Tensor = self.answer_embedding(next_user_response)
+
+        # 组合下一题问题和答案嵌入
+        next_exercise_emb = torch.cat(
+            [next_question_embedding, next_answer_embedding], dim=-1
+        )  # [B, S, 2*E]
+
+        # 将下一题练习嵌入投影到隐藏维度
+        next_exercise_emb = F.relu(self.fc_exercise(next_exercise_emb))  # [B, S, H]
+        next_exercise_emb = self.embedding_dropout(next_exercise_emb)
+
+        # 历史回顾模块
+        # question_embedding_sequence: [B, S, E]
+        # next_question_embedding: [B, S, E]
+        # lstm_output: [B, S, H]
+        history_question_neighbors = self.history_review(
+            question_embedding_sequence,
+            next_question_embedding,
+            exercise_emb,
+            user_mask,
         )  # history_question_neighbors: [B, S, M, H]
 
-        # 构造学生相关状态集合：当前LSTM输出 + 历史邻居
+        # 构造学生相关状态集合：LSTM 输出 + 历史邻居
         # lstm_output: [B, S, H] -> [B, S, 1, H]
         # history_question_neighbors: [B, S, M, H]
-        # hist_candidates: [B, S, M+1, H]
-        hist_candidates = torch.cat(
+        # student_status: [B, S, M+1, H]
+        student_status = torch.cat(
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )  # [B, S, M+1, H]
 
-        # next_q_trans: [B, S, H] -> [B, S, 1, H]
-        next_candidates = next_q_trans.unsqueeze(2)  # [B, S, 1, H]
+        # 构建知识相关状态集合：下一题特征 + 相关知识点特征
+        # 获取每个问题关联的技能
+        # 此处得到的每一个问题关联的0/1向量表示其关联的技能
+        # next_user_sequence: [B, S] 每个元素是问题ID
+        q_skill_vectors = question_skill_matrix[
+            next_user_sequence
+        ]  # [B, S, num_skills]
+
+        # 通过对二值向量降序排序，将值为1的技能索引排在前面
+        sorted_skill_indices = torch.argsort(
+            q_skill_vectors, dim=-1, descending=True
+        )  # [B, S, num_skills]
+
+        # 计算每行最大关联技能数
+        max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
+        # 计算每个位置实际关联的技能数量（1的个数）
+        skill_counts = q_skill_vectors.sum(dim=-1).long()  # [B, S]
+
+        # 选取每个位置前 K 个技能索引（K=max_skills_per_q）
+        related_skill_ids = sorted_skill_indices[
+            ..., :max_skills_per_question
+        ].clone()  # [B, S, K]
+
+        # 不足 K 个技能的位置使用 padding 索引填充
+        device = next_user_sequence.device
+        pos = torch.arange(max_skills_per_question, device=device).view(
+            1, 1, -1
+        )  # [1,1,K]
+        valid_pos_mask = pos < skill_counts.unsqueeze(-1)  # [B, S, K]
+
+        padding_index = skill_hetero_conv.size(0)  # 额外的零向量行索引
+        padding_ids = torch.full_like(related_skill_ids, padding_index)
+        related_skill_ids = torch.where(
+            valid_pos_mask, related_skill_ids, padding_ids
+        )  # [B, S, K]
+
+        # 为 padding 索引追加一行零向量
+        skill_conv_padded = torch.cat(
+            [
+                skill_hetero_conv,
+                torch.zeros(
+                    1, self.embedding_dim, device=device, dtype=skill_hetero_conv.dtype
+                ),
+            ],
+            dim=0,
+        )  # [num_skills+1, embedding_dim]
+
+        # 获取相关知识点嵌入
+        # 从 skill_conv_padded 中取出对应的技能嵌入
+        # related_skill_ids: [B, S, max_skills_per_question]
+        # related_skill_embs: [B, S, max_skills_per_question, embedding_dim]
+        related_skill_embs = skill_conv_padded[related_skill_ids]
+
+        # 拼接得到知识相关状态集合
+        # next_question_embedding: [B, S, embedding_dim] -> [B, S, 1, embedding_dim]
+        # related_skill_embs: [B, S, max_skills_per_question, embedding_dim]
+        knowledge_status = torch.cat(
+            [next_question_embedding.unsqueeze(2), related_skill_embs],
+            dim=2,
+        )  # [B, S, max_skills_per_question+1, embedding_dim]
 
         # 广义交互模块
         logits = self.general_interaction(
-            hist_candidates, next_candidates, user_mask
+            student_status, knowledge_status, user_mask
         )  # [B, S]
 
         return logits  # [B, S]
