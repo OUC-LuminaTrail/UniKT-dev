@@ -136,8 +136,8 @@ class GeneralInteraction(nn.Module):
         logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
 
         # 扩展维度以便拼接
-        hist_expanded = hist_candidates.unsqueeze(3)  # [B, S, M+1, 1, H]
-        next_expanded = next_candidates.unsqueeze(2)  # [B, S, 1, N+1, H]
+        hist_expanded = hist_candidates.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
+        next_expanded = next_candidates.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
 
         # 拼接交互对向量
         interaction_pairs = torch.cat([hist_expanded, next_expanded], dim=-1)
