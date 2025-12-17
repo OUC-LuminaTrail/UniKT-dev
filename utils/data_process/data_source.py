@@ -326,9 +326,10 @@ class DataSource(ABC):
                     # 处理单文件 .gz
                     uncompressed_name = lower_name[:-3]
                     target_file = os.path.join(extract_target, uncompressed_name)
-                    with gzip.open(archive_path, "rb") as f_in, open(
-                        target_file, "wb"
-                    ) as f_out:
+                    with (
+                        gzip.open(archive_path, "rb") as f_in,
+                        open(target_file, "wb") as f_out,
+                    ):
                         shutil.copyfileobj(f_in, f_out)
                 else:
                     # 非压缩文件，直接复制

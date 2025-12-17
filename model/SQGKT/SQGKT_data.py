@@ -102,7 +102,7 @@ class SQGKTModelData(GraphModelData):
 
         # 1. 计算用户能力因子（每个用户的平均正确率）
         print("Computing ability factors...")
-        
+
         # 确保 user 和 question 是整数
         user_ids = data["user"].astype(int).values
         question_ids = data["question"].astype(int).values
@@ -115,7 +115,7 @@ class SQGKTModelData(GraphModelData):
         # 2. 计算问题的尝试次数和提示次数统计
         if "attempt_count" in data.columns and "hint_count" in data.columns:
             print("Computing attempt and hint factors from data...")
-            
+
             # 计算每个问题的平均尝试次数和提示次数
             question_attempt_mean = data.groupby("question")["attempt_count"].mean()
             question_hint_mean = data.groupby("question")["hint_count"].mean()
@@ -123,7 +123,7 @@ class SQGKTModelData(GraphModelData):
             # 映射到每个交互
             mean_attempts = data["question"].map(question_attempt_mean).fillna(1).values
             mean_hints = data["question"].map(question_hint_mean).fillna(0).values
-            
+
             attempt_counts = data["attempt_count"].fillna(1).values
             hint_counts = data["hint_count"].fillna(0).values
 
@@ -135,8 +135,10 @@ class SQGKTModelData(GraphModelData):
             hint_factor = np.zeros_like(hint_counts, dtype=np.float32)
             mask_hint = mean_hints > 0
             if np.any(mask_hint):
-                hint_factor[mask_hint] = 1 - poisson.cdf(hint_counts[mask_hint] - 1, mean_hints[mask_hint])
-            
+                hint_factor[mask_hint] = 1 - poisson.cdf(
+                    hint_counts[mask_hint] - 1, mean_hints[mask_hint]
+                )
+
             hint_factor_g = k + (1 - k) / (1 + np.exp(-d * (hint_factor - b)))
 
             # 存储到三维表中
@@ -151,10 +153,12 @@ class SQGKTModelData(GraphModelData):
             # 简化版本：只使用能力因子和基于问题难度的估计
             # 计算每个问题的平均正确率（作为难度的反向指标）
             question_difficulty_series = data.groupby("question_id")["label"].mean()
-            
+
             # 映射到每个交互
-            difficulties = data["question_id"].map(question_difficulty_series).fillna(0.5).values
-            
+            difficulties = (
+                data["question_id"].map(question_difficulty_series).fillna(0.5).values
+            )
+
             attempt_factor_g = 1.0 - difficulties
             hint_factor_g = 1.0 - difficulties
 
@@ -271,7 +275,11 @@ class SQGKTModelData(GraphModelData):
                     f"Fold index {fold_idx} is out of range for {kfold_n_splits} folds."
                 )
             train_data, val_data = self.split_kfold_data(
-                user_sequence, user_response, user_mask, user_id_sequence, fold_idx=fold_idx
+                user_sequence,
+                user_response,
+                user_mask,
+                user_id_sequence,
+                fold_idx=fold_idx,
             )
         else:
             train_data, val_data = self.split_data(

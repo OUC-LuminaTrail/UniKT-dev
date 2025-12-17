@@ -236,20 +236,20 @@ class HGIKTModelData(GraphModelData):
                     e_list.append(cluster["vertices"])
                     edge_weights.append(cluster["weight"])
 
-            except Exception as e:
+            except Exception:
                 e_list.append(vertices)
                 edge_weights.append(1.0)
 
         # 处理空超边情况
         if len(e_list) == 0:
-            print(f"Warning: No hyperedges found. Creating self-loop hypergraph.")
+            print("Warning: No hyperedges found. Creating self-loop hypergraph.")
             e_list = [[i] for i in range(num_vertices)]
             edge_weights = [1.0] * num_vertices
 
         # 确保超边列表和权重列表长度一致
-        assert len(e_list) == len(
-            edge_weights
-        ), f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
+        assert len(e_list) == len(edge_weights), (
+            f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
+        )
 
         # 创建超图
         hypergraph = Hypergraph(

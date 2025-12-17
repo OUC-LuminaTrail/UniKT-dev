@@ -1,10 +1,11 @@
 """
 Optuna Tuner wrapper and helpers
 """
+
 import os
 import json
 import logging
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional
 from dataclasses import asdict
 from datetime import datetime
 
@@ -34,11 +35,11 @@ class OptunaTuner:
         self.param_space = param_space
         self.objective_fn = objective_fn
         self.objective_kwargs = objective_kwargs or {}
-        
+
         # 验证参数空间
         for space in self.param_space:
             space.validate()
-        
+
         # 创建学习目标
         self.study: Optional[optuna.Study] = None
         self._setup_logging()
@@ -58,10 +59,10 @@ class OptunaTuner:
         params = {}
         for space in self.param_space:
             params[space.name] = space.suggest(trial)
-        
+
         # 调用用户定义的目标函数
         score = self.objective_fn(trial, params=params, **self.objective_kwargs)
-        
+
         return score
 
     def search(self) -> Dict[str, Any]:
@@ -71,16 +72,19 @@ class OptunaTuner:
         # 创建Study
         sampler = self.config.get_sampler()
         pruner = self.config.get_pruner()
-        
+
         storage_url = None
         if self.config.db_url:
             storage_url = self.config.db_url
         elif self.config.save_dir:
             os.makedirs(self.config.save_dir, exist_ok=True)
             storage_url = f"sqlite:///{os.path.join(self.config.save_dir, 'study.db')}"
-        
-        study_name = self.config.study_name or f"study_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+
+        study_name = (
+            self.config.study_name
+            or f"study_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+
         study_kwargs = {
             "sampler": sampler,
             "pruner": pruner,
@@ -104,7 +108,7 @@ class OptunaTuner:
             raise ValueError("Optuna direction configuration missing")
 
         self.study = optuna.create_study(**study_kwargs)
-        
+
         # 优化
         self.study.optimize(
             self._objective,
@@ -113,11 +117,11 @@ class OptunaTuner:
             timeout=self.config.timeout,
             show_progress_bar=(self.config.verbose > 0),
         )
-        
+
         # 保存结果
         if self.config.save_dir:
             self._save_results()
-        
+
         # 返回最佳参数
         return self.study.best_params
 
@@ -125,35 +129,37 @@ class OptunaTuner:
         """保存搜索结果"""
         if not self.study or not self.config.save_dir:
             return
-        
+
         os.makedirs(self.config.save_dir, exist_ok=True)
-        
+
         # 保存最佳参数
         best_params_path = os.path.join(self.config.save_dir, "best_params.json")
-        with open(best_params_path, 'w') as f:
+        with open(best_params_path, "w") as f:
             json.dump(self.study.best_params, f, indent=2)
-        
+
         # 保存搜索历史
         history_path = os.path.join(self.config.save_dir, "search_history.json")
         trials_data = []
         for trial in self.study.trials:
-            trials_data.append({
-                "number": trial.number,
-                "value": trial.value,
-                "params": trial.params,
-                "state": trial.state.name,
-            })
-        with open(history_path, 'w') as f:
+            trials_data.append(
+                {
+                    "number": trial.number,
+                    "value": trial.value,
+                    "params": trial.params,
+                    "state": trial.state.name,
+                }
+            )
+        with open(history_path, "w") as f:
             json.dump(trials_data, f, indent=2)
-        
+
         # 保存配置
         config_path = os.path.join(self.config.save_dir, "optuna_config.json")
         config_dict = asdict(self.config)
-        config_dict['sampler_kwargs'] = str(config_dict.get('sampler_kwargs', {}))
-        config_dict['pruner_kwargs'] = str(config_dict.get('pruner_kwargs', {}))
-        with open(config_path, 'w') as f:
+        config_dict["sampler_kwargs"] = str(config_dict.get("sampler_kwargs", {}))
+        config_dict["pruner_kwargs"] = str(config_dict.get("pruner_kwargs", {}))
+        with open(config_path, "w") as f:
             json.dump(config_dict, f, indent=2)
-        
+
         logger.info(f"Results saved to {self.config.save_dir}")
 
     def get_best_trial(self) -> Optional[optuna.Trial]:
@@ -167,7 +173,7 @@ class OptunaTuner:
         if not self.study:
             print("No study found. Run search() first.")
             return
-        
+
         print("\n" + "=" * 60)
         print("Optuna Hyperparameter Search Summary")
         print("=" * 60)

@@ -58,7 +58,7 @@ class HyperparameterManager:
         # 将Namespace转换为字典
         if isinstance(params, Namespace):
             params = vars(params)
-        
+
         # 序列化所有参数
         serialized_params = self._serialize_params(params)
 
@@ -116,11 +116,11 @@ class HyperparameterManager:
         elif isinstance(value, set):
             return list(value)
         # 处理Path对象
-        elif hasattr(value, '__fspath__'):  # pathlib.Path
+        elif hasattr(value, "__fspath__"):  # pathlib.Path
             return str(value)
         # 处理可调用对象（函数、类等）
         elif callable(value):
-            if hasattr(value, '__name__'):
+            if hasattr(value, "__name__"):
                 return f"<callable: {value.__name__}>"
             else:
                 return f"<callable: {type(value).__name__}>"
@@ -383,11 +383,21 @@ def create_hyperparameter_manager(
             # 训练相关参数
             elif any(
                 kw in key.lower()
-                for kw in ["epoch", "batch", "lr", "optimizer", "loss", "weight_decay", "momentum"]
+                for kw in [
+                    "epoch",
+                    "batch",
+                    "lr",
+                    "optimizer",
+                    "loss",
+                    "weight_decay",
+                    "momentum",
+                ]
             ):
                 training_params[key] = value
             # 数据相关参数
-            elif any(kw in key.lower() for kw in ["data", "dataset", "sequence", "max_len"]):
+            elif any(
+                kw in key.lower() for kw in ["data", "dataset", "sequence", "max_len"]
+            ):
                 data_params[key] = value
             else:
                 other_params[key] = value

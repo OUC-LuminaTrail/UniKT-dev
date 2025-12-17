@@ -24,9 +24,15 @@ class EarlyStopping:
     - 记录最佳指标值与对应 epoch
     """
 
-    def __init__(self, config: Optional[EarlyStoppingConfig] = None, *,
-                 monitor: Optional[str] = None, mode: Optional[str] = None,
-                 patience: Optional[int] = None, min_delta: Optional[float] = None):
+    def __init__(
+        self,
+        config: Optional[EarlyStoppingConfig] = None,
+        *,
+        monitor: Optional[str] = None,
+        mode: Optional[str] = None,
+        patience: Optional[int] = None,
+        min_delta: Optional[float] = None,
+    ):
         if config is None:
             config = EarlyStoppingConfig()
         # 允许通过关键字参数覆盖
