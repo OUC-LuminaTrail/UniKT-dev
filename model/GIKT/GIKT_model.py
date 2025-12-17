@@ -37,7 +37,7 @@ class HistoryRecap(nn.Module):
         qa_emb: torch.Tensor,  # [B, S, H]
         user_mask: torch.Tensor,  # [B, S]
     ):
-        B, S, D = input_q_emb.size()
+        B, S, _ = input_q_emb.size()
         H = qa_emb.size(-1)
         device = input_q_emb.device
 
@@ -111,6 +111,21 @@ class HistoryRecap(nn.Module):
 
 
 class GeneralInteraction(nn.Module):
+    r"""广义交互模块
+
+    参数：
+    - hidden_dim: 隐藏层维度
+    - attention_dim: 注意力网络中间层维度
+
+    输入：
+    - hist_candidates: 学生相关状态集合 [B, S, M+1, H]
+    - next_candidates: 知识相关状态集合 [B, S, N+1, H]
+    - user_mask: 用户有效位置掩码 [B, S]
+
+    输出：
+    - logits: 预测分数 [B, S]
+    """
+
     def __init__(self, hidden_dim: int, attention_dim: int = 64):
         super(GeneralInteraction, self).__init__()
         self.hidden_dim = hidden_dim
@@ -145,9 +160,7 @@ class GeneralInteraction(nn.Module):
         # 通过注意力网络计算分数
         attention_scores = self.attention_net(
             interaction_pairs.reshape(-1, 2 * H)
-        ).reshape(
-            B, S, M_plus_1, N_plus_1
-        )  # [B, S, M+1, N+1]
+        ).reshape(B, S, M_plus_1, N_plus_1)  # [B, S, M+1, N+1]
 
         # 展平维度进行softmax
         attention_scores_flat = attention_scores.reshape(
@@ -177,9 +190,18 @@ class GeneralInteraction(nn.Module):
 class GNN_QS(nn.Module):
     r"""问题-技能图聚合
 
+    参数：
+    - embedding_dim: 节点嵌入维度
+    - n_hop: GNN 层数
+    - heads: 注意力头数
+    - dropout: Dropout 概率
+
     输入：
     - x: 节点权重
     - edge_index: 边索引
+
+    输出：
+    - x: 聚合后的节点表示
     """
 
     def __init__(self, embedding_dim, n_hop, heads, dropout):
@@ -262,13 +284,7 @@ class GIKT(nn.Module):
             dropout=self.dropout,
         )
 
-        # 全连接层，将图卷积后的特征映射到隐藏维度
-        self.fc_feature = Linear(
-            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
-        )
-        self.fc_next_feature = Linear(
-            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
-        )
+        # 全连接层，将练习嵌入投影到隐藏维度
         self.fc_exercise = Linear(
             self.embedding_dim * 2, self.hidden_dim, weight_initializer="uniform"
         )
@@ -276,15 +292,20 @@ class GIKT(nn.Module):
         # LSTM层
         self.lstm = nn.LSTM(
             # 将question和answer拼接作为输入
-            input_size=self.hidden_dim * 2,
+            input_size=self.hidden_dim,
             hidden_size=self.hidden_dim,
             num_layers=self.lstm_layers,
             batch_first=True,
             dropout=self.dropout,
         )
 
+        # 全连接层，将图卷积后的技能嵌入投影到隐藏维度
+        self.fc_next_skill = Linear(
+            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
+        )
+
         # 历史回顾模块
-        self.history_recap = HistoryRecap(
+        self.history_review = HistoryRecap(
             hist_neighbor_num=args.history_neighbour,
             att_bound=args.att_bound,
         )
@@ -305,147 +326,151 @@ class GIKT(nn.Module):
 
         # 获取用户答题序列的回复嵌入
         # [B, S, embedding_dim]
-        answers_emb: torch.Tensor = self.answer_embedding(user_response)
-
-        # 图中节点特征初始化
-        x = {
-            "question": self.question_embedding.weight,
-            "skill": self.skill_embedding.weight,
-        }
+        answers_embedding: torch.Tensor = self.answer_embedding(user_response)
 
         # 全图卷积
-        conv = self.conv(x, graph.edge_index_dict)
-        # question_conv [B, S, embedding_dim]
+        conv = self.conv(
+            {
+                "question": self.question_embedding.weight,
+                "skill": self.skill_embedding.weight,
+            },
+            graph.edge_index_dict,
+        )
+
+        # 图卷积得到的问题嵌入 [num_questions, embedding_dim]
         question_conv: torch.Tensor = conv["question"]
-        # skill_conv [num_skills, embedding_dim]
+        # 图卷积得到的技能嵌入 [num_skills, embedding_dim]
         skill_conv: torch.Tensor = conv["skill"]
 
-        # 按照用户序列索引获取对应的问题节点表示
-        # 扩展 user_sequence 以匹配 question_conv 的维度
-        # user_sequence: [B, S] -> [B, S, embedding_dim]
-        user_sequence_expanded = user_sequence.unsqueeze(-1).expand(
-            -1, -1, self.embedding_dim
-        )
-        # 从图卷积后的 question_conv 中按用户序列 ID 取出特征
-        # question_emb: [B, S, embedding_dim]
-        question_emb = torch.gather(
-            question_conv.unsqueeze(0).expand(B, -1, -1),
-            1,
-            user_sequence_expanded,
-        )
+        # 按照用户序列索引获取对应的问题的嵌入表示
+        # user_sequence: [B, S], question_conv: [num_questions, embedding_dim]
+        # question_embedding_sequence: [B, S, embedding_dim]
+        question_embedding_sequence = question_conv[user_sequence]
 
-        # 变换问题与答案嵌入到隐藏维度后再拼接，作为 LSTM 输入
-        q_trans = F.relu(self.fc_feature(question_emb))  # [B, S, H]
-        a_trans = F.relu(self.fc_feature(answers_emb))  # [B, S, H]
-        exercise_emb = torch.cat([q_trans, a_trans], dim=-1)  # [B, S, 2H]
+        # 组合问题和答案嵌入得到练习嵌入
+        exercise_emb = torch.cat(
+            [question_embedding_sequence, answers_embedding], dim=-1
+        )  # [B, S, 2*E]
+
+        # 将练习嵌入投影到隐藏维度
+        exercise_emb = F.relu(self.fc_exercise(exercise_emb))  # [B, S, H]
+        exercise_emb = self.embedding_dropout(exercise_emb)
 
         # lstm_output [B, S, H]
         lstm_output, _ = self.lstm(exercise_emb)
 
-        # 提取下一题特征，最后一个时间步用零向量占位
-        # 构造下一题 ID
-        next_user_sequence = torch.zeros_like(user_sequence)
+        # 获取下一题问题序列，最后一个时间步用零向量占位
+        next_user_sequence = torch.zeros_like(user_sequence)  # [B, S]
         if user_sequence.size(1) > 1:
             # 将 user_sequence 向左移动一位，最后一位用0填充
             next_user_sequence[:, :-1] = user_sequence[:, 1:]
             next_user_sequence[:, -1] = 0
 
-        next_user_sequence_expanded = next_user_sequence.unsqueeze(-1).expand(
-            -1, -1, self.embedding_dim
-        )
-        # 从图卷积后的 question_conv 中按下一题 ID 取出特征
-        # next_q_emb: [B, S, E]
-        next_q_emb = torch.gather(
-            question_conv.unsqueeze(0).expand(B, -1, -1),
-            1,
-            next_user_sequence_expanded,
-        )
-        next_q_trans = F.relu(self.fc_next_feature(next_q_emb))  # [B, S, H]
+        # 获取下一题的问题序列嵌入
+        # next_question_embedding: [B, S, embedding_dim]
+        next_question_embedding: torch.Tensor = question_conv[next_user_sequence]
 
-        # 拼接问题嵌入和答案嵌入，然后投影到 H 维
-        exercise_representation = torch.cat(
-            [question_emb, answers_emb], dim=-1
+        # 获取下一题学生回复，最后一个时间步用0占位
+        next_user_response = torch.zeros_like(user_response)  # [B, S]
+        if user_response.size(1) > 1:
+            next_user_response[:, :-1] = user_response[:, 1:]
+            next_user_response[:, -1] = 0
+
+        # 获取下一题的回复嵌入
+        # next_answer_embedding: [B, S, embedding_dim]
+        next_answer_embedding: torch.Tensor = self.answer_embedding(next_user_response)
+
+        # 组合下一题问题和答案嵌入
+        next_exercise_emb = torch.cat(
+            [next_question_embedding, next_answer_embedding], dim=-1
         )  # [B, S, 2*E]
-        e_i = F.relu(self.fc_exercise(exercise_representation))  # [B, S, H]
 
-        # 历史回顾模块：采样历史邻居
-        # question_emb: [B, S, E], next_q_emb: [B, S, E], lstm_output: [B, S, H]
-        history_question_neighbors = self.history_recap(
-            question_emb, next_q_emb, e_i, user_mask
+        # 将下一题练习嵌入投影到隐藏维度
+        next_exercise_emb = F.relu(self.fc_exercise(next_exercise_emb))  # [B, S, H]
+        next_exercise_emb = self.embedding_dropout(next_exercise_emb)
+
+        # 历史回顾模块
+        # question_embedding_sequence: [B, S, E]
+        # next_question_embedding: [B, S, E]
+        # lstm_output: [B, S, H]
+        history_question_neighbors = self.history_review(
+            question_embedding_sequence,
+            next_question_embedding,
+            exercise_emb,
+            user_mask,
         )  # history_question_neighbors: [B, S, M, H]
 
-        # 构造学生相关状态集合：当前LSTM输出 + 历史邻居
+        # 构造学生相关状态集合：LSTM 输出 + 历史邻居
         # lstm_output: [B, S, H] -> [B, S, 1, H]
         # history_question_neighbors: [B, S, M, H]
-        # hist_candidates: [B, S, M+1, H]
+        # student_status: [B, S, M+1, H]
         student_status = torch.cat(
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )  # [B, S, M+1, H]
 
         # 构建知识相关状态集合：下一题特征 + 相关知识点特征
-        # 使用 question_skill_matrix 获取问题-技能关联信息
-        # question_skill_matrix: [num_questions, num_skills]
-        device = next_user_sequence.device
-        S = next_user_sequence.size(1)
-
-        # 直接索引获取每个问题的技能关联向量
+        # 获取每个问题关联的技能
+        # 此处得到的每一个问题关联的0/1向量表示其关联的技能
         # next_user_sequence: [B, S] 每个元素是问题ID
         q_skill_vectors = question_skill_matrix[
             next_user_sequence
         ]  # [B, S, num_skills]
 
-        # 找出每个问题关联的技能ID
+        # 通过对二值向量降序排序，将值为1的技能索引排在前面
+        sorted_skill_indices = torch.argsort(
+            q_skill_vectors, dim=-1, descending=True
+        )  # [B, S, num_skills]
+
         # 计算每行最大关联技能数
-        max_skills_per_q = int(q_skill_vectors.sum(dim=-1).max().item())
+        max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
+        # 计算每个位置实际关联的技能数量（1的个数）
+        skill_counts = q_skill_vectors.sum(dim=-1).long()  # [B, S]
 
-        # 构建 related_skill_ids: [B, S, max_skills_per_q]
-        related_skill_ids = torch.zeros(
-            B, S, max_skills_per_q, dtype=torch.long, device=device
-        )
+        # 选取每个位置前 K 个技能索引（K=max_skills_per_q）
+        related_skill_ids = sorted_skill_indices[
+            ..., :max_skills_per_question
+        ].clone()  # [B, S, K]
 
-        # 为每个位置填充关联的技能ID
-        for b in range(B):
-            for s in range(S):
-                skill_mask = q_skill_vectors[b, s] > 0  # [num_skills]
-                skill_indices = torch.nonzero(skill_mask, as_tuple=True)[
-                    0
-                ]  # 获取技能ID
+        # 不足 K 个技能的位置使用 padding 索引填充
+        device = next_user_sequence.device
+        pos = torch.arange(max_skills_per_question, device=device).view(
+            1, 1, -1
+        )  # [1,1,K]
+        valid_pos_mask = pos < skill_counts.unsqueeze(-1)  # [B, S, K]
 
-                if len(skill_indices) > 0:
-                    num_skills = min(len(skill_indices), max_skills_per_q)
-                    related_skill_ids[b, s, :num_skills] = skill_indices[:num_skills]
-                    # 剩余位置用第一个技能ID填充（避免越界）
-                    if num_skills < max_skills_per_q:
-                        related_skill_ids[b, s, num_skills:] = skill_indices[0]
+        padding_index = skill_conv.size(0)  # 额外的零向量行索引
+        padding_ids = torch.full_like(related_skill_ids, padding_index)
+        related_skill_ids = torch.where(
+            valid_pos_mask, related_skill_ids, padding_ids
+        )  # [B, S, K]
 
-        # 扩展维度以便gather操作
-        # skill_conv: [num_skills, H] -> [B, S, num_skills, H]
-        skill_conv_expanded = (
-            skill_conv.unsqueeze(0).unsqueeze(0).expand(B, S, -1, -1)
-        )  # [B, S, num_skills, H]
-
-        # related_skill_ids: [B, S, max_skills_per_q] -> [B, S, max_skills_per_q, H]
-        related_skill_ids_expanded = related_skill_ids.unsqueeze(-1).expand(
-            -1, -1, -1, self.hidden_dim
-        )  # [B, S, max_skills_per_q, H]
+        # 为 padding 索引追加一行零向量
+        skill_conv_padded = torch.cat(
+            [
+                skill_conv,
+                torch.zeros(1, self.hidden_dim, device=device, dtype=skill_conv.dtype),
+            ],
+            dim=0,
+        )  # [num_skills+1, H]
 
         # 获取相关知识点嵌入
-        # 从 [B, S, num_skills, H] 中按 [B, S, max_skills_per_q, H] 索引在dim=2上gather
-        related_skill_embs = torch.gather(
-            skill_conv_expanded, 2, related_skill_ids_expanded
-        )  # [B, S, max_skills_per_q, H]
+        # 从 skill_conv_padded 中取出对应的技能嵌入
+        # related_skill_ids: [B, S, max_skills_per_question]
+        # related_skill_embs: [B, S, max_skills_per_question, H]
+        related_skill_embs = skill_conv_padded[related_skill_ids]
 
         # 将技能表示变换到隐藏维度
         related_skill_trans = F.relu(
-            self.fc_next_feature(related_skill_embs)
-        )  # [B, S, max_skills_per_q, H]
+            self.fc_next_skill(related_skill_embs)
+        )  # [B, S, max_skills_per_question, H]
 
-        # 构建完整的知识相关状态集合
+        # 拼接得到知识相关状态集合
         # next_q_trans: [B, S, H] -> [B, S, 1, H]
-        # related_skill_trans: [B, S, max_skills_per_q, H]
+        # related_skill_trans: [B, S, max_skills_per_question, H]
         knowledge_status = torch.cat(
-            [next_q_trans.unsqueeze(2), related_skill_trans], dim=2
-        )  # [B, S, max_skills_per_q+1, H]
+            [next_question_embedding.unsqueeze(2), related_skill_trans],
+            dim=2,
+        )  # [B, S, max_skills_per_question+1, H]
 
         # 广义交互模块
         logits = self.general_interaction(
