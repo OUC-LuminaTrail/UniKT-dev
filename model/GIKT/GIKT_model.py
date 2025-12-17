@@ -299,11 +299,6 @@ class GIKT(nn.Module):
             dropout=self.dropout,
         )
 
-        # 全连接层，将图卷积后的技能嵌入投影到隐藏维度
-        self.fc_next_skill = Linear(
-            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
-        )
-
         # 历史回顾模块
         self.history_review = HistoryRecap(
             hist_neighbor_num=args.history_neighbour,
@@ -459,16 +454,11 @@ class GIKT(nn.Module):
         # related_skill_embs: [B, S, max_skills_per_question, H]
         related_skill_embs = skill_conv_padded[related_skill_ids]
 
-        # 将技能表示变换到隐藏维度
-        related_skill_trans = F.relu(
-            self.fc_next_skill(related_skill_embs)
-        )  # [B, S, max_skills_per_question, H]
-
         # 拼接得到知识相关状态集合
         # next_q_trans: [B, S, H] -> [B, S, 1, H]
         # related_skill_trans: [B, S, max_skills_per_question, H]
         knowledge_status = torch.cat(
-            [next_question_embedding.unsqueeze(2), related_skill_trans],
+            [next_question_embedding.unsqueeze(2), related_skill_embs],
             dim=2,
         )  # [B, S, max_skills_per_question+1, H]
 
