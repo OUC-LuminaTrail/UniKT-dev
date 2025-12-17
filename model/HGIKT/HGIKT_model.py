@@ -243,49 +243,26 @@ class GeneralInteraction(nn.Module):
     r"""广义交互模块
 
     参数：
-    - student_dim: 学生状态集合的维度
-    - knowledge_dim: 知识状态集合的维度
+    - hidden_dim: 隐藏层维度
     - attention_dim: 注意力网络中间层维度
 
     输入：
-    - hist_candidates: 学生相关状态集合 [B, S, M+1, student_dim]
-    - next_candidates: 知识相关状态集合 [B, S, N+1, knowledge_dim]
+    - hist_candidates: 学生相关状态集合 [B, S, M+1, H]
+    - next_candidates: 知识相关状态集合 [B, S, N+1, H]
     - user_mask: 用户有效位置掩码 [B, S]
 
     输出：
     - logits: 预测分数 [B, S]
     """
 
-    def __init__(self, student_dim: int, knowledge_dim: int, attention_dim: int = 64):
+    def __init__(self, hidden_dim: int, attention_dim: int = 64):
         super(GeneralInteraction, self).__init__()
-        self.student_dim = student_dim
-        self.knowledge_dim = knowledge_dim
+        self.hidden_dim = hidden_dim
         self.attention_dim = attention_dim
-
-        # 统一投影维度：取两者中较小的维度
-        self.unified_dim = min(student_dim, knowledge_dim)
-
-        # 线性投影层：将两个集合投影到相同维度
-        self.student_proj = (
-            nn.Linear(student_dim, self.unified_dim)
-            if student_dim != self.unified_dim
-            else nn.Identity()
-        )
-        self.knowledge_proj = (
-            nn.Linear(knowledge_dim, self.unified_dim)
-            if knowledge_dim != self.unified_dim
-            else nn.Identity()
-        )
-
-        # 初始化投影层权重
-        if isinstance(self.student_proj, nn.Linear):
-            nn.init.xavier_uniform_(self.student_proj.weight)
-        if isinstance(self.knowledge_proj, nn.Linear):
-            nn.init.xavier_uniform_(self.knowledge_proj.weight)
 
         # 加性注意力：输入拼接向量，输出注意力分数
         self.attention_net = nn.Sequential(
-            nn.Linear(2 * self.unified_dim, attention_dim),
+            nn.Linear(2 * hidden_dim, attention_dim),
             nn.Tanh(),
             nn.Linear(attention_dim, 1),
         )
@@ -295,34 +272,23 @@ class GeneralInteraction(nn.Module):
         nn.init.xavier_uniform_(self.attention_net[2].weight)
 
     def forward(self, hist_candidates, next_candidates, user_mask):
-        B, S, M_plus_1, H_student = hist_candidates.size()
+        B, S, M_plus_1, H = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
-        H_knowledge = next_candidates.size(3)
-
-        # 投影到统一维度
-        # hist_candidates: [B, S, M+1, student_dim] -> [B, S, M+1, unified_dim]
-        hist_projected = self.student_proj(
-            hist_candidates.reshape(-1, H_student)
-        ).reshape(B, S, M_plus_1, self.unified_dim)
-        # next_candidates: [B, S, N+1, knowledge_dim] -> [B, S, N+1, unified_dim]
-        next_projected = self.knowledge_proj(
-            next_candidates.reshape(-1, H_knowledge)
-        ).reshape(B, S, N_plus_1, self.unified_dim)
 
         # 计算两两内积得分
-        interaction = hist_projected.unsqueeze(3) * next_projected.unsqueeze(2)
+        interaction = hist_candidates.unsqueeze(3) * next_candidates.unsqueeze(2)
         logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
 
         # 扩展维度以便拼接
-        hist_expanded = hist_projected.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
-        next_expanded = next_projected.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
+        hist_expanded = hist_candidates.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
+        next_expanded = next_candidates.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
 
         # 拼接交互对向量
         interaction_pairs = torch.cat([hist_expanded, next_expanded], dim=-1)
 
         # 通过注意力网络计算分数
         attention_scores = self.attention_net(
-            interaction_pairs.reshape(-1, 2 * self.unified_dim)
+            interaction_pairs.reshape(-1, 2 * H)
         ).reshape(B, S, M_plus_1, N_plus_1)  # [B, S, M+1, N+1]
 
         # 展平维度进行softmax
@@ -361,41 +327,40 @@ class HGIKT(nn.Module):
         self.data_metadata = data_metadata
 
         # 模型参数
-        self.embedding_dim = args.embedding_dim  # 嵌入维度
-        self.lstm_hidden_dim = args.lstm_hidden_dim  # LSTM 隐藏层维度
+        self.hidden_dim = args.hidden_dim  # 隐藏层维度
         self.lstm_layers = args.lstm_layers  # LSTM层数
         self.dropout = args.dropout  # Dropout概率，所有层共享
 
         # Embedding
         self.question_embedding = torch.nn.Embedding(
             num_embeddings=data_metadata["num_questions"],
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
         )
         self.question_embedding_hyper = torch.nn.Embedding(
             num_embeddings=data_metadata["num_questions"],
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
         )
         self.skill_embedding = torch.nn.Embedding(
             num_embeddings=data_metadata["num_skills"],
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
         )
         self.assignment_embedding = torch.nn.Embedding(
             num_embeddings=data_metadata["num_assignments"],
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
         )
         self.template_embedding = torch.nn.Embedding(
             num_embeddings=data_metadata["num_templates"],
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
         )
         self.answer_embedding = torch.nn.Embedding(
             num_embeddings=2,
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
         )
         self.embedding_dropout = torch.nn.Dropout(p=self.dropout)
 
         # 异质图模块
         self.hetero_conv = HeteroGNN(
-            embedding_dim=self.embedding_dim,
+            embedding_dim=self.hidden_dim,
             n_hop=args.n_hop,
             heads=args.heads,
             dropout=self.dropout,
@@ -403,35 +368,29 @@ class HGIKT(nn.Module):
 
         # 超图模块
         self.hgnn_conv = HyperGNN(
-            in_ch=args.embedding_dim,  # 输入通道数
-            n_hid=args.embedding_dim,  # 隐藏层通道数
-            n_class=args.embedding_dim,  # 输出通道数
+            in_ch=self.hidden_dim,  # 输入通道数
+            n_hid=self.hidden_dim,  # 隐藏层通道数
+            n_class=self.hidden_dim,  # 输出通道数
             dropout=self.dropout,  # Dropout概率
         )
 
         # 融合模块
         self.fuse = Linear(
-            self.embedding_dim * 2, self.embedding_dim, weight_initializer="uniform"
+            self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
         )
 
         # 全连接层，将练习嵌入投影到隐藏维度
         self.fc_exercise = Linear(
-            self.embedding_dim * 2, self.lstm_hidden_dim, weight_initializer="uniform"
+            self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
         )
 
         # LSTM层
         self.lstm = nn.LSTM(
-            # 将question和answer拼接作为输入
-            input_size=self.lstm_hidden_dim,
-            hidden_size=self.lstm_hidden_dim,
+            input_size=self.hidden_dim,
+            hidden_size=self.hidden_dim,
             num_layers=self.lstm_layers,
             batch_first=True,
             dropout=self.dropout,
-        )
-
-        # 全连接层，将图卷积后的技能嵌入投影到隐藏维度
-        self.fc_next_skill = Linear(
-            self.embedding_dim, self.lstm_hidden_dim, weight_initializer="uniform"
         )
 
         # 历史回顾模块
@@ -442,7 +401,7 @@ class HGIKT(nn.Module):
 
         # 广义交互模块
         self.general_interaction = GeneralInteraction(
-            student_dim=self.lstm_hidden_dim, knowledge_dim=self.embedding_dim
+            hidden_dim=self.hidden_dim, attention_dim=args.attention_dim
         )
 
     def forward(
@@ -596,7 +555,7 @@ class HGIKT(nn.Module):
             [
                 skill_hetero_conv,
                 torch.zeros(
-                    1, self.embedding_dim, device=device, dtype=skill_hetero_conv.dtype
+                    1, self.hidden_dim, device=device, dtype=skill_hetero_conv.dtype
                 ),
             ],
             dim=0,

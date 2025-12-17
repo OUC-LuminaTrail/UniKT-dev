@@ -12,13 +12,7 @@ def parse_args():
     # 模型参数
     model_params = parser.add_argument_group("Model Parameters")
     model_params.add_argument(
-        "--lstm_hidden_dim",
-        type=int,
-        default=210,
-        help="Dimension of LSTM hidden layers",
-    )
-    model_params.add_argument(
-        "--embedding_dim", type=int, default=75, help="Dimension of embeddings"
+        "--hidden_dim", type=int, default=100, help="Dimension of hidden layers"
     )
     model_params.add_argument(
         "--lstm_layers", type=int, default=1, help="Number of LSTM layers"
@@ -35,6 +29,9 @@ def parse_args():
     )
     model_params.add_argument(
         "--att_bound", type=float, default=0.0042, help="Attention boundary value"
+    )
+    model_params.add_argument(
+        "--attention_dim", type=int, default=64, help="Dimension of attention layers"
     )
 
     # 动态权重超图参数
