@@ -21,7 +21,9 @@ class GIKTTrainer(Trainer):
         from model.GIKT import GIKTModelData
 
         model_data = GIKTModelData(data_src)
-        train_data, val_data, self.graph = model_data.prepare_data(args)
+        train_data, val_data, self.graph, self.question_skill_matrix = (
+            model_data.prepare_data(args)
+        )
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,
@@ -37,6 +39,9 @@ class GIKTTrainer(Trainer):
             checkpoint_path=args.checkpoint_path,
             seed=args.seed,
         )
+
+        # 将静态数据移动到设备中
+        self.graph = self.graph.to(self.device_)  # 图
 
     def init_model(self, args, data_src):
         from model.GIKT.GIKT_model import GIKT
@@ -65,11 +70,10 @@ class GIKTTrainer(Trainer):
         sequence = sequence.to(self.device_)
         response = response.to(self.device_)
         mask = mask.to(torch.bool).to(self.device_)
-        self.graph = self.graph.to(self.device_)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(sequence, response, mask, self.graph)  # [B, S]
+        y_hat_full = self.model(sequence, response, mask, self.graph, self.question_skill_matrix)  # [B, S]
 
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]

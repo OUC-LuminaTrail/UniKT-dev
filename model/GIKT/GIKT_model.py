@@ -111,86 +111,64 @@ class HistoryRecap(nn.Module):
 
 
 class GeneralInteraction(nn.Module):
-    r"""广义交互预测模块
-
-    核心思想：
-    - 计算学生相关状态 Nh 与知识相关状态 Nn 的两两内积得分
-    - 使用可学习的因子分解注意力：score[i,j] = f1[i] + f2[j]
-    - Softmax 归一化后加权求和得到最终预测分数
-
-    参数:
-        hidden_dim (int): 特征维度 H
-
-    输入:
-        hist_candidates: [B, S, M+1, H] 学生相关状态
-        next_candidates: [B, S, N+1, H] 知识相关状态
-        user_mask: [B, S] 有效位置掩码
-
-    输出:
-        logits: [B, S] 每个时间步的预测分数
-    """
-
-    def __init__(self, hidden_dim: int):
+    def __init__(self, hidden_dim: int, attention_dim: int = 64):
         super(GeneralInteraction, self).__init__()
         self.hidden_dim = hidden_dim
+        self.attention_dim = attention_dim
 
-        # 学生相关状态权重
-        self.linear1 = nn.Linear(hidden_dim, 1)
-        # 知识相关状态权重
-        self.linear2 = nn.Linear(hidden_dim, 1)
+        # 加性注意力：输入拼接向量，输出注意力分数
+        self.attention_net = nn.Sequential(
+            nn.Linear(2 * hidden_dim, attention_dim),
+            nn.Tanh(),
+            nn.Linear(attention_dim, 1),
+        )
 
-        # Xavier 初始化
-        nn.init.xavier_uniform_(self.linear1.weight)
-        nn.init.xavier_uniform_(self.linear2.weight)
+        # 初始化权重
+        nn.init.xavier_uniform_(self.attention_net[0].weight)
+        nn.init.xavier_uniform_(self.attention_net[2].weight)
 
-    def forward(
-        self,
-        hist_candidates: torch.Tensor,  # [B, S, M+1, H]
-        next_candidates: torch.Tensor,  # [B, S, N+1, H]
-        user_mask: torch.Tensor,  # [B, S]
-    ):
+    def forward(self, hist_candidates, next_candidates, user_mask):
         B, S, M_plus_1, H = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
 
         # 计算两两内积得分
-        # hist_candidates: [B, S, M+1, H] -> [B, S, M+1, 1, H]
-        # next_candidates: [B, S, N+1, H] -> [B, S, 1, N+1, H]
-        # interaction: [B, S, M+1, N+1, H]
         interaction = hist_candidates.unsqueeze(3) * next_candidates.unsqueeze(2)
-        # 在特征维度上求和得到内积
         logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
 
-        # 历史侧得分: [B, S, M+1, H] -> [B*S*(M+1), H] -> [B*S*(M+1), 1]
-        f1 = self.linear1(hist_candidates.reshape(-1, H))  # [B*S*(M+1), 1]
-        f1 = f1.reshape(B, S, M_plus_1, 1)  # [B, S, M+1, 1]
+        # 扩展维度以便拼接
+        hist_expanded = hist_candidates.unsqueeze(3)  # [B, S, M+1, 1, H]
+        next_expanded = next_candidates.unsqueeze(2)  # [B, S, 1, N+1, H]
 
-        # 未来侧得分: [B, S, N+1, H] -> [B*S*(N+1), H] -> [B*S*(N+1), 1]
-        f2 = self.linear2(next_candidates.reshape(-1, H))  # [B*S*(N+1), 1]
-        f2 = f2.reshape(B, S, 1, N_plus_1)  # [B, S, 1, N+1]
+        # 拼接交互对向量
+        interaction_pairs = torch.cat([hist_expanded, next_expanded], dim=-1)
 
-        # 广播相加: [B, S, M+1, 1] + [B, S, 1, N+1] -> [B, S, M+1, N+1]
-        attention_scores = torch.tanh(f1 + f2)  # [B, S, M+1, N+1]
+        # 通过注意力网络计算分数
+        attention_scores = self.attention_net(
+            interaction_pairs.reshape(-1, 2 * H)
+        ).reshape(
+            B, S, M_plus_1, N_plus_1
+        )  # [B, S, M+1, N+1]
 
-        # Step 3: Softmax 归一化
-        # 将二维配对展平: [B, S, M+1, N+1] -> [B, S, (M+1)*(N+1)]
-        attention_scores_flat = attention_scores.reshape(B, S, -1)  # [B, S, K]
-        logits_raw_flat = logits_raw.reshape(B, S, -1)  # [B, S, K]
+        # 展平维度进行softmax
+        attention_scores_flat = attention_scores.reshape(
+            B, S, -1
+        )  # [B, S, (M+1)*(N+1)]
+        logits_raw_flat = logits_raw.reshape(B, S, -1)  # [B, S, (M+1)*(N+1)]
 
-        # 对无效位置（user_mask=0）的注意力分数设为 -inf
-        mask_expanded = user_mask.unsqueeze(-1)  # [B, S, 1]
+        # 应用掩码和softmax
+        mask_expanded = user_mask.unsqueeze(-1)
         attention_scores_flat = torch.where(
             mask_expanded,
             attention_scores_flat,
-            torch.full_like(attention_scores_flat, torch.finfo(attention_scores_flat.dtype).min),
+            torch.full_like(attention_scores_flat, -1e9),
         )
-        # Softmax
-        attention_weights = F.softmax(attention_scores_flat, dim=-1)  # [B, S, K]
+
+        attention_weights = F.softmax(
+            attention_scores_flat, dim=-1
+        )  # [B, S, (M+1)*(N+1)]
 
         # 加权求和
-        # logits_raw_flat: [B, S, K], attention_weights: [B, S, K]
         logits = torch.sum(logits_raw_flat * attention_weights, dim=-1)  # [B, S]
-
-        # 将无效位置的 logits 清零
         logits = logits * user_mask.float()
 
         return logits
@@ -215,12 +193,18 @@ class GNN_QS(nn.Module):
             conv = HeteroConv(
                 {
                     ("question", "has", "skill"): TransformerConv(
-                        (embedding_dim, embedding_dim), embedding_dim, aggr="add",
-                        heads=heads, concat=False
+                        (embedding_dim, embedding_dim),
+                        embedding_dim,
+                        aggr="add",
+                        heads=heads,
+                        concat=False,
                     ),
                     ("skill", "rev_has", "question"): TransformerConv(
-                        (embedding_dim, embedding_dim), embedding_dim, aggr="add",
-                        heads=heads, concat=False
+                        (embedding_dim, embedding_dim),
+                        embedding_dim,
+                        aggr="add",
+                        heads=heads,
+                        concat=False,
                     ),
                 },
                 aggr="sum",
@@ -285,6 +269,9 @@ class GIKT(nn.Module):
         self.fc_next_feature = Linear(
             self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
         )
+        self.fc_exercise = Linear(
+            self.embedding_dim * 2, self.hidden_dim, weight_initializer="uniform"
+        )
 
         # LSTM层
         self.lstm = nn.LSTM(
@@ -311,6 +298,7 @@ class GIKT(nn.Module):
         user_response: torch.Tensor,
         user_mask: torch.Tensor,
         graph,
+        question_skill_matrix: torch.Tensor,
     ):
         # 批量大小
         B, _ = user_sequence.size()
@@ -326,8 +314,11 @@ class GIKT(nn.Module):
         }
 
         # 全图卷积
+        conv = self.conv(x, graph.edge_index_dict)
         # question_conv [B, S, embedding_dim]
-        question_conv: torch.Tensor = self.conv(x, graph.edge_index_dict)["question"]
+        question_conv: torch.Tensor = conv["question"]
+        # skill_conv [num_skills, embedding_dim]
+        skill_conv: torch.Tensor = conv["skill"]
 
         # 按照用户序列索引获取对应的问题节点表示
         # 扩展 user_sequence 以匹配 question_conv 的维度
@@ -371,26 +362,94 @@ class GIKT(nn.Module):
         )
         next_q_trans = F.relu(self.fc_next_feature(next_q_emb))  # [B, S, H]
 
+        # 拼接问题嵌入和答案嵌入，然后投影到 H 维
+        exercise_representation = torch.cat(
+            [question_emb, answers_emb], dim=-1
+        )  # [B, S, 2*E]
+        e_i = F.relu(self.fc_exercise(exercise_representation))  # [B, S, H]
+
         # 历史回顾模块：采样历史邻居
         # question_emb: [B, S, E], next_q_emb: [B, S, E], lstm_output: [B, S, H]
         history_question_neighbors = self.history_recap(
-            question_emb, next_q_emb, q_trans, user_mask
+            question_emb, next_q_emb, e_i, user_mask
         )  # history_question_neighbors: [B, S, M, H]
 
         # 构造学生相关状态集合：当前LSTM输出 + 历史邻居
         # lstm_output: [B, S, H] -> [B, S, 1, H]
         # history_question_neighbors: [B, S, M, H]
         # hist_candidates: [B, S, M+1, H]
-        hist_candidates = torch.cat(
+        student_status = torch.cat(
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )  # [B, S, M+1, H]
 
+        # 构建知识相关状态集合：下一题特征 + 相关知识点特征
+        # 使用 question_skill_matrix 获取问题-技能关联信息
+        # question_skill_matrix: [num_questions, num_skills]
+        device = next_user_sequence.device
+        S = next_user_sequence.size(1)
+
+        # 直接索引获取每个问题的技能关联向量
+        # next_user_sequence: [B, S] 每个元素是问题ID
+        q_skill_vectors = question_skill_matrix[
+            next_user_sequence
+        ]  # [B, S, num_skills]
+
+        # 找出每个问题关联的技能ID
+        # 计算每行最大关联技能数
+        max_skills_per_q = int(q_skill_vectors.sum(dim=-1).max().item())
+
+        # 构建 related_skill_ids: [B, S, max_skills_per_q]
+        related_skill_ids = torch.zeros(
+            B, S, max_skills_per_q, dtype=torch.long, device=device
+        )
+
+        # 为每个位置填充关联的技能ID
+        for b in range(B):
+            for s in range(S):
+                skill_mask = q_skill_vectors[b, s] > 0  # [num_skills]
+                skill_indices = torch.nonzero(skill_mask, as_tuple=True)[
+                    0
+                ]  # 获取技能ID
+
+                if len(skill_indices) > 0:
+                    num_skills = min(len(skill_indices), max_skills_per_q)
+                    related_skill_ids[b, s, :num_skills] = skill_indices[:num_skills]
+                    # 剩余位置用第一个技能ID填充（避免越界）
+                    if num_skills < max_skills_per_q:
+                        related_skill_ids[b, s, num_skills:] = skill_indices[0]
+
+        # 扩展维度以便gather操作
+        # skill_conv: [num_skills, H] -> [B, S, num_skills, H]
+        skill_conv_expanded = (
+            skill_conv.unsqueeze(0).unsqueeze(0).expand(B, S, -1, -1)
+        )  # [B, S, num_skills, H]
+
+        # related_skill_ids: [B, S, max_skills_per_q] -> [B, S, max_skills_per_q, H]
+        related_skill_ids_expanded = related_skill_ids.unsqueeze(-1).expand(
+            -1, -1, -1, self.hidden_dim
+        )  # [B, S, max_skills_per_q, H]
+
+        # 获取相关知识点嵌入
+        # 从 [B, S, num_skills, H] 中按 [B, S, max_skills_per_q, H] 索引在dim=2上gather
+        related_skill_embs = torch.gather(
+            skill_conv_expanded, 2, related_skill_ids_expanded
+        )  # [B, S, max_skills_per_q, H]
+
+        # 将技能表示变换到隐藏维度
+        related_skill_trans = F.relu(
+            self.fc_next_feature(related_skill_embs)
+        )  # [B, S, max_skills_per_q, H]
+
+        # 构建完整的知识相关状态集合
         # next_q_trans: [B, S, H] -> [B, S, 1, H]
-        next_candidates = next_q_trans.unsqueeze(2)  # [B, S, 1, H]
+        # related_skill_trans: [B, S, max_skills_per_q, H]
+        knowledge_status = torch.cat(
+            [next_q_trans.unsqueeze(2), related_skill_trans], dim=2
+        )  # [B, S, max_skills_per_q+1, H]
 
         # 广义交互模块
         logits = self.general_interaction(
-            hist_candidates, next_candidates, user_mask
+            student_status, knowledge_status, user_mask
         )  # [B, S]
 
         return logits  # [B, S]
