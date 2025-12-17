@@ -32,3 +32,5 @@ jobs:
         env:
           # To report GitHub Actions status checks
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FIX_PYTHON_BLACK: true
+          PYTHON_ISORT: true
