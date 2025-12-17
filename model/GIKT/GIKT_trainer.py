@@ -42,6 +42,9 @@ class GIKTTrainer(Trainer):
 
         # 将静态数据移动到设备中
         self.graph = self.graph.to(self.device_)  # 图
+        self.question_skill_matrix = self.question_skill_matrix.to(
+            self.device_
+        )  # 问题-技能矩阵
 
     def init_model(self, args, data_src):
         from model.GIKT.GIKT_model import GIKT
@@ -73,7 +76,9 @@ class GIKTTrainer(Trainer):
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(sequence, response, mask, self.graph, self.question_skill_matrix)  # [B, S]
+        y_hat_full = self.model(
+            sequence, response, mask, self.graph, self.question_skill_matrix
+        )  # [B, S]
 
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]
