@@ -114,49 +114,26 @@ class GeneralInteraction(nn.Module):
     r"""广义交互模块
 
     参数：
-    - student_dim: 学生状态集合的维度
-    - knowledge_dim: 知识状态集合的维度
+    - hidden_dim: 隐藏层维度
     - attention_dim: 注意力网络中间层维度
 
     输入：
-    - hist_candidates: 学生相关状态集合 [B, S, M+1, student_dim]
-    - next_candidates: 知识相关状态集合 [B, S, N+1, knowledge_dim]
+    - hist_candidates: 学生相关状态集合 [B, S, M+1, H]
+    - next_candidates: 知识相关状态集合 [B, S, N+1, H]
     - user_mask: 用户有效位置掩码 [B, S]
 
     输出：
     - logits: 预测分数 [B, S]
     """
 
-    def __init__(self, student_dim: int, knowledge_dim: int, attention_dim: int = 64):
+    def __init__(self, hidden_dim: int, attention_dim: int = 64):
         super(GeneralInteraction, self).__init__()
-        self.student_dim = student_dim
-        self.knowledge_dim = knowledge_dim
+        self.hidden_dim = hidden_dim
         self.attention_dim = attention_dim
-
-        # 统一投影维度：取两者中较小的维度
-        self.unified_dim = min(student_dim, knowledge_dim)
-
-        # 线性投影层：将两个集合投影到相同维度
-        self.student_proj = (
-            nn.Linear(student_dim, self.unified_dim)
-            if student_dim != self.unified_dim
-            else nn.Identity()
-        )
-        self.knowledge_proj = (
-            nn.Linear(knowledge_dim, self.unified_dim)
-            if knowledge_dim != self.unified_dim
-            else nn.Identity()
-        )
-
-        # 初始化投影层权重
-        if isinstance(self.student_proj, nn.Linear):
-            nn.init.xavier_uniform_(self.student_proj.weight)
-        if isinstance(self.knowledge_proj, nn.Linear):
-            nn.init.xavier_uniform_(self.knowledge_proj.weight)
 
         # 加性注意力：输入拼接向量，输出注意力分数
         self.attention_net = nn.Sequential(
-            nn.Linear(2 * self.unified_dim, attention_dim),
+            nn.Linear(2 * hidden_dim, attention_dim),
             nn.Tanh(),
             nn.Linear(attention_dim, 1),
         )
@@ -166,34 +143,23 @@ class GeneralInteraction(nn.Module):
         nn.init.xavier_uniform_(self.attention_net[2].weight)
 
     def forward(self, hist_candidates, next_candidates, user_mask):
-        B, S, M_plus_1, H_student = hist_candidates.size()
+        B, S, M_plus_1, H = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
-        H_knowledge = next_candidates.size(3)
-
-        # 投影到统一维度
-        # hist_candidates: [B, S, M+1, student_dim] -> [B, S, M+1, unified_dim]
-        hist_projected = self.student_proj(
-            hist_candidates.reshape(-1, H_student)
-        ).reshape(B, S, M_plus_1, self.unified_dim)
-        # next_candidates: [B, S, N+1, knowledge_dim] -> [B, S, N+1, unified_dim]
-        next_projected = self.knowledge_proj(
-            next_candidates.reshape(-1, H_knowledge)
-        ).reshape(B, S, N_plus_1, self.unified_dim)
 
         # 计算两两内积得分
-        interaction = hist_projected.unsqueeze(3) * next_projected.unsqueeze(2)
+        interaction = hist_candidates.unsqueeze(3) * next_candidates.unsqueeze(2)
         logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
 
         # 扩展维度以便拼接
-        hist_expanded = hist_projected.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
-        next_expanded = next_projected.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
+        hist_expanded = hist_candidates.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
+        next_expanded = next_candidates.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
 
         # 拼接交互对向量
         interaction_pairs = torch.cat([hist_expanded, next_expanded], dim=-1)
 
         # 通过注意力网络计算分数
         attention_scores = self.attention_net(
-            interaction_pairs.reshape(-1, 2 * self.unified_dim)
+            interaction_pairs.reshape(-1, 2 * H)
         ).reshape(B, S, M_plus_1, N_plus_1)  # [B, S, M+1, N+1]
 
         # 展平维度进行softmax
@@ -333,6 +299,11 @@ class GIKT(nn.Module):
             dropout=self.dropout,
         )
 
+        # 全连接层，将图卷积后的技能嵌入投影到隐藏维度
+        self.fc_next_skill = Linear(
+            self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
+        )
+
         # 历史回顾模块
         self.history_review = HistoryRecap(
             hist_neighbor_num=args.history_neighbour,
@@ -340,9 +311,7 @@ class GIKT(nn.Module):
         )
 
         # 广义交互模块
-        self.general_interaction = GeneralInteraction(
-            student_dim=self.hidden_dim, knowledge_dim=self.embedding_dim
-        )
+        self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
     def forward(
         self,
@@ -479,26 +448,29 @@ class GIKT(nn.Module):
         skill_conv_padded = torch.cat(
             [
                 skill_conv,
-                torch.zeros(
-                    1, self.embedding_dim, device=device, dtype=skill_conv.dtype
-                ),
+                torch.zeros(1, self.hidden_dim, device=device, dtype=skill_conv.dtype),
             ],
             dim=0,
-        )  # [num_skills+1, embedding_dim]
+        )  # [num_skills+1, H]
 
         # 获取相关知识点嵌入
         # 从 skill_conv_padded 中取出对应的技能嵌入
         # related_skill_ids: [B, S, max_skills_per_question]
-        # related_skill_embs: [B, S, max_skills_per_question, embedding_dim]
+        # related_skill_embs: [B, S, max_skills_per_question, H]
         related_skill_embs = skill_conv_padded[related_skill_ids]
 
+        # 将技能表示变换到隐藏维度
+        related_skill_trans = F.relu(
+            self.fc_next_skill(related_skill_embs)
+        )  # [B, S, max_skills_per_question, H]
+
         # 拼接得到知识相关状态集合
-        # next_question_embedding: [B, S, embedding_dim] -> [B, S, 1, embedding_dim]
-        # related_skill_embs: [B, S, max_skills_per_question, embedding_dim]
+        # next_q_trans: [B, S, H] -> [B, S, 1, H]
+        # related_skill_trans: [B, S, max_skills_per_question, H]
         knowledge_status = torch.cat(
-            [next_question_embedding.unsqueeze(2), related_skill_embs],
+            [next_question_embedding.unsqueeze(2), related_skill_trans],
             dim=2,
-        )  # [B, S, max_skills_per_question+1, embedding_dim]
+        )  # [B, S, max_skills_per_question+1, H]
 
         # 广义交互模块
         logits = self.general_interaction(
