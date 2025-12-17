@@ -1,4 +1,3 @@
-from .data_source import *
 import os
 import pandas as pd
 from tqdm import tqdm
@@ -9,6 +8,12 @@ import concurrent.futures
 import itertools
 import multiprocessing
 import threading
+from .data_source import (
+    DataSource,
+    restrains_sequence_length,
+    build_question_data_from_cleared,
+    map_to_continuous_ids,
+)
 
 
 class EdNetKT1Data(DataSource):
@@ -109,7 +114,7 @@ class EdNetKT1Data(DataSource):
                     # 尝试获取进度更新，超时时间短一点以免阻塞退出
                     count = progress_queue.get(timeout=0.1)
                     pbar.update(count)
-                except:
+                except Exception:
                     continue
 
         progress_thread = threading.Thread(target=update_progress)

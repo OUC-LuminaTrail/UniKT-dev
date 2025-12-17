@@ -1,7 +1,12 @@
 import os
 import pandas as pd
 from typing_extensions import override
-from .data_source import *
+from .data_source import (
+    DataSource,
+    restrains_sequence_length,
+    build_question_data_from_cleared,
+    map_to_continuous_ids,
+)
 
 
 class Assistments2017Data(DataSource):
