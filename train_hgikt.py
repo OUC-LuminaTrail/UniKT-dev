@@ -18,44 +18,26 @@ def parse_args():
         "--lstm_layers", type=int, default=1, help="Number of LSTM layers"
     )
     model_params.add_argument(
-        "--dropout", type=float, default=0.37, help="Dropout probability"
+        "--dropout", type=float, default=0.54, help="Dropout probability"
     )
-    model_params.add_argument("--n_hop", type=int, default=4, help="Number of GNN hops")
+    model_params.add_argument("--n_hop", type=int, default=5, help="Number of GNN hops")
     model_params.add_argument(
-        "--heads", type=int, default=1, help="Number of GNN attention heads"
+        "--heads", type=int, default=4, help="Number of GNN attention heads"
     )
     model_params.add_argument(
-        "--history_neighbour", type=int, default=3, help="Top K neighbors to consider"
+        "--history_neighbour", type=int, default=10, help="Top K neighbors to consider"
     )
     model_params.add_argument(
         "--att_bound", type=float, default=0.0042, help="Attention boundary value"
     )
     model_params.add_argument(
-        "--attention_dim", type=int, default=64, help="Dimension of attention layers"
+        "--attention_dim", type=int, default=70, help="Dimension of attention layers"
     )
-
-    # 动态权重超图参数
-    hypergraph_params = parser.add_argument_group("Hypergraph Parameters")
-    hypergraph_params.add_argument(
+    model_params.add_argument(
         "--num_difficulty_clusters",
         type=int,
         default=5,
-        help="Number of difficulty clusters for weighted hypergraph (default: 3 for easy/medium/hard)",
-    )
-
-    # 门控融合子空间参数
-    fusion_params = parser.add_argument_group("Fusion Parameters")
-    fusion_params.add_argument(
-        "--num_subspaces",
-        type=int,
-        default=6,
-        help="Number of subspaces for learned fusion (default: 4)",
-    )
-    fusion_params.add_argument(
-        "--sub_dim",
-        type=int,
-        default=24,
-        help="Dimension of each subspace for learned fusion (default: 32)",
+        help="Number of difficulty clusters for weighted hypergraph",
     )
 
     # 数据参数
@@ -84,12 +66,12 @@ def parse_args():
         "--epochs", type=int, default=100, help="Number of epochs"
     )
     train_params.add_argument(
-        "--batch_size", type=int, default=128, help="Batch size for training"
+        "--batch_size", type=int, default=32, help="Batch size for training"
     )
     train_params.add_argument(
         "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
     )
-    train_params.add_argument("--lr", type=float, default=4e-4, help="Learning rate")
+    train_params.add_argument("--lr", type=float, default=0.0014, help="Learning rate")
     train_params.add_argument(
         "--lr_decay", type=float, default=None, help="Learning rate decay factor"
     )
