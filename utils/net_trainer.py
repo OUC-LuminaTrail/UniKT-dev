@@ -354,7 +354,7 @@ class Trainer(ABC):
         self.loss = self.loss.to(self.device_)  # 将损失函数移动到设备中
 
         for epoch in range(self.start_epoch, self.epochs):
-            print(f"Epoch {epoch+1}")
+            print(f"Epoch {epoch + 1}")
             # 训练
             train_total_loss = self.process_data(self.train_data, epoch, is_train=True)
             if self.use_swanlab:
@@ -385,8 +385,8 @@ class Trainer(ABC):
                             )
                     if should_stop:
                         print(
-                            f"Early stopping triggered at epoch {epoch+1}. Best {self._monitor_name()} = "
-                            f"{self.early_stopping.best_score:.4f} at epoch {int(self.early_stopping.best_epoch)+1 if self.early_stopping.best_epoch is not None else '?'}"
+                            f"Early stopping triggered at epoch {epoch + 1}. Best {self._monitor_name()} = "
+                            f"{self.early_stopping.best_score:.4f} at epoch {int(self.early_stopping.best_epoch) + 1 if self.early_stopping.best_epoch is not None else '?'}"
                         )
                         break
 
@@ -655,7 +655,7 @@ class Trainer(ABC):
         if is_better:
             self._best_metric = metric
             print(
-                f"Saving best model at epoch {epoch+1} with {self._monitor_name()} {metric:.4f}"
+                f"Saving best model at epoch {epoch + 1} with {self._monitor_name()} {metric:.4f}"
             )
             self.save_checkpoint(epoch, checkpoint_path, weights_only=True)
 

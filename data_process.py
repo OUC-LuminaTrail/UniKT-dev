@@ -104,21 +104,19 @@ def cmd_download(args):
         )
 
     print(f"Downloading dataset {args.dataset} to {dp.data_folder}")
-    
+
     # 获取下载参数
     force_download = getattr(args, "force", False)
     max_retries = getattr(args, "max_retries", 3)
     num_threads = getattr(args, "num_threads", 4)
-    
+
     # 调用 fetch_data 并传递参数
     dp.fetch_data(
-        force_download=force_download,
-        max_retries=max_retries,
-        num_threads=num_threads
+        force_download=force_download, max_retries=max_retries, num_threads=num_threads
     )
     # 持久化元信息
     dp.save_metadata()
-    print(f"Download complete.")
+    print("Download complete.")
 
 
 def cmd_process(args):

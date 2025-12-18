@@ -42,6 +42,11 @@ class HGIKTModelData(GraphModelData):
             max_seq_len, min_seq_len
         )
 
+        # 构建问题-技能关联矩阵，并转换为torch张量
+        question_skill_matrix = torch.from_numpy(
+            self.build_relationship_matrix(("question", "has", "skill"))
+        ).float()
+
         # 构建难度加权超图
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
@@ -110,6 +115,7 @@ class HGIKTModelData(GraphModelData):
             "val_dataloader": val_dataloader,
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
+            "question_skill_matrix": question_skill_matrix,
         }
 
         return return_data
@@ -236,20 +242,20 @@ class HGIKTModelData(GraphModelData):
                     e_list.append(cluster["vertices"])
                     edge_weights.append(cluster["weight"])
 
-            except Exception as e:
+            except Exception:
                 e_list.append(vertices)
                 edge_weights.append(1.0)
 
         # 处理空超边情况
         if len(e_list) == 0:
-            print(f"Warning: No hyperedges found. Creating self-loop hypergraph.")
+            print("Warning: No hyperedges found. Creating self-loop hypergraph.")
             e_list = [[i] for i in range(num_vertices)]
             edge_weights = [1.0] * num_vertices
 
         # 确保超边列表和权重列表长度一致
-        assert len(e_list) == len(
-            edge_weights
-        ), f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
+        assert len(e_list) == len(edge_weights), (
+            f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
+        )
 
         # 创建超图
         hypergraph = Hypergraph(

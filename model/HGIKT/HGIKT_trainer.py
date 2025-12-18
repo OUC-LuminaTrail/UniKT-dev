@@ -28,6 +28,7 @@ class HGIKTTrainer(Trainer):
         val_data = data_dict["val_dataloader"]
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
+        self.question_skill_matrix = data_dict["question_skill_matrix"]
 
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
@@ -48,6 +49,7 @@ class HGIKTTrainer(Trainer):
         # 将静态数据移动到设备
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
+        self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
 
     def init_model(self, args, data_src):
         from model.HGIKT.HGIKT_model import HGIKT
@@ -85,6 +87,7 @@ class HGIKTTrainer(Trainer):
             mask,
             self.hetero_graph,
             self.hypergraph,
+            self.question_skill_matrix,
         )  # [B, S]
         # 提取有效位置的预测和标签
         y_hat_seq = y_hat_full[:, :-1]

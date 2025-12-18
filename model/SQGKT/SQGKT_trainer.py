@@ -31,15 +31,19 @@ class SQGKTTrainer(Trainer):
             self.uq_u_neighbor_list,
             self.uq_q_neighbor_list,
         ) = model_data.prepare_data(args)
-        
+
         # 将numpy数组转换为torch张量
-        self.uq_matrix = torch.from_numpy(self.uq_matrix)  # 3维张量: [num_users, num_questions, 3]
-        self.qs_matrix = torch.from_numpy(self.qs_matrix)  # 2维张量: [num_questions, num_skills]
+        self.uq_matrix = torch.from_numpy(
+            self.uq_matrix
+        )  # 3维张量: [num_users, num_questions, 3]
+        self.qs_matrix = torch.from_numpy(
+            self.qs_matrix
+        )  # 2维张量: [num_questions, num_skills]
         self.qs_q_neighbor_list = torch.from_numpy(self.qs_q_neighbor_list)
         self.qs_s_neighbor_list = torch.from_numpy(self.qs_s_neighbor_list)
         self.uq_u_neighbor_list = torch.from_numpy(self.uq_u_neighbor_list)
         self.uq_q_neighbor_list = torch.from_numpy(self.uq_q_neighbor_list)
-        
+
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
             model=model,

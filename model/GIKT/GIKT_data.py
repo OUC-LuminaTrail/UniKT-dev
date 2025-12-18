@@ -53,6 +53,11 @@ class GIKTModelData(GraphModelData):
             ]
         )
 
+        # 构建问题-技能关联矩阵，并转换为torch张量
+        question_skill_matrix = torch.from_numpy(
+            self.build_relationship_matrix(("question", "has", "skill"))
+        ).float()
+
         # 划分训练集和验证集
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
@@ -80,4 +85,4 @@ class GIKTModelData(GraphModelData):
         val_dataloader = DataLoader(
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
-        return train_dataloader, val_dataloader, graph
+        return train_dataloader, val_dataloader, graph, question_skill_matrix

@@ -126,9 +126,9 @@ class SQGKT(Module):
                 batch_size, self.emb_dim, device=DEVICE, dtype=emb0_question_t.dtype
             )
             emb_question_t[mask_t] = emb0_question_t
-            emb_question_t[~mask_t] = self.question_embedding_1(
-                question_t[~mask_t]
-            ).to(emb_question_t.dtype)
+            emb_question_t[~mask_t] = self.question_embedding_1(question_t[~mask_t]).to(
+                emb_question_t.dtype
+            )
 
             node_neighbors_2 = [user_t[mask_t]]
             _batch_size_2 = len(node_neighbors_2[0])
@@ -152,9 +152,7 @@ class SQGKT(Module):
                     emb_node_neighbor_2.append(self.user_embedding(nodes))
                 else:
                     emb_node_neighbor_2.append(self.question_embedding_2(nodes))
-            emb0_question_t_2 = self.aggregate_uq(
-                emb_node_neighbor_2, node_neighbors_2
-            )
+            emb0_question_t_2 = self.aggregate_uq(emb_node_neighbor_2, node_neighbors_2)
             emb_question_t_2 = torch.zeros(
                 batch_size, self.emb_dim, device=DEVICE, dtype=emb0_question_t_2.dtype
             )
@@ -198,9 +196,9 @@ class SQGKT(Module):
                 num_qs = 1 + emb_skills.shape[0]
                 emb_next = torch.unsqueeze(emb_q_next[i], dim=0)
                 # emb_skills 与 emb_next 可能为半精度；确保与目标一致
-                qs_concat[i, 0:num_qs] = torch.cat(
-                    (emb_next, emb_skills), dim=0
-                ).to(qs_concat.dtype)
+                qs_concat[i, 0:num_qs] = torch.cat((emb_next, emb_skills), dim=0).to(
+                    qs_concat.dtype
+                )
 
             if t == 0:
                 y_hat[:, 0] = torch.tensor(0.5, device=DEVICE, dtype=y_hat.dtype)
