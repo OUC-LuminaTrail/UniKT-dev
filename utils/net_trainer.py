@@ -409,9 +409,7 @@ class Trainer(ABC):
         print("Training complete")
 
     @abstractmethod
-    def forward_pass(
-        self, batch_data: Tuple[Any, ...]
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward_pass(self, batch_data: Tuple[Any, ...]) -> dict:
         """
         模型前向传播
 
@@ -419,10 +417,7 @@ class Trainer(ABC):
             batch_data: 从DataLoader获取的一个批次数据
 
         返回:
-            Tuple[y_hat, y_label, y_predict]:
-                - y_hat: 模型输出的预测概率/logits
-                - y_label: 真实标签
-                - y_predict: 预测结果
+            dict: 包含 "y_hat", "y_label", "y_predict" 的字典
         """
         raise NotImplementedError(
             "Subclasses of Trainer must implement forward_pass method"
@@ -469,19 +464,19 @@ class Trainer(ABC):
             self._aggregate_and_log(epoch, phase="val")
         return total_loss
 
-    def compute_loss(self, forward_outputs: Tuple[Any, ...]) -> torch.Tensor:
+    def compute_loss(self, forward_outputs: dict) -> torch.Tensor:
         """
         计算损失函数。
         子类可以重写此方法以支持更复杂的损失计算（如多任务损失、对比损失等）。
 
         参数:
-            forward_outputs: forward_pass 的返回值元组
+            forward_outputs: forward_pass 方法输出的字典
 
         返回:
             loss: 计算得到的标量损失张量
         """
-        y_hat = forward_outputs[0]
-        y_label = forward_outputs[1]
+        y_hat = forward_outputs["y_hat"]
+        y_label = forward_outputs["y_label"]
         return self.loss(y_hat, y_label)
 
     def run_train_batch(self, batch_data: Tuple[Any, ...]) -> float:
@@ -498,18 +493,26 @@ class Trainer(ABC):
         # 清零梯度
         self.opt.zero_grad()
         # 前向传播
-        y_hat, y_label, y_predict = self.forward_pass(batch_data)
+        output = self.forward_pass(batch_data)
+        assert isinstance(output, dict) and {
+            "y_hat",
+            "y_label",
+            "y_predict",
+        }.issubset(output.keys()), (
+            "forward_pass must return dict with y_hat/y_label/y_predict"
+        )
         # 计算损失
-        loss = self.compute_loss((y_hat, y_label, y_predict))
+        loss = self.compute_loss(output)
         if hasattr(self, "_train_accum"):
-            self._train_accum["y_hat"].append(y_hat.detach().cpu())
-            self._train_accum["y_label"].append(y_label.detach().cpu())
-            self._train_accum["y_pred"].append(y_predict.detach().cpu())
+            self._train_accum["y_hat"].append(output["y_hat"].detach().cpu())
+            self._train_accum["y_label"].append(output["y_label"].detach().cpu())
+            self._train_accum["y_pred"].append(output["y_predict"].detach().cpu())
         # 反向传播和优化
         loss.backward()
         self.opt.step()
         return loss.item()
 
+    @torch.no_grad()
     def run_eval_batch(self, batch_data: Tuple[Any, ...]) -> float:
         """
         执行一个验证批次
@@ -522,16 +525,22 @@ class Trainer(ABC):
             该批次的损失值
         """
         self.model.eval()
-        with torch.no_grad():
-            # 前向传播
-            y_hat, y_label, y_predict = self.forward_pass(batch_data)
-            # 计算损失
-            loss = self.compute_loss((y_hat, y_label, y_predict))
-            # 累积到 epoch 容器
-            if hasattr(self, "_val_accum"):
-                self._val_accum["y_hat"].append(y_hat.detach().cpu())
-                self._val_accum["y_label"].append(y_label.detach().cpu())
-                self._val_accum["y_pred"].append(y_predict.detach().cpu())
+        # 前向传播
+        output = self.forward_pass(batch_data)
+        assert isinstance(output, dict) and {
+            "y_hat",
+            "y_label",
+            "y_predict",
+        }.issubset(output.keys()), (
+            "forward_pass must return dict with y_hat/y_label/y_predict"
+        )
+        # 计算损失
+        loss = self.compute_loss(output)
+        # 累积到 epoch 容器
+        if hasattr(self, "_val_accum"):
+            self._val_accum["y_hat"].append(output["y_hat"].detach().cpu())
+            self._val_accum["y_label"].append(output["y_label"].detach().cpu())
+            self._val_accum["y_pred"].append(output["y_predict"].detach().cpu())
         return loss.item()
 
     def _aggregate_and_log(self, epoch: int, phase: str):
