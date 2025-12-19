@@ -20,7 +20,7 @@ def parse_args():
     model_params.add_argument(
         "--dropout", type=float, default=0.54, help="Dropout probability"
     )
-    model_params.add_argument("--n_hop", type=int, default=5, help="Number of GNN hops")
+    model_params.add_argument("--n_hop", type=int, default=3, help="Number of GNN hops")
     model_params.add_argument(
         "--heads", type=int, default=4, help="Number of GNN attention heads"
     )
