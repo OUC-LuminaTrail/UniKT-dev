@@ -66,7 +66,7 @@ def parse_args():
         "--epochs", type=int, default=100, help="Number of epochs"
     )
     train_params.add_argument(
-        "--batch_size", type=int, default=32, help="Batch size for training"
+        "--batch_size", type=int, default=128, help="Batch size for training"
     )
     train_params.add_argument(
         "--checkpoint_path", type=str, default=None, help="Path to model checkpoints"
