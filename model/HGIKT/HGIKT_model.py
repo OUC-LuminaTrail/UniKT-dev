@@ -1,19 +1,15 @@
 import torch
 import torch.nn as nn
-from torch_geometric.nn import HeteroConv, Linear, TransformerConv
+from torch_geometric.nn import HGTConv, Linear
 from torch.nn import functional as F
 from dhg.nn import HGNNConv
 
 
 class HeteroGNN(nn.Module):
-    r"""问题-技能图聚合
-
-    输入：
-    - x: 节点权重
-    - edge_index: 边索引
+    r"""基于 HGT 的问题-技能图聚合
     """
 
-    def __init__(self, embedding_dim, n_hop, heads, dropout):
+    def __init__(self, embedding_dim, n_hop, heads, dropout, metadata):
         super(HeteroGNN, self).__init__()
         self.n_hop = n_hop
         self.heads = heads
@@ -21,68 +17,26 @@ class HeteroGNN(nn.Module):
         self.convs = torch.nn.ModuleList()
 
         for _ in range(n_hop):
-            conv = HeteroConv(
-                {
-                    # 问题技能图
-                    ("question", "has", "skill"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                    ("skill", "rev_has", "question"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                    # 技能作业图
-                    ("skill", "related_to", "assignment"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                    ("assignment", "rev_related_to", "skill"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                    # 问题模板图
-                    ("question", "belongs_to", "template"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                    ("template", "rev_belongs_to", "question"): TransformerConv(
-                        (embedding_dim, embedding_dim),
-                        embedding_dim,
-                        aggr="add",
-                        heads=heads,
-                        concat=False,
-                    ),
-                },
-                aggr="sum",
+            conv = HGTConv(
+                in_channels=embedding_dim,
+                out_channels=embedding_dim,
+                metadata=metadata,
+                heads=heads,
             )
             self.convs.append(conv)
-        self.gnn_conv = nn.ModuleList(self.convs)
 
-    def forward(self, x, edge_index):
-        for conv in self.gnn_conv:
-            x: torch.Tensor = conv(x, edge_index)
-            x = {key: x.relu() for key, x in x.items()}
-            x = {
-                key: F.dropout(x, p=self.dropout, training=self.training)
-                for key, x in x.items()
-            }
-        return x
+    def forward(self, x_dict, edge_index_dict):
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            # 对每个节点类型的输出应用激活和 dropout
+            new_x_dict = {}
+            for node_type, x in x_dict.items():
+                if x is not None:
+                    x = F.gelu(x)
+                    x = F.dropout(x, p=self.dropout, training=self.training)
+                new_x_dict[node_type] = x
+            x_dict = new_x_dict
+        return x_dict
 
 
 class HyperGNN(nn.Module):
@@ -319,7 +273,7 @@ class GeneralInteraction(nn.Module):
 class HGIKT(nn.Module):
     r"""HGIKT主模型"""
 
-    def __init__(self, args, data_metadata, **kwargs):
+    def __init__(self, args, data_metadata, hetero_metadata, **kwargs):
         super(HGIKT, self).__init__(**kwargs)
         # 保存参数
         self.args = args
@@ -364,6 +318,7 @@ class HGIKT(nn.Module):
             n_hop=args.n_hop,
             heads=args.heads,
             dropout=self.dropout,
+            metadata=hetero_metadata,
         )
 
         # 超图模块

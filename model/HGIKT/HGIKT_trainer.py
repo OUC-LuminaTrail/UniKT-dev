@@ -55,7 +55,7 @@ class HGIKTTrainer(Trainer):
         from model.HGIKT.HGIKT_model import HGIKT
 
         print("Initializing HGIKT model...")
-        model = HGIKT(args, data_src.get_metadata())
+        model = HGIKT(args, data_src.get_metadata(), self.hetero_graph.metadata())
 
         # 二分类交叉熵损失
         loss_fn = torch.nn.BCEWithLogitsLoss()
