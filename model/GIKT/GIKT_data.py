@@ -32,7 +32,7 @@ class GIKTModelData(GraphModelData):
         r"""
         准备GIKT模型所需的数据
         """
-        fold_idx = args.fold if args.fold > 0 else None
+        fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         min_seq_len = self.data_src.get_metadata("min_seq_len")
