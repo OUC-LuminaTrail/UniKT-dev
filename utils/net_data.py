@@ -196,7 +196,7 @@ class BaseModelData(ABC):
 
         return train_data, val_data
 
-    def calculate_question_difficulty(self):
+    def calculate_question_difficulty(self, exclude_fold: int = None):
         """
         计算每个问题的难度指标
 
@@ -204,6 +204,9 @@ class BaseModelData(ABC):
         1. 正确率（correct_rate）：正确回答次数 / 总回答次数
         2. 平均作答时间（avg_time）：如果数据集有时间字段
         3. 提示率（hint_rate）：如果数据集有提示字段
+
+        参数:
+            exclude_fold: 要排除的fold索引（用于在交叉验证时排除验证集数据）
 
         返回:
             dict: 问题ID -> 难度分数的字典，难度分数为0-1之间，越大表示越难
@@ -214,6 +217,11 @@ class BaseModelData(ABC):
         import tqdm
 
         data = self.data_src.get_sequence_data()
+
+        # 如果指定了排除的fold，则过滤掉该fold的数据
+        if exclude_fold is not None and "fold" in data.columns:
+            data = data[data["fold"] != exclude_fold]
+            print(f"Excluding fold {exclude_fold} from difficulty calculation.")
 
         # 计算每个问题的正确率
         question_stats = (
@@ -241,13 +249,16 @@ class BaseModelData(ABC):
 
         return difficulty_scores
 
-    def calculate_question_discrimination(self):
+    def calculate_question_discrimination(self, exclude_fold: int = None):
         """
         计算每个问题的区分度指标 (Discrimination)
 
         区分度反映了题目区分不同能力水平学生的能力。
         这里采用点二系列相关系数 (Point-Biserial Correlation) 的简化版本：
         计算每个题目得分与学生总平均分之间的相关性。
+
+        参数:
+            exclude_fold: 要排除的fold索引（用于在交叉验证时排除验证集数据）
 
         返回:
             dict: 问题ID -> 区分度分数的字典，通常在 -1 到 1 之间，越大表示区分度越高
@@ -256,6 +267,11 @@ class BaseModelData(ABC):
         import numpy as np
 
         data = self.data_src.get_sequence_data()
+
+        # 如果指定了排除的fold，则过滤掉该fold的数据
+        if exclude_fold is not None and "fold" in data.columns:
+            data = data[data["fold"] != exclude_fold]
+            print(f"Excluding fold {exclude_fold} from discrimination calculation.")
 
         # 1. 计算每个学生的平均正确率作为能力代理
         user_stats = data.groupby("user")["label"].mean().reset_index()
