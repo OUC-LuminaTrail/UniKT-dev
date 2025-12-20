@@ -241,6 +241,58 @@ class BaseModelData(ABC):
 
         return difficulty_scores
 
+    def calculate_question_discrimination(self):
+        """
+        计算每个问题的区分度指标 (Discrimination)
+
+        区分度反映了题目区分不同能力水平学生的能力。
+        这里采用点二系列相关系数 (Point-Biserial Correlation) 的简化版本：
+        计算每个题目得分与学生总平均分之间的相关性。
+
+        返回:
+            dict: 问题ID -> 区分度分数的字典，通常在 -1 到 1 之间，越大表示区分度越高
+        """
+        import tqdm
+        import numpy as np
+
+        data = self.data_src.get_sequence_data()
+
+        # 1. 计算每个学生的平均正确率作为能力代理
+        user_stats = data.groupby("user")["label"].mean().reset_index()
+        user_stats.columns = ["user", "user_mean"]
+
+        # 2. 将学生平均分合并回原始数据
+        data_with_user_mean = data.merge(user_stats, on="user")
+
+        # 3. 计算每个问题的区分度（题目得分与学生平均分的相关系数）
+        discrimination_scores = {}
+
+        # 按问题分组计算相关性
+        grouped = data_with_user_mean.groupby("question")
+
+        for qid, group in tqdm.tqdm(
+            grouped,
+            desc="Calculating question discrimination",
+        ):
+            if len(group) < 2:
+                discrimination_scores[int(qid)] = 0.0
+                continue
+
+            # 计算 label 和 user_mean 的相关系数
+            # np.corrcoef 返回相关系数矩阵
+            corr = np.corrcoef(group["label"], group["user_mean"])[0, 1]
+
+            # 处理 NaN 情况（例如所有学生对该题得分相同）
+            if np.isnan(corr):
+                corr = 0.0
+
+            # 考虑样本量置信度
+            confidence = min(len(group) / 10.0, 1.0)
+            discrimination = corr * confidence
+            discrimination_scores[int(qid)] = float(discrimination)
+
+        return discrimination_scores
+
     def calculate_question_error_rate(self):
         """
         计算每个(问题, 技能)对的错误率
