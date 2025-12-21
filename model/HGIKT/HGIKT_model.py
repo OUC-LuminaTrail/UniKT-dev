@@ -6,8 +6,7 @@ from dhg.nn import HGNNConv
 
 
 class HeteroGNN(nn.Module):
-    r"""基于 HGT 的问题-技能图聚合
-    """
+    r"""基于 HGT 的问题-技能图聚合"""
 
     def __init__(self, embedding_dim, n_hop, heads, dropout, metadata):
         super(HeteroGNN, self).__init__()
@@ -270,6 +269,72 @@ class GeneralInteraction(nn.Module):
         return logits
 
 
+class MoEFusion(nn.Module):
+    r"""混合专家融合 (Mixture-of-Experts Fusion)
+
+    将两个视图的特征处理视为不同的"专家"。
+    引入一个共享专家(Shared Expert)捕获共性。
+    使用门控网络(Router)动态分配权重。
+    """
+
+    def __init__(self, dim, dropout=0.1):
+        super(MoEFusion, self).__init__()
+        self.dim = dim
+
+        # 专家网络:
+        # Expert 1: 处理 View 1
+        # Expert 2: 处理 View 2
+        # Expert 3: 处理 View 1 + View 2 (Shared)
+        self.expert1 = nn.Sequential(
+            nn.Linear(dim, dim), nn.GELU(), nn.Dropout(dropout)
+        )
+        self.expert2 = nn.Sequential(
+            nn.Linear(dim, dim), nn.GELU(), nn.Dropout(dropout)
+        )
+        self.expert_shared = nn.Sequential(
+            nn.Linear(dim * 2, dim), nn.GELU(), nn.Dropout(dropout)
+        )
+
+        # 门控网络: 输入两个视图，输出专家的权重
+        self.router = nn.Sequential(
+            nn.Linear(dim * 2, dim),
+            nn.Tanh(),
+            nn.Linear(dim, 3),  # 3个专家
+            nn.Softmax(dim=-1),
+        )
+
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, view1, view2):
+        # 专家输出
+        e1 = self.expert1(view1)
+        e2 = self.expert2(view2)
+        # 展平批次维度以适应 Linear
+        B_shape = view1.shape[:-1]
+        N = int(torch.prod(torch.tensor(B_shape)).item()) if len(B_shape) > 0 else 1
+
+        v1_flat = view1.view(N, -1)
+        v2_flat = view2.view(N, -1)
+
+        e1 = self.expert1(v1_flat)
+        e2 = self.expert2(v2_flat)
+        e_shared = self.expert_shared(torch.cat([v1_flat, v2_flat], dim=-1))
+
+        # 堆叠专家输出: [N, 3, D]
+        experts = torch.stack([e1, e2, e_shared], dim=1)
+
+        # 计算路由权重
+        combined = torch.cat([v1_flat, v2_flat], dim=-1)
+        weights = self.router(combined)  # [N, 3]
+
+        # 加权求和
+        # weights: [N, 3] -> [N, 3, 1]
+        # experts: [N, 3, D]
+        fused = torch.sum(experts * weights.unsqueeze(-1), dim=1)
+
+        return self.norm(fused).view(*B_shape, self.dim)
+
+
 class HGIKT(nn.Module):
     r"""HGIKT主模型"""
 
@@ -330,9 +395,7 @@ class HGIKT(nn.Module):
         )
 
         # 融合模块
-        self.fuse = Linear(
-            self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
-        )
+        self.fuse = MoEFusion(dim=self.hidden_dim, dropout=self.dropout)
 
         # 全连接层，将练习嵌入投影到隐藏维度
         self.fc_exercise = Linear(
@@ -400,7 +463,7 @@ class HGIKT(nn.Module):
         # question_hyper_conv: [num_questions, embedding_dim]
         # question_hetero_conv: [num_questions, embedding_dim]
         question_conv_fused = self.fuse(
-            torch.cat([question_hetero_conv, question_hyper_conv], dim=-1)
+            question_hetero_conv, question_hyper_conv
         )  # [num_questions, embedding_dim]
 
         # 按照用户序列索引获取对应的问题的嵌入表示
