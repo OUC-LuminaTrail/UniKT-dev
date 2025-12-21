@@ -26,7 +26,7 @@ class HGIKTTrainer(Trainer):
         # 解包数据
         train_data = data_dict["train_dataloader"]
         val_data = data_dict["val_dataloader"]
-        self.hypergraph = data_dict["skill_hypergraph"]
+        self.hypergraph = data_dict["template_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
