@@ -8,16 +8,14 @@ from typing import Any
 
 def get_data_source(dataset_name: str, args: Any) -> DataSource:
     """根据数据集名称获取对应的数据源类实例"""
-    if dataset_name == "assistments09":
-        return Assistments2009Data(args=args)
-    elif dataset_name == "assistments12":
-        return Assistments2012Data(args=args)
-    elif dataset_name == "assistments17":
-        return Assistments2017Data(args=args)
-    elif dataset_name == "ednet_kt1":
-        return EdNetKT1Data(args=args)
-    else:
-        raise ValueError(f"Unsupported dataset: {dataset_name}")
+    from utils.core import DATA_SOURCES
+
+    if dataset_name not in DATA_SOURCES:
+        available = ", ".join(DATA_SOURCES.keys())
+        raise ValueError(f"Unsupported dataset: {dataset_name}. Available: {available}")
+
+    dataset_cls = DATA_SOURCES.get(dataset_name)
+    return dataset_cls(args=args)
 
 
 __all__ = [

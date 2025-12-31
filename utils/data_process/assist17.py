@@ -7,11 +7,12 @@ from .data_source import (
     build_question_data_from_cleared,
     map_to_continuous_ids,
 )
-from utils.core import get_logger
+from utils.core import get_logger, register_data_source
 
 logger = get_logger(__name__)
 
 
+@register_data_source("assistments17")
 class Assistments2017Data(DataSource):
     """
     Assistments2017数据集处理类
