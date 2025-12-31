@@ -15,7 +15,7 @@ python data_process.py -d ednet_kt1
 
 ```bash
 # 在 ASSISTments2009 数据集上训练
-python train_gikt.py -d assistments09
+python train.py -m GIKT -d assistments09
 
 # 在其他数据集上训练
 python train_gikt.py -d assistments12

@@ -1,16 +1,16 @@
 # 早停（Early Stopping）
 
-本仓库已在通用训练器 `utils/net_trainer.py` 中集成早停机制。默认关闭，可选按验证集指标触发中止训练，并可自动恢复最佳权重。
+本仓库已在通用训练器中集成早停机制。默认关闭，可选按验证集指标触发中止训练，并可自动恢复最佳权重。
 
 ## 快速使用
 
 ```bash
 # GIKT，基于 AUC 进行早停，耐心 10 轮训练，启用恢复最佳权重
-python train_gikt.py -d assistments09 \
+python train.py -m GIKT -d assistments09 \
     --es_patience 10 --es_monitor auc --es_mode max --es_min_delta 0.0
 
 # SQGKT，基于 Loss 进行早停，耐心 8 轮训练
-python train_sqgkt.py -d assistments12 \
+python train.py -m SQGKT -d assistments12 \
     --es_patience 8 --es_monitor loss --es_mode min --es_min_delta 1e-4
 ```
 

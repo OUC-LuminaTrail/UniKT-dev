@@ -49,41 +49,32 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
 ```
 kt-exp-graph/
 ├── configs/                           # 配置与参数空间
-│   ├── optuna_config.json             # Optuna 搜索配置
-│   ├── param_space_gikt.json          # GIKT 超参空间
-│   └── param_space_hgikt.json         # HGIKT 超参空间
+│   ├── ablation/                      # 消融实验配置
+│   └── optuna/                        # Optuna 搜索配置
 ├── data/                              # 数据目录
 │   ├── assistments09/
 │   ├── assistments12/
-│   ├── assistments15/
 │   ├── assistments17/
 │   └── ednet/
 ├── model/                             # 模型实现
 │   ├── GIKT/
-│   │   ├── GIKT_data.py               # 数据加载
-│   │   ├── GIKT_model.py              # 模型定义
-│   │   └── GIKT_trainer.py            # 训练逻辑
 │   ├── HGIKT/
-│   │   ├── HGIKT_data.py              # 数据加载
-│   │   ├── HGIKT_model.py             # 模型定义
-│   │   └── HGIKT_trainer.py           # 训练逻辑
-│   ├── SQGKT/
-│   │   ├── SQGKT_data.py              # 数据加载
-│   │   ├── SQGKT_model.py             # 模型定义
-│   │   └── SQGKT_trainer.py           # 训练逻辑
+│   └── SQGKT/
 ├── runs/                              # 实验运行日志与检查点
 ├── swanlog/                           # SwanLab 本地日志
 ├── utils/                             # 工具模块
-│   ├── early_stopping.py              # 通用早停器
-│   ├── hyperparam_manager.py          # 超参数管理
-│   └── net_trainer.py                 # 基础训练器（统一种子/日志/指标）
+│   ├── ablation/                      # 消融实验工具
+│   ├── config/                        # 配置管理
+│   ├── core/                          # 核心工具（日志/随机数等）
+│   ├── data_process/                  # 数据处理工具
+│   ├── optuna_utils/                  # Optuna 工具
+│   └── training/                      # 训练核心逻辑
+├── ablation_study.py                  # 消融实验脚本
 ├── data_process.py                    # 数据预处理脚本（下载/清洗/划分）
-├── optuna_search_gikt.py              # GIKT 超参数搜索脚本
-├── optuna_search_hgikt.py             # HGIKT 超参数搜索脚本
-├── run_kfold.sh                       # K 折训练脚本
-├── train_gikt.py                      # GIKT 训练脚本
-├── train_hgikt.py                     # HGIKT 训练脚本
-└── train_sqgkt.py                     # SQGKT 训练脚本
+├── optuna_search.py                   # 超参数搜索脚本
+├── train.py                           # 模型训练脚本
+└── scripts/
+    └── run_kfold.sh                   # K 折训练脚本
 ```
 
 ## 快速开始
@@ -143,14 +134,21 @@ python data_process.py process \
 
 ### 2. 模型训练
 
-各模型的训练说明在 `docs/` 目录下：
+使用 `train.py` 脚本进行模型训练：
 
-- GIKT 训练指南：参见 `docs/train_gikt.md`
-- SQGKT 训练指南：参见 `docs/train_sqgkt.md`
+```bash
+# 训练 GIKT 模型
+python train.py -m GIKT -d assistments09
+
+# 训练 SQGKT 模型
+python train.py -m SQGKT -d assistments09
+```
+
+各模型的详细训练说明在 `docs/` 目录下。
 
 ### 复现性设置
 
-训练脚本中的 `--seed` 参数现在由 `utils/net_trainer.py` 统一处理。`Trainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
+训练脚本中的 `--seed` 参数现在由 `utils/training/base_trainer.py` 统一处理。`BaseTrainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
 
 ### 3. 查看训练结果
 

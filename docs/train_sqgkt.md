@@ -7,13 +7,13 @@
 ## 基础训练命令
 
 ```bash
-python train_sqgkt.py -d assistments12
+python train.py -m SQGKT -d assistments12
 ```
 
 > 提示：更多可用数据集或参数可通过 `-h` 查看：
 >
 > ```bash
-> python train_sqgkt.py -h
+> python train.py -h
 > ```
 
 ## 启用早停
