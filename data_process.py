@@ -2,8 +2,8 @@
 
 from argparse import ArgumentParser
 from utils.data_process import get_data_source
-from utils.logger import get_logger
-from utils.params import DataParams, GeneralParams
+from utils.core import get_logger
+from utils.config import DataParams, GeneralParams
 
 logger = get_logger(__name__)
 
