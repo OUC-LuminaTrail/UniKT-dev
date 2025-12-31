@@ -7,6 +7,9 @@ from .data_source import (
     build_question_data_from_cleared,
     map_to_continuous_ids,
 )
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 
 class Assistments2012Data(DataSource):
@@ -34,14 +37,14 @@ class Assistments2012Data(DataSource):
         """
         if not os.path.exists(self.raw_data_path):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
-        print("Loading raw data from:", self.raw_data_path)
+        logger.info("Loading raw data from:", self.raw_data_path)
         self.raw_data = pd.read_csv(
             self.raw_data_path, encoding="latin1", low_memory=False
         )
 
     @override
     def clear_data(self):
-        print("Processing Data...")
+        logger.info("Processing Data...")
         if self.raw_data is None:
             try:
                 self.load_src_data()

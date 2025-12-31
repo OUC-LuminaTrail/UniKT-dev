@@ -4,10 +4,107 @@ GIKT 模型训练器
 """
 
 import torch
-from utils.net_trainer import Trainer
+from utils.training import BaseTrainer
+from utils.core import TRAINERS, get_logger
+from utils.config import register_model_params, BaseParamConfig
+
+logger = get_logger(__name__)
 
 
-class HGIKTTrainer(Trainer):
+@register_model_params("HGIKT")
+class HGIKTModelParams(BaseParamConfig):
+    """HGIKT model-specific parameters."""
+
+    def define_params(self) -> tuple[str, dict]:
+        group_name = "HGIKT Parameters"
+        params = {
+            "hidden_dim": {
+                "type": int,
+                "default": 250,
+                "short": "hd",
+                "help": "Hidden layer dimension",
+            },
+            "n_hop": {
+                "type": int,
+                "default": 4,
+                "short": "nh",
+                "help": "Number of GNN hops",
+            },
+            "heads": {
+                "type": int,
+                "default": 1,
+                "short": "hs",
+                "help": "Number of attention heads",
+            },
+            "lstm_layers": {
+                "type": int,
+                "default": 1,
+                "short": "ll",
+                "help": "Number of LSTM layers",
+            },
+            "history_neighbour": {
+                "type": int,
+                "default": 5,
+                "short": "hn",
+                "help": "History neighbor count",
+            },
+            "attention_dim": {
+                "type": int,
+                "default": 110,
+                "short": "ad",
+                "help": "Attention dimension",
+            },
+            "att_bound": {
+                "type": float,
+                "default": 0.1,
+                "short": "ab",
+                "help": "Attention bound",
+            },
+            "num_difficulty_clusters": {
+                "type": int,
+                "default": 5,
+                "help": "Number of difficulty clusters for weighted hypergraph",
+            },
+            "epochs": {
+                "type": int,
+                "default": 120,
+                "short": "ep",
+                "help": "Number of training epochs",
+            },
+            "learning_rate": {
+                "type": float,
+                "default": 0.0003,
+                "short": "lr",
+                "help": "Learning rate for optimizer",
+            },
+            "lr_decay": {
+                "type": float,
+                "default": None,
+                "help": "Learning rate decay factor per epoch",
+            },
+            "dropout": {
+                "type": float,
+                "default": 0.25,
+                "help": "Dropout rate",
+            },
+            "weight_decay": {
+                "type": float,
+                "default": 0.00001,
+                "short": "wd",
+                "help": "Weight decay (L2 regularization) for optimizer",
+            },
+            "batch_size": {
+                "type": int,
+                "default": 64,
+                "short": "bs",
+                "help": "Batch size for training",
+            },
+        }
+        return group_name, params
+
+
+@TRAINERS.register("HGIKT")
+class HGIKTTrainer(BaseTrainer):
     """
     HGIKT模型训练器
     """
@@ -54,14 +151,14 @@ class HGIKTTrainer(Trainer):
     def init_model(self, args, data_src):
         from model.HGIKT.HGIKT_model import HGIKT
 
-        print("Initializing HGIKT model...")
+        logger.info("Initializing HGIKT model...")
         model = HGIKT(args, data_src.get_metadata(), self.hetero_graph.metadata())
 
         # 二分类交叉熵损失
         loss_fn = torch.nn.BCEWithLogitsLoss()
         # 优化器
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
         # 学习率调度器
         lr_scheduler = None
@@ -73,11 +170,12 @@ class HGIKTTrainer(Trainer):
         return model, optimizer, loss_fn, lr_scheduler
 
     def forward_pass(self, batch_data):
+        """HGIKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成"""
+        # 解包数据并移动到设备
         sequence, response, mask = batch_data
-        # 将数据移动到设备
-        sequence = sequence.to(self.device_)
-        response = response.to(self.device_)
-        mask = mask.to(torch.bool).to(self.device_)
+        sequence = self._move_tensor_to_device(sequence)
+        response = self._move_tensor_to_device(response)
+        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
@@ -89,25 +187,17 @@ class HGIKTTrainer(Trainer):
             self.hypergraph,
             self.question_skill_matrix,
         )  # [B, S]
+
         # 提取有效位置的预测和标签
-        y_hat_seq = y_hat_full[:, :-1]
-        y_label_seq = response.float()[:, 1:]
-        mask_curr = mask[:, :-1]
-        mask_next = mask[:, 1:]
-        valid_mask = mask_curr & mask_next  # [B, S-1]
+        y_hat, y_label, _ = self._extract_valid_predictions(
+            y_hat_full, response, mask, skip_first=True
+        )
 
-        # 使用 mask 选择有效位置
-        y_hat = torch.masked_select(y_hat_seq, valid_mask)
-        y_label = torch.masked_select(y_label_seq, valid_mask)
+        # 处理空批次
+        y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 若该批次没有任何有效位置，使用占位避免后续计算报错
-        if y_label.numel() == 0:
-            # Logits 0.0 对应概率 0.5
-            y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
-            y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
-
-        # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
-        y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
+        # 生成二分类预测
+        y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
         return {
             "y_hat": y_hat,

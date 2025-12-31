@@ -22,38 +22,12 @@ cd "$REPO_ROOT" || { echo "Error: Failed to change directory to repository root:
 # 处理折数列表 (支持空格或逗号分隔)
 FOLDS_LIST=${FOLDS_ARG//,/ }
 
-# 获取模型对应的脚本
-get_model_script() {
-    local model=$1
-    if [ "$model" == "GIKT" ]; then
-        echo "train_gikt.py"
-    elif [ "$model" == "SQGKT" ]; then
-        echo "train_sqgkt.py"
-    elif [ "$model" == "HGIKT" ]; then
-        echo "train_hgikt.py"
-    else
-        echo ""
-    fi
-}
-
 # 运行单个模型的指定折
 run_kfold_for_model() {
     local model=$1
-    local script=$(get_model_script "$model")
     
-    if [ -z "$script" ]; then
-        echo "Error: Unknown model '$model'"
-        return 1
-    fi
-
-    if [ ! -f "$script" ]; then
-        echo "Error: Script '$script' not found for model '$model'"
-        return 1
-    fi
-
     echo "=================================================="
     echo "Starting Training for Model: $model"
-    echo "Script: $script"
     echo "Folds: $FOLDS_LIST"
     echo "Arguments: $ARGS"
     echo "=================================================="
@@ -64,8 +38,8 @@ run_kfold_for_model() {
         echo "Running Fold $fold for $model"
         echo "----------------------------------------"
         
-        # 运行 python 脚本，传入 --fold 参数和其他参数
-        python "$script" --fold "$fold" $ARGS
+        # 运行统一的 train.py 脚本，传入 -m 模型参数、--fold 参数和其他参数
+        python train.py -m "$model" --fold "$fold" $ARGS
         
         # 检查退出代码
         if [ $? -ne 0 ]; then

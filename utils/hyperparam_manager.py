@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, Union
 from datetime import datetime
 from argparse import Namespace
 import torch
+from utils.core import get_logger
 
 
 class HyperparameterManager:
@@ -35,6 +36,7 @@ class HyperparameterManager:
         self.metadata: Dict[str, Any] = {
             "created_at": datetime.now().isoformat(),
         }
+        self.logger = get_logger(__name__)
 
     def get_hyperparameters_dict(self) -> Dict[str, Any]:
         """
@@ -174,7 +176,7 @@ class HyperparameterManager:
                 with open(filepath, "w", encoding="utf-8") as f:
                     yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
             except ImportError:
-                print("Warning: PyYAML not installed. Saving as JSON instead.")
+                self.logger.warning("PyYAML not installed. Saving as JSON instead.")
                 with open(
                     filepath.replace(".yaml", ".json"), "w", encoding="utf-8"
                 ) as f:
@@ -182,7 +184,7 @@ class HyperparameterManager:
         else:
             raise ValueError(f"Unsupported format: {format}. Use 'json' or 'yaml'.")
 
-        print(f"Hyperparameters saved to: {filepath}")
+        self.logger.info(f"Hyperparameters saved to: {filepath}")
 
     def load(self, filepath: str) -> Dict:
         """
@@ -217,7 +219,7 @@ class HyperparameterManager:
         self.metadata = data.get("metadata", {})
         self.hyperparams = data.get("hyperparameters", {})
 
-        print(f"Hyperparameters loaded from: {filepath}")
+        self.logger.info(f"Hyperparameters loaded from: {filepath}")
         return self.hyperparams
 
     def get_summary(self) -> str:
@@ -227,7 +229,7 @@ class HyperparameterManager:
         Returns:
             格式化的超参数摘要字符串
         """
-        lines = ["=" * 60]
+        lines = []
 
         # 元数据
         lines.append("[Metadata]")
@@ -238,7 +240,6 @@ class HyperparameterManager:
         lines.append("\n[Hyperparameters]")
         self._format_params(self.hyperparams, lines, indent=1)
 
-        lines.append("=" * 60)
         return "\n".join(lines)
 
     def _format_params(self, params: Dict, lines: list, indent: int = 0):
@@ -315,7 +316,7 @@ class HyperparameterManager:
                 missing.append(param)
 
         if missing:
-            print(f"Missing required parameters: {missing}")
+            self.logger.warning(f"Missing required parameters: {missing}")
             return False
 
         return True

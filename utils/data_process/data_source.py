@@ -1,6 +1,10 @@
 from abc import ABC, abstractmethod
 import os
+import pandas
 from sklearn.model_selection import KFold
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 
 class DataSource(ABC):
@@ -109,7 +113,7 @@ class DataSource(ABC):
         # 如果服务器不支持Range或文件太小，使用单线程下载
         if accept_ranges != "bytes" or total_bytes < 10 * 1024 * 1024:  # 小于10MB
             if accept_ranges != "bytes":
-                print(
+                logger.warning(
                     "Server does not support range requests, using single-threaded download"
                 )
             self._download_single_thread(archive_path)
@@ -160,7 +164,7 @@ class DataSource(ABC):
                         future.result()  # 如果有异常会在这里抛出
 
             # 合并所有分块文件
-            print("Merging downloaded chunks...")
+            logger.debug("Merging downloaded chunks...")
             with open(archive_path, "wb") as outfile:
                 for i in range(num_threads):
                     chunk_path = os.path.join(temp_dir, f"chunk_{i}")
@@ -241,13 +245,15 @@ class DataSource(ABC):
 
         # 检查是否需要下载
         if os.path.exists(archive_path) and not force_download:
-            print(f"Dataset already exists, skip downloading: {archive_path}")
+            logger.info(f"Dataset already exists, skip downloading: {archive_path}")
         else:
             if force_download and os.path.exists(archive_path):
-                print(f"Force download enabled, removing existing file: {archive_path}")
+                logger.warning(
+                    f"Force download enabled, removing existing file: {archive_path}"
+                )
                 os.remove(archive_path)
 
-            print(f"Downloading data from {self.data_url}")
+            logger.info(f"Downloading data from {self.data_url}")
 
             # 尝试下载，支持重试
             for attempt in range(max_retries):
@@ -258,24 +264,26 @@ class DataSource(ABC):
                         )
                     else:
                         # urllib 回退
-                        print("Using urllib as fallback (no multi-threading support)")
+                        logger.warning(
+                            "Using urllib as fallback (no multi-threading support)"
+                        )
                         urllib.request.urlretrieve(self.data_url, archive_path)
 
-                    print(f"Download finished: {archive_path}")
+                    logger.info(f"Download finished: {archive_path}")
                     break  # 下载成功，跳出重试循环
 
                 except Exception as e:
                     # 清理失败的下载文件
                     if os.path.exists(archive_path):
                         os.remove(archive_path)
-                        print(f"Removed incomplete download: {archive_path}")
+                        logger.debug(f"Removed incomplete download: {archive_path}")
 
                     if attempt < max_retries - 1:
                         wait_time = 2**attempt  # 指数退避
-                        print(
+                        logger.error(
                             f"Download failed (attempt {attempt + 1}/{max_retries}): {e}"
                         )
-                        print(f"Retrying in {wait_time} seconds...")
+                        logger.info(f"Retrying in {wait_time} seconds...")
                         time.sleep(wait_time)
                     else:
                         raise RuntimeError(
@@ -296,7 +304,7 @@ class DataSource(ABC):
         if force_download:
             # 强制模式：清空并重新解压
             if any(Path(extract_target).iterdir()):
-                print(
+                logger.warning(
                     f"Force mode enabled, removing existing raw data: {extract_target}"
                 )
                 shutil.rmtree(extract_target)
@@ -306,11 +314,13 @@ class DataSource(ABC):
             # 目录为空，需要解压
             should_extract = True
         else:
-            print(f"Raw data directory not empty, skip extraction: {extract_target}")
+            logger.info(
+                f"Raw data directory not empty, skip extraction: {extract_target}"
+            )
             return extract_target
 
         if should_extract:
-            print(f"Extracting archive: {archive_path}")
+            logger.info(f"Extracting archive: {archive_path}")
             lower_name = file_name.lower()
             try:
                 if lower_name.endswith(".zip"):
@@ -339,7 +349,7 @@ class DataSource(ABC):
             except Exception as e:
                 raise RuntimeError(f"Failed to extract archive: {e}")
 
-            print(f"Extraction finished: {extract_target}")
+            logger.info(f"Extraction finished: {extract_target}")
 
         self.add_metadata("raw_data_path", extract_target)
 
@@ -353,23 +363,37 @@ class DataSource(ABC):
     def load_processed_data(self):
         """
         加载预处理后的数据
-        """
-        import pandas
 
+        异常:
+            FileNotFoundError: 预处理数据文件不存在
+            ValueError: 数据完整性检查失败（MD5不匹配）
+        """
         self.load_metadata()
         # 加载预处理后的数据文件
         sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_sequence.parquet"
         )
-        data_processed_path = os.path.join(
+        question_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_question.parquet"
         )
-        if not os.path.exists(sequence_data_path) or not os.path.exists(
-            data_processed_path
-        ):
+
+        # 检查文件是否存在，提供详细的错误信息和修复建议
+        missing_files = []
+        if not os.path.exists(sequence_data_path):
+            missing_files.append(f"  - {sequence_data_path}")
+        if not os.path.exists(question_data_path):
+            missing_files.append(f"  - {question_data_path}")
+
+        if missing_files:
+            missing_str = "\n".join(missing_files)
             raise FileNotFoundError(
-                f"Cannot find processed data file: {sequence_data_path} or {data_processed_path}"
+                f"Processed data files not found for dataset '{self.dataset}':\n"
+                f"{missing_str}\n\n"
+                f"💡 To fix this, please run preprocessing first:\n"
+                f"   python data_process.py process -d {self.dataset}\n\n"
+                f"📁 Data base path: {self.data_folder}"
             )
+
         # 检测文件的MD5值是否匹配
         md5_hash = self.compute_md5(sequence_data_path)
         if (
@@ -377,19 +401,72 @@ class DataSource(ABC):
             and md5_hash != self.metadata["sequence_data_md5"]
         ):
             raise ValueError(
-                "Processed data file integrity check failed (MD5 mismatch)."
+                f"Processed data file integrity check failed (MD5 mismatch).\n"
+                f"Expected MD5: {self.metadata.get('sequence_data_md5', 'unknown')}\n"
+                f"Actual MD5: {md5_hash}\n\n"
+                f"💡 The data may be corrupted or outdated. Please re-run preprocessing:\n"
+                f"   python data_process.py process -d {self.dataset}"
             )
-        md5_hash = self.compute_md5(data_processed_path)
+        md5_hash = self.compute_md5(question_data_path)
         if (
             "question_data_md5" in self.metadata
             and md5_hash != self.metadata["question_data_md5"]
         ):
             raise ValueError(
-                "Processed data file integrity check failed (MD5 mismatch)."
+                f"Question data file integrity check failed (MD5 mismatch).\n"
+                f"Expected MD5: {self.metadata.get('question_data_md5', 'unknown')}\n"
+                f"Actual MD5: {md5_hash}\n\n"
+                f"💡 The data may be corrupted or outdated. Please re-run preprocessing:\n"
+                f"   python data_process.py process -d {self.dataset}"
             )
+
         # 加载数据
-        self.sequence_data = pandas.read_parquet(sequence_data_path)
-        self.question_data = pandas.read_parquet(data_processed_path)
+        self._load_processed_data_safely(sequence_data_path, question_data_path)
+
+    def _load_processed_data_safely(self, sequence_data_path, question_data_path):
+        """
+        安全加载parquet数据,带详细错误信息
+
+        参数:
+            sequence_data_path: 序列数据路径
+            question_data_path: 问题数据路径
+
+        异常:
+            FileNotFoundError: 文件不存在
+            ValueError: 数据格式错误
+            MemoryError: 内存不足
+        """
+        # 加载序列数据
+        try:
+            logger.info(f"Loading sequence data: {sequence_data_path}")
+            self.sequence_data = pandas.read_parquet(sequence_data_path)
+            logger.info(
+                f"✓ Sequence data loaded successfully: {self.sequence_data.shape}"
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Data file not found: {sequence_data_path}\n"
+                f"Please run preprocessing first: python data_process.py process -d {self.dataset}"
+            ) from e
+        except Exception as e:
+            logger.error(f"Failed to load sequence data: {e}")
+            raise
+
+        # 加载问题数据
+        try:
+            logger.info(f"Loading question data: {question_data_path}")
+            self.question_data = pandas.read_parquet(question_data_path)
+            logger.info(
+                f"✓ Question data loaded successfully: {self.question_data.shape}"
+            )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Data file not found: {question_data_path}\n"
+                f"Please run preprocessing first: python data_process.py process -d {self.dataset}"
+            ) from e
+        except Exception as e:
+            logger.error(f"Failed to load question data: {e}")
+            raise
 
     @abstractmethod
     def clear_data(self):
@@ -407,7 +484,7 @@ class DataSource(ABC):
 
         注：在该方法中应调用 save_metadata() 保存元信息
         """
-        print("Saving processed data...")
+        logger.info("Saving processed data...")
         if self.sequence_data is None or self.question_data is None:
             raise ValueError("Please run clear_data() before saving processed data.")
 
@@ -425,7 +502,7 @@ class DataSource(ABC):
         md5_hash = self.compute_md5(sequence_data_path)
         self.add_metadata("sequence_data_md5", md5_hash)
         self.save_metadata()
-        print("Processed data saved.")
+        logger.info("Processed data saved.")
 
     def compute_md5(self, file_path: str) -> str:
         """
@@ -597,7 +674,7 @@ class DataSource(ABC):
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
-        print(f"Adding K-Fold labels with n_splits={n_splits}")
+        logger.info(f"Adding K-Fold labels with n_splits={n_splits}")
 
         # 复制数据以避免修改原始数据
         data = self.sequence_data.copy()

@@ -1,6 +1,4 @@
-"""
-Optuna configuration and parameter space helpers
-"""
+"""Optuna 配置和参数空间辅助工具。"""
 
 import json
 import logging

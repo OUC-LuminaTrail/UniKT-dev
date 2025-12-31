@@ -1,5 +1,11 @@
+"""数据下载和处理的命令行工具。"""
+
 from argparse import ArgumentParser
 from utils.data_process import get_data_source
+from utils.logger import get_logger
+from utils.params import DataParams, GeneralParams
+
+logger = get_logger(__name__)
 
 
 SUPPORTED_DATASETS = [
@@ -10,25 +16,6 @@ SUPPORTED_DATASETS = [
 ]
 
 
-def _build_common_args(parser):
-    parser.add_argument(
-        "-d",
-        "--dataset",
-        type=str,
-        choices=SUPPORTED_DATASETS,
-        required=True,
-        help="Dataset name",
-    )
-    parser.add_argument(
-        "--data_base_path",
-        default="./data",
-        type=str,
-        help="Data base path for raw/processed files",
-    )
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    return parser
-
-
 def build_parser():
     parser = ArgumentParser(description="Data Processing CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -37,7 +24,8 @@ def build_parser():
     dl = subparsers.add_parser(
         "download", help="Download raw dataset archive and extract"
     )
-    _build_common_args(dl)
+    DataParams.add_args(dl)
+    GeneralParams.add_args(dl)
     dl.add_argument(
         "--data_url",
         type=str,
@@ -68,24 +56,8 @@ def build_parser():
     proc = subparsers.add_parser(
         "process", help="Process raw data into standardized format"
     )
-    _build_common_args(proc)
-    proc.add_argument(
-        "--min_seq_len", type=int, default=10, help="Minimum sequence length"
-    )
-    proc.add_argument(
-        "--max_seq_len", type=int, default=200, help="Maximum sequence length"
-    )
-    proc.add_argument(
-        "--kfold",
-        type=int,
-        default=5,
-        help="Number of folds for K-Fold cross-validation (>=2 to enable)",
-    )
-    proc.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug mode to process a smaller subset of data(for EdNet dataset only)",
-    )
+    DataParams.add_args(proc)
+    GeneralParams.add_args(proc)
     proc.set_defaults(func=cmd_process)
 
     return parser
@@ -103,7 +75,7 @@ def cmd_download(args):
             "No data_url available for this dataset. Provide --data_url explicitly."
         )
 
-    print(f"Downloading dataset {args.dataset} to {dp.data_folder}")
+    logger.info(f"Downloading dataset {args.dataset} to {dp.data_folder}")
 
     # 获取下载参数
     force_download = getattr(args, "force", False)
@@ -116,7 +88,7 @@ def cmd_download(args):
     )
     # 持久化元信息
     dp.save_metadata()
-    print("Download complete.")
+    logger.info("Download complete.")
 
 
 def cmd_process(args):

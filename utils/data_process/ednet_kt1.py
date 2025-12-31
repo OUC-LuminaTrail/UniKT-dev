@@ -14,6 +14,9 @@ from .data_source import (
     build_question_data_from_cleared,
     map_to_continuous_ids,
 )
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 
 class EdNetKT1Data(DataSource):
@@ -37,7 +40,7 @@ class EdNetKT1Data(DataSource):
         # 实现数据加载逻辑
         if not os.path.exists(self.raw_data_folder):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_folder}")
-        print("Loading raw data from:", self.raw_data_folder)
+        logger.info("Loading raw data from:", self.raw_data_folder)
 
         # 读取题目信息
         self.question_data_path = os.path.join(
@@ -56,7 +59,7 @@ class EdNetKT1Data(DataSource):
         is_debug = hasattr(self.args, "debug") and self.args.debug
         debug_limit = 200 if is_debug else None
         if is_debug:
-            print(f"Debug mode enabled: processing only {debug_limit} files.")
+            logger.debug(f"Debug mode enabled: processing only {debug_limit} files.")
 
         # 统计文件总数
         total_files = 0
@@ -98,7 +101,7 @@ class EdNetKT1Data(DataSource):
         # 增大chunk size以减少开销
         CHUNK_SIZE = 5000
 
-        print(f"Starting parallel processing with {max_workers} workers...")
+        logger.info(f"Starting parallel processing with {max_workers} workers...")
 
         # 使用Manager Queue进行进程间通信
         manager = multiprocessing.Manager()
@@ -138,7 +141,7 @@ class EdNetKT1Data(DataSource):
                         if res is not None:
                             processed_batches.append(res)
                     except Exception as e:
-                        print(f"Error in worker: {e}")
+                        logger.error(f"Error in worker: {e}")
         finally:
             # 停止进度条线程
             stop_event.set()
@@ -148,13 +151,13 @@ class EdNetKT1Data(DataSource):
         if not processed_batches:
             raise ValueError("No data processed from EdNet files.")
 
-        print("Concatenating all batches...")
+        logger.debug("Concatenating all batches...")
         self.sequence_data_raw = pa.concat_tables(processed_batches).to_pandas()
-        print(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
+        logger.info(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
 
     @override
     def clear_data(self):
-        print("Processing Data...")
+        logger.info("Processing Data...")
 
         # 加载原始数据
         if (
@@ -234,7 +237,7 @@ class EdNetKT1Data(DataSource):
             seperator=";",
         )
 
-        print(f"Processed {len(sequence_data)} interactions.")
+        logger.info(f"Processed {len(sequence_data)} interactions.")
 
         self.add_metadatas(
             {

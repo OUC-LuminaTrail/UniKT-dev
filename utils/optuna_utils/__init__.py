@@ -1,7 +1,6 @@
-"""
-Top level module for optuna helper utilities.
+"""Optuna 辅助工具的顶层模块。
 
-Exports a simplified interface for the project's optuna integration.
+导出项目 Optuna 集成的简化接口。
 """
 
 from .config import (

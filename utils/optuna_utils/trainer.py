@@ -1,10 +1,7 @@
-"""
-Trainer integration to be used as an Optuna objective
-"""
+"""与 Optuna 目标函数集成的 Trainer。"""
 
 from typing import Any, Callable, Dict, List, Optional, Type
 from argparse import Namespace
-import logging
 import os
 
 from .config import (
@@ -14,8 +11,9 @@ from .config import (
     load_param_space_from_json,
 )
 from .tuner import OptunaTuner
+from utils.core import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class TrainerObjectiveWrapper:
@@ -55,9 +53,8 @@ class TrainerObjectiveWrapper:
         args = self._create_trial_args(params)
 
         # 为这个trial设置日志目录
-        trial_dir = os.path.join(
-            getattr(args, "log_dir", "./runs"), f"trial_{trial.number}"
-        )
+        base_log_dir = getattr(args, "log_dir", None) or "./runs"
+        trial_dir = os.path.join(base_log_dir, f"trial_{trial.number}")
         args.log_dir = trial_dir
 
         try:

@@ -4,6 +4,9 @@ from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 
 class GIKTDataset(Dataset):
@@ -65,7 +68,9 @@ class GIKTModelData(GraphModelData):
                 raise ValueError(
                     f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
                 )
-            print(f"Using K-fold cross-validation: fold {fold_idx}/{kfold_n_splits}")
+            logger.info(
+                f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
+            )
             train_data, val_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )

@@ -3,6 +3,7 @@ import numpy as np
 from tqdm import tqdm
 from utils.data_process.data_source import DataSource
 from utils.net_data import GraphModelData
+from utils.core import get_logger
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
@@ -30,6 +31,7 @@ class SQGKTDataset(Dataset):
 class SQGKTModelData(GraphModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
+        self.logger = get_logger(__name__)
 
     def sample_fixed_neighbors(
         self, matrix, neighbor_size, axis=1, desc="Sampling neighbors"
@@ -84,7 +86,7 @@ class SQGKTModelData(GraphModelData):
         返回:
             uq_table: 形状 (num_user, num_question, 3) 的三维张量
         """
-        print("Building user-question table with factors...")
+        self.logger.info("Building user-question table with factors...")
         from scipy.stats import poisson
 
         # 获取数据
@@ -101,7 +103,7 @@ class SQGKTModelData(GraphModelData):
         b = 10
 
         # 1. 计算用户能力因子（每个用户的平均正确率）
-        print("Computing ability factors...")
+        self.logger.info("Computing ability factors...")
 
         # 确保 user 和 question 是整数
         user_ids = data["user"].astype(int).values
@@ -114,7 +116,7 @@ class SQGKTModelData(GraphModelData):
 
         # 2. 计算问题的尝试次数和提示次数统计
         if "attempt_count" in data.columns and "hint_count" in data.columns:
-            print("Computing attempt and hint factors from data...")
+            self.logger.info("Computing attempt and hint factors from data...")
 
             # 计算每个问题的平均尝试次数和提示次数
             question_attempt_mean = data.groupby("question")["attempt_count"].mean()
@@ -147,16 +149,16 @@ class SQGKTModelData(GraphModelData):
             uq_table[user_ids, question_ids, 2] = hint_factor_g
 
         else:
-            print(
+            self.logger.warning(
                 "Using simplified factors (attempt_count and hint_count not available)..."
             )
             # 简化版本：只使用能力因子和基于问题难度的估计
             # 计算每个问题的平均正确率（作为难度的反向指标）
-            question_difficulty_series = data.groupby("question_id")["label"].mean()
+            question_difficulty_series = data.groupby("question")["label"].mean()
 
             # 映射到每个交互
             difficulties = (
-                data["question_id"].map(question_difficulty_series).fillna(0.5).values
+                data["question"].map(question_difficulty_series).fillna(0.5).values
             )
 
             attempt_factor_g = 1.0 - difficulties
@@ -167,7 +169,7 @@ class SQGKTModelData(GraphModelData):
             uq_table[user_ids, question_ids, 1] = attempt_factor_g
             uq_table[user_ids, question_ids, 2] = hint_factor_g
 
-        print(f"UQ table shape: {uq_table.shape}")
+        self.logger.info(f"UQ table shape: {uq_table.shape}")
         return uq_table
 
     def generate_question_skill_neighbors(
@@ -185,7 +187,7 @@ class SQGKTModelData(GraphModelData):
             q_neighbors: 形状 (num_question, q_neighbor_size) 的问题邻居数组
             s_neighbors: 形状 (num_skill, s_neighbor_size) 的技能邻居数组
         """
-        print("Generating question-skill graph neighbors...")
+        self.logger.info("Generating question-skill graph neighbors...")
         # 问题的邻居是技能 (按行采样)
         q_neighbors = self.sample_fixed_neighbors(
             qs_matrix,
@@ -219,7 +221,7 @@ class SQGKTModelData(GraphModelData):
             u_neighbors: 形状 (num_user, u_neighbor_size) 的用户邻居数组
             q_neighbors: 形状 (num_question, q_neighbor_size) 的问题邻居数组
         """
-        print("Generating user-question graph neighbors...")
+        self.logger.info("Generating user-question graph neighbors...")
         # 用户的邻居是问题 (按行采样)
         u_neighbors = self.sample_fixed_neighbors(
             uq_matrix, u_neighbor_size, axis=1, desc="Sampling user->question neighbors"
@@ -248,8 +250,8 @@ class SQGKTModelData(GraphModelData):
         )
 
         # 构建学生-问题矩阵和问题-技能矩阵
-        uq_matrix_2d = self.build_data_matrix(("user", "answers", "question"))
-        qs_matrix = self.build_data_matrix(("question", "has", "skill"))
+        uq_matrix_2d = self.build_relationship_matrix(("user", "answers", "question"))
+        qs_matrix = self.build_relationship_matrix(("question", "has", "skill"))
 
         # 构建三维的用户-问题表（包含三个因子）
         uq_table = self.build_uq_table_with_factors()

@@ -4,10 +4,122 @@ SQGKT 模型训练器
 """
 
 import torch
-from utils.net_trainer import Trainer
+from utils.training import BaseTrainer
+from utils.core import TRAINERS, get_logger
+from utils.config import register_model_params, BaseParamConfig
+
+logger = get_logger(__name__)
 
 
-class SQGKTTrainer(Trainer):
+@register_model_params("SQGKT")
+class SQGKTModelParams(BaseParamConfig):
+    """SQGKT model-specific parameters."""
+
+    def define_params(self) -> tuple[str, dict]:
+        group_name = "SQGKT Parameters"
+        params = {
+            "embedding_dim": {
+                "type": int,
+                "default": 100,
+                "short": "ed",
+                "help": "Embedding dimension (default: 100)",
+            },
+            "dropout_lstm": {
+                "type": float,
+                "default": 0.2,
+                "short": "dpl",
+                "help": "LSTM dropout probability (default: 0.2)",
+            },
+            "dropout_gnn": {
+                "type": float,
+                "default": 0.4,
+                "short": "dpg",
+                "help": "GNN dropout probability (default: 0.4)",
+            },
+            "lstm_layers": {
+                "type": int,
+                "default": 2,
+                "short": "ll",
+                "help": "Number of LSTM layers (default: 2)",
+            },
+            "qs_question_neighbors": {
+                "type": int,
+                "default": 5,
+                "help": "Question neighbors in question-skill graph (default: 5)",
+            },
+            "qs_skill_neighbors": {
+                "type": int,
+                "default": 10,
+                "help": "Skill neighbors in question-skill graph (default: 10)",
+            },
+            "uq_user_neighbors": {
+                "type": int,
+                "default": 5,
+                "help": "Question neighbors in user-question graph (default: 5)",
+            },
+            "uq_question_neighbors": {
+                "type": int,
+                "default": 5,
+                "help": "Skill neighbors in user-question graph (default: 5)",
+            },
+            "n_hop": {
+                "type": int,
+                "default": 3,
+                "short": "nh",
+                "help": "Number of GNN hops (default: 3)",
+            },
+            "rank_k": {
+                "type": int,
+                "default": 10,
+                "help": "Top K for soft review mechanism (default: 10)",
+            },
+            "history_neighbour": {
+                "type": int,
+                "default": 5,
+                "short": "hn",
+                "help": "History neighbor count (default: 5)",
+            },
+            "att_bound": {
+                "type": float,
+                "default": 0.2,
+                "short": "ab",
+                "help": "Attention bound (default: 0.2)",
+            },
+            "epochs": {
+                "type": int,
+                "default": 200,
+                "short": "ep",
+                "help": "Number of training epochs (default: 100)",
+            },
+            "learning_rate": {
+                "type": float,
+                "default": 0.001,
+                "short": "lr",
+                "help": "Learning rate for optimizer (default: 0.001)",
+            },
+            "lr_decay_factor": {
+                "type": float,
+                "default": None,
+                "help": "Learning rate decay factor per epoch (default: None)",
+            },
+            "weight_decay": {
+                "type": float,
+                "default": 1e-4,
+                "short": "wd",
+                "help": "Weight decay (L2 regularization) for optimizer (default: 0.0001)",
+            },
+            "batch_size": {
+                "type": int,
+                "default": 128,
+                "short": "bs",
+                "help": "Batch size for training (default: 128)",
+            },
+        }
+        return group_name, params
+
+
+@TRAINERS.register("SQGKT")
+class SQGKTTrainer(BaseTrainer):
     """
     SQGKT模型训练器
     """
@@ -63,31 +175,32 @@ class SQGKTTrainer(Trainer):
     def init_model(self, args, data_src):
         from model.SQGKT import SQGKT
 
-        print("Initializing SQGKT model...")
+        logger.info("Initializing SQGKT model...")
         model = SQGKT(args, data_src.get_metadata())
 
         # 二分类交叉熵损失
         loss_fn = torch.nn.BCEWithLogitsLoss()
         # 优化器
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
         # 学习率调度器
         lr_scheduler = None
-        if args.lr_decay:
+        if args.lr_decay_factor:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=args.lr_decay_factor
             )
 
         return model, optimizer, loss_fn, lr_scheduler
 
     def forward_pass(self, batch_data):
+        """SQGKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成"""
+        # 解包数据并移动到设备
         sequence, response, mask, user_ids = batch_data
-        # 将数据移动到设备
-        sequence = sequence.to(self.device_)
-        response = response.to(self.device_)
-        mask = mask.to(torch.bool).to(self.device_)
-        user_ids = user_ids.to(self.device_)
+        sequence = self._move_tensor_to_device(sequence)
+        response = self._move_tensor_to_device(response)
+        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
+        user_ids = self._move_tensor_to_device(user_ids)
 
         # 模型前向传播
         y_hat_full = self.model(
@@ -103,23 +216,19 @@ class SQGKTTrainer(Trainer):
             self.uq_q_neighbor_list.to(self.device_),
         )  # [B, S]
 
-        # 提取有效位置的预测和标签
-        # 跳过第一个时间步
-        y_hat_seq = y_hat_full[:, 1:]
-        y_label_seq = response.float()[:, 1:]
-        valid_mask = mask[:, 1:]
+        # 提取有效位置的预测和标签（跳过第一个时间步）
+        y_hat, y_label, _ = self._extract_valid_predictions(
+            y_hat_full, response, mask, skip_first=True
+        )
 
-        # 使用 mask 选择有效位置
-        y_hat = torch.masked_select(y_hat_seq, valid_mask)
-        y_label = torch.masked_select(y_label_seq, valid_mask)
+        # 处理空批次
+        y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 若该批次没有任何有效位置，使用占位避免后续计算报错
-        if y_label.numel() == 0:
-            # Logits 0.0 对应概率 0.5
-            y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
-            y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
+        # 生成二分类预测
+        y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
-        # 生成二分类预测（Logits 阈值 0.0 对应概率 0.5）
-        y_predict = torch.ge(y_hat, torch.tensor(0.0).to(self.device_)).to(torch.int)
-
-        return y_hat, y_label, y_predict
+        return {
+            "y_hat": y_hat,
+            "y_label": y_label,
+            "y_predict": y_predict,
+        }

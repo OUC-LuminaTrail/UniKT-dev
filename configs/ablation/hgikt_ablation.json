@@ -1,0 +1,94 @@
+{
+  "model_name": "HGIKT",
+  "baseline": {
+    "name": "full_model",
+    "description": "Complete HGIKT model with all modules enabled",
+    "modifications": []
+  },
+  "ablations": [
+    {
+      "name": "no_hetero_gnn",
+      "description": "Disable heterogeneous graph neural network",
+      "modifications": [
+        {
+          "type": "module_disable",
+          "target": "hetero_conv"
+        }
+      ]
+    },
+    {
+      "name": "no_hyper_gnn",
+      "description": "Disable hypergraph neural network",
+      "modifications": [
+        {
+          "type": "module_disable",
+          "target": "hgnn_conv"
+        }
+      ]
+    },
+    {
+      "name": "no_hetero_gnn_with_moe_disabled",
+      "description": "Disable heterogeneous GNN and MoE fusion, use only hypergraph GNN output",
+      "modifications": [
+        {
+          "type": "module_disable",
+          "target": "hetero_conv"
+        },
+        {
+          "type": "module_replace",
+          "target": "fuse",
+          "params": {
+            "replacement_module": "PassThroughModule",
+            "replacement_params": {
+              "index": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "no_hyper_gnn_with_moe_disabled",
+      "description": "Disable hypergraph GNN and MoE fusion, use only heterogeneous GNN output",
+      "modifications": [
+        {
+          "type": "module_disable",
+          "target": "hgnn_conv"
+        },
+        {
+          "type": "module_replace",
+          "target": "fuse",
+          "params": {
+            "replacement_module": "PassThroughModule",
+            "replacement_params": {
+              "index": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "no_fusion",
+      "description": "Disable MoE fusion module",
+      "modifications": [
+        {
+          "type": "module_disable",
+          "target": "fuse"
+        }
+      ]
+    },
+    {
+      "name": "no_hetero_and_hyper",
+      "description": "Disable both heterogeneous and hypergraph GNN",
+      "modifications": [
+        {
+          "type": "module_disable",
+          "target": "hetero_conv"
+        },
+        {
+          "type": "module_disable",
+          "target": "hgnn_conv"
+        }
+      ]
+    }
+  ]
+}

@@ -4,6 +4,9 @@ from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 
 class HGIKTDataset(Dataset):
@@ -53,7 +56,7 @@ class HGIKTModelData(GraphModelData):
             num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),
         )
 
-        print(
+        logger.debug(
             f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)"
         )
 
@@ -88,7 +91,9 @@ class HGIKTModelData(GraphModelData):
                 raise ValueError(
                     f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
                 )
-            print(f"Using K-fold cross-validation: fold {fold_idx}/{kfold_n_splits}")
+            logger.info(
+                f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
+            )
             train_data, val_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
@@ -181,7 +186,9 @@ class HGIKTModelData(GraphModelData):
         e_list = []
         edge_weights = []
 
-        print(f"Building difficulty-weighted {hyperedge_node_type} hypergraph...")
+        logger.debug(
+            f"Building difficulty-weighted {hyperedge_node_type} hypergraph..."
+        )
         for hyperedge_idx, vertices in tqdm(
             edge_dict.items(), desc=f"Clustering {hyperedge_node_type} by difficulty"
         ):
@@ -248,7 +255,7 @@ class HGIKTModelData(GraphModelData):
 
         # 处理空超边情况
         if len(e_list) == 0:
-            print("Warning: No hyperedges found. Creating self-loop hypergraph.")
+            logger.warning("No hyperedges found. Creating self-loop hypergraph.")
             e_list = [[i] for i in range(num_vertices)]
             edge_weights = [1.0] * num_vertices
 
@@ -262,10 +269,12 @@ class HGIKTModelData(GraphModelData):
             num_v=num_vertices, e_list=e_list, e_weight=edge_weights
         )
 
-        print(
+        logger.debug(
             f"Difficulty-weighted {hyperedge_node_type.capitalize()} Hypergraph constructed:"
         )
-        print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
-        print(f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}")
+        logger.debug(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
+        logger.debug(
+            f"  - Number of hyperedges (difficulty clusters): {hypergraph.num_e}"
+        )
 
         return hypergraph

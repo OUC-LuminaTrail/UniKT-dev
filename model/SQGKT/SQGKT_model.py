@@ -2,8 +2,10 @@ import torch
 from torch.nn import Module, Embedding, Linear, ModuleList, Dropout, LSTMCell
 import torch.nn as nn
 import torch.nn.functional as F
+from utils.core import MODELS
 
 
+@MODELS.register("SQGKT")
 class SQGKT(Module):
     def __init__(
         self,
@@ -265,12 +267,17 @@ class SQGKT(Module):
         return torch.relu(self.MLP_AGG_last(emb_node_neighbor[0]))
 
     def sum_aggregate_uq(self, emb_self, emb_neighbor, hop, self_ids, neighbor_ids):
-        """
-        :param emb_self: 中心节点的嵌入, shape: [num_center_nodes, emb_dim]
-        :param emb_neighbor: 邻居节点的嵌入, shape: [num_center_nodes, neighbor_size, emb_dim]
-        :param hop: 当前的聚合层数
-        :param self_ids: 中心节点的全局ID, shape: [num_center_nodes]
-        :param neighbor_ids: 邻居节点的全局ID, shape: [num_center_nodes, neighbor_size]
+        """聚合用户-问题图的邻居节点特征。
+
+        Args:
+            emb_self: 中心节点的嵌入，shape: [num_center_nodes, emb_dim]
+            emb_neighbor: 邻居节点的嵌入，shape: [num_center_nodes, neighbor_size, emb_dim]
+            hop: 当前的聚合层数
+            self_ids: 中心节点的全局ID，shape: [num_center_nodes]
+            neighbor_ids: 邻居节点的全局ID，shape: [num_center_nodes, neighbor_size]
+
+        Returns:
+            加权聚合后的嵌入
         """
         # 在 User-Question Graph 中，中心节点是 User，邻居是 Question
         user_ids = self_ids

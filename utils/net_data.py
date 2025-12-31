@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from utils.data_process import DataSource
+from utils.core import get_logger
 
 
 class BaseModelData(ABC):
@@ -221,7 +222,9 @@ class BaseModelData(ABC):
         # 如果指定了排除的fold，则过滤掉该fold的数据
         if exclude_fold is not None and "fold" in data.columns:
             data = data[data["fold"] != exclude_fold]
-            print(f"Excluding fold {exclude_fold} from difficulty calculation.")
+            self.logger.info(
+                f"Excluding fold {exclude_fold} from difficulty calculation."
+            )
 
         # 计算每个问题的正确率
         question_stats = (
@@ -271,7 +274,9 @@ class BaseModelData(ABC):
         # 如果指定了排除的fold，则过滤掉该fold的数据
         if exclude_fold is not None and "fold" in data.columns:
             data = data[data["fold"] != exclude_fold]
-            print(f"Excluding fold {exclude_fold} from discrimination calculation.")
+            self.logger.info(
+                f"Excluding fold {exclude_fold} from discrimination calculation."
+            )
 
         # 1. 计算每个学生的平均正确率作为能力代理
         user_stats = data.groupby("user")["label"].mean().reset_index()
@@ -400,8 +405,8 @@ class BaseModelData(ABC):
         except (KeyError, AttributeError):
             # 如果元数据中没有，从数据中计算
             num_src = data[src_col].nunique()
-            print(
-                f"Warning: {src_meta_key} not found in metadata, calculated from data: {num_src}"
+            self.logger.warning(
+                f"{src_meta_key} not found in metadata, calculated from data: {num_src}"
             )
 
         try:
@@ -409,8 +414,8 @@ class BaseModelData(ABC):
         except (KeyError, AttributeError):
             # 如果元数据中没有，从数据中计算
             num_dst = data[dst_col].nunique()
-            print(
-                f"Warning: {dst_meta_key} not found in metadata, calculated from data: {num_dst}"
+            self.logger.warning(
+                f"{dst_meta_key} not found in metadata, calculated from data: {num_dst}"
             )
 
         # 初始化矩阵
@@ -455,6 +460,10 @@ class GraphModelData(BaseModelData):
     r"""
     图数据基类
     """
+
+    def __init__(self, data_src: DataSource):
+        super().__init__(data_src)
+        self.logger = get_logger(__name__)
 
     @abstractmethod
     def prepare_data(self, args):
@@ -642,7 +651,9 @@ class GraphModelData(BaseModelData):
             src_type, relation, dst_type = edge_type
 
             # 使用 build_relationship_matrix 构建关联矩阵
-            print(f"Building relationship matrix for {src_type}-{relation}-{dst_type}")
+            self.logger.info(
+                f"Building relationship matrix for {src_type}-{relation}-{dst_type}"
+            )
             rel_matrix = self.build_relationship_matrix(edge_type, value_type="binary")
 
             # 从关联矩阵中提取边索引
@@ -650,7 +661,7 @@ class GraphModelData(BaseModelData):
             src_indices, dst_indices = np.nonzero(rel_matrix)
 
             if len(src_indices) == 0:
-                print(f"Warning: No edges found for {edge_type}")
+                self.logger.warning(f"No edges found for {edge_type}")
                 continue
 
             # 转换为 PyTorch 张量
@@ -671,8 +682,8 @@ class GraphModelData(BaseModelData):
 
                 # 检查列是否存在
                 if src_col not in data.columns or dst_col not in data.columns:
-                    print(
-                        f"Warning: Columns {src_col} or {dst_col} not found. Skipping edge attributes."
+                    self.logger.warning(
+                        f"Columns {src_col} or {dst_col} not found. Skipping edge attributes."
                     )
                     continue
 
@@ -804,8 +815,8 @@ class GraphModelData(BaseModelData):
 
         # 处理没有超边的情况
         if len(e_list) == 0:
-            print(
-                f"Warning: No hyperedges found for {edge_type}. Creating self-loop hypergraph."
+            self.logger.warning(
+                f"No hyperedges found for {edge_type}. Creating self-loop hypergraph."
             )
             # 创建自环超图：每个顶点自成一个超边
             e_list = [[i] for i in range(num_vertices)]
@@ -813,8 +824,10 @@ class GraphModelData(BaseModelData):
         # 使用 DHG 框架创建超图
         hypergraph = Hypergraph(num_v=num_vertices, e_list=e_list)
 
-        print(f"{hyperedge_node_type.capitalize()} Hypergraph constructed:")
-        print(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
-        print(f"  - Number of hyperedges ({hyperedge_node_type}s): {hypergraph.num_e}")
+        self.logger.info(f"{hyperedge_node_type.capitalize()} Hypergraph constructed:")
+        self.logger.info(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
+        self.logger.info(
+            f"  - Number of hyperedges ({hyperedge_node_type}s): {hypergraph.num_e}"
+        )
 
         return hypergraph

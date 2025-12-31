@@ -1,10 +1,7 @@
-"""
-Optuna Tuner wrapper and helpers
-"""
+"""Optuna 调优器包装器和辅助工具。"""
 
 import os
 import json
-import logging
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import asdict
 from datetime import datetime
@@ -12,8 +9,9 @@ from datetime import datetime
 import optuna
 
 from .config import HyperparameterSpace, OptunaConfig
+from utils.core import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class OptunaTuner:
@@ -171,19 +169,21 @@ class OptunaTuner:
     def print_summary(self):
         """打印搜索结果摘要"""
         if not self.study:
-            print("No study found. Run search() first.")
+            logger.warning("No study found. Run search() first.")
             return
 
-        print("\n" + "=" * 60)
-        print("Optuna Hyperparameter Search Summary")
-        print("=" * 60)
-        print(f"Study Name: {self.study.study_name}")
-        print(f"Total Trials: {len(self.study.trials)}")
-        print(f"Best Value: {self.study.best_value}")
-        print("\nBest Parameters:")
+        log = [
+            "=" * 60,
+            "Optuna Hyperparameter Search Summary",
+            "=" * 60,
+            f"Study Name: {self.study.study_name}",
+            f"Total Trials: {len(self.study.trials)}",
+            f"Best Value: {self.study.best_value}",
+            "\nBest Parameters:",
+        ]
         for param, value in self.study.best_params.items():
-            print(f"  {param}: {value}")
-        print("=" * 60 + "\n")
+            log.append(f"  {param}: {value}")
+        logger.info("\n".join(log))
 
     def get_dataframe(self):
         """获取试验数据框（需要pandas）"""
