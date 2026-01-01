@@ -16,6 +16,7 @@ from utils.config import (
     GeneralParams,
     get_model_params,
 )
+from utils.experiment_manager import ExperimentManager, ExperimentType
 import model  # noqa: F401
 
 logger = get_logger(__name__)
@@ -70,12 +71,6 @@ def parse_args():
         default=None,
         help="Comma-separated list of ablation names to run (default: all)",
     )
-    ablation_group.add_argument(
-        "--output-dir",
-        type=str,
-        default="runs/ablation",
-        help="Directory to save ablation results (default: runs/ablation)",
-    )
 
     args = parser.parse_args()
 
@@ -91,6 +86,15 @@ def main():
     # Load ablation configuration
     logger.info(f"Loading configuration from: {args.config}")
     config = load_ablation_config(args.config)
+
+    # 创建实验管理器
+    exp_manager = ExperimentManager(
+        exp_type=ExperimentType.ABLATION,
+        model_name=config.model_name,
+        dataset_name=args.dataset,
+        base_dir="runs",
+    )
+    logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 
     logger.info(f"Model: {config.model_name}")
     logger.info(f"Baseline: {config.baseline.name}")
@@ -121,7 +125,7 @@ def main():
         config=config,
         args=args,
         data_src=data_src,
-        output_dir=args.output_dir,
+        exp_manager=exp_manager,
     )
 
     # Run experiments

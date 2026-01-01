@@ -128,6 +128,7 @@ class SQGKTTrainer(BaseTrainer):
         self,
         args=None,
         data_src=None,
+        exp_manager=None,
     ):
         # 构建数据
         from model.SQGKT.SQGKT_data import SQGKTModelData
@@ -166,10 +167,10 @@ class SQGKTTrainer(BaseTrainer):
             val_data=val_data,
             lr_scheduler=lr_scheduler,
             hyperparams=args,
-            log_dir=args.log_dir,
             device=args.device,
             checkpoint_path=args.checkpoint_path,
             seed=args.seed,
+            exp_manager=exp_manager,
         )
 
     def init_model(self, args, data_src):

@@ -4,7 +4,6 @@
 """
 
 import os
-import time
 import argparse
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Any
@@ -75,7 +74,7 @@ class BaseTrainer(ABC):
         lr_scheduler=None,
         early_stopping=None,
         hyperparams=None,
-        log_dir: str = None,
+        exp_manager=None,
         device: torch.device = None,
         checkpoint_path: str = None,
         use_swanlab: bool = True,
@@ -93,7 +92,7 @@ class BaseTrainer(ABC):
             lr_scheduler: 学习率调度器（可选）
             early_stopping: 早停配置或对象（可选）
             hyperparams: 超参数（可选）
-            log_dir: 日志目录（可选）
+            exp_manager: 实验管理器（必需）
             device: 计算设备（可选）
             checkpoint_path: 检查点路径（可选）
             use_swanlab: 是否使用 SwanLab（默认 True）
@@ -157,10 +156,10 @@ class BaseTrainer(ABC):
                 )
 
         # 创建日志目录
-        dir = time.strftime("%Y%m%d-%H%M%S")
-        if log_dir is not None:
-            dir = os.path.join(log_dir, dir)
-        self.log_dir = os.path.join("runs", dir)
+        if exp_manager is None:
+            raise ValueError("exp_manager is required.")
+
+        self.log_dir = exp_manager.get_log_dir()
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
@@ -186,9 +185,12 @@ class BaseTrainer(ABC):
         # SwanLab 初始化
         self.use_swanlab = use_swanlab
         if self.use_swanlab:
+            from pathlib import Path
+
+            experiment_name = Path(self.log_dir).name
             self._init_swanlab(
                 project_name="kt-exp-graph",
-                experiment_name=f"Run_{dir}",
+                experiment_name=f"Run_{experiment_name}",
             )
 
     @classmethod

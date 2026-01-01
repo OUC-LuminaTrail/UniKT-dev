@@ -10,6 +10,7 @@ from utils.config import (
     EarlyStoppingParams,
     GeneralParams,
 )
+from utils.experiment_manager import ExperimentManager, ExperimentType
 import model  # noqa: F401
 
 logger = get_logger(__name__)
@@ -59,6 +60,10 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # 创建实验管理器
+    exp_manager = ExperimentManager.from_args(args, ExperimentType.NORMAL)
+    logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
+
     logger.info(f"Building dataset: {args.dataset}...")
     data_src = get_data_source(dataset_name=args.dataset, args=args)
 
@@ -67,6 +72,7 @@ def main():
     trainer = trainer_cls(
         args=args,
         data_src=data_src,
+        exp_manager=exp_manager,
     )
 
     logger.info("Starting training...")

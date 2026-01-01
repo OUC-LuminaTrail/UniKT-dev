@@ -2,7 +2,6 @@
 
 from typing import Any, Callable, Dict, List, Optional, Type
 from argparse import Namespace
-import os
 
 from .config import (
     OptunaConfig,
@@ -28,15 +27,25 @@ class TrainerObjectiveWrapper:
         base_args: Namespace,
         metric_name: str = "auc",
         max_epochs: Optional[int] = None,
+        exp_manager=None,
     ):
         """
         初始化Trainer包装器
+
+        Args:
+            trainer_class: 训练器类
+            data_src_fn: 数据源工厂函数
+            base_args: 基础参数
+            metric_name: 优化指标名称
+            max_epochs: 最大epoch数
+            exp_manager: 实验管理器（用于创建trial子目录）
         """
         self.trainer_class = trainer_class
         self.data_src_fn = data_src_fn
         self.base_args = base_args
         self.metric_name = metric_name
         self.max_epochs = max_epochs or getattr(base_args, "epochs", 50)
+        self.exp_manager = exp_manager
 
         # 验证metric_name
         if metric_name.lower() not in ["auc", "acc", "rmse", "loss"]:
@@ -52,17 +61,21 @@ class TrainerObjectiveWrapper:
         # 创建副本，避免修改原始args
         args = self._create_trial_args(params)
 
-        # 为这个trial设置日志目录
-        base_log_dir = getattr(args, "log_dir", None) or "./runs"
-        trial_dir = os.path.join(base_log_dir, f"trial_{trial.number}")
-        args.log_dir = trial_dir
+        # 为这个trial创建子实验管理器
+        trial_exp_manager = None
+        if self.exp_manager is not None:
+            trial_exp_manager = self.exp_manager.create_sub_experiment(
+                f"trial_{trial.number}"
+            )
 
         try:
             # 加载数据
             data_src = self.data_src_fn()
 
             # 初始化trainer
-            trainer = self.trainer_class(args=args, data_src=data_src)
+            trainer = self.trainer_class(
+                args=args, data_src=data_src, exp_manager=trial_exp_manager
+            )
 
             # 运行训练
             trainer.run()

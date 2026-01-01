@@ -8,6 +8,7 @@ from utils.config import (
     GeneralParams,
     get_model_params,
 )
+from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
     load_config_from_json,
     load_param_space_from_json,
@@ -92,6 +93,17 @@ def main():
     """主函数。"""
     args = parse_args()
 
+    # 创建实验管理器
+    exp_manager = ExperimentManager(
+        exp_type=ExperimentType.HYPERPARAM_SEARCH,
+        model_name=args.model,
+        dataset_name=args.dataset,
+        base_dir="runs",
+        tags=[f"n_trials{args.n_trials}"] if hasattr(args, "n_trials") else [],
+    )
+
+    logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
+
     logger.info("=" * 60)
     logger.info(f"{args.model} Optuna Hyperparameter Search")
     logger.info("=" * 60)
@@ -99,7 +111,7 @@ def main():
     # 加载Optuna配置
     logger.info(f"Loading Optuna config from: {args.optuna_config}")
     optuna_config = load_config_from_json(args.optuna_config)
-    optuna_config.save_dir = args.log_dir
+    optuna_config.save_dir = exp_manager.get_log_dir()
 
     # 加载参数空间
     logger.info(f"Loading parameter space from: {args.param_space}")
@@ -119,6 +131,7 @@ def main():
         base_args=args,
         metric_name=args.metric,
         max_epochs=args.epochs,
+        exp_manager=exp_manager,
     )
 
     # 使用构建器创建OptunaTuner
@@ -142,8 +155,8 @@ def main():
     # 获取和保存数据框
     df = tuner.get_dataframe()
     if df is not None:
-        os.makedirs(args.log_dir, exist_ok=True)
-        df_path = os.path.join(args.log_dir, f"trials_history_{args.model.lower()}.csv")
+        log_dir = exp_manager.get_log_dir()
+        df_path = os.path.join(log_dir, f"trials_history_{args.model.lower()}.csv")
         df.to_csv(df_path, index=False)
         logger.info(f"Trials history saved to: {df_path}")
 

@@ -112,6 +112,7 @@ class GIKTTrainer(BaseTrainer):
         self,
         args=None,
         data_src=None,
+        exp_manager=None,
     ):
         # 构建数据
         from model.GIKT import GIKTModelData
@@ -130,10 +131,10 @@ class GIKTTrainer(BaseTrainer):
             val_data=val_data,
             lr_scheduler=lr_scheduler,
             hyperparams=args,
-            log_dir=args.log_dir,
             device=args.device,
             checkpoint_path=args.checkpoint_path,
             seed=args.seed,
+            exp_manager=exp_manager,
         )
 
         # 将静态数据移动到设备中

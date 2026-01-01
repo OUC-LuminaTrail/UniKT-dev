@@ -9,7 +9,7 @@ import copy
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Type
 
 from .config import AblationConfig, AblationModification, AblationStudyConfig
 from .strategies import apply_ablation
@@ -153,7 +153,7 @@ class AblationExperiment:
         config: AblationStudyConfig,
         args: Any,
         data_src: Any,
-        output_dir: Optional[str] = None,
+        exp_manager,
     ):
         """
         Initialize ablation experiment.
@@ -163,13 +163,14 @@ class AblationExperiment:
             config: Ablation study configuration
             args: Training arguments
             data_src: Data source
-            output_dir: Directory to save results
+            exp_manager: ExperimentManager instance
         """
         self.base_trainer = base_trainer
         self.config = config
         self.args = args
         self.data_src = data_src
-        self.output_dir = Path(output_dir) if output_dir else Path("runs/ablation")
+        self.exp_manager = exp_manager
+        self.output_dir = Path(exp_manager.get_log_dir())
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.results: List[AblationResult] = []
@@ -185,13 +186,18 @@ class AblationExperiment:
 
         start_time = time.time()
 
-        # Create a copy of args to avoid modifying the original and set unique log dir
+        # Create a copy of args to avoid modifying the original
         run_args = copy.deepcopy(self.args)
-        if hasattr(run_args, "log_dir"):
-            run_args.log_dir = str(self.output_dir / self.config.baseline.name)
+
+        # Create sub-experiment manager for baseline
+        baseline_exp_manager = self.exp_manager.create_sub_experiment(
+            self.config.baseline.name
+        )
 
         # Create trainer and run
-        trainer = self.base_trainer(args=run_args, data_src=self.data_src)
+        trainer = self.base_trainer(
+            args=run_args, data_src=self.data_src, exp_manager=baseline_exp_manager
+        )
         trainer.run()
 
         # Collect metrics
@@ -226,13 +232,18 @@ class AblationExperiment:
 
         start_time = time.time()
 
-        # Create a copy of args to avoid modifying the original and set unique log dir
+        # Create a copy of args to avoid modifying the original
         run_args = copy.deepcopy(self.args)
-        if hasattr(run_args, "log_dir"):
-            run_args.log_dir = str(self.output_dir / ablation_config.name)
+
+        # Create sub-experiment manager for this ablation
+        ablation_exp_manager = self.exp_manager.create_sub_experiment(
+            ablation_config.name
+        )
 
         # Create trainer
-        trainer = self.base_trainer(args=run_args, data_src=self.data_src)
+        trainer = self.base_trainer(
+            args=run_args, data_src=self.data_src, exp_manager=ablation_exp_manager
+        )
         model = trainer.model
 
         # Apply ablation strategies using ExitStack to manage multiple context managers
