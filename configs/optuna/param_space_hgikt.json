@@ -50,14 +50,6 @@
     "default": 0.2
   },
   {
-    "name": "attention_dim",
-    "type": "int",
-    "low": 32,
-    "high": 256,
-    "log": true,
-    "default": 64
-  },
-  {
     "name": "lr",
     "type": "float",
     "low": 0.0001,

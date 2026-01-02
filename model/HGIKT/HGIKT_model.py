@@ -238,9 +238,7 @@ class HGIKT(nn.Module):
         )
 
         # 广义交互模块
-        self.general_interaction = GeneralInteraction(
-            hidden_dim=self.hidden_dim, attention_dim=args.attention_dim
-        )
+        self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
     def forward(
         self,

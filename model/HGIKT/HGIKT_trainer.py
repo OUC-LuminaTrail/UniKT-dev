@@ -48,12 +48,6 @@ class HGIKTModelParams(BaseParamConfig):
                 "short": "hn",
                 "help": "History neighbor count",
             },
-            "attention_dim": {
-                "type": int,
-                "default": 110,
-                "short": "ad",
-                "help": "Attention dimension",
-            },
             "att_bound": {
                 "type": float,
                 "default": 0.1,

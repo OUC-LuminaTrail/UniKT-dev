@@ -114,7 +114,6 @@ class GeneralInteraction(nn.Module):
 
     参数：
     - hidden_dim: 隐藏层维度
-    - attention_dim: 注意力网络中间层维度
 
     输入：
     - hist_candidates: 学生相关状态集合 [B, S, M+1, H]
@@ -125,62 +124,87 @@ class GeneralInteraction(nn.Module):
     - logits: 预测分数 [B, S]
     """
 
-    def __init__(self, hidden_dim: int, attention_dim: int = 64):
+    def __init__(self, hidden_dim: int):
         super(GeneralInteraction, self).__init__()
         self.hidden_dim = hidden_dim
-        self.attention_dim = attention_dim
 
-        # 加性注意力：输入拼接向量，输出注意力分数
-        self.attention_net = nn.Sequential(
-            nn.Linear(2 * hidden_dim, attention_dim),
-            nn.Tanh(),
-            nn.Linear(attention_dim, 1),
-        )
+        # 加性注意力的两个权重向量和偏置
+        self.w1 = nn.Parameter(torch.empty(hidden_dim, 1))
+        self.w2 = nn.Parameter(torch.empty(hidden_dim, 1))
+        self.b1 = nn.Parameter(torch.empty(1))
+        self.b2 = nn.Parameter(torch.empty(1))
 
-        # 初始化权重
-        nn.init.xavier_uniform_(self.attention_net[0].weight)
-        nn.init.xavier_uniform_(self.attention_net[2].weight)
+        # Xavier初始化
+        nn.init.xavier_uniform_(self.w1)
+        nn.init.xavier_uniform_(self.w2)
+        nn.init.zeros_(self.b1)
+        nn.init.zeros_(self.b2)
 
-    def forward(self, hist_candidates, next_candidates, user_mask):
+    def forward(
+        self,
+        hist_candidates: torch.Tensor,  # [B, S, M+1, H]
+        next_candidates: torch.Tensor,  # [B, S, N+1, H]
+        user_mask: torch.Tensor,  # [B, S]
+    ):
         B, S, M_plus_1, H = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
 
-        # 计算两两内积得分
+        # 1. 计算两两内积得分
+        # hist: [B, S, M+1, H] -> [B, S, M+1, 1, H]
+        # next: [B, S, N+1, H] -> [B, S, 1, N+1, H]
         interaction = hist_candidates.unsqueeze(3) * next_candidates.unsqueeze(2)
         logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
 
-        # 扩展维度以便拼接
-        hist_expanded = hist_candidates.unsqueeze(3).expand(-1, -1, -1, N_plus_1, -1)
-        next_expanded = next_candidates.unsqueeze(2).expand(-1, -1, M_plus_1, -1, -1)
+        # 2. 计算加性注意力分数
+        # 分别对hist和next应用线性变换
+        # hist_candidates: [B, S, M+1, H] -> [B, S, M+1, 1]
+        f1 = (
+            torch.matmul(
+                hist_candidates.reshape(-1, H),  # [B*S*(M+1), H]
+                self.w1,  # [H, 1]
+            ).reshape(B, S, M_plus_1, 1)
+            + self.b1
+        )  # [B, S, M+1, 1]
 
-        # 拼接交互对向量
-        interaction_pairs = torch.cat([hist_expanded, next_expanded], dim=-1)
+        # next_candidates: [B, S, N+1, H] -> [B, S, 1, N+1]
+        f2 = (
+            torch.matmul(
+                next_candidates.reshape(-1, H),  # [B*S*(N+1), H]
+                self.w2,  # [H, 1]
+            ).reshape(B, S, 1, N_plus_1)
+            + self.b2
+        )  # [B, S, 1, N+1]
 
-        # 通过注意力网络计算分数
-        attention_scores = self.attention_net(
-            interaction_pairs.reshape(-1, 2 * H)
-        ).reshape(B, S, M_plus_1, N_plus_1)  # [B, S, M+1, N+1]
+        # 3. 广播相加并应用tanh激活
+        # f1: [B, S, M+1, 1]
+        # f2: [B, S, 1, N+1]
+        # f: [B, S, M+1, N+1]
+        attention_scores = torch.tanh(f1 + f2)  # [B, S, M+1, N+1]
 
-        # 展平维度进行softmax
+        # 4. 展平并进行softmax
         attention_scores_flat = attention_scores.reshape(
             B, S, -1
         )  # [B, S, (M+1)*(N+1)]
         logits_raw_flat = logits_raw.reshape(B, S, -1)  # [B, S, (M+1)*(N+1)]
 
-        # 应用掩码和softmax
-        mask_expanded = user_mask.unsqueeze(-1)
+        # 5. 应用用户掩码
+        mask_expanded = user_mask.unsqueeze(-1)  # [B, S, 1]
         attention_scores_flat = torch.where(
             mask_expanded,
             attention_scores_flat,
             torch.full_like(attention_scores_flat, -1e9),
         )
 
+        # 6. Softmax归一化
         attention_weights = F.softmax(
-            attention_scores_flat, dim=-1
+            attention_scores_flat,
+            dim=-1,
         )  # [B, S, (M+1)*(N+1)]
 
-        # 加权求和
+        # 7. 加权求和
         logits = torch.sum(logits_raw_flat * attention_weights, dim=-1)  # [B, S]
+
+        # 8. 应用掩码（无效位置置零）
         logits = logits * user_mask.float()
 
         return logits
