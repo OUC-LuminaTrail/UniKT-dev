@@ -211,7 +211,7 @@ class GIKT(nn.Module):
         history_question_neighbors = self.history_review(
             question_embedding_sequence,
             next_question_embedding,
-            exercise_emb,
+            lstm_output,  # qa_emb
             user_mask,
         )  # history_question_neighbors: [B, S, M, H]
 
