@@ -548,6 +548,23 @@ class BaseTrainer(ABC):
                                 cb.step(monitor_value, epoch)
                                 break
 
+                    # 记录早停状态到 SwanLab
+                    if self.use_swanlab:
+                        try:
+                            import swanlab
+
+                            swanlab.log(
+                                {
+                                    "ES/Best": self.early_stopping.best_score,
+                                    "ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
+                                },
+                                step=epoch,
+                            )
+                        except ImportError:
+                            logger.warning(
+                                "SwanLab is not installed. Skipping Early Stopping logging."
+                            )
+
                     # 更新最佳指标显示（放在 step 之后，确保 num_bad_epochs 已刷新）
                     if best_metric_text is not None:
                         best_epoch = getattr(self, "_best_epoch", None)
