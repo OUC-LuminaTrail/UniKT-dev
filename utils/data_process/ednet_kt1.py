@@ -41,7 +41,7 @@ class EdNetKT1Data(DataSource):
         # 实现数据加载逻辑
         if not os.path.exists(self.raw_data_folder):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_folder}")
-        logger.info("Loading raw data from:", self.raw_data_folder)
+        logger.info(f"Loading raw data from: {self.raw_data_folder}")
 
         # 读取题目信息
         self.question_data_path = os.path.join(

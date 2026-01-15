@@ -38,7 +38,7 @@ class Assistments2017Data(DataSource):
         """
         if not os.path.exists(self.raw_data_path):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
-        logger.info("Loading raw data from:", self.raw_data_path)
+        logger.info(f"Loading raw data from: {self.raw_data_path}")
         self.raw_data = pd.read_csv(
             self.raw_data_path, encoding="latin1", low_memory=False
         )
