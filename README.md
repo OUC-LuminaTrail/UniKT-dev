@@ -1,4 +1,4 @@
-# KT-GNN 实验模型（PyG 框架）
+# KT-GNN 实验框架
 
 ## 项目依赖
 
@@ -13,11 +13,43 @@
 - swanlab: 0.7.2
 - python-dotenv: 1.2.1
 
-### 环境安装
+## 运行环境配置
 
-该环境配置命令只支持 Linux 系统。
+> 该框架仅支持 Linux 系统。
+
+### 使用 `pixi`（推荐）
+
+本项目推荐使用 [pixi](https://pixi.sh/) 管理依赖，它可以自动处理 CUDA 版本和 Python 环境。
 
 ```bash
+# 安装环境并进入默认 GPU 环境
+pixi shell
+
+# 如果没有 GPU，请进入 CPU 环境
+pixi shell -e cpu
+
+# 退出环境
+exit
+```
+
+### 使用 `Anaconda`
+
+若习惯使用 `conda`，我们也提供了自动化配置脚本：
+
+```bash
+# 赋予脚本执行权限
+chmod +x ./scripts/setup_env.sh
+
+# 运行配置脚本
+./scripts/setup_env.sh
+```
+
+该脚本会创建一个名为 `ktexp` 的环境并安装所有必要的依赖。
+
+
+### 手动配置运行环境
+
+```sh
 conda create -n ktexp python=3.10
 
 # CPU
@@ -33,7 +65,7 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
 
 ### 配置说明
 
-本项目使用 `.env` 文件管理环境变量配置（如飞书通知）。
+本项目使用 `.env` 文件管理环境变量配置。
 
 1. 复制示例配置文件：
    ```bash
@@ -41,8 +73,9 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
    ```
 
 2. 修改 `.env` 文件中的配置项：
-   - `LARK_WEBHOOK_URL`: 飞书机器人 Webhook 地址
-   - `LARK_SECRET`: 飞书机器人签名密钥
+   - `LARK_WEBHOOK_URL`: 飞书机器人 Webhook 地址。
+   - `SWANLAB_WORKSPACE`: SwanLab 项目空间名称。
+   - `SWANLAB_MODE`: 设置为 `cloud`（上传）或 `local`（仅本地日志）。
 
 ## 项目结构
 
@@ -146,11 +179,29 @@ python train.py -m SQGKT -d assistments09
 
 各模型的详细训练说明在 `docs/` 目录下。
 
-### 复现性设置
+### 3. 消融实验研究
 
-训练脚本中的 `--seed` 参数现在由 `utils/training/base_trainer.py` 统一处理。`BaseTrainer` 会调用 `seed_everything` 同步设置 Python、NumPy 与 PyTorch 的随机状态，并强制启用确定性的 cuDNN 配置，从而保证数据划分、图构建和模型训练全过程具有可复现性。
+消融实验通过配置文件定义不同的策略（如置零特征、禁用模块等）：
 
-### 3. 查看训练结果
+```bash
+# 运行 GIKT 的消融实验
+python ablation_study.py --model GIKT --dataset assistments09 --config configs/ablation/gikt_ablation.json
+```
+
+生成的实验结果会记录在 SwanLab 中，方便对比各消融版本的性能。
+
+### 4. 超参数自动化搜索 (Optuna)
+
+利用 Optuna 自动寻找最优超参数：
+
+```bash
+# 启动 50 轮超参搜索
+python optuna_search.py -m GIKT -d assistments09 --n_trials 50
+```
+
+搜索的空间由 `configs/optuna/param_space_<model>.json` 定义。
+
+### 5. 查看训练结果
 
 训练过程中的指标会自动上传到 SwanLab，可以在 SwanLab 官网查看训练曲线、损失、准确率、AUC等指标。
 

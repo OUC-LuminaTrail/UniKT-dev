@@ -26,3 +26,6 @@ data/
 *.pt
 *.pth
 .env
+# pixi environments
+.pixi/*
+!.pixi/config.toml
