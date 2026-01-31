@@ -104,7 +104,7 @@ class SQGKT(Module):
             node_neighbors = [question_t[mask_t]]
             _batch_size = len(node_neighbors[0])
             for i in range(self.agg_hops):
-                nodes_current = node_neighbors[-1].reshape(-1)
+                nodes_current = node_neighbors[-1].reshape(-1).long()
                 neighbor_shape = [_batch_size] + [
                     (q_neighbor_size if j % 2 == 0 else s_neighbor_size)
                     for j in range(i + 1)
@@ -135,7 +135,7 @@ class SQGKT(Module):
             node_neighbors_2 = [user_t[mask_t]]
             _batch_size_2 = len(node_neighbors_2[0])
             for i in range(self.agg_hops):
-                nodes_current_2 = node_neighbors_2[-1].reshape(-1)
+                nodes_current_2 = node_neighbors_2[-1].reshape(-1).long()
                 neighbor_shape_2 = [_batch_size_2] + [
                     (u_neighbor_size if j % 2 == 0 else q_neighbor_size_2)
                     for j in range(i + 1)
@@ -289,14 +289,14 @@ class SQGKT(Module):
         # user_ids.unsqueeze(-1).expand(-1, question_ids.shape[1]) -> 构造用于gather的索引
 
         # 扩展 user_ids 以匹配 question_ids 的形状，用于索引
-        expanded_user_ids = user_ids.unsqueeze(1).expand_as(question_ids)
+        expanded_user_ids = user_ids.unsqueeze(1).expand_as(question_ids).long()
 
         # 直接使用高级索引从 self.uq_table 中批量获取权重
         # self.uq_table 的形状: [全局用户数, 全局问题数, 3]
         # expanded_user_ids 的形状: [批次大小, 邻居数]
         # question_ids 的形状: [批次大小, 邻居数]
         # node_weights 的形状将是: [批次大小, 邻居数, 3]
-        node_weights = self.uq_matrix[expanded_user_ids, question_ids, :]
+        node_weights = self.uq_matrix[expanded_user_ids, question_ids.long(), :]
 
         # 分别提取三个因子
         c_i = node_weights[..., 0].unsqueeze(-1)  # Shape: [批次大小, 邻居数, 1]
