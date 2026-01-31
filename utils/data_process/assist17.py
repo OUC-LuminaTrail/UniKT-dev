@@ -81,11 +81,11 @@ class Assistments2017Data(DataSource):
                 # "correct",
                 # "original",
                 "hint",
-                "hintCount",
+                # "hintCount",
                 "hintTotal",
                 "scaffold",
                 "bottomHint",
-                "attemptCount",
+                # "attemptCount",
                 "frIsHelpRequest",
                 "frPast5HelpRequest",
                 "frPast8HelpRequest",
@@ -147,6 +147,8 @@ class Assistments2017Data(DataSource):
                 "correct": "label",
                 "skill": "skill",
                 "assignmentId": "assignment",
+                "hintCount": "hint_count",
+                "attemptCount": "attempt_count",
             }
         )
         # 将技能列映射为唯一的整数ID
