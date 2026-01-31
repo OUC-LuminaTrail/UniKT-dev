@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data as Data
 from tqdm import tqdm
@@ -593,8 +594,12 @@ class ABKTTrainer(MultiTrainer):
         }
 
     def _forward_am(self, batch_data: tuple) -> dict:
-        """AM 阶段的前向传播"""
-        # batch_data: [batch, 6] -> [user, item, correct, km_pred, g, w]
+        """AM 阶段的前向传播
+
+        训练数据: [user, item, correct, km_pred, g, w] - 6 列
+        验证数据: [user, item, correct, km_pred] - 4 列
+        """
+        # batch_data: [batch, 6] 或 [batch, 4]
         batch = batch_data[0] if isinstance(batch_data, tuple) else batch_data
         batch = batch.to(self.device_)
 
@@ -617,19 +622,23 @@ class ABKTTrainer(MultiTrainer):
         # 生成二元预测
         y_predict = (final_pred >= 0.5).int()
 
-        # 存储额外信息用于损失计算
-        return {
+        # 构建输出字典
+        output = {
             "y_hat": final_pred,
             "y_label": correct,
             "y_predict": y_predict,
-            # AM 阶段的额外数据
             "am_pred": am_pred,
             "km_pred": km_pred,
-            "g": batch[:, 4],
-            "w": batch[:, 5],
             "u_norm": u_norm,
             "i_norm": i_norm,
         }
+
+        # 训练模式下有 g 和 w 列（用于 boosting 损失计算）
+        if batch.shape[1] >= 6:
+            output["g"] = batch[:, 4]
+            output["w"] = batch[:, 5]
+
+        return output
 
     def compute_loss(self, outputs: dict, stage_name: str) -> torch.Tensor:
         """计算损失
@@ -644,7 +653,12 @@ class ABKTTrainer(MultiTrainer):
         if stage_name == "km":
             return self.loss(outputs["y_hat"], outputs["y_label"])
         elif stage_name == "am":
-            # AM 阶段使用自定义损失
+            # 验证模式下没有 g 和 w，使用简单的 BCE 损失
+            if "g" not in outputs or "w" not in outputs:
+                # 使用组合预测的 BCE 损失作为验证损失
+                y_hat = outputs["y_hat"].clamp(1e-6, 1 - 1e-6)
+                return F.binary_cross_entropy(y_hat, outputs["y_label"])
+            # 训练模式下使用完整的 boosting 损失
             return self.loss(
                 outputs["am_pred"],
                 outputs["km_pred"],
