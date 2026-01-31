@@ -4,6 +4,7 @@
 """
 
 from .base_trainer import BaseTrainer
+from .multi_trainer import MultiTrainer, StageConfig
 from .metrics import MetricsAccumulator
 from .callbacks import (
     Callback,
@@ -15,6 +16,8 @@ from .callbacks import (
 
 __all__ = [
     "BaseTrainer",
+    "MultiTrainer",
+    "StageConfig",
     "MetricsAccumulator",
     "Callback",
     "CallbackManager",
