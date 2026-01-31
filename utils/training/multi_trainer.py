@@ -502,10 +502,12 @@ class MultiTrainer:
                     )
                     break
 
+        best_metric_str = f"{best_metric:.4f}" if best_metric is not None else "N/A"
+        best_epoch_str = str(best_epoch + 1) if best_epoch is not None else "N/A"
         logger.info(
             f"[{stage_prefix}] Training complete. "
-            f"Best {self._monitor_name()}: {best_metric:.4f if best_metric else 'N/A'} "
-            f"at epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}"
+            f"Best {self._monitor_name()}: {best_metric_str} "
+            f"at epoch {best_epoch_str}"
         )
 
         # 恢复最佳模型

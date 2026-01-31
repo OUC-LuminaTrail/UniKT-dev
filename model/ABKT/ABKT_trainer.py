@@ -1,34 +1,28 @@
 """
 ABKT 模型训练器
 
-实现两阶段 Boosting 训练:
+使用 MultiTrainer 框架实现两阶段 Boosting 训练:
 - Stage 1 (KM): 训练知识模块 K_CMF
 - Stage 2 (AM): 训练能力模块 GMF，使用 boosting 残差
 """
 
-import os
-from typing import Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as Data
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
-from rich.table import Column
-from sklearn.metrics import accuracy_score, roc_auc_score
 from tqdm import tqdm
 
-from utils.config import BaseParamConfig, register_model_params
-from utils.core import TRAINERS, get_logger, seed_everything
+from utils.config import (
+    BaseParamConfig,
+    EarlyStopping,
+    EarlyStoppingConfig,
+    register_model_params,
+)
+from utils.core import TRAINERS, get_logger
 from utils.data_process import DataSource
+from utils.training import MultiTrainer, StageConfig
 
 from .ABKT_data import ABKTModelData
 from .ABKT_model import GMF, IRT_2, K_CMF
@@ -141,19 +135,138 @@ class ABKTModelParams(BaseParamConfig):
         return group_name, params
 
 
+# ==================== KM 阶段的数据集 ====================
+
+
+class KMUserDataset(Data.Dataset):
+    """KM 阶段的用户序列数据集
+
+    每个样本是一个用户的完整答题序列，batch_size=1
+    """
+
+    def __init__(
+        self,
+        train_users: list,
+        train_sequences: dict,
+    ):
+        self.train_users = train_users
+        self.train_sequences = train_sequences
+
+    def __len__(self):
+        return len(self.train_users)
+
+    def __getitem__(self, idx: int):
+        user_id = self.train_users[idx]
+        seq_data = self.train_sequences[user_id]
+        items = torch.tensor(seq_data[0][0], dtype=torch.long)
+        corrects = torch.tensor(seq_data[1][0], dtype=torch.long)
+        return user_id, items, corrects
+
+
+class KMValidationDataset(Data.Dataset):
+    """KM 阶段的验证数据集
+
+    每个样本是一个测试三元组
+    """
+
+    def __init__(self, test_triplets: list):
+        self.test_triplets = test_triplets
+
+    def __len__(self):
+        return len(self.test_triplets)
+
+    def __getitem__(self, idx: int):
+        user_id, item_id, correct = self.test_triplets[idx]
+        return user_id, item_id, correct
+
+
+# ==================== AM 阶段的数据集 ====================
+
+
+class AMTripletDataset(Data.Dataset):
+    """AM 阶段的训练数据集
+
+    每个样本包含 [user, item, correct, km_pred, g, w]
+    """
+
+    def __init__(self, triplets: torch.Tensor):
+        self.triplets = triplets
+
+    def __len__(self):
+        return len(self.triplets)
+
+    def __getitem__(self, idx: int):
+        return self.triplets[idx]
+
+
+# ==================== 自定义损失函数 ====================
+
+
+class KMLoss(nn.Module):
+    """KM 阶段损失函数：BCE Loss"""
+
+    def __init__(self):
+        super().__init__()
+        self.bce = nn.BCELoss()
+
+    def forward(self, y_hat: torch.Tensor, y_label: torch.Tensor) -> torch.Tensor:
+        # y_hat 已经是概率，直接用 BCE
+        return self.bce(y_hat, y_label)
+
+
+class AMLoss(nn.Module):
+    """AM 阶段损失函数：Boosting Loss + L2 正则化"""
+
+    def __init__(self, am_lambda: float, combine_mode: str):
+        super().__init__()
+        self.am_lambda = am_lambda
+        self.combine_mode = combine_mode
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        k_batch: torch.Tensor,
+        g_batch: torch.Tensor,
+        w_batch: torch.Tensor,
+        u_norm: torch.Tensor,
+        i_norm: torch.Tensor,
+    ) -> torch.Tensor:
+        # Boosting 损失
+        if self.combine_mode == "add":
+            loss = -torch.mean(w_batch * torch.pow(pred + g_batch / w_batch, 2))
+        elif self.combine_mode == "mul":
+            loss = -torch.mean(
+                w_batch
+                * k_batch
+                * torch.pow(pred + g_batch / (w_batch * k_batch) - 1, 2)
+            )
+        else:
+            raise ValueError(f"Unknown combine mode: {self.combine_mode}")
+
+        # L2 正则化
+        l2_loss = u_norm + i_norm
+        total_loss = loss + self.am_lambda * l2_loss
+
+        return total_loss
+
+
+# ==================== ABKT 训练器 ====================
+
+
 @TRAINERS.register("ABKT")
-class ABKTTrainer:
+class ABKTTrainer(MultiTrainer):
     """
     ABKT 两阶段训练器
 
-    Stage 1: 训练 K_CMF (Knowledge Module)
-    Stage 2: 训练 GMF (Ability Module) with boosting residuals
+    继承 MultiTrainer，实现：
+    - Stage 1 (km): 训练 K_CMF (Knowledge Module)
+    - Stage 2 (am): 训练 GMF (Ability Module) with boosting residuals
     """
 
     def __init__(
         self,
         args=None,
-        data_src: DataSource = None,
+        data_src: Optional[DataSource] = None,
         exp_manager=None,
     ):
         """
@@ -164,133 +277,62 @@ class ABKTTrainer:
             data_src: 数据源
             exp_manager: 实验管理器
         """
-        self.args = args
-        self.data_src = data_src
-        self.exp_manager = exp_manager
+        # 设置设备
+        device = None
+        if args is not None and hasattr(args, "device") and args.device:
+            device = args.device
 
-        # 设备设置
-        self.device = torch.device(
-            args.device
-            if hasattr(args, "device") and args.device
-            else "cuda"
-            if torch.cuda.is_available()
-            else "cpu"
+        # 调用父类初始化
+        super().__init__(
+            args=args,
+            data_src=data_src,
+            exp_manager=exp_manager,
+            device=device,
+            use_swanlab=True,
+            seed=getattr(args, "seed", None) if args else None,
         )
-
-        # 设置随机种子
-        self.seed = seed_everything(args.seed if hasattr(args, "seed") else None)
-
-        # 日志目录
-        if exp_manager is not None:
-            self.log_dir = exp_manager.get_log_dir()
-            if not os.path.exists(self.log_dir):
-                os.makedirs(self.log_dir)
-        else:
-            self.log_dir = "./runs/abkt_default"
-            os.makedirs(self.log_dir, exist_ok=True)
 
         # 准备数据
         logger.info("Preparing ABKT data...")
         self.model_data = ABKTModelData(data_src)
         self.data = self.model_data.prepare_data(args)
 
-        # 初始化模型（将在 run() 中创建）
+        # 模型引用（在 init_stage 中设置）
         self.km_model: Optional[K_CMF] = None
         self.am_model: Optional[GMF] = None
+
+        # AM 阶段的额外数据（在 prepare_next_stage 中计算）
+        self.am_train_triplets: Optional[torch.Tensor] = None
+        self.am_test_triplets: Optional[torch.Tensor] = None
+        self.adj_norm: Optional[torch.Tensor] = None
 
         # 最佳指标
         self.best_km_auc = 0.0
         self.best_am_auc = 0.0
 
-        # SwanLab 初始化
-        self.use_swanlab = True
-        if self.use_swanlab:
-            self._init_swanlab()
+    def get_stages(self) -> list[str]:
+        """返回训练阶段列表"""
+        return ["km", "am"]
 
-    def _init_swanlab(self):
-        """初始化 SwanLab 实验追踪"""
-        import swanlab
-        from dotenv import load_dotenv
+    def init_stage(self, stage_name: str) -> StageConfig:
+        """初始化指定阶段的配置
 
-        load_dotenv()
+        Args:
+            stage_name: 阶段名称 ('km' 或 'am')
 
-        from swanlab.plugin.notification import LarkCallback
+        Returns:
+            StageConfig 对象
+        """
+        if stage_name == "km":
+            return self._init_km_stage()
+        elif stage_name == "am":
+            return self._init_am_stage()
+        else:
+            raise ValueError(f"Unknown stage: {stage_name}")
 
-        callbacks = []
-        lark_webhook = os.getenv("LARK_WEBHOOK_URL")
-        lark_secret = os.getenv("LARK_SECRET")
-        if lark_webhook:
-            callbacks.append(LarkCallback(webhook_url=lark_webhook, secret=lark_secret))
-
-        # 构建超参数字典
-        config = {
-            "model": "ABKT",
-            "dataset": self.args.dataset
-            if hasattr(self.args, "dataset")
-            else "unknown",
-            "fold": self.args.fold if hasattr(self.args, "fold") else -1,
-            "km_hidden_dim": self.args.km_hidden_dim,
-            "km_guess": self.args.km_guess,
-            "km_lr": self.args.km_lr,
-            "km_epochs": self.args.km_epochs,
-            "km_patience": self.args.km_patience,
-            "am_embedding_dim": self.args.am_embedding_dim,
-            "am_lambda": self.args.am_lambda,
-            "am_layer": self.args.am_layer,
-            "am_lr": self.args.am_lr,
-            "am_epochs": self.args.am_epochs,
-            "am_patience": self.args.am_patience,
-            "pretrain_clip": self.args.pretrain_clip,
-            "combine_mode": self.args.combine_mode,
-            "batch_size": self.args.batch_size,
-            "seed": self.seed,
-        }
-
-        experiment_name = os.path.basename(self.log_dir) if self.log_dir else "ABKT_run"
-        swanlab.init(
-            workspace=os.getenv("SWANLAB_WORKSPACE", None),
-            project_name="kt-exp-graph",
-            experiment_name=f"Run_{experiment_name}",
-            config=config,
-            callbacks=callbacks,
-            group="ABKT",
-            tags=["cuda" if torch.cuda.is_available() else "cpu", "two-stage"],
-        )
-        logger.info(f"SwanLab initialized for ABKT experiment: {experiment_name}")
-
-    def run(self):
-        """运行两阶段训练"""
-        logger.info("=" * 50)
-        logger.info("Starting ABKT Two-Stage Training")
-        logger.info("=" * 50)
-
-        # Stage 1: Train Knowledge Module
-        logger.info("\n" + "=" * 50)
-        logger.info("Stage 1: Training Knowledge Module (K_CMF)")
-        logger.info("=" * 50)
-        self._train_km_stage()
-
-        # Compute boosting residuals
-        logger.info("\n" + "=" * 50)
-        logger.info("Computing Boosting Residuals")
-        logger.info("=" * 50)
-        train_triplets, test_triplets, adj_norm = self._compute_boosting_residuals()
-
-        # Stage 2: Train Ability Module
-        logger.info("\n" + "=" * 50)
-        logger.info("Stage 2: Training Ability Module (GMF)")
-        logger.info("=" * 50)
-        self._train_am_stage(train_triplets, test_triplets, adj_norm)
-
-        # 完成训练
-        self._finish()
-
-    def _train_km_stage(self):
-        """Stage 1: 训练知识模块 K_CMF"""
-        Q_matrix = self.data["Q_matrix"].to(self.device)
-        train_sequences = self.data["train_sequences"]
-        test_triplets = self.data["test_triplets"]
-        train_users = self.data["train_users"]
+    def _init_km_stage(self) -> StageConfig:
+        """初始化 KM 阶段"""
+        Q_matrix = self.data["Q_matrix"].to(self.device_)
         num_users = self.data["num_users"]
         num_items = self.data["num_items"]
         num_skills = self.data["num_skills"]
@@ -302,183 +344,331 @@ class ABKTTrainer:
             user_num=num_users,
             item_num=num_items,
             Q_matrix=Q_matrix,
-        ).to(self.device)
-
-        # 优化器和损失函数
-        optimizer = optim.Adam(self.km_model.parameters(), lr=self.args.km_lr)
-        loss_fn = nn.BCELoss()
-
-        # 准备训练数据
-        train_itemsq = []
-        train_correctsq = []
-        for user_id in train_users:
-            seq_data = train_sequences[user_id]
-            items = torch.tensor(seq_data[0][0], dtype=torch.long)
-            corrects = torch.tensor(seq_data[1][0], dtype=torch.long)
-            train_itemsq.append(items)
-            train_correctsq.append(corrects)
-
-        # 准备测试数据
-        test_user_set = set([t[0] for t in test_triplets])
-
-        # 训练索引
-        train_index = torch.arange(len(train_users))
-        train_loader = Data.DataLoader(train_index, batch_size=1, shuffle=True)
-
-        # Early stopping
-        best_auc = 0.0
-        patience_counter = 0
-
-        # 创建进度条
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            TaskProgressColumn(),
-            MofNCompleteColumn(table_column=Column(justify="right")),
-            TimeRemainingColumn(),
-            expand=True,
         )
 
-        with progress:
-            epoch_task = progress.add_task(
-                "[bold red]KM Epochs", total=self.args.km_epochs
+        # 保存 Q_matrix 引用
+        self.Q_matrix = Q_matrix
+
+        # 创建数据集和加载器（batch_size=1，单用户序列）
+        train_dataset = KMUserDataset(
+            train_users=self.data["train_users"],
+            train_sequences=self.data["train_sequences"],
+        )
+        train_loader = Data.DataLoader(train_dataset, batch_size=1, shuffle=True)
+
+        # 验证数据：使用测试三元组
+        val_dataset = KMValidationDataset(self.data["test_triplets"])
+        val_loader = Data.DataLoader(
+            val_dataset, batch_size=len(val_dataset), shuffle=False
+        )
+
+        # 优化器
+        optimizer = optim.Adam(self.km_model.parameters(), lr=self.args.km_lr)
+
+        # 早停
+        early_stopping = EarlyStopping(
+            EarlyStoppingConfig(
+                monitor="auc",
+                mode="max",
+                patience=self.args.km_patience,
+            )
+        )
+
+        logger.info(
+            f"KM Stage: users={num_users}, items={num_items}, skills={num_skills}"
+        )
+
+        return StageConfig(
+            name="km",
+            model=self.km_model,
+            optimizer=optimizer,
+            loss_fn=KMLoss(),
+            train_data=train_loader,
+            val_data=val_loader,
+            epochs=self.args.km_epochs,
+            early_stopping=early_stopping,
+        )
+
+    def _init_am_stage(self) -> StageConfig:
+        """初始化 AM 阶段"""
+        num_users = self.data["num_users"]
+        num_items = self.data["num_items"]
+
+        # 确保 boosting 残差已计算
+        if self.am_train_triplets is None:
+            raise RuntimeError(
+                "AM stage requires boosting residuals. "
+                "Make sure prepare_next_stage was called after KM stage."
             )
 
-            for epoch in range(self.args.km_epochs):
-                self.km_model.train()
-
-                train_preds = []
-                train_labels = []
-                total_loss = 0.0
-
-                for idx in train_loader:
-                    idx = idx.item()
-                    user_id = train_users[idx]
-                    itemsq = train_itemsq[idx].to(self.device)
-                    correctsq = train_correctsq[idx].to(self.device)
-
-                    # 前向传播
-                    user_k, _, _ = self.km_model(user_id, itemsq)
-                    item_q = Q_matrix[itemsq, :]
-                    item_k = self.km_model.item_k[itemsq, :]
-
-                    # IRT 预测
-                    pred = IRT_2(user_k[:-1, :], item_k, item_q, self.args.km_guess)
-                    pred = pred.clamp(1e-6, 1 - 1e-6)
-
-                    # 计算损失
-                    loss = loss_fn(pred, correctsq.float())
-                    total_loss += loss.item()
-
-                    # 反向传播
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-
-                    # 记录预测
-                    train_preds.extend(pred.detach().cpu().numpy())
-                    train_labels.extend(correctsq.cpu().numpy())
-
-                # 计算训练指标
-                train_auc = roc_auc_score(train_labels, train_preds)
-                train_acc = accuracy_score(
-                    train_labels, [1 if p >= 0.5 else 0 for p in train_preds]
-                )
-                avg_loss = total_loss / len(train_users)
-
-                # 验证阶段
-                self.km_model.eval()
-                with torch.no_grad():
-                    # 获取测试用户的最终知识状态
-                    user_final_states = {}
-                    for idx, user_id in enumerate(train_users):
-                        if user_id in test_user_set:
-                            itemsq = train_itemsq[idx].to(self.device)
-                            user_k, _, _ = self.km_model(user_id, itemsq)
-                            user_final_states[user_id] = user_k[-1, :]
-
-                    # 测试预测
-                    test_preds = []
-                    test_labels = []
-                    for user_id, item_id, correct in test_triplets:
-                        if user_id in user_final_states:
-                            user_k = user_final_states[user_id]
-                            item_q = Q_matrix[item_id, :]
-                            item_k = self.km_model.item_k[item_id, :]
-                            pred = IRT_2(
-                                user_k.unsqueeze(0),
-                                item_k.unsqueeze(0),
-                                item_q.unsqueeze(0),
-                                self.args.km_guess,
-                            )
-                            test_preds.append(pred.item())
-                            test_labels.append(correct)
-
-                    test_auc = roc_auc_score(test_labels, test_preds)
-                    test_acc = accuracy_score(
-                        test_labels, [1 if p >= 0.5 else 0 for p in test_preds]
-                    )
-
-                # SwanLab 日志
-                if self.use_swanlab:
-                    import swanlab
-
-                    swanlab.log(
-                        {
-                            "Stage1/train_loss": avg_loss,
-                            "Stage1/train_auc": train_auc,
-                            "Stage1/train_acc": train_acc,
-                            "Stage1/test_auc": test_auc,
-                            "Stage1/test_acc": test_acc,
-                        },
-                        step=epoch,
-                    )
-
-                logger.info(
-                    f"KM Epoch {epoch + 1}/{self.args.km_epochs}: "
-                    f"Loss={avg_loss:.4f}, Train AUC={train_auc:.4f}, "
-                    f"Test AUC={test_auc:.4f}, Test ACC={test_acc:.4f}"
-                )
-
-                # Early stopping
-                if test_auc > best_auc:
-                    best_auc = test_auc
-                    self.best_km_auc = best_auc
-                    patience_counter = 0
-                    # 保存最佳模型
-                    torch.save(
-                        self.km_model.state_dict(),
-                        os.path.join(self.log_dir, "best_km_model.pth"),
-                    )
-                else:
-                    patience_counter += 1
-
-                if patience_counter >= self.args.km_patience:
-                    logger.info(
-                        f"Early stopping triggered at epoch {epoch + 1}. "
-                        f"Best AUC: {best_auc:.4f}"
-                    )
-                    break
-
-                progress.advance(epoch_task)
-
-        # 加载最佳模型
-        self.km_model.load_state_dict(
-            torch.load(os.path.join(self.log_dir, "best_km_model.pth"))
+        # 初始化 GMF 模型
+        self.am_model = GMF(
+            n_users=num_users,
+            n_items=num_items,
+            embedding_k=self.args.am_embedding_dim,
+            aj_norm=self.adj_norm,
+            adj=self.args.use_adj,
+            layer=self.args.am_layer,
         )
-        logger.info(f"KM Stage completed. Best Test AUC: {best_auc:.4f}")
 
-    def _compute_boosting_residuals(self) -> tuple:
-        """
-        计算 boosting 残差
+        # 创建数据集和加载器
+        train_dataset = AMTripletDataset(self.am_train_triplets)
+        train_loader = Data.DataLoader(
+            train_dataset, batch_size=self.args.batch_size, shuffle=True
+        )
+
+        # 验证数据
+        val_dataset = AMTripletDataset(self.am_test_triplets)
+        val_loader = Data.DataLoader(
+            val_dataset, batch_size=len(val_dataset), shuffle=False
+        )
+
+        # 优化器
+        optimizer = optim.Adam(self.am_model.parameters(), lr=self.args.am_lr)
+
+        # 早停
+        early_stopping = EarlyStopping(
+            EarlyStoppingConfig(
+                monitor="auc",
+                mode="max",
+                patience=self.args.am_patience,
+            )
+        )
+
+        # 损失函数
+        loss_fn = AMLoss(
+            am_lambda=self.args.am_lambda,
+            combine_mode=self.args.combine_mode,
+        )
+
+        logger.info(
+            f"AM Stage: train_triplets={len(self.am_train_triplets)}, "
+            f"test_triplets={len(self.am_test_triplets)}"
+        )
+
+        return StageConfig(
+            name="am",
+            model=self.am_model,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            train_data=train_loader,
+            val_data=val_loader,
+            epochs=self.args.am_epochs,
+            early_stopping=early_stopping,
+        )
+
+    def forward_pass(self, batch_data: tuple[Any, ...], stage_name: str) -> dict:
+        """模型前向传播
+
+        Args:
+            batch_data: 批次数据
+            stage_name: 阶段名称
 
         Returns:
-            train_triplets: 训练三元组 [user, item, correct, km_pred, g, w]
-            test_triplets: 测试三元组 [user, item, correct, km_pred]
-            adj_norm: 归一化邻接矩阵
+            包含 y_hat, y_label, y_predict 的字典
         """
-        Q_matrix = self.data["Q_matrix"].to(self.device)
+        if stage_name == "km":
+            return self._forward_km(batch_data)
+        elif stage_name == "am":
+            return self._forward_am(batch_data)
+        else:
+            raise ValueError(f"Unknown stage: {stage_name}")
+
+    def _forward_km(self, batch_data: tuple) -> dict:
+        """KM 阶段的前向传播
+
+        训练时：batch_size=1，每次处理一个用户的完整序列
+        验证时：batch 包含所有测试三元组 (user_id, item_id, correct)
+        """
+        user_ids, items, corrects = batch_data
+
+        # 检测是训练模式还是验证模式
+        # 训练模式：items 是 2D [1, seq_len]
+        # 验证模式：items 是 1D [batch_size] (每个元素是单个 item_id)
+        is_training = items.dim() == 2
+
+        if is_training:
+            return self._forward_km_train(user_ids, items, corrects)
+        else:
+            return self._forward_km_val(user_ids, items, corrects)
+
+    def _forward_km_train(
+        self, user_ids: torch.Tensor, items: torch.Tensor, corrects: torch.Tensor
+    ) -> dict:
+        """KM 阶段训练时的前向传播
+
+        Args:
+            user_ids: 用户 ID [1]
+            items: 题目序列 [1, seq_len]
+            corrects: 正确率序列 [1, seq_len]
+        """
+        # 移除 batch 维度（因为 batch_size=1）
+        user_id = user_ids.item()
+        items = items.squeeze(0).to(self.device_)
+        corrects = corrects.squeeze(0).to(self.device_)
+
+        # 前向传播
+        user_k, _, _ = self.km_model(user_id, items)
+
+        # 获取题目参数
+        item_q = self.Q_matrix[items, :]
+        item_k = self.km_model.item_k[items, :]
+
+        # IRT 预测
+        pred = IRT_2(user_k[:-1, :], item_k, item_q, self.args.km_guess)
+        pred = pred.clamp(1e-6, 1 - 1e-6)
+
+        # 生成二元预测
+        y_predict = (pred >= 0.5).int()
+
+        return {
+            "y_hat": pred,
+            "y_label": corrects.float(),
+            "y_predict": y_predict,
+        }
+
+    def _forward_km_val(
+        self, user_ids: torch.Tensor, item_ids: torch.Tensor, corrects: torch.Tensor
+    ) -> dict:
+        """KM 阶段验证时的前向传播
+
+        对于每个测试三元组 (user, item, correct)，使用用户的训练历史
+        计算其知识状态，然后预测测试题目的正确率。
+
+        Args:
+            user_ids: 用户 ID [batch_size]
+            item_ids: 测试题目 ID [batch_size]
+            corrects: 实际正确率 [batch_size]
+        """
+        user_ids = user_ids.to(self.device_)
+        item_ids = item_ids.to(self.device_)
+        corrects = corrects.to(self.device_)
+
+        batch_size = user_ids.shape[0]
+        preds = []
+
+        # 对每个测试样本分别计算
+        for i in range(batch_size):
+            user_id = user_ids[i].item()
+            item_id = item_ids[i].item()
+
+            # 获取用户的训练序列
+            if user_id in self.data["train_sequences"]:
+                train_items = self.data["train_sequences"][user_id][0][0]
+                train_items_tensor = torch.tensor(
+                    train_items, dtype=torch.long, device=self.device_
+                )
+
+                # 计算知识状态演变
+                user_k, _, _ = self.km_model(user_id, train_items_tensor)
+                # 使用最后的知识状态（即完成所有训练后的状态）
+                final_user_k = user_k[-1, :]  # [skill_num]
+            else:
+                # 如果用户没有训练数据，使用初始知识状态
+                final_user_k = torch.sigmoid(self.km_model.user_initial_k[user_id, :])
+
+            # 获取测试题目的参数
+            item_q = self.Q_matrix[item_id, :]  # [skill_num]
+            item_k = self.km_model.item_k[item_id, :]  # [skill_num]
+
+            # IRT 预测
+            pred = IRT_2(
+                final_user_k.unsqueeze(0),
+                item_k.unsqueeze(0),
+                item_q.unsqueeze(0),
+                self.args.km_guess,
+            )
+            preds.append(pred)
+
+        # 合并预测结果
+        pred = torch.cat(preds, dim=0).clamp(1e-6, 1 - 1e-6)
+
+        # 生成二元预测
+        y_predict = (pred >= 0.5).int()
+
+        return {
+            "y_hat": pred,
+            "y_label": corrects.float(),
+            "y_predict": y_predict,
+        }
+
+    def _forward_am(self, batch_data: tuple) -> dict:
+        """AM 阶段的前向传播"""
+        # batch_data: [batch, 6] -> [user, item, correct, km_pred, g, w]
+        batch = batch_data[0] if isinstance(batch_data, tuple) else batch_data
+        batch = batch.to(self.device_)
+
+        u_idx = batch[:, 0].long()
+        i_idx = batch[:, 1].long()
+        correct = batch[:, 2]
+        km_pred = batch[:, 3]
+
+        # GMF 前向传播
+        am_pred, u_norm, i_norm = self.am_model(u_idx, i_idx)
+
+        # 组合预测
+        if self.args.combine_mode == "add":
+            final_pred = am_pred + km_pred
+        elif self.args.combine_mode == "mul":
+            final_pred = am_pred * km_pred
+        else:
+            final_pred = am_pred + km_pred
+
+        # 生成二元预测
+        y_predict = (final_pred >= 0.5).int()
+
+        # 存储额外信息用于损失计算
+        return {
+            "y_hat": final_pred,
+            "y_label": correct,
+            "y_predict": y_predict,
+            # AM 阶段的额外数据
+            "am_pred": am_pred,
+            "km_pred": km_pred,
+            "g": batch[:, 4],
+            "w": batch[:, 5],
+            "u_norm": u_norm,
+            "i_norm": i_norm,
+        }
+
+    def compute_loss(self, outputs: dict, stage_name: str) -> torch.Tensor:
+        """计算损失
+
+        Args:
+            outputs: forward_pass 的输出
+            stage_name: 阶段名称
+
+        Returns:
+            损失张量
+        """
+        if stage_name == "km":
+            return self.loss(outputs["y_hat"], outputs["y_label"])
+        elif stage_name == "am":
+            # AM 阶段使用自定义损失
+            return self.loss(
+                outputs["am_pred"],
+                outputs["km_pred"],
+                outputs["g"],
+                outputs["w"],
+                outputs["u_norm"],
+                outputs["i_norm"],
+            )
+        else:
+            raise ValueError(f"Unknown stage: {stage_name}")
+
+    def prepare_next_stage(self, stage_name: str, stage_outputs: dict) -> None:
+        """阶段间数据准备
+
+        在 KM 阶段完成后，计算 boosting 残差用于 AM 阶段
+        """
+        if stage_name == "km":
+            logger.info("Computing boosting residuals for AM stage...")
+            self._compute_boosting_residuals()
+            self.best_km_auc = stage_outputs.get("best_metric", 0.0)
+
+    def _compute_boosting_residuals(self):
+        """计算 boosting 残差"""
+        Q_matrix = self.Q_matrix
         train_sequences = self.data["train_sequences"]
         test_triplets = self.data["test_triplets"]
         train_users = self.data["train_users"]
@@ -505,8 +695,8 @@ class ABKTTrainer:
             for idx, user_id in enumerate(
                 tqdm(train_users, desc="Computing KM predictions")
             ):
-                itemsq = train_itemsq[idx].to(self.device)
-                correctsq = train_correctsq[idx].to(self.device)
+                itemsq = train_itemsq[idx].to(self.device_)
+                correctsq = train_correctsq[idx].to(self.device_)
 
                 user_k, _, _ = self.km_model(user_id, itemsq)
                 item_q = Q_matrix[itemsq, :]
@@ -566,215 +756,34 @@ class ABKTTrainer:
         w = -(y / (k**2) + (1 - y) / ((1 - k) ** 2))
 
         # 添加 g 和 w 到训练三元组
-        train_triplets = torch.cat(
+        self.am_train_triplets = torch.cat(
             [train_triplets, g.unsqueeze(1), w.unsqueeze(1)], dim=1
-        )
+        ).to(self.device_)
 
-        logger.info(f"Train triplets shape: {train_triplets.shape}")
-        logger.info(f"Test triplets shape: {test_triplets_tensor.shape}")
+        self.am_test_triplets = test_triplets_tensor.to(self.device_)
+
+        logger.info(f"Train triplets shape: {self.am_train_triplets.shape}")
+        logger.info(f"Test triplets shape: {self.am_test_triplets.shape}")
 
         # 构建邻接矩阵
-        adj_norm = self.model_data.build_normalized_adj_matrix(
-            train_sequences=self.data["train_sequences"],
+        self.adj_norm = self.model_data.build_normalized_adj_matrix(
+            train_sequences=train_sequences,
             num_users=num_users,
             num_items=num_items,
             symmetric=True,
-        )
-
-        return (
-            train_triplets.to(self.device),
-            test_triplets_tensor.to(self.device),
-            adj_norm.to(self.device),
-        )
-
-    def _train_am_stage(
-        self,
-        train_triplets: torch.Tensor,
-        test_triplets: torch.Tensor,
-        adj_norm: torch.sparse.Tensor,
-    ):
-        """
-        Stage 2: 训练能力模块 GMF
-
-        Args:
-            train_triplets: [user, item, correct, km_pred, g, w]
-            test_triplets: [user, item, correct, km_pred]
-            adj_norm: 归一化邻接矩阵
-        """
-        num_users = self.data["num_users"]
-        num_items = self.data["num_items"]
-
-        # 初始化 GMF 模型
-        self.am_model = GMF(
-            n_users=num_users,
-            n_items=num_items,
-            embedding_k=self.args.am_embedding_dim,
-            aj_norm=adj_norm,
-            adj=self.args.use_adj,
-            layer=self.args.am_layer,
-        ).to(self.device)
-
-        # 优化器
-        optimizer = optim.Adam(self.am_model.parameters(), lr=self.args.am_lr)
-
-        # 数据加载器
-        train_loader = Data.DataLoader(
-            train_triplets, batch_size=self.args.batch_size, shuffle=True
-        )
-
-        # Early stopping
-        best_auc = 0.0
-        patience_counter = 0
-
-        # 创建进度条
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            TaskProgressColumn(),
-            MofNCompleteColumn(table_column=Column(justify="right")),
-            TimeRemainingColumn(),
-            expand=True,
-        )
-
-        with progress:
-            epoch_task = progress.add_task(
-                "[bold blue]AM Epochs", total=self.args.am_epochs
-            )
-
-            for epoch in range(self.args.am_epochs):
-                self.am_model.train()
-                total_loss = 0.0
-                total_l2_loss = 0.0
-
-                for batch in train_loader:
-                    u_idx = batch[:, 0].long()
-                    i_idx = batch[:, 1].long()
-                    k_batch = batch[:, 3]
-                    g_batch = batch[:, 4]
-                    w_batch = batch[:, 5]
-
-                    # 前向传播
-                    pred, u_norm, i_norm = self.am_model(u_idx, i_idx)
-
-                    # Boosting 损失
-                    if self.args.combine_mode == "add":
-                        loss = -torch.mean(
-                            w_batch * torch.pow(pred + g_batch / w_batch, 2)
-                        )
-                    elif self.args.combine_mode == "mul":
-                        loss = -torch.mean(
-                            w_batch
-                            * k_batch
-                            * torch.pow(pred + g_batch / (w_batch * k_batch) - 1, 2)
-                        )
-                    else:
-                        raise ValueError(
-                            f"Unknown combine mode: {self.args.combine_mode}"
-                        )
-
-                    # L2 正则化
-                    l2_loss = u_norm + i_norm
-                    total_batch_loss = loss + self.args.am_lambda * l2_loss
-
-                    # 反向传播
-                    optimizer.zero_grad()
-                    total_batch_loss.backward()
-                    optimizer.step()
-
-                    total_loss += loss.item() * batch.shape[0]
-                    total_l2_loss += l2_loss.item() * batch.shape[0]
-
-                avg_loss = total_loss / train_triplets.shape[0]
-                avg_l2_loss = total_l2_loss / train_triplets.shape[0]
-
-                # 验证阶段
-                self.am_model.eval()
-                with torch.no_grad():
-                    test_u_idx = test_triplets[:, 0].long()
-                    test_i_idx = test_triplets[:, 1].long()
-                    test_correct = test_triplets[:, 2]
-                    test_km_pred = test_triplets[:, 3]
-
-                    am_pred, _, _ = self.am_model(test_u_idx, test_i_idx)
-
-                    # 组合预测
-                    if self.args.combine_mode == "add":
-                        final_pred = am_pred + test_km_pred
-                    elif self.args.combine_mode == "mul":
-                        final_pred = am_pred * test_km_pred
-                    else:
-                        final_pred = am_pred + test_km_pred
-
-                    # 计算指标
-                    final_pred_np = final_pred.cpu().numpy()
-                    test_correct_np = test_correct.cpu().numpy()
-
-                    test_auc = roc_auc_score(test_correct_np, final_pred_np)
-                    test_acc = accuracy_score(
-                        test_correct_np, [1 if p >= 0.5 else 0 for p in final_pred_np]
-                    )
-
-                # SwanLab 日志
-                if self.use_swanlab:
-                    import swanlab
-
-                    swanlab.log(
-                        {
-                            "Stage2/train_loss": avg_loss,
-                            "Stage2/l2_loss": avg_l2_loss,
-                            "Stage2/test_auc": test_auc,
-                            "Stage2/test_acc": test_acc,
-                        },
-                        step=self.args.km_epochs + epoch,
-                    )
-
-                logger.info(
-                    f"AM Epoch {epoch + 1}/{self.args.am_epochs}: "
-                    f"Loss={avg_loss:.4f}, L2={avg_l2_loss:.4f}, "
-                    f"Test AUC={test_auc:.4f}, Test ACC={test_acc:.4f}"
-                )
-
-                # Early stopping
-                if test_auc > best_auc:
-                    best_auc = test_auc
-                    self.best_am_auc = best_auc
-                    patience_counter = 0
-                    # 保存最佳模型
-                    torch.save(
-                        self.am_model.state_dict(),
-                        os.path.join(self.log_dir, "best_am_model.pth"),
-                    )
-                else:
-                    patience_counter += 1
-
-                if patience_counter >= self.args.am_patience:
-                    logger.info(
-                        f"Early stopping triggered at epoch {epoch + 1}. "
-                        f"Best AUC: {best_auc:.4f}"
-                    )
-                    break
-
-                progress.advance(epoch_task)
-
-        logger.info(f"AM Stage completed. Best Test AUC: {best_auc:.4f}")
+        ).to(self.device_)
 
     def _finish(self):
-        """训练完成，清理资源"""
-        logger.info("=" * 50)
+        """训练完成，记录最终指标"""
+        # 获取 AM 阶段的最佳指标
+        if "am" in self._stage_outputs:
+            self.best_am_auc = self._stage_outputs["am"].get("best_metric", 0.0)
+
+        logger.info("=" * 60)
         logger.info("ABKT Training Complete")
         logger.info(f"Best KM AUC: {self.best_km_auc:.4f}")
         logger.info(f"Best AM (Combined) AUC: {self.best_am_auc:.4f}")
-        logger.info("=" * 50)
+        logger.info("=" * 60)
 
-        if self.use_swanlab:
-            import swanlab
-
-            swanlab.log(
-                {
-                    "Final/best_km_auc": self.best_km_auc,
-                    "Final/best_am_auc": self.best_am_auc,
-                }
-            )
-            swanlab.finish()
-            logger.info("SwanLab run finished")
+        # 调用父类的 _finish
+        super()._finish()
