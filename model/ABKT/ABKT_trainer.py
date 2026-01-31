@@ -531,10 +531,11 @@ class ABKTTrainer(MultiTrainer):
     def _forward_km_val(
         self, user_ids: torch.Tensor, item_ids: torch.Tensor, corrects: torch.Tensor
     ) -> dict:
-        """KM 阶段验证时的前向传播
+        """KM 阶段验证时的前向传播 (批量处理模式)
 
-        对于每个测试三元组 (user, item, correct)，使用用户的训练历史
-        计算其知识状态，然后预测测试题目的正确率。
+        采用原始ABKT的批量处理策略：
+        1. 先批量计算所有测试用户的最终知识状态
+        2. 然后批量预测所有测试样本
 
         Args:
             user_ids: 用户 ID [batch_size]
@@ -545,44 +546,44 @@ class ABKTTrainer(MultiTrainer):
         item_ids = item_ids.to(self.device_)
         corrects = corrects.to(self.device_)
 
-        batch_size = user_ids.shape[0]
-        preds = []
+        # 获取唯一的测试用户
+        test_users = self.data["test_users"]
 
-        # 对每个测试样本分别计算
-        for i in range(batch_size):
-            user_id = user_ids[i].item()
-            item_id = item_ids[i].item()
+        # Step 1: 批量计算所有测试用户的最终知识状态
+        test_user_state_dict = {}
+        with torch.no_grad():
+            for test_user_id in test_users:
+                if test_user_id in self.data["train_sequences"]:
+                    # 获取用户的训练序列
+                    train_items = self.data["train_sequences"][test_user_id][0][0]
+                    train_items_tensor = torch.tensor(
+                        train_items, dtype=torch.long, device=self.device_
+                    )
 
-            # 获取用户的训练序列
-            if user_id in self.data["train_sequences"]:
-                train_items = self.data["train_sequences"][user_id][0][0]
-                train_items_tensor = torch.tensor(
-                    train_items, dtype=torch.long, device=self.device_
-                )
+                    # 计算知识状态演变
+                    user_k, _, _ = self.km_model(test_user_id, train_items_tensor)
+                    # 保存最后的知识状态
+                    test_user_state_dict[test_user_id] = user_k[-1, :]
+                else:
+                    # 如果用户没有训练数据，使用初始知识状态
+                    test_user_state_dict[test_user_id] = torch.sigmoid(
+                        self.km_model.user_initial_k[test_user_id, :]
+                    )
 
-                # 计算知识状态演变
-                user_k, _, _ = self.km_model(user_id, train_items_tensor)
-                # 使用最后的知识状态（即完成所有训练后的状态）
-                final_user_k = user_k[-1, :]  # [skill_num]
-            else:
-                # 如果用户没有训练数据，使用初始知识状态
-                final_user_k = torch.sigmoid(self.km_model.user_initial_k[user_id, :])
+        # Step 2: 根据测试样本的用户ID，批量获取知识状态
+        user_states_k_list = []
+        for user_id in user_ids.tolist():
+            user_states_k_list.append(test_user_state_dict[user_id].unsqueeze(0))
+        user_states_k = torch.cat(user_states_k_list, dim=0)  # [batch_size, skill_num]
 
-            # 获取测试题目的参数
-            item_q = self.Q_matrix[item_id, :]  # [skill_num]
-            item_k = self.km_model.item_k[item_id, :]  # [skill_num]
+        # Step 3: 批量获取题目参数
+        item_states_q = self.Q_matrix[item_ids, :]  # [batch_size, skill_num]
+        item_state_k = self.km_model.item_k[item_ids, :]  # [batch_size, skill_num]
 
-            # IRT 预测
-            pred = IRT_2(
-                final_user_k.unsqueeze(0),
-                item_k.unsqueeze(0),
-                item_q.unsqueeze(0),
-                self.args.km_guess,
-            )
-            preds.append(pred)
-
-        # 合并预测结果
-        pred = torch.cat(preds, dim=0).clamp(1e-6, 1 - 1e-6)
+        # Step 4: 批量IRT预测
+        pred = IRT_2(
+            user_states_k, item_state_k, item_states_q, self.args.km_guess
+        ).clamp(1e-6, 1 - 1e-6)
 
         # 生成二元预测
         y_predict = (pred >= 0.5).int()
