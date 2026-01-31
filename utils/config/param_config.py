@@ -4,7 +4,7 @@
 """
 
 import argparse
-from typing import ClassVar, Dict, Any, Type, Optional, List
+from typing import Dict, Any, Type, Optional, List
 from abc import ABC, abstractmethod
 from ..core import PARAM_CONFIGS
 
@@ -16,26 +16,21 @@ class BaseParamConfig(ABC):
 
     Example:
         >>> class MyModelParams(BaseParamConfig):
-        ...     @classmethod
-        ...     def define_params(cls) -> tuple[str, dict]:
+        ...     def define_params(self) -> tuple[str, dict]:
         ...         return "MyModel Parameters", {
         ...             "hidden_dim": {"type": int, "default": 100, "help": "Hidden dimension"},
         ...         }
     """
 
-    params: ClassVar[Dict[str, Dict[str, Any]]] = {}
-    group_name: ClassVar[str] = None
-
     def __init__(self):
         super().__init__()
         # 从实例方法定义初始化
         group, params = self.define_params()
-        self.group_name = group
-        self.params = params
+        self.group_name: str = group
+        self.params: Dict[str, Dict[str, Any]] = params
 
-    @classmethod
     @abstractmethod
-    def define_params(cls) -> tuple[str, dict]:
+    def define_params(self) -> tuple[str, dict]:
         """定义参数。
 
         子类必须实现此方法，返回参数组名称和参数字典。
@@ -94,8 +89,7 @@ def register_model_params(model_name: str):
     Usage:
         >>> @register_model_params("GIKT")
         ... class GIKTModelParams(BaseParamConfig):
-        ...     @classmethod
-        ...     def define_params(cls):
+        ...     def define_params(self):
         ...         return "GIKT Parameters", {...}
 
     Args:
@@ -144,7 +138,7 @@ def list_models() -> List[str]:
 class DataParams(BaseParamConfig):
     """数据处理参数配置。"""
 
-    def define_params(cls) -> tuple[str, dict]:
+    def define_params(self) -> tuple[str, dict]:
         group_name = "Data Parameters"
         params = {
             "dataset": {
@@ -198,7 +192,7 @@ class DataParams(BaseParamConfig):
 class EarlyStoppingParams(BaseParamConfig):
     """早停参数配置。"""
 
-    def define_params(cls) -> tuple[str, dict]:
+    def define_params(self) -> tuple[str, dict]:
         group_name = "Early Stopping Parameters"
         params = {
             "es_monitor": {
@@ -239,7 +233,7 @@ class EarlyStoppingParams(BaseParamConfig):
 class GeneralParams(BaseParamConfig):
     """通用参数配置（日志、设备、种子等）。"""
 
-    def define_params(cls) -> tuple[str, dict]:
+    def define_params(self) -> tuple[str, dict]:
         group_name = "General Parameters"
         params = {
             "log_dir": {
