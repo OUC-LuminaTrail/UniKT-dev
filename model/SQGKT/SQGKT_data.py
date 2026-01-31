@@ -147,27 +147,10 @@ class SQGKTModelData(GraphModelData):
             uq_table[user_ids, question_ids, 0] = ability_factors
             uq_table[user_ids, question_ids, 1] = attempt_factor_g
             uq_table[user_ids, question_ids, 2] = hint_factor_g
-
         else:
-            self.logger.warning(
-                "Using simplified factors (attempt_count and hint_count not available)..."
+            raise ValueError(
+                "Data must contain 'attempt_count' and 'hint_count' columns to compute factors."
             )
-            # 简化版本：只使用能力因子和基于问题难度的估计
-            # 计算每个问题的平均正确率（作为难度的反向指标）
-            question_difficulty_series = data.groupby("question")["label"].mean()
-
-            # 映射到每个交互
-            difficulties = (
-                data["question"].map(question_difficulty_series).fillna(0.5).values
-            )
-
-            attempt_factor_g = 1.0 - difficulties
-            hint_factor_g = 1.0 - difficulties
-
-            # 存储到三维表中
-            uq_table[user_ids, question_ids, 0] = ability_factors
-            uq_table[user_ids, question_ids, 1] = attempt_factor_g
-            uq_table[user_ids, question_ids, 2] = hint_factor_g
 
         self.logger.info(f"UQ table shape: {uq_table.shape}")
         return uq_table
