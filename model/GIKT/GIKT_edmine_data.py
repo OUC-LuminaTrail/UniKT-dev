@@ -47,9 +47,7 @@ class GIKTEdmineModelData(GraphModelData):
         )
 
         # 构建问题-技能关联矩阵
-        q_table = self.build_relationship_matrix(
-            ("question", "has", "skill")
-        )
+        q_table = self.build_relationship_matrix(("question", "has", "skill"))
         # 转换为GIKT所需的邻接表格式
         question2concept = self.q2c_from_q_table(q_table)
         concept2question = self.c2q_from_q_table(q_table)
@@ -95,7 +93,13 @@ class GIKTEdmineModelData(GraphModelData):
             val_dataset, batch_size=args.batch_size, shuffle=False
         )
 
-        return train_dataloader, val_dataloader, question_neighbors, concept_neighbors, q_table
+        return (
+            train_dataloader,
+            val_dataloader,
+            question_neighbors,
+            concept_neighbors,
+            q_table,
+        )
 
     def c2q_from_q_table(self, q_table: np.ndarray) -> dict[int, list[int]]:
         """

@@ -142,14 +142,12 @@ class GIKTEdmine(nn.Module):
                     (emb_next, emb_concepts), dim=0
                 )
             question_concept = question_concept.to(self.device)
-            if t == 0:
-                y_hat[:, 0] = self.predict(
-                    question_concept, torch.unsqueeze(gru2_output, dim=1)
-                )
-                continue
             # recap选取历史状态
             current_state = gru2_output.unsqueeze(dim=1)
-            if t <= self.rank_k:
+            if t == 0:
+                # t=0时，只有当前状态，没有历史状态
+                current_history_state = current_state
+            elif t <= self.rank_k:
                 current_history_state = torch.concat(
                     (current_state, state_history[:, 0:t]), dim=1
                 )
@@ -173,7 +171,9 @@ class GIKTEdmine(nn.Module):
                 current_history_state = torch.concat(
                     (current_state, select_history), dim=1
                 )
-            y_hat[:, t + 1] = self.predict(question_concept, current_history_state)
+            # 标准KT对齐：y_hat[:, t] 存储用t时刻信息预测t+1时刻的结果
+            # 这样 y_hat[:, t] 对应标签 correctness_seq[:, t+1]
+            y_hat[:, t] = self.predict(question_concept, current_history_state)
             h2_pre = gru2_output
             state_history[:, t] = gru2_output
         return y_hat

@@ -151,7 +151,12 @@ class GIKTEdmineTrainer(BaseTrainer):
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(
-            sequence, response, mask, self.question_neighbors, self.concept_neighbors, self.q_table
+            sequence,
+            response,
+            mask,
+            self.question_neighbors,
+            self.concept_neighbors,
+            self.q_table,
         )  # [B, S]
 
         # 提取有效位置的预测和标签
