@@ -229,6 +229,6 @@ class GIKTEdmine(nn.Module):
         tmp = torch.squeeze(tmp, dim=-1)  # [batch_size, num_qc, num_state]
         alpha = torch.softmax(tmp, dim=2)  # [batch_size, num_qc, num_state]
         p = torch.sum(torch.sum(alpha * output_g, dim=1), dim=1)  # [batch_size, 1]
-        result = torch.sigmoid(torch.squeeze(p, dim=-1))
+        result = torch.squeeze(p, dim=-1)
 
         return result
