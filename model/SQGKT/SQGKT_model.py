@@ -92,21 +92,21 @@ class SQGKT(nn.Module):
         uq_q_neighbor_size = q_neighbors_uq.shape[1]  # 用户邻居数
 
         # 初始化LSTM隐藏状态和细胞状态
-        h1 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
+        h1 = torch.nn.init.xavier_uniform_(
+            torch.zeros(batch_size, dim_emb, device=self.device)
         )
-        c1 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
+        c1 = torch.nn.init.xavier_uniform_(
+            torch.zeros(batch_size, dim_emb, device=self.device)
         )
-        h2 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
+        h2 = torch.nn.init.xavier_uniform_(
+            torch.zeros(batch_size, dim_emb, device=self.device)
         )
-        c2 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
+        c2 = torch.nn.init.xavier_uniform_(
+            torch.zeros(batch_size, dim_emb, device=self.device)
         )
 
-        state_history = torch.zeros(batch_size, seq_len, dim_emb).to(self.device)
-        y_hat = torch.zeros(batch_size, seq_len).to(self.device)
+        state_history = torch.zeros(batch_size, seq_len, dim_emb, device=self.device)
+        y_hat = torch.zeros(batch_size, seq_len, device=self.device)
 
         for t in range(seq_len - 1):
             user_t = user_seq[:, t]
@@ -145,7 +145,7 @@ class SQGKT(nn.Module):
                     emb_nodes_qs.append(self.embed_concept(nodes))
 
             emb_question_t_qs = self.aggregate_qs(emb_nodes_qs)
-            qs_emb_reconstruct = torch.zeros(batch_size, dim_emb).to(self.device)
+            qs_emb_reconstruct = torch.zeros(batch_size, dim_emb, device=self.device)
             qs_emb_reconstruct[mask_t] = emb_question_t_qs
             qs_emb_reconstruct[~mask_t] = self.embed_question_qs(question_t[~mask_t])
 
@@ -183,7 +183,7 @@ class SQGKT(nn.Module):
             emb_question_t_uq = self.aggregate_uq(
                 emb_nodes_uq, user_t[mask_t], uq_table
             )
-            uq_emb_reconstruct = torch.zeros(batch_size, dim_emb).to(self.device)
+            uq_emb_reconstruct = torch.zeros(batch_size, dim_emb, device=self.device)
             uq_emb_reconstruct[mask_t] = emb_question_t_uq
             uq_emb_reconstruct[~mask_t] = self.embed_question_uq(question_t[~mask_t])
 
@@ -215,16 +215,17 @@ class SQGKT(nn.Module):
                     correspond_concepts_list.append(self.embed_concept(concepts_index))
             # 将习题和对应知识点embedding拼接起来
             emb_question_next = self.embed_question_qs(question_next)
-            question_concept = torch.zeros(batch_size, max_concept + 1, dim_emb).to(
-                self.device
+            question_concept = torch.zeros(
+                batch_size, max_concept + 1, dim_emb, device=self.device
             )
             for b, emb_concepts in enumerate(correspond_concepts_list):
                 num_qc = 1 + emb_concepts.shape[0]
-                emb_next = torch.unsqueeze(emb_question_next[b], dim=0)
+                emb_next = emb_question_next[
+                    b : b + 1
+                ]
                 question_concept[b, 0:num_qc] = torch.concat(
                     (emb_next, emb_concepts), dim=0
                 )
-            question_concept = question_concept.to(self.device)
             # recap选取历史状态
             current_state = lstm2_output.unsqueeze(dim=1)
             if t == 0:
@@ -235,22 +236,15 @@ class SQGKT(nn.Module):
                     (current_state, state_history[:, 0:t]), dim=1
                 )
             else:
-                Q = (
-                    self.embed_question_qs(question_next)
-                    .clone()
-                    .detach()
-                    .unsqueeze(dim=-1)
-                )
-                K = self.embed_question_qs(question_seq[:, 0:t]).clone().detach()
-                product_score = torch.bmm(K, Q).squeeze(dim=-1)
+                with torch.no_grad():
+                    Q = self.embed_question_qs(question_next).unsqueeze(dim=-1)
+                    K = self.embed_question_qs(question_seq[:, 0:t])
+                    product_score = torch.bmm(K, Q).squeeze(dim=-1)
                 _, indices = torch.topk(product_score, k=self.rank_k, dim=1)
-                select_history = torch.concat(
-                    tuple(
-                        state_history[i][indices[i]].unsqueeze(dim=0)
-                        for i in range(batch_size)
-                    ),
-                    dim=0,
+                batch_indices = torch.arange(batch_size, device=self.device).unsqueeze(
+                    1
                 )
+                select_history = state_history[batch_indices, indices]
                 current_history_state = torch.concat(
                     (current_state, select_history), dim=1
                 )
@@ -330,36 +324,25 @@ class SQGKT(nn.Module):
 
     def predict(self, question_concept, current_history_state):
         # question_concept: (batch_size, num_qc, dim_emb), current_history_state: (batch_size, num_state, dim_emb)
-        output_g = torch.bmm(
-            question_concept, torch.transpose(current_history_state, 1, 2)
-        )
+        output_g = torch.bmm(question_concept, current_history_state.transpose(1, 2))
 
-        num_qc, num_state = question_concept.shape[1], current_history_state.shape[1]
-        states = torch.unsqueeze(
-            current_history_state, dim=1
+        states = current_history_state.unsqueeze(
+            1
         )  # [batch_size, 1, num_state, dim_emb]
-        states = states.repeat(
-            1, num_qc, 1, 1
-        )  # [batch_size, num_qc, num_state, dim_emb]
-        question_concepts = torch.unsqueeze(
-            question_concept, dim=2
+        question_concepts = question_concept.unsqueeze(
+            2
         )  # [batch_size, num_qc, 1, dim_emb]
-        question_concepts = question_concepts.repeat(
-            1, 1, num_state, 1
-        )  # [batch_size, num_qc, num_state, dim_emb]
 
-        K = torch.tanh(
-            self.MLP_query(states)
-        )  # [batch_size, num_qc, num_state, dim_emb]
+        K = torch.tanh(self.MLP_query(states))  # [batch_size, 1, num_state, dim_emb]
         Q = torch.tanh(
             self.MLP_key(question_concepts)
-        )  # [batch_size, num_qc, num_state, dim_emb]
-        tmp = self.MLP_W(
-            torch.concat((Q, K), dim=-1)
-        )  # [batch_size, num_qc, num_state, 1]
-        tmp = torch.squeeze(tmp, dim=-1)  # [batch_size, num_qc, num_state]
-        alpha = torch.softmax(tmp, dim=2)  # [batch_size, num_qc, num_state]
-        p = torch.sum(torch.sum(alpha * output_g, dim=1), dim=1)  # [batch_size, 1]
-        result = torch.squeeze(p, dim=-1)
+        )  # [batch_size, num_qc, 1, dim_emb]
 
-        return result
+        # [batch_size, num_qc, num_state, 2*dim_emb]
+        tmp = self.MLP_W(torch.concat((Q, K), dim=-1)).squeeze(
+            -1
+        )  # [batch_size, num_qc, num_state]
+        alpha = torch.softmax(tmp, dim=2)  # [batch_size, num_qc, num_state]
+        p = (alpha * output_g).sum(dim=(1, 2))  # [batch_size]
+
+        return p
