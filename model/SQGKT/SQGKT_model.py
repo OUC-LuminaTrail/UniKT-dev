@@ -220,9 +220,7 @@ class SQGKT(nn.Module):
             )
             for b, emb_concepts in enumerate(correspond_concepts_list):
                 num_qc = 1 + emb_concepts.shape[0]
-                emb_next = emb_question_next[
-                    b : b + 1
-                ]
+                emb_next = emb_question_next[b : b + 1]
                 question_concept[b, 0:num_qc] = torch.concat(
                     (emb_next, emb_concepts), dim=0
                 )
@@ -326,19 +324,22 @@ class SQGKT(nn.Module):
         # question_concept: (batch_size, num_qc, dim_emb), current_history_state: (batch_size, num_state, dim_emb)
         output_g = torch.bmm(question_concept, current_history_state.transpose(1, 2))
 
-        states = current_history_state.unsqueeze(
-            1
-        )  # [batch_size, 1, num_state, dim_emb]
-        question_concepts = question_concept.unsqueeze(
-            2
-        )  # [batch_size, num_qc, 1, dim_emb]
+        num_qc, num_state = question_concept.shape[1], current_history_state.shape[1]
 
-        K = torch.tanh(self.MLP_query(states))  # [batch_size, 1, num_state, dim_emb]
+        states = current_history_state.unsqueeze(1).expand(
+            -1, num_qc, -1, -1
+        )  # [batch_size, num_qc, num_state, dim_emb]
+        question_concepts = question_concept.unsqueeze(2).expand(
+            -1, -1, num_state, -1
+        )  # [batch_size, num_qc, num_state, dim_emb]
+
+        K = torch.tanh(
+            self.MLP_query(states)
+        )  # [batch_size, num_qc, num_state, dim_emb]
         Q = torch.tanh(
             self.MLP_key(question_concepts)
-        )  # [batch_size, num_qc, 1, dim_emb]
+        )  # [batch_size, num_qc, num_state, dim_emb]
 
-        # [batch_size, num_qc, num_state, 2*dim_emb]
         tmp = self.MLP_W(torch.concat((Q, K), dim=-1)).squeeze(
             -1
         )  # [batch_size, num_qc, num_state]
