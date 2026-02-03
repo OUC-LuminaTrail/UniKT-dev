@@ -6,6 +6,7 @@
 from typing import Dict, List
 import numpy as np
 import torch
+from scipy.special import expit
 from sklearn.metrics import roc_auc_score, accuracy_score, root_mean_squared_error
 from ..core import get_logger
 
@@ -86,14 +87,14 @@ class MetricsAccumulator:
         if not accum["y_label"]:
             return {}
 
-        # 拼接所有 batch
-        y_label = torch.cat(accum["y_label"]).numpy()
-        y_pred = torch.cat(accum["y_pred"]).numpy()
-        y_hat = torch.cat(accum["y_hat"]).numpy()
+        # 拼接所有 batch 并转换为 numpy 数组
+        y_label: np.ndarray = torch.cat(accum["y_label"]).numpy()
+        y_pred: np.ndarray = torch.cat(accum["y_pred"]).numpy()
+        y_hat: np.ndarray = torch.cat(accum["y_hat"]).numpy()
 
         # 检查预测值是否为概率值，如果不是则自动应用 sigmoid
         if not ((y_hat >= 0).all() and (y_hat <= 1).all()):
-            y_hat = 1 / (1 + np.exp(-y_hat))
+            y_hat = expit(y_hat)  # 数值稳定的 sigmoid 实现
 
         # 计算指标
         metrics = {

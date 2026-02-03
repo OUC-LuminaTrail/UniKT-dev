@@ -202,16 +202,12 @@ class SQGKT(Module):
                     qs_concat.dtype
                 )
 
-            if t == 0:
-                y_hat[:, 0] = torch.tensor(0.5, device=DEVICE, dtype=y_hat.dtype)
-                y_hat[:, 1] = self.predict(
-                    qs_concat, torch.unsqueeze(lstm_output, dim=1)
-                ).to(y_hat.dtype)
-                continue
-
             current_state = lstm_output.unsqueeze(dim=1)
-            if t <= self.rank_k:
-                current_history_state = torch.cat(
+            if t == 0:
+                # t=0时，只有当前状态，没有历史状态
+                current_history_state = current_state
+            elif t <= self.rank_k:
+                current_history_state = torch.concat(
                     (current_state, state_history[:, 0:t]), dim=1
                 )
             else:
@@ -230,9 +226,7 @@ class SQGKT(Module):
                     (current_state, select_history), dim=1
                 )
 
-            y_hat[:, t + 1] = self.predict(qs_concat, current_history_state).to(
-                y_hat.dtype
-            )
+            y_hat[:, t] = self.predict(qs_concat, current_history_state).to(y_hat.dtype)
             state_history[:, t] = lstm_output.to(state_history.dtype)
         return y_hat
 
