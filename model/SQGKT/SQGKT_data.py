@@ -49,15 +49,19 @@ class SQGKTModelData(GraphModelData):
 
         # 构建问题-技能关联矩阵
         qs_table = self.build_relationship_matrix(("question", "has", "skill"))
-        num_q, num_c = qs_table.shape[0], qs_table.shape[1]
 
         # 问题-技能图的邻接表
         # q_neighbors_qs[question_id] -> 该问题的技能邻居ID列表
         # c_neighbors_qs[skill_id] -> 该技能的问题邻居ID列表
+        qs_q_neighbor_size = max(1, int(getattr(args, "qs_question_neighbors", 5)))
+        qs_c_neighbor_size = max(1, int(getattr(args, "qs_skill_neighbors", 10)))
+        self.logger.info(
+            f"[SQGKT] QS neighbors: q->s={qs_q_neighbor_size}, s->q={qs_c_neighbor_size}"
+        )
         q_neighbors_qs, c_neighbors_qs = self.build_graph_neighbors(
             qs_table,
-            q_neighbor_size=int(qs_table.sum(axis=1).max()),
-            c_neighbor_size=min(20, max(1, num_q // num_c)),
+            q_neighbor_size=qs_q_neighbor_size,
+            c_neighbor_size=qs_c_neighbor_size,
         )
         qs_table = torch.tensor(qs_table, dtype=torch.long)
         q_neighbors_qs = torch.tensor(q_neighbors_qs, dtype=torch.long)
@@ -65,15 +69,19 @@ class SQGKTModelData(GraphModelData):
 
         # 构建用户-问题邻接表
         uq_matrix = self.build_relationship_matrix(("user", "answers", "question"))
-        num_u, num_q_uq = uq_matrix.shape[0], uq_matrix.shape[1]
 
         # 用户-问题图的邻接表
         # u_neighbors_uq[user_id] -> 该用户的问题邻居ID列表
         # q_neighbors_uq[question_id] -> 该问题的用户邻居ID列表
+        uq_u_neighbor_size = max(1, int(getattr(args, "uq_user_neighbors", 5)))
+        uq_q_neighbor_size = max(1, int(getattr(args, "uq_question_neighbors", 5)))
+        self.logger.info(
+            f"[SQGKT] UQ neighbors: u->q={uq_u_neighbor_size}, q->u={uq_q_neighbor_size}"
+        )
         u_neighbors_uq, q_neighbors_uq = self.build_graph_neighbors(
             uq_matrix,
-            q_neighbor_size=int(uq_matrix.sum(axis=1).max()),
-            c_neighbor_size=min(20, max(1, num_u // num_q_uq)),
+            q_neighbor_size=uq_u_neighbor_size,
+            c_neighbor_size=uq_q_neighbor_size,
         )
         u_neighbors_uq = torch.tensor(u_neighbors_uq, dtype=torch.long)
         q_neighbors_uq = torch.tensor(q_neighbors_uq, dtype=torch.long)
