@@ -18,29 +18,29 @@ class SQGKTModelParams(BaseParamConfig):
     def define_params(self) -> tuple[str, dict]:
         group_name = "SQGKT Parameters"
         params = {
-            "embedding_dim": {
+            "dim_emb": {
                 "type": int,
                 "default": 100,
                 "short": "ed",
                 "help": "Embedding dimension (default: 100)",
             },
-            "dropout_lstm": {
+            "agg_hops": {
+                "type": int,
+                "default": 3,
+                "short": "nh",
+                "help": "Number of GNN hops (default: 3)",
+            },
+            "dropout4lstm": {
                 "type": float,
                 "default": 0.2,
                 "short": "dpl",
                 "help": "LSTM dropout probability (default: 0.2)",
             },
-            "dropout_gnn": {
+            "dropout4gnn": {
                 "type": float,
                 "default": 0.4,
                 "short": "dpg",
                 "help": "GNN dropout probability (default: 0.4)",
-            },
-            "lstm_layers": {
-                "type": int,
-                "default": 2,
-                "short": "ll",
-                "help": "Number of LSTM layers (default: 2)",
             },
             "qs_question_neighbors": {
                 "type": int,
@@ -55,41 +55,23 @@ class SQGKTModelParams(BaseParamConfig):
             "uq_user_neighbors": {
                 "type": int,
                 "default": 5,
-                "help": "Question neighbors in user-question graph (default: 5)",
+                "help": "User neighbors in user-question graph (default: 5)",
             },
             "uq_question_neighbors": {
                 "type": int,
                 "default": 5,
-                "help": "Skill neighbors in user-question graph (default: 5)",
-            },
-            "n_hop": {
-                "type": int,
-                "default": 3,
-                "short": "nh",
-                "help": "Number of GNN hops (default: 3)",
+                "help": "Question neighbors in user-question graph (default: 5)",
             },
             "rank_k": {
                 "type": int,
                 "default": 10,
                 "help": "Top K for soft review mechanism (default: 10)",
             },
-            "history_neighbour": {
-                "type": int,
-                "default": 5,
-                "short": "hn",
-                "help": "History neighbor count (default: 5)",
-            },
-            "att_bound": {
-                "type": float,
-                "default": 0.2,
-                "short": "ab",
-                "help": "Attention bound (default: 0.2)",
-            },
             "epochs": {
                 "type": int,
-                "default": 200,
+                "default": 300,
                 "short": "ep",
-                "help": "Number of training epochs (default: 100)",
+                "help": "Number of training epochs (default: 200)",
             },
             "learning_rate": {
                 "type": float,
@@ -137,25 +119,13 @@ class SQGKTTrainer(BaseTrainer):
         (
             train_data,
             val_data,
-            self.uq_matrix,
-            self.qs_matrix,
-            self.qs_q_neighbor_list,
-            self.qs_s_neighbor_list,
-            self.uq_u_neighbor_list,
-            self.uq_q_neighbor_list,
+            qs_table,
+            q_neighbors_qs,
+            c_neighbors_qs,
+            uq_table,
+            u_neighbors_uq,
+            q_neighbors_uq,
         ) = model_data.prepare_data(args)
-
-        # 将numpy数组转换为torch张量
-        self.uq_matrix = torch.from_numpy(
-            self.uq_matrix
-        )  # 3维张量: [num_users, num_questions, 3]
-        self.qs_matrix = torch.from_numpy(
-            self.qs_matrix
-        )  # 2维张量: [num_questions, num_skills]
-        self.qs_q_neighbor_list = torch.from_numpy(self.qs_q_neighbor_list)
-        self.qs_s_neighbor_list = torch.from_numpy(self.qs_s_neighbor_list)
-        self.uq_u_neighbor_list = torch.from_numpy(self.uq_u_neighbor_list)
-        self.uq_q_neighbor_list = torch.from_numpy(self.uq_q_neighbor_list)
 
         model, opt, loss, lr_scheduler = self.init_model(args, data_src)
         super().__init__(
@@ -172,6 +142,13 @@ class SQGKTTrainer(BaseTrainer):
             seed=args.seed,
             exp_manager=exp_manager,
         )
+
+        self.qs_table = self._move_tensor_to_device(qs_table)
+        self.q_neighbors_qs = self._move_tensor_to_device(q_neighbors_qs)
+        self.c_neighbors_qs = self._move_tensor_to_device(c_neighbors_qs)
+        self.uq_table = self._move_tensor_to_device(uq_table)
+        self.u_neighbors_uq = self._move_tensor_to_device(u_neighbors_uq)
+        self.q_neighbors_uq = self._move_tensor_to_device(q_neighbors_uq)
 
     def init_model(self, args, data_src):
         from model.SQGKT import SQGKT
@@ -197,24 +174,24 @@ class SQGKTTrainer(BaseTrainer):
     def forward_pass(self, batch_data):
         """SQGKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成"""
         # 解包数据并移动到设备
-        sequence, response, mask, user_ids = batch_data
+        users, sequence, response, mask = batch_data
+        users = self._move_tensor_to_device(users)
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
-        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
-        user_ids = self._move_tensor_to_device(user_ids)
+        mask = self._move_tensor_to_device(mask)
 
         # 模型前向传播
         y_hat_full = self.model(
-            user_ids,
+            users,
             sequence,
             response,
             mask,
-            self.uq_matrix.to(self.device_),
-            self.qs_matrix.to(self.device_),
-            self.qs_q_neighbor_list.to(self.device_),
-            self.qs_s_neighbor_list.to(self.device_),
-            self.uq_u_neighbor_list.to(self.device_),
-            self.uq_q_neighbor_list.to(self.device_),
+            self.qs_table,
+            self.q_neighbors_qs,
+            self.c_neighbors_qs,
+            self.uq_table,
+            self.u_neighbors_uq,
+            self.q_neighbors_uq,
         )  # [B, S]
 
         # 提取有效位置的预测和标签（跳过第一个时间步）
