@@ -9,6 +9,7 @@ class HistoryRecap(nn.Module):
     - 对于时间步 t，计算"下一题(t+1)"与"历史所有题目(0..t)"的余弦相似度
     - 使用 top-k 选取最相似的 M 个历史位置
     - 从指定的表示向量（如 LSTM 输出）中 gather 这些位置的特征
+    - 当相似度低于阈值时，使用预计算的 hist_neighbor_index 作为备用索引
 
     参数:
         hist_neighbor_num (int): 要采样的历史邻居数量 M
@@ -19,6 +20,7 @@ class HistoryRecap(nn.Module):
         next_q_emb: [B, S, D] 下一题的 embedding (用于计算相似度)
         qa_emb: [B, S, H] 要采样的表示向量
         user_mask: [B, S] 有效位置掩码
+        hist_neighbor_index: [B, S, M] 预计算的备用索引（可选）
 
     输出:
         hist_neighbors: [B, S, M, H] 采样得到的历史邻居表示
@@ -35,6 +37,7 @@ class HistoryRecap(nn.Module):
         next_q_emb: torch.Tensor,  # [B, S, D]
         qa_emb: torch.Tensor,  # [B, S, H]
         user_mask: torch.Tensor,  # [B, S]
+        hist_neighbor_index: torch.Tensor = None,  # [B, S, M] 可选的备用索引
     ):
         B, S, _ = input_q_emb.size()
         H = qa_emb.size(-1)
@@ -77,12 +80,21 @@ class HistoryRecap(nn.Module):
             sorted=True,
         )  # [B, S, M], [B, S, M]
 
-        # 将相似度为0的位置索引标记为 -1
-        temp_hist_index = torch.where(
-            hist_attention_value > 0,
-            temp_hist_index,
-            torch.full_like(temp_hist_index, -1),
-        )  # [B, S, M]
+        # 当相似度 <= 0 时，使用预计算的备用索引
+        if hist_neighbor_index is not None:
+            # 使用预计算的 hist_neighbor_index 作为备用
+            temp_hist_index = torch.where(
+                hist_attention_value > 0,
+                temp_hist_index,
+                hist_neighbor_index,  # 使用预计算的索引而非 -1
+            )
+        else:
+            # 如果没有提供 hist_neighbor_index，使用 -1 作为无效标记
+            temp_hist_index = torch.where(
+                hist_attention_value > 0,
+                temp_hist_index,
+                torch.full_like(temp_hist_index, -1),
+            )  # [B, S, M]
 
         # 在 qa_emb 后添加零向量作为 padding
         zero_padding = torch.zeros(B, 1, H, device=device, dtype=qa_emb.dtype)
