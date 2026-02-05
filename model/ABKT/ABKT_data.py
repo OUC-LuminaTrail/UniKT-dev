@@ -275,7 +275,7 @@ class ABKTModelData(BaseModelData):
         values = torch.tensor(adj_norm.data, dtype=torch.float32)
         shape = adj_norm.shape
 
-        adj_sparse = torch.sparse_coo_tensor(indices, values, shape)
+        adj_sparse = torch.sparse_coo_tensor(indices, values, shape).coalesce()
 
         self.logger.info(f"Adjacency matrix shape: {shape}")
         self.logger.info(f"Number of edges: {len(values)}")
