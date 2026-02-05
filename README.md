@@ -83,31 +83,65 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
 kt-exp-graph/
 ├── configs/                           # 配置与参数空间
 │   ├── ablation/                      # 消融实验配置
+│   │   ├── gikt_ablation.json
+│   │   ├── hgikt_ablation.json
+│   │   └── sqgkt_ablation.json
 │   └── optuna/                        # Optuna 搜索配置
+│       ├── optuna_config.json
+│       ├── param_space_gikt.json
+│       └── param_space_hgikt.json
 ├── data/                              # 数据目录
 │   ├── assistments09/
 │   ├── assistments12/
 │   ├── assistments17/
-│   └── ednet/
+│   └── ednet_kt1/
 ├── model/                             # 模型实现
+│   ├── ABKT/
+│   ├── DGEKT/
 │   ├── GIKT/
 │   ├── HGIKT/
-│   └── SQGKT/
+│   ├── SGKT/
+│   ├── SQGKT/
+│   └── layers/                        # 共享模型组件
+│       ├── components.py
+│       └── __init__.py
 ├── runs/                              # 实验运行日志与检查点
 ├── swanlog/                           # SwanLab 本地日志
 ├── utils/                             # 工具模块
 │   ├── ablation/                      # 消融实验工具
 │   ├── config/                        # 配置管理
-│   ├── core/                          # 核心工具（日志/随机数等）
+│   │   ├── base.py
+│   │   ├── data_config.py
+│   │   ├── experiment_config.py
+│   │   ├── param_config.py
+│   │   └── training_config.py
+│   ├── core/                          # 核心工具
+│   │   ├── logger.py
+│   │   ├── random.py
+│   │   └── registry.py
 │   ├── data_process/                  # 数据处理工具
+│   │   ├── data_source.py
+│   │   ├── assist09.py
+│   │   ├── assist12.py
+│   │   ├── assist17.py
+│   │   └── ednet_kt1.py
 │   ├── optuna_utils/                  # Optuna 工具
-│   └── training/                      # 训练核心逻辑
+│   ├── training/                      # 训练核心逻辑
+│   │   ├── base_trainer.py
+│   │   ├── callbacks.py
+│   │   ├── checkpoint.py
+│   │   ├── metrics.py
+│   │   └── multi_trainer.py
+│   ├── experiment_manager.py
+│   ├── hyperparam_manager.py
+│   └── net_data.py
+├── scripts/
+│   ├── run_kfold.sh                   # K 折训练脚本
+│   └── setup_env.sh                   # 环境配置脚本
 ├── ablation_study.py                  # 消融实验脚本
 ├── data_process.py                    # 数据预处理脚本（下载/清洗/划分）
 ├── optuna_search.py                   # 超参数搜索脚本
-├── train.py                           # 模型训练脚本
-└── scripts/
-    └── run_kfold.sh                   # K 折训练脚本
+└── train.py                           # 模型训练脚本
 ```
 
 ## 快速开始
@@ -169,12 +203,25 @@ python data_process.py process \
 
 使用 `train.py` 脚本进行模型训练：
 
+**训练示例：**
+
 ```bash
 # 训练 GIKT 模型
 python train.py -m GIKT -d assistments09
 
+# 训练 HGIKT 模型
+python train.py -m HGIKT -d assistments09
+
 # 训练 SQGKT 模型
 python train.py -m SQGKT -d assistments09
+
+# K折交叉验证训练
+for fold in {0..4}; do
+  python train.py -m GIKT -d assistments09 --fold $fold
+done
+
+# 使用早停机制训练
+python train.py -m GIKT -d assistments09 --es_patience 10 --es_monitor auc --es_mode max
 ```
 
 各模型的详细训练说明在 `docs/` 目录下。
