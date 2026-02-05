@@ -162,10 +162,8 @@ class GeneralInteraction(nn.Module):
         N_plus_1 = next_candidates.size(2)
 
         # 1. 计算两两内积得分
-        # hist: [B, S, M+1, H] -> [B, S, M+1, 1, H]
-        # next: [B, S, N+1, H] -> [B, S, 1, N+1, H]
-        interaction = hist_candidates.unsqueeze(3) * next_candidates.unsqueeze(2)
-        logits_raw = torch.sum(interaction, dim=-1)  # [B, S, M+1, N+1]
+        logits_raw = torch.einsum("bsmh,bsnh->bsmn", hist_candidates, next_candidates)
+        # [B, S, M+1, N+1]
 
         # 2. 计算加性注意力分数
         # 分别对hist和next应用线性变换
