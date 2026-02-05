@@ -17,7 +17,7 @@ ruff = ">=0.14.13,<0.15"
 
 [pypi-dependencies]
 dhg = "==0.9.*"
-swanlab = "==0.7.*"
+swanlab = "<0.8"
 torch-geometric = ">=2.7.0, <3"
 
 [feature.gpu.system-requirements]
