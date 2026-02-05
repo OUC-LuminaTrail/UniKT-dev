@@ -212,10 +212,13 @@ class SGKTModelData(GraphModelData):
         """
         Build Heterogeneous Relation Graph (HRG) following original author's strategy.
 
-        The HRG graph contains three types of relations:
-        1. Question -> Skill (via skill_matrix)
-        2. Skill -> Question (reverse)
-        3. Question <-> Question (co-occurrence in same sequence)
+        The HRG graph contains two types of relations:
+        1. Question <-> Skill (bidirectional via skill_matrix)
+        2. Question <-> Question (co-occurrence in same sequence)
+
+        Optimization: Instead of building both Q->S and S->Q separately, we build
+        Q->S once and use torch.cat to add reverse edges, reducing code redundancy
+        while maintaining the same graph structure.
 
         Args:
             question_skill_matrix: [num_questions, num_skills] binary matrix
@@ -234,22 +237,15 @@ class SGKTModelData(GraphModelData):
         cooc_neighbor_num = int(cooc_neighbor_num)
 
         # Relation 1: Question -> Skill (via skill_matrix)
-        # Following original author's logic in build_adj_list (line 60)
+        # Build Question->Skill edges only; reverse edges (Skill->Question) will be
+        # automatically added via torch.cat to create an undirected graph
         for q in range(num_questions):
             skills = np.where(question_skill_matrix[q] == 1)[0].tolist()
             for s in skills:
                 edge_index[0].append(num_skills + q)  # Question node ID
                 edge_index[1].append(s)  # Skill node ID
 
-        # Relation 2: Skill -> Question (reverse edges)
-        # Following original author's logic (line 66-67)
-        for s in range(num_skills):
-            questions = np.where(question_skill_matrix[:, s] == 1)[0].tolist()
-            for q in questions:
-                edge_index[0].append(s)  # Skill node ID
-                edge_index[1].append(num_skills + q)  # Question node ID
-
-        # Relation 3: Question co-occurrence (questions in same sequence)
+        # Relation 2: Question co-occurrence (questions in same sequence)
         # Following original author's logic (line 68-71)
         # Extract co-occurrence from training data
         data = self.data_src.get_sequence_data()
@@ -263,9 +259,7 @@ class SGKTModelData(GraphModelData):
             cooc_neighbors: dict[int, set[int]] = {}
 
             # Group once for performance
-            user_to_questions = (
-                data.groupby("user")["question"].unique()
-            )
+            user_to_questions = data.groupby("user")["question"].unique()
             for _user_id, questions_arr in tqdm(
                 user_to_questions.items(),
                 total=len(user_to_questions),
@@ -296,9 +290,20 @@ class SGKTModelData(GraphModelData):
                     edge_index[0].append(src)
                     edge_index[1].append(dst)
 
-        # Convert to tensor and remove duplicates
-        edge_index = torch.tensor(edge_index, dtype=torch.long)
-        edge_index = torch.unique(edge_index, dim=1)
+        # Convert to tensor
+        edge_index_tensor = torch.tensor(edge_index, dtype=torch.long)
+
+        # Add reverse edges to make the graph undirected
+        edge_index_with_reverse = torch.cat(
+            [
+                edge_index_tensor,
+                torch.stack([edge_index_tensor[1], edge_index_tensor[0]], dim=0),
+            ],
+            dim=1,
+        )
+
+        # Remove duplicate edges
+        edge_index = torch.unique(edge_index_with_reverse, dim=1)
 
         # Build PyG Data object
         hrg_data = Data(edge_index=edge_index, num_nodes=num_skills + num_questions)
@@ -361,8 +366,11 @@ class SGKTDataset(Dataset):
         self.hist_neighbor_num = hist_neighbor_num
         self.max_seq_len = user_sequence.shape[1]
 
-        assert len(user_sequence) == len(user_response) == len(user_mask) == len(
-            user_skills
+        assert (
+            len(user_sequence)
+            == len(user_response)
+            == len(user_mask)
+            == len(user_skills)
         ), "Sequence, response, mask, and skills must have the same length"
 
     def __len__(self):
