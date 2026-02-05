@@ -158,6 +158,12 @@ class SGKTTrainer(BaseTrainer):
         # Move static data to device
         self.hrg_data = self.hrg_data.to(self.device_)
 
+        # Precompute neighbor indices for HRG embedding
+        # This is a one-time operation that significantly speeds up forward passes
+        logger.info("Precomputing HRG neighbor indices...")
+        self.model.hrg_embedding.precompute_neighbors(self.hrg_data.edge_index)
+        logger.info("HRG neighbor indices precomputed successfully")
+
         logger.info(
             f"SGKT Trainer initialized with {self.num_skills} skills and {self.num_questions} questions"
         )

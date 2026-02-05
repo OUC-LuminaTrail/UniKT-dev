@@ -57,6 +57,80 @@ class HRGEmbedding(nn.Module):
         for _ in range(num_layers):
             self.convs.append(GCNConv(embedding_dim, embedding_dim))
 
+        # Precomputed neighbor indices (initialized in precompute_neighbors)
+        self.register_buffer("neighbor_indices", None)  # [num_questions, max_neighbors]
+        self.register_buffer("neighbor_mask", None)  # [num_questions, max_neighbors]
+        self._precomputed = False
+
+    def precompute_neighbors(self, edge_index):
+        """
+        Precompute neighbor indices for all questions.
+
+        This method should be called once after model initialization,
+        before training starts. It builds static neighbor index buffers
+        that are reused across all forward passes.
+
+        Args:
+            edge_index: [2, E] HRG graph edge indices (static)
+        """
+        device = edge_index.device
+
+        # 1. Extract question-question edges (vectorized)
+        # Question nodes are indexed from num_skills to num_skills + num_questions - 1
+        qq_mask = (edge_index[0] >= self.num_skills) & (
+            edge_index[1] >= self.num_skills
+        )
+        qq_edges = edge_index[:, qq_mask].clone()
+        qq_edges[0] -= self.num_skills
+        qq_edges[1] -= self.num_skills
+
+        # 2. Build adjacency list (dense format for efficiency)
+        # For each question, store up to max_neighbors neighbor indices
+        neighbor_indices = torch.full(
+            (self.num_questions, self.max_neighbors),
+            -1,
+            dtype=torch.long,
+            device=device,
+        )
+        neighbor_mask = torch.zeros(
+            (self.num_questions, self.max_neighbors),
+            dtype=torch.bool,
+            device=device,
+        )
+
+        # 3. Extract neighbors for each question with deterministic order
+        # Match the original implementation's ordering: src matches first, then dst matches
+        # NOTE: Original implementation has a bug where it collects src[src==q] instead of
+        # dst[src==q], but we maintain this behavior for numerical equivalence
+        if qq_edges.shape[1] > 0:
+            src = qq_edges[0]
+            dst = qq_edges[1]
+
+            # Build neighbor lists matching original implementation's behavior
+            for q_id in range(self.num_questions):
+                # Original logic: src[src == q] gives the source nodes (including q itself)
+                # Then dst[dst == q] gives the destination nodes
+                # This is intentionally kept as-is to match original behavior
+                src_matches = src[src == q_id]
+                dst_matches = dst[dst == q_id]
+                # Concatenate: src matches first, then dst matches
+                neighbors = torch.cat([src_matches, dst_matches])
+                # Remove self-loops only (no deduplication to match original)
+                neighbors = neighbors[neighbors != q_id]
+                # Limit to max_neighbors
+                if len(neighbors) > self.max_neighbors:
+                    neighbors = neighbors[: self.max_neighbors]
+
+                n = len(neighbors)
+                if n > 0:
+                    neighbor_indices[q_id, :n] = neighbors
+                    neighbor_mask[q_id, :n] = True
+
+        # 4. Register as buffers
+        self.register_buffer("neighbor_indices", neighbor_indices)
+        self.register_buffer("neighbor_mask", neighbor_mask)
+        self._precomputed = True
+
     def forward(self, hrg_data, question_indices):
         """
         Forward pass for HRG embedding.
@@ -71,6 +145,10 @@ class HRGEmbedding(nn.Module):
         """
         device = question_indices.device
         batch_size, seq_len = question_indices.shape
+
+        # Auto-precompute neighbors if not done yet
+        if not self._precomputed:
+            self.precompute_neighbors(hrg_data.edge_index)
 
         # 1. Build initial node features
         num_nodes = self.num_skills + self.num_questions
@@ -105,11 +183,14 @@ class HRGEmbedding(nn.Module):
 
     def _extract_neighbor_features(self, x, edge_index, question_node_indices, device):
         """
-        Extract neighbor features for each question.
+        Extract neighbor features for each question using precomputed indices.
+
+        This optimized version uses precomputed neighbor indices to avoid
+        building adjacency lists during each forward pass.
 
         Args:
             x: [num_nodes, embedding_dim] All node features after GCN
-            edge_index: [2, num_edges] Edge indices
+            edge_index: [2, num_edges] Edge indices (kept for API compatibility)
             question_node_indices: [batch_size, seq_len] Question node IDs
             device: Torch device
 
@@ -118,58 +199,30 @@ class HRGEmbedding(nn.Module):
         """
         batch_size, seq_len = question_node_indices.shape
 
-        # Build adjacency list for questions
-        # Only consider edges that connect to question nodes
-        question_edge_mask = (edge_index[0] >= self.num_skills) | (
-            edge_index[1] >= self.num_skills
-        )
-        question_edges = edge_index[:, question_edge_mask]  # [2, num_question_edges]
+        # Convert question node indices to question indices (0-based)
+        q_indices = question_node_indices - self.num_skills  # [B, S]
 
-        # Convert to zero-based question indices
-        src = question_edges[0] - self.num_skills  # [num_question_edges]
-        dst = question_edges[1] - self.num_skills  # [num_question_edges]
+        # Gather precomputed neighbor indices [B, S, K]
+        batch_neighbor_idx = self.neighbor_indices[q_indices]
+        batch_neighbor_mask = self.neighbor_mask[q_indices]
 
-        # Filter out skill node indices (they become negative after subtraction)
-        valid_mask = (src >= 0) & (dst >= 0)
-        src = src[valid_mask]
-        dst = dst[valid_mask]
-
-        # Build neighbor list for each question
-        max_neighbors = self.max_neighbors
-
-        # Initialize neighbor features tensor with zeros
-        neighbor_features = torch.zeros(
-            batch_size, seq_len, max_neighbors, self.embedding_dim, device=device
+        # Convert to global node IDs [B, S, K]
+        batch_neighbor_idx = batch_neighbor_idx + self.num_skills
+        # Set padding positions to 0 (valid index, will be masked out later)
+        batch_neighbor_idx = torch.where(
+            batch_neighbor_mask,
+            batch_neighbor_idx,
+            torch.zeros_like(batch_neighbor_idx),
         )
 
-        # For efficiency, collect all unique questions in the batch
-        unique_questions = torch.unique(question_node_indices)
+        # Vectorized gather: x[neighbor_idx] -> [B, S, K, E]
+        # Use advanced indexing
+        neighbor_features = x[batch_neighbor_idx]  # [B, S, K, E]
 
-        # Build neighbor map: question_id -> list of neighbor_ids
-        neighbor_map = {}
-        for q_id in unique_questions:
-            q_idx = q_id - self.num_skills  # Convert to question index
-            # Find all neighbors of this question
-            neighbors = torch.cat([src[src == q_idx], dst[dst == q_idx]])
-            # Remove self-loops
-            neighbors = neighbors[neighbors != q_idx]
-            # Limit to max_neighbors
-            if len(neighbors) > max_neighbors:
-                neighbors = neighbors[:max_neighbors]
-            neighbor_map[q_id.item()] = neighbors
-
-        # Fill neighbor features for each position in batch
-        for b in range(batch_size):
-            for s in range(seq_len):
-                q_id = question_node_indices[b, s].item()
-                if q_id in neighbor_map:
-                    neighbors = neighbor_map[q_id]
-                    n_count = len(neighbors)
-                    if n_count > 0:
-                        # Get neighbor node IDs (add back num_skills)
-                        neighbor_node_ids = neighbors + self.num_skills
-                        # Gather neighbor features
-                        neighbor_features[b, s, :n_count] = x[neighbor_node_ids]
+        # Apply mask to zero out padding positions
+        neighbor_features = (
+            neighbor_features * batch_neighbor_mask.unsqueeze(-1).float()
+        )
 
         return neighbor_features
 
@@ -240,66 +293,61 @@ class SGEmbedding(nn.Module):
         batch_size, seq_len, _ = question_emb.shape
         device = question_emb.device
 
-        outputs = []
+        # Pre-compute valid lengths for all batches
+        valid_lens = user_mask.sum(dim=1).long()  # [B]
+        max_valid_len = valid_lens.max().item()
 
-        for b in range(batch_size):
-            # Get valid length for this sample
-            valid_len = user_mask[b].sum().item()
-            if valid_len == 0:
-                # No valid data, use zeros
-                outputs.append(torch.zeros(seq_len, self.embedding_dim, device=device))
-                continue
+        # Handle case where all sequences are empty
+        if max_valid_len == 0:
+            return torch.zeros(batch_size, seq_len, self.embedding_dim, device=device)
 
-            # Initialize fin_state with first timestep (TF line 135)
-            # Use answer embedding of first position as initial state
-            fin_state = answer_emb[b, 0]  # [embedding_dim]
+        # Initialize hidden states: fin_state = answer_emb[:, 0] for each batch
+        fin_states = answer_emb[:, 0, :]  # [B, E]
 
-            # Process each timestep sequentially (TF lines 138-150)
-            output_steps = []
-            for t in range(valid_len):
-                # Get features for current timestep
-                q_feat = question_emb[b, t]  # [E]
-                a_feat = answer_emb[b, t]  # [E]
-                it_feat = input_trans_embedding[
-                    b, t
-                ]  # [H] - need to project to [E] if E != H
+        # Prepare output tensor
+        outputs = torch.zeros(batch_size, seq_len, self.embedding_dim, device=device)
 
-                # Project hidden_dim to embedding_dim if needed (TF assumes E == H)
-                it_feat_projected = self.hidden_to_embedding(it_feat)  # [E]
+        # Process each timestep
+        for t in range(max_valid_len):
+            # Create mask for batches that are still valid at this timestep
+            valid_mask = t < valid_lens  # [B]
 
-                # Gate mechanism (TF lines 141-145)
-                in_state = q_feat + a_feat + it_feat_projected  # [E]
-                in_state = self.dropout(in_state)
-                fin_state_in = self.W_in(in_state) + self.b_in  # [E]
-                fin_state_out = self.W_out(in_state) + self.b_out  # [E]
+            if not valid_mask.any():
+                break
 
-                # Concatenate gates and add residual (TF line 144-145)
-                av = torch.cat([fin_state_in, fin_state_out], dim=-1)  # [2*E]
-                av = av + torch.cat([in_state, in_state], dim=-1)  # [2*E]
+            # Get features for current timestep (all batches)
+            q_feat = question_emb[:, t, :]  # [B, E]
+            a_feat = answer_emb[:, t, :]  # [B, E]
+            it_feat = input_trans_embedding[:, t, :]  # [B, H]
+            it_feat_projected = self.hidden_to_embedding(it_feat)  # [B, E]
 
-                # GRUCell forward pass (TF line 146-148)
-                # Expand av to have batch dimension
-                av_expanded = av.unsqueeze(0)  # [1, 2*E]
-                fin_state_expanded = fin_state.unsqueeze(0)  # [1, E]
+            # Compute in_state
+            in_state = q_feat + a_feat + it_feat_projected  # [B, E]
+            in_state = self.dropout(in_state)
 
-                fin_state = self.gru_cell(av_expanded, fin_state_expanded)
+            # Compute gates
+            fin_state_in = self.W_in(in_state) + self.b_in  # [B, E]
+            fin_state_out = self.W_out(in_state) + self.b_out  # [B, E]
 
-                fin_state = fin_state.squeeze(0)  # [E]
-                fin_state = self.dropout(fin_state)
+            # Compute av
+            av = torch.cat([fin_state_in, fin_state_out], dim=-1)  # [B, 2E]
+            av = av + torch.cat([in_state, in_state], dim=-1)  # [B, 2E]
 
-                # Store output for this timestep
-                output_steps.append(fin_state)
+            # Apply GRUCell to all batches simultaneously
+            new_fin_states = self.gru_cell(av, fin_states)  # [B, E]
+            new_fin_states = self.dropout(new_fin_states)
 
-            # Pad to seq_len with zeros
-            while len(output_steps) < seq_len:
-                output_steps.append(torch.zeros_like(output_steps[-1]))
+            # Update only valid positions
+            fin_states = torch.where(
+                valid_mask.unsqueeze(-1).expand_as(fin_states),
+                new_fin_states,
+                fin_states,
+            )
 
-            outputs.append(torch.stack(output_steps, dim=0))  # [seq_len, E]
+            # Store output for this timestep
+            outputs[:, t, :] = fin_states
 
-        # Stack batches
-        output_series = torch.stack(outputs, dim=0)  # [B, S, E]
-
-        return output_series
+        return outputs
 
 
 class NextNeighborSampler(nn.Module):
@@ -426,7 +474,7 @@ class SelfAttentionHistory(nn.Module):
 
     def _init_weights(self):
         """Initialize weights following TF implementation (uniform initialization)."""
-        stdv = 1.0 / torch.sqrt(torch.tensor(self.hidden_dim, dtype=torch.float32))
+        stdv = 1.0 / (self.hidden_dim**0.5)
         nn.init.uniform_(self.xita, -stdv, stdv)
         nn.init.uniform_(self.xt1, -stdv, stdv)
         nn.init.uniform_(self.xt2, -stdv, stdv)
@@ -458,19 +506,23 @@ class SelfAttentionHistory(nn.Module):
 
         input_embedding = self.dropout(input_embedding)
 
-        # Feature-wise dimension interaction
-        temp_features = []
-        for i in range(hidden_dim):
-            input_dim_i = input_embedding[:, :, i]  # [B, S]
-            diff = input_dim_i - input_embedding[:, :, 0]  # [B, S]
-            transformed1 = torch.matmul(diff, self.xt1)  # [B, S]
-            exp_transformed = torch.exp(transformed1)  # [B, S]
-            transformed2 = torch.matmul(exp_transformed, self.xt2)  # [B, S]
-            result_dim = transformed2 + self.xita  # [B, S]
-            temp_features.append(result_dim)
+        # For each dimension i: result[:, :, i] = exp((x[:, :, i] - x[:, :, 0]) @ xt1) @ xt2 + xita
 
-        # Stack and permute to [B, S, H]
-        input_embedding_transformed = torch.stack(temp_features, dim=0).permute(1, 2, 0)
+        # Step 1: Compute diff for all dimensions: [B, S, H] - [B, S, 1] -> [B, S, H]
+        diff = input_embedding - input_embedding[:, :, 0:1]
+
+        # Step 2: First matrix multiplication for all dimensions
+        # [B, S, H] @ [S, S] -> [B, S, H] using einsum: bsh,st->bth
+        transformed1 = torch.einsum("bsh,st->bth", diff, self.xt1)
+        exp_transformed = torch.exp(transformed1)
+
+        # Step 3: Second matrix multiplication for all dimensions
+        transformed2 = torch.einsum("bsh,st->bth", exp_transformed, self.xt2)
+
+        # Step 4: Add position-wise bias (broadcast xita: [S] -> [B, S, H])
+        input_embedding_transformed = transformed2 + self.xita.unsqueeze(0).unsqueeze(
+            -1
+        )
         input_embedding_transformed = self.dropout(input_embedding_transformed)
 
         # Add zero padding
