@@ -392,42 +392,18 @@ class NextNeighborSampler(nn.Module):
                 dtype=neighbor_features.dtype,
             )
 
-        # Following TF implementation strategy (model.py:280-290):
-        # 1. Reshape to [B*S, total_neighbors, emb_dim]
-        temp_emb = neighbor_features.reshape(
-            batch_size * seq_len, total_neighbors, emb_dim
-        )
-
-        # 2. Transpose to [total_neighbors, B*S, emb_dim] for shuffling
-        temp_emb = temp_emb.transpose(0, 1)
-
-        # 3. Shuffle along the neighbor dimension (first dimension)
         perm = torch.randperm(total_neighbors, device=neighbor_features.device)
-        temp_emb = temp_emb[perm]  # [total_neighbors, B*S, emb_dim]
-
-        # 4. Transpose back to [B*S, total_neighbors, emb_dim]
-        temp_emb = temp_emb.transpose(0, 1)
-
-        # 5. Sample according to TF logic
         if total_neighbors >= self.next_neighbor_num:
-            # Enough neighbors: take first N
-            sampled_neighbors = temp_emb[:, : self.next_neighbor_num, :]
+            # Enough neighbors: directly sample first N using advanced indexing
+            sampled_idx = perm[: self.next_neighbor_num]
+            next_neighbors = neighbor_features[:, :, sampled_idx, :]
         else:
-            # Not enough neighbors: tile (repeat) to reach N
-            # TF: tile_neighbor_embedding = tf.tile(temp_emb, [1, -(-N // Q), 1])
-            # This calculates ceil(N / Q) to determine how many times to repeat
+            # Not enough neighbors: need to tile (repeat) indices to reach N
             repeat_times = -(
                 -self.next_neighbor_num // total_neighbors
             )  # Ceiling division
-            sampled_neighbors = temp_emb.repeat(1, repeat_times, 1)[
-                :, : self.next_neighbor_num, :
-            ]
-
-        # 6. Reshape back to [B, S, N, emb_dim]
-        next_neighbors = sampled_neighbors.reshape(
-            batch_size, seq_len, self.next_neighbor_num, emb_dim
-        )
-
+            extended_idx = perm.repeat(repeat_times)[: self.next_neighbor_num]
+            next_neighbors = neighbor_features[:, :, extended_idx, :]
         return next_neighbors
 
 
