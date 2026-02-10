@@ -194,9 +194,6 @@ class GMF(nn.Module):
         self.adj_tag = adj
         self.layer = layer
 
-        # 确保邻接矩阵为 float32
-        aj_norm = aj_norm.to(torch.float32)
-
         # 节点嵌入 [n_users + n_items, embedding_k]
         self.embeddings = nn.Parameter(
             torch.randn((n_users + n_items, embedding_k)) * 0.01
@@ -204,17 +201,36 @@ class GMF(nn.Module):
 
         # 预计算多跳邻接矩阵
         if layer >= 1:
-            self.register_buffer("aj_norm_1", aj_norm.to_dense())
+            self.register_buffer("aj_norm_1", aj_norm)
         if layer >= 2:
-            aj_dense = aj_norm.to_dense()
-            self.register_buffer("aj_norm_2", self.aj_norm_1.mm(aj_dense))
+            with torch.no_grad():
+                aj_norm_2 = torch.sparse.mm(aj_norm, aj_norm).coalesce()
+            self.register_buffer("aj_norm_2", aj_norm_2)
         if layer >= 3:
-            aj_dense = aj_norm.to_dense()
-            self.register_buffer("aj_norm_3", self.aj_norm_2.mm(aj_dense))
+            with torch.no_grad():
+                aj_norm_3 = torch.sparse.mm(self.aj_norm_2, aj_norm).coalesce()
+            self.register_buffer("aj_norm_3", aj_norm_3)
 
-        # 可学习的邻接权重矩阵
+        # 可学习的邻接权重
+        # 始终初始化这些属性，但仅在adj=True时创建可学习的参数
+        self.adj_values_1 = None
+        self.adj_values_2 = None
+        self.adj_values_3 = None
+
         if adj:
-            self.adj = nn.Parameter(torch.ones(aj_norm.shape))
+            # 为每个layer存储对应的权重
+            if layer >= 1:
+                self.adj_values_1 = nn.Parameter(
+                    torch.ones(self.aj_norm_1._values().shape)
+                )
+            if layer >= 2:
+                self.adj_values_2 = nn.Parameter(
+                    torch.ones(self.aj_norm_2._values().shape)
+                )
+            if layer >= 3:
+                self.adj_values_3 = nn.Parameter(
+                    torch.ones(self.aj_norm_3._values().shape)
+                )
 
         # 全局效应偏置
         self.user_GE = nn.Parameter(torch.zeros(n_users))
@@ -223,6 +239,19 @@ class GMF(nn.Module):
         logger.debug(
             f"GMF initialized: users={n_users}, items={n_items}, "
             f"embedding_k={embedding_k}, layer={layer}"
+        )
+
+    def _apply_sparse_adj(
+        self, sparse_mat: torch.Tensor, adj_values: torch.Tensor
+    ) -> torch.Tensor:
+        """应用可学习权重到稀疏矩阵"""
+        if adj_values is None:
+            return sparse_mat
+
+        # 创建带权重的稀疏矩阵
+        weighted_values = sparse_mat._values() * adj_values
+        return torch.sparse_coo_tensor(
+            sparse_mat._indices(), weighted_values, sparse_mat.shape
         )
 
     def forward(
@@ -241,16 +270,19 @@ class GMF(nn.Module):
             i_norm: 题目嵌入范数 (用于正则化)
         """
         # 计算图卷积后的嵌入
-        if self.adj_tag:
+        if self.adj_values_1 is not None:
             # 使用可学习的邻接权重
             if self.layer == 0:
                 G_embeddings = self.embeddings
             elif self.layer == 1:
-                G_embeddings = (self.aj_norm_1 * self.adj).mm(self.embeddings)
+                aj_weighted = self._apply_sparse_adj(self.aj_norm_1, self.adj_values_1)
+                G_embeddings = torch.sparse.mm(aj_weighted, self.embeddings)
             elif self.layer == 2:
-                G_embeddings = (self.aj_norm_2 * self.adj).mm(self.embeddings)
+                aj_weighted = self._apply_sparse_adj(self.aj_norm_2, self.adj_values_2)
+                G_embeddings = torch.sparse.mm(aj_weighted, self.embeddings)
             elif self.layer == 3:
-                G_embeddings = (self.aj_norm_3 * self.adj).mm(self.embeddings)
+                aj_weighted = self._apply_sparse_adj(self.aj_norm_3, self.adj_values_3)
+                G_embeddings = torch.sparse.mm(aj_weighted, self.embeddings)
             else:
                 raise ValueError(f"GMF layer must be in [0, 1, 2, 3], got {self.layer}")
         else:
@@ -258,11 +290,11 @@ class GMF(nn.Module):
             if self.layer == 0:
                 G_embeddings = self.embeddings
             elif self.layer == 1:
-                G_embeddings = self.aj_norm_1.mm(self.embeddings)
+                G_embeddings = torch.sparse.mm(self.aj_norm_1, self.embeddings)
             elif self.layer == 2:
-                G_embeddings = self.aj_norm_2.mm(self.embeddings)
+                G_embeddings = torch.sparse.mm(self.aj_norm_2, self.embeddings)
             elif self.layer == 3:
-                G_embeddings = self.aj_norm_3.mm(self.embeddings)
+                G_embeddings = torch.sparse.mm(self.aj_norm_3, self.embeddings)
             else:
                 raise ValueError(f"GMF layer must be in [0, 1, 2, 3], got {self.layer}")
 

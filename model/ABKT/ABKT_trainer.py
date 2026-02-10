@@ -61,9 +61,9 @@ class ABKTModelParams(BaseParamConfig):
             },
             "km_epochs": {
                 "type": int,
-                "default": 50,
+                "default": 100,
                 "short": "kme",
-                "help": "Number of epochs for KM stage (default: 50)",
+                "help": "Number of epochs for KM stage (default: 100)",
             },
             "km_patience": {
                 "type": int,
@@ -104,9 +104,9 @@ class ABKTModelParams(BaseParamConfig):
             },
             "am_patience": {
                 "type": int,
-                "default": 50,
+                "default": 10,
                 "short": "amp",
-                "help": "Early stopping patience for AM stage (default: 50)",
+                "help": "Early stopping patience for AM stage (default: 10)",
             },
             # Common parameters
             "pretrain_clip": {
