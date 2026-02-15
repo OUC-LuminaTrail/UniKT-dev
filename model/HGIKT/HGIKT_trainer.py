@@ -170,7 +170,7 @@ class HGIKTTrainer(BaseTrainer):
         sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
-        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
+        mask = self._move_tensor_to_device(mask)
 
         # 模型前向传播
         # 模型在时刻 t 的输出预测的是 t+1 的标签

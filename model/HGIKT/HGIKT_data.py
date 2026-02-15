@@ -11,16 +11,12 @@ logger = get_logger(__name__)
 
 class HGIKTDataset(Dataset):
     def __init__(self, sequences, responses, masks):
-        self.sequences = sequences
-        self.responses = responses
-        self.masks = masks
+        self.sequences = torch.as_tensor(sequences, dtype=torch.long)
+        self.responses = torch.as_tensor(responses, dtype=torch.long)
+        self.masks = torch.as_tensor(masks, dtype=torch.bool)
 
     def __getitem__(self, index):
-        return (
-            torch.tensor(self.sequences[index], dtype=torch.long),
-            torch.tensor(self.responses[index], dtype=torch.long),
-            torch.tensor(self.masks[index], dtype=torch.long),
-        )
+        return self.sequences[index], self.responses[index], self.masks[index]
 
     def __len__(self):
         return len(self.sequences)

@@ -125,15 +125,10 @@ class MoEFusion(nn.Module):
         self.norm = nn.LayerNorm(dim)
 
     def forward(self, view1, view2):
-        # 专家输出
-        e1 = self.expert1(view1)
-        e2 = self.expert2(view2)
         # 展平批次维度以适应 Linear
         B_shape = view1.shape[:-1]
-        N = int(torch.prod(torch.tensor(B_shape)).item()) if len(B_shape) > 0 else 1
-
-        v1_flat = view1.view(N, -1)
-        v2_flat = view2.view(N, -1)
+        v1_flat = view1.reshape(-1, self.dim)
+        v2_flat = view2.reshape(-1, self.dim)
 
         e1 = self.expert1(v1_flat)
         e2 = self.expert2(v2_flat)
@@ -151,7 +146,7 @@ class MoEFusion(nn.Module):
         # experts: [N, 3, D]
         fused = torch.sum(experts * weights.unsqueeze(-1), dim=1)
 
-        return self.norm(fused).view(*B_shape, self.dim)
+        return self.norm(fused).reshape(*B_shape, self.dim)
 
 
 @MODELS.register("HGIKT")
@@ -311,25 +306,6 @@ class HGIKT(nn.Module):
         # 获取下一题的问题序列嵌入
         # next_question_embedding: [B, S, embedding_dim]
         next_question_embedding: torch.Tensor = question_conv_fused[next_user_sequence]
-
-        # 获取下一题学生回复，最后一个时间步用0占位
-        next_user_response = torch.zeros_like(user_response)  # [B, S]
-        if user_response.size(1) > 1:
-            next_user_response[:, :-1] = user_response[:, 1:]
-            next_user_response[:, -1] = 0
-
-        # 获取下一题的回复嵌入
-        # next_answer_embedding: [B, S, embedding_dim]
-        next_answer_embedding: torch.Tensor = self.answer_embedding(next_user_response)
-
-        # 组合下一题问题和答案嵌入
-        next_exercise_emb = torch.cat(
-            [next_question_embedding, next_answer_embedding], dim=-1
-        )  # [B, S, 2*E]
-
-        # 将下一题练习嵌入投影到隐藏维度
-        next_exercise_emb = F.relu(self.fc_exercise(next_exercise_emb))  # [B, S, H]
-        next_exercise_emb = self.embedding_dropout(next_exercise_emb)
 
         # 历史回顾模块
         # question_embedding_sequence: [B, S, E]
