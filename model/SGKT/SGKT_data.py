@@ -10,11 +10,15 @@ from utils.net_data import GraphModelData
 from utils.core import get_logger
 import torch
 import numpy as np
-from tqdm import tqdm
-from torch_geometric.data import Data
 
 
-def sample_hist_neighbors(batch_size, max_seq_len, hist_neighbor_num, skill_index):
+def sample_hist_neighbors(
+    batch_size,
+    max_seq_len,
+    hist_neighbor_num,
+    skill_index,
+    pad_index=None,
+):
     """
     Sample historical neighbors based on skill matching.
 
@@ -26,51 +30,61 @@ def sample_hist_neighbors(batch_size, max_seq_len, hist_neighbor_num, skill_inde
         batch_size: Batch size
         max_seq_len: Maximum sequence length
         hist_neighbor_num: Number of historical neighbors to sample (M)
-        skill_index: [batch_size, max_seq_len] Skill indices for each position
+        skill_index: [batch_size, max_seq_len] Skill indices (tensor or ndarray)
+        pad_index: Padding index used when no valid historical neighbor exists.
+                   Defaults to max_seq_len and requires downstream gather to
+                   append one zero-padding position.
 
     Returns:
         hist_neighbor_index: [batch_size, max_seq_len, hist_neighbor_num]
                             Pre-computed historical neighbor indices
     """
-    hist_neighbors_index = []
+    if pad_index is None:
+        pad_index = max_seq_len
 
-    for i in range(batch_size):
-        seq_hist_index = []
-        seq_skill_index = skill_index[i]
+    if hist_neighbor_num == 0:
+        return np.zeros((batch_size, max_seq_len, 0), dtype=np.int64)
+
+    # Convert to numpy if tensor
+    if isinstance(skill_index, torch.Tensor):
+        skills = skill_index.numpy()
+    else:
+        skills = np.asarray(skill_index)
+
+    # Result array: default to pad_index (dedicated padding position for no-match fallback)
+    result = np.full(
+        (batch_size, max_seq_len, hist_neighbor_num),
+        pad_index,
+        dtype=np.int64,
+    )
+    # Position 0 has no history; keep padding index to avoid future leakage.
+    result[:, 0, :] = pad_index
+
+    for b in range(batch_size):
+        seq_skills = skills[b]  # [max_seq_len]
+
+        # Build same-skill match matrix: same_skill[t, k] = True if skills match
+        # and k < t (causal: only look at history)
+        # [max_seq_len] == [max_seq_len, 1] -> [max_seq_len, max_seq_len]
+        same_skill = seq_skills[np.newaxis, :] == seq_skills[:, np.newaxis]
+        # Causal mask: position k < t
+        causal = np.tril(np.ones((max_seq_len, max_seq_len), dtype=bool), k=-1)
+        valid = same_skill & causal  # [max_seq_len, max_seq_len]
 
         for t in range(1, max_seq_len):
-            # Find historical positions with the same skill
-            # same_skill_index = [k for k in range(t) if seq_skill_index[k] == seq_skill_index[t]]
-            current_skill = seq_skill_index[t].item()
-            same_skill_indices = [
-                k for k in range(t) if seq_skill_index[k].item() == current_skill
-            ]
+            candidates = np.where(valid[t])[0]
+            n_candidates = len(candidates)
+            if n_candidates >= hist_neighbor_num:
+                result[b, t] = np.random.choice(
+                    candidates, hist_neighbor_num, replace=False
+                )
+            elif n_candidates > 0:
+                result[b, t] = np.random.choice(
+                    candidates, hist_neighbor_num, replace=True
+                )
+            # else: keeps default pad_index
 
-            if hist_neighbor_num != 0:
-                if len(same_skill_indices) >= hist_neighbor_num:
-                    # Enough same-skill positions, sample without replacement
-                    selected = np.random.choice(
-                        same_skill_indices, hist_neighbor_num, replace=False
-                    )
-                    seq_hist_index.append(selected.tolist())
-                elif len(same_skill_indices) > 0:
-                    # Not enough, sample with replacement
-                    selected = np.random.choice(
-                        same_skill_indices, hist_neighbor_num, replace=True
-                    )
-                    seq_hist_index.append(selected.tolist())
-                else:
-                    # No same-skill position found, use fallback indices
-                    # Use [max_seq_len-1, max_seq_len-1, ...] as fallback
-                    seq_hist_index.append([max_seq_len - 1] * hist_neighbor_num)
-            else:
-                seq_hist_index.append([])
-
-        # Pad first position with zeros (no history for t=0)
-        seq_hist_index = [[0] * hist_neighbor_num] + seq_hist_index
-        hist_neighbors_index.append(seq_hist_index)
-
-    return np.array(hist_neighbors_index, dtype=np.int64)
+    return result
 
 
 class SGKTModelData(GraphModelData):
@@ -119,18 +133,18 @@ class SGKTModelData(GraphModelData):
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
 
-        # 3. Build HRG graph (Question-Skill Graph)
-        # Following the original author's sampling strategy
-        hrg_data = self.build_hrg_graph(
+        self.logger.info("Building question-skill neighbors for HRG")
+
+        question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix=question_skill_matrix,
+            user_sequence=user_sequence,
+            user_mask=user_mask,
             num_skills=num_skills,
             num_questions=num_questions,
-            cooc_neighbor_num=getattr(args, "cooc_neighbor_num", 50),
+            question_neighbor_num=getattr(args, "question_neighbor_num", 4),
+            skill_neighbor_num=getattr(args, "skill_neighbor_num", 4),
         )
-
-        self.logger.info(
-            f"HRG graph built: {hrg_data.num_nodes} nodes, {hrg_data.edge_index.shape[1]} edges"
-        )
+        question_neighbors[:num_skills] = skill_neighbors
 
         # 4. Split data into train/val or k-fold
         if hasattr(args, "fold") and args.fold is not None:
@@ -194,126 +208,126 @@ class SGKTModelData(GraphModelData):
             f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}"
         )
 
+        hrg_context = {
+            "question_neighbors": torch.from_numpy(question_neighbors).long(),
+            "feature_embedding": None,
+            "next_neighbor_num": getattr(args, "next_neighbor_num", 4),
+        }
+
         return (
             train_loader,
             val_loader,
-            hrg_data,
+            hrg_context,
             num_skills,
             num_questions,
         )
 
-    def build_hrg_graph(
+    def build_qs_neighbors(
         self,
         question_skill_matrix,
+        user_sequence,
+        user_mask,
         num_skills,
         num_questions,
-        cooc_neighbor_num: int = 50,
+        question_neighbor_num,
+        skill_neighbor_num,
     ):
-        """
-        Build Heterogeneous Relation Graph (HRG) following original author's strategy.
+        qs_num = num_skills + num_questions
+        # Use set-backed adjacency for O(1) deduplication while preserving
+        # the original graph semantics.
+        adj_sets = [set() for _ in range(qs_num)]
 
-        The HRG graph contains two types of relations:
-        1. Question <-> Skill (bidirectional via skill_matrix)
-        2. Question <-> Question (co-occurrence in same sequence)
+        question_skills = [
+            np.where(question_skill_matrix[q_id] == 1)[0].tolist()
+            for q_id in range(num_questions)
+        ]
 
-        Optimization: Instead of building both Q->S and S->Q separately, we build
-        Q->S once and use torch.cat to add reverse edges, reducing code redundancy
-        while maintaining the same graph structure.
+        # 1) Filter out padded positions using mask (vectorized).
+        valid_positions = user_mask.astype(bool)
+        valid_questions = user_sequence[valid_positions].astype(np.int64, copy=False)
+        valid_questions = valid_questions[
+            (valid_questions >= 0) & (valid_questions < num_questions)
+        ]
 
-        Args:
-            question_skill_matrix: [num_questions, num_skills] binary matrix
-            num_skills: Number of skills
-            num_questions: Number of questions
+        # 2) Build question->skill and skill->question edges from all visible
+        # interactions (transductive setting aligned with original implementation).
+        if valid_questions.size > 0:
+            appeared_questions = np.unique(valid_questions)
+            for q_id in appeared_questions.tolist():
+                q_node = num_skills + q_id
+                skill_neighbors_for_q = question_skills[q_id]
+                adj_sets[q_node].update(skill_neighbors_for_q)
+                for skill_id in skill_neighbors_for_q:
+                    adj_sets[skill_id].add(q_node)
 
-        Returns:
-            hrg_data: PyG Data object with unified node indexing
-                - Node indexing: [skill_0, ..., skill_S, question_0, ..., question_Q]
-                - Total nodes = num_skills + num_questions
-        """
-        edge_index = [[], []]
+        # Build adjacency on real interactions only (exclude padded positions),
+        # while keeping the original SGKT transductive behavior (use all visible sequences).
+        for seq, mask in zip(user_sequence, user_mask):
+            valid_seq = seq[mask.astype(bool)]
+            if valid_seq.size == 0:
+                continue
 
-        if cooc_neighbor_num is None:
-            cooc_neighbor_num = 0
-        cooc_neighbor_num = int(cooc_neighbor_num)
+            valid_seq = valid_seq[(valid_seq >= 0) & (valid_seq < num_questions)]
+            if valid_seq.size == 0:
+                continue
 
-        # Relation 1: Question -> Skill (via skill_matrix)
-        # Build Question->Skill edges only; reverse edges (Skill->Question) will be
-        # automatically added via torch.cat to create an undirected graph
-        for q in range(num_questions):
-            skills = np.where(question_skill_matrix[q] == 1)[0].tolist()
-            for s in skills:
-                edge_index[0].append(num_skills + q)  # Question node ID
-                edge_index[1].append(s)  # Skill node ID
+            # Keep first-occurrence order in each sequence (same as previous behavior).
+            unique_q, first_idx = np.unique(valid_seq, return_index=True)
+            ordered_q = unique_q[np.argsort(first_idx)]
+            question_nodes = (num_skills + ordered_q).tolist()
 
-        # Relation 2: Question co-occurrence (questions in same sequence)
-        # Following original author's logic (line 68-71)
-        # Extract co-occurrence from training data
-        data = self.data_src.get_sequence_data()
+            if len(question_nodes) <= 1:
+                continue
 
-        # IMPORTANT: naive co-occurrence makes a fully-connected graph per user
-        # (O(|Q_u|^2) edges). For large datasets this explodes GPU memory in GCNConv.
-        # To match the original author's *bounded neighbor* behavior, we cap the number
-        # of co-occurrence neighbors per question.
-        if cooc_neighbor_num > 0:
-            # Build question -> co-occurrence neighbor set (question ids are 0-based)
-            cooc_neighbors: dict[int, set[int]] = {}
+            # Add complete co-occurrence edges among questions in the same sequence.
+            question_node_set = set(question_nodes)
+            for q_node in question_nodes:
+                adj_sets[q_node].update(question_node_set - {q_node})
 
-            # Group once for performance
-            user_to_questions = data.groupby("user")["question"].unique()
-            for _user_id, questions_arr in tqdm(
-                user_to_questions.items(),
-                total=len(user_to_questions),
-                desc="Building question co-occurrence edges (capped)",
-            ):
-                # Deterministic order to keep runs stable
-                questions_in_seq = sorted(set(map(int, questions_arr)))
-                if len(questions_in_seq) <= 1:
-                    continue
+        # Convert set-backed adjacency into lists for downstream sampling.
+        adj_list = [list(neighbors) for neighbors in adj_sets]
 
-                for idx, q1 in enumerate(questions_in_seq):
-                    # candidates are all other questions in the same user sequence
-                    candidates = questions_in_seq[:idx] + questions_in_seq[idx + 1 :]
-                    if len(candidates) > cooc_neighbor_num:
-                        candidates = candidates[:cooc_neighbor_num]
-                    if not candidates:
-                        continue
-                    cooc_neighbors.setdefault(q1, set()).update(candidates)
+        question_neighbors = np.zeros([qs_num, question_neighbor_num], dtype=np.int32)
+        skill_neighbors = np.zeros([num_skills, skill_neighbor_num], dtype=np.int32)
+        for index, neighbors in enumerate(adj_list):
+            if index < num_skills:
+                if len(neighbors) > 0:
+                    if len(neighbors) >= skill_neighbor_num:
+                        skill_neighbors[index] = np.random.choice(
+                            neighbors, skill_neighbor_num, replace=False
+                        )
+                    else:
+                        skill_neighbors[index] = np.random.choice(
+                            neighbors, skill_neighbor_num, replace=True
+                        )
+            else:
+                if len(neighbors) > 0:
+                    if len(neighbors) >= question_neighbor_num:
+                        neighbors_arr = np.asarray(neighbors, dtype=np.int32)
+                        save_skill = neighbors_arr[neighbors_arr < num_skills]
+                        save_question = neighbors_arr[neighbors_arr >= num_skills]
+                        if len(save_skill) >= question_neighbor_num:
+                            question_neighbors[index] = np.random.choice(
+                                save_skill, question_neighbor_num, replace=False
+                            )
+                        else:
+                            question_neighbors[index][: len(save_skill)] = save_skill
+                            if question_neighbor_num - len(save_skill) - 1 > 0:
+                                temp = np.random.choice(
+                                    save_question,
+                                    question_neighbor_num - len(save_skill) - 1,
+                                    replace=False,
+                                )
+                                changdu = len(save_skill)
+                                question_neighbors[
+                                    index, changdu + 1 : changdu + 1 + len(temp)
+                                ] = temp
+                    else:
+                        question_neighbors[index] = np.random.choice(
+                            neighbors, question_neighbor_num, replace=True
+                        )
 
-            # Enforce the global cap per question (across all users)
-            for q1, neigh_set in cooc_neighbors.items():
-                neigh_list = sorted(neigh_set)
-                if len(neigh_list) > cooc_neighbor_num:
-                    neigh_list = neigh_list[:cooc_neighbor_num]
-                src = num_skills + q1
-                for q2 in neigh_list:
-                    dst = num_skills + q2
-                    edge_index[0].append(src)
-                    edge_index[1].append(dst)
-
-        # Convert to tensor
-        edge_index_tensor = torch.tensor(edge_index, dtype=torch.long)
-
-        # Add reverse edges to make the graph undirected
-        edge_index_with_reverse = torch.cat(
-            [
-                edge_index_tensor,
-                torch.stack([edge_index_tensor[1], edge_index_tensor[0]], dim=0),
-            ],
-            dim=1,
-        )
-
-        # Remove duplicate edges
-        edge_index = torch.unique(edge_index_with_reverse, dim=1)
-
-        # Build PyG Data object
-        hrg_data = Data(edge_index=edge_index, num_nodes=num_skills + num_questions)
-
-        self.logger.info(
-            f"HRG Graph: {num_skills} skills, {num_questions} questions, "
-            f"{edge_index.shape[1]} edges"
-        )
-
-        return hrg_data
+        return question_neighbors, skill_neighbors
 
     def _extract_skills(self, user_sequence):
         """
@@ -328,20 +342,13 @@ class SGKTModelData(GraphModelData):
         question_skill_matrix = self.build_relationship_matrix(
             ("question", "has", "skill"), value_type="binary"
         )
+        first_skill = np.argmax(question_skill_matrix, axis=1)
+        has_skill = np.any(question_skill_matrix == 1, axis=1)
+        question_to_skill = np.where(has_skill, first_skill, 0).astype(
+            user_sequence.dtype, copy=False
+        )
 
-        num_users, max_seq_len = user_sequence.shape
-        user_skills = np.zeros_like(user_sequence)
-
-        for user_id in range(num_users):
-            for t in range(max_seq_len):
-                question_id = user_sequence[user_id, t]
-                # Find skill for this question (assuming single skill per question)
-                # Get the skill ID where the matrix has value 1
-                skills = np.where(question_skill_matrix[question_id] == 1)[0]
-                if len(skills) > 0:
-                    user_skills[user_id, t] = skills[0]  # Use first skill
-
-        return user_skills
+        return question_to_skill[user_sequence]
 
 
 class SGKTDataset(Dataset):
@@ -403,11 +410,16 @@ def sgkt_collate_fn(batch, hist_neighbor_num=5):
 
     # Compute hist_neighbor_index for this batch
     batch_size = batched["skills"].shape[0]
-    max_seq_len = batched["skills"].shape[1]
+    full_seq_len = batched["skills"].shape[1]  # e.g., 200
+    model_seq_len = full_seq_len - 1  # e.g., 199
 
-    # Compute hist_neighbor_index using skill-based matching
+    # Compute hist_neighbor_index using model sequence length
     hist_neighbor_index = sample_hist_neighbors(
-        batch_size, max_seq_len, hist_neighbor_num, batched["skills"]
+        batch_size,
+        model_seq_len,  # Use model_seq_len instead of full_seq_len
+        hist_neighbor_num,
+        batched["skills"][:, :model_seq_len],  # Slice skills to model_seq_len
+        pad_index=model_seq_len,
     )
 
     batched["hist_neighbor_index"] = torch.from_numpy(hist_neighbor_index).long()

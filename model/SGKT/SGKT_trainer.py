@@ -24,9 +24,9 @@ class SGKTModelParams(BaseParamConfig):
             # HRG (GCNConv) parameters
             "n_hop": {
                 "type": int,
-                "default": 2,
+                "default": 3,
                 "short": "nh",
-                "help": "Number of GCN layers for HRG graph (multi-hop aggregation) (default: 2)",
+                "help": "Number of GCN layers for HRG graph (multi-hop aggregation) (default: 3)",
             },
             # SG (GatedGraphConv) parameters
             "sg_layers": {
@@ -37,15 +37,15 @@ class SGKTModelParams(BaseParamConfig):
             # Neighbor sampling parameters
             "hist_neighbor_num": {
                 "type": int,
-                "default": 5,
+                "default": 3,
                 "short": "hn",
-                "help": "Number of historical neighbors to sample (default: 5)",
+                "help": "Number of historical neighbors to sample (default: 3)",
             },
             "next_neighbor_num": {
                 "type": int,
-                "default": 5,
+                "default": 4,
                 "short": "nn",
-                "help": "Number of next question neighbors to sample (default: 5)",
+                "help": "Number of next question neighbors to sample (default: 4)",
             },
             "att_bound": {
                 "type": float,
@@ -54,8 +54,34 @@ class SGKTModelParams(BaseParamConfig):
             },
             "cooc_neighbor_num": {
                 "type": int,
-                "default": 50,
-                "help": "Max number of co-occurrence neighbors per question in HRG graph (default: 50)",
+                "default": 0,
+                "help": "Max number of co-occurrence neighbors per question in HRG graph (default: 0)",
+            },
+            "skill_neighbor_num": {
+                "type": int,
+                "default": 4,
+                "help": "Number of skill neighbors to sample per hop (default: 4)",
+            },
+            "question_neighbor_num": {
+                "type": int,
+                "default": 4,
+                "help": "Number of question neighbors to sample per hop (default: 4)",
+            },
+            "aggregator": {
+                "type": str,
+                "default": "sum",
+                "help": "Aggregator type: sum or concat (default: sum)",
+            },
+            "select_index": {
+                "type": list,
+                "default": [0, 1, 2],
+                "nargs": "?",
+                "help": "Feature indices used for model inputs (default: [0, 1, 2])",
+            },
+            "sim_emb": {
+                "type": str,
+                "default": "question_emb",
+                "help": "Embedding type for similarity (default: question_emb)",
             },
             # Standard parameters
             "embedding_dim": {
@@ -70,15 +96,11 @@ class SGKTModelParams(BaseParamConfig):
                 "short": "hd",
                 "help": "Hidden layer dimension (default: 100)",
             },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout rate (default: 0.2)",
-            },
-            "dropout_gnn": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout rate for GNN/HRG route (default: 0.2)",
+            "dropout_keep_probs": {
+                "type": list,
+                "default": [0.8, 0.8, 1],
+                "nargs": "?",
+                "help": "Dropout keep probabilities for each GCN layer in HRG (default: [0.8, 0.8, 1])",
             },
             "epochs": {
                 "type": int,
@@ -88,14 +110,14 @@ class SGKTModelParams(BaseParamConfig):
             },
             "learning_rate": {
                 "type": float,
-                "default": 0.001,
+                "default": 0.00025,
                 "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.001)",
+                "help": "Learning rate for optimizer (default: 0.00025)",
             },
             "lr_decay": {
                 "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch (default: None)",
+                "default": 0.92,
+                "help": "Learning rate decay factor per epoch (default: 0.92)",
             },
             "weight_decay": {
                 "type": float,
@@ -105,9 +127,9 @@ class SGKTModelParams(BaseParamConfig):
             },
             "batch_size": {
                 "type": int,
-                "default": 64,
+                "default": 6,
                 "short": "bs",
-                "help": "Batch size for training (default: 64)",
+                "help": "Batch size for training (default: 6)",
             },
         }
 
@@ -155,14 +177,12 @@ class SGKTTrainer(BaseTrainer):
             exp_manager=exp_manager,
         )
 
-        # Move static data to device
-        self.hrg_data = self.hrg_data.to(self.device_)
-
-        # Precompute neighbor indices for HRG embedding
-        # This is a one-time operation that significantly speeds up forward passes
-        logger.info("Precomputing HRG neighbor indices...")
-        self.model.hrg_embedding.precompute_neighbors(self.hrg_data.edge_index)
-        logger.info("HRG neighbor indices precomputed successfully")
+        # Move HRG context to device and bind feature embedding table
+        self.hrg_data = {
+            key: value.to(self.device_) if hasattr(value, "to") else value
+            for key, value in self.hrg_data.items()
+        }
+        self.hrg_data["feature_embedding"] = self.model.feature_embedding.weight
 
         logger.info(
             f"SGKT Trainer initialized with {self.num_skills} skills and {self.num_questions} questions"

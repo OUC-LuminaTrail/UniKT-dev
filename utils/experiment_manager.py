@@ -169,9 +169,6 @@ class ExperimentManager:
         # 提取batch_size标签
         if hasattr(args, "batch_size"):
             tags.append(f"bs{args.batch_size}")
-        # 提取debug标签
-        if hasattr(args, "debug") and args.debug:
-            tags.append("debug")
 
         return ExperimentManager(
             exp_type=exp_type,

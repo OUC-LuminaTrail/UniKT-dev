@@ -117,7 +117,10 @@ class BaseTrainer(ABC):
         # 设置随机种子
         if seed is None and hyperparams is not None:
             seed = getattr(hyperparams, "seed", None)
-        self.seed = seed_everything(seed)
+        deterministic = True
+        if hyperparams is not None:
+            deterministic = getattr(hyperparams, "deterministic", True)
+        self.seed = seed_everything(seed, deterministic=deterministic)
 
         # 自动优化 DataLoader 参数
         if isinstance(self.train_data, torch.utils.data.DataLoader):
@@ -327,9 +330,10 @@ class BaseTrainer(ABC):
             处理后的 (y_hat, y_label) 元组
         """
         if y_label.numel() == 0:
-            # Logits 0.0 对应概率 0.5
-            y_hat = torch.tensor([0.0], dtype=torch.float, device=self.device_)
-            y_label = torch.tensor([0.0], dtype=torch.float, device=self.device_)
+            raise ValueError(
+                "Empty valid targets in current batch: no positions satisfy the training mask alignment. "
+                "Please check data preprocessing/sampling settings (e.g., min_seq_len, sample_users, batch_size)."
+            )
         return y_hat, y_label
 
     def _generate_binary_predictions(

@@ -3,7 +3,7 @@
 from argparse import ArgumentParser
 from utils.data_process import get_data_source
 from utils.core import get_logger
-from utils.config import DataParams, GeneralParams
+from utils.config import DataParams, GeneralParams, SamplingParams
 
 logger = get_logger(__name__)
 
@@ -58,6 +58,7 @@ def build_parser():
     )
     DataParams.add_args(proc)
     GeneralParams.add_args(proc)
+    SamplingParams.add_args(proc)
     proc.set_defaults(func=cmd_process)
 
     return parser
@@ -94,12 +95,21 @@ def cmd_download(args):
 def cmd_process(args):
     """Handle `process` subcommand."""
     dp = get_data_source(args.dataset, args)
-    # 清理数据
     dp.clear_data()
-    # 添加交叉验证标签
-    if hasattr(args, "kfold") and args.kfold and args.kfold > 1:
+
+    if args.sample_users:
+        dp.sample_users(
+            args.sample_users,
+            stratify=args.sample_stratify,
+            balance=args.sample_balance,
+            attempts_bins=args.sample_attempts_bins,
+            correct_bins=args.sample_correct_bins,
+            skill_bins=args.sample_skill_bins,
+        )
+
+    if args.kfold and args.kfold > 1:
         dp.add_kfold_labels(n_splits=args.kfold)
-    # 保存预处理后的数据
+
     dp.save_data()
 
 

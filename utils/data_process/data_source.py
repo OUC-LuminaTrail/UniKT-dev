@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import os
-import pandas
+import pandas as pd
 from sklearn.model_selection import KFold
 from utils.core import get_logger
 
@@ -439,7 +439,7 @@ class DataSource(ABC):
         # 加载序列数据
         try:
             logger.info(f"Loading sequence data: {sequence_data_path}")
-            self.sequence_data = pandas.read_parquet(sequence_data_path)
+            self.sequence_data = pd.read_parquet(sequence_data_path)
             logger.info(
                 f"✓ Sequence data loaded successfully: {self.sequence_data.shape}"
             )
@@ -455,7 +455,7 @@ class DataSource(ABC):
         # 加载问题数据
         try:
             logger.info(f"Loading question data: {question_data_path}")
-            self.question_data = pandas.read_parquet(question_data_path)
+            self.question_data = pd.read_parquet(question_data_path)
             logger.info(
                 f"✓ Question data loaded successfully: {self.question_data.shape}"
             )
@@ -703,6 +703,250 @@ class DataSource(ABC):
         self.add_metadata("kfold_n_splits", n_splits)
 
         return data
+
+    def get_user_stats(self):
+        """
+        计算用户统计特征（答题数、正确率、技能覆盖度）
+
+        返回:
+            包含用户统计信息的 DataFrame，索引为用户ID，列包括:
+            - attempts: 答题次数
+            - correct_rate: 正确率
+            - skill_count: 涉及的技能数
+        """
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+
+        # 按用户分组统计
+        user_stats = self.sequence_data.groupby("user").agg(
+            attempts=("label", "count"),
+            correct=("label", "sum"),
+        )
+
+        user_skill = self.sequence_data[["user", "question"]].merge(
+            self.question_data[["question", "skill"]],
+            on="question",
+            how="left",
+        )
+        skill_stats = (
+            user_skill.groupby("user")["skill"].nunique(dropna=True).rename("skills")
+        )
+
+        user_stats = user_stats.join(skill_stats, how="left")
+        user_stats["skills"] = user_stats["skills"].fillna(0).astype(int)
+        user_stats["correct_rate"] = user_stats["correct"] / user_stats["attempts"]
+        user_stats = user_stats.rename(columns={"skills": "skill_count"})
+
+        return user_stats
+
+    def sample_users(
+        self,
+        n_samples: int,
+        stratify: bool = True,
+        balance: bool = False,
+        attempts_bins: list = [20, 100],
+        correct_bins: list = [0.4, 0.8],
+        skill_bins: list = [5, 15],
+    ):
+        """
+        对用户进行分层抽样
+
+        基于用户的三维统计特征（答题数、正确率、技能覆盖度）进行分层抽样，
+        保留原始数据集的分布特征。
+
+        参数:
+            n_samples: 要抽取的用户数量
+            stratify: 是否启用分层抽样（默认: True）
+            balance: 是否在各层间平衡抽样（默认: False）
+            attempts_bins: 答题数分箱边界（默认: [20, 100]）
+            correct_bins: 正确率分箱边界（默认: [0.4, 0.8]）
+            skill_bins: 技能数分箱边界（默认: [5, 15]）
+
+        返回:
+            None（直接更新 self.sequence_data 和 self.question_data）
+
+        异常:
+            ValueError: 如果 n_samples 大于总用户数或 sequence_data 未加载
+
+        说明:
+            - 抽样使用全局随机种子 self.seed 确保可重复性
+            - 抽样配置和统计信息会记录到 metadata 中
+            - 同时更新 sequence_data 和 question_data 保持一致性
+        """
+        import numpy as np
+
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+
+        logger.info(f"Sampling {n_samples} users from dataset...")
+
+        user_stats = self.get_user_stats()
+        total_users = len(user_stats)
+
+        if n_samples > total_users:
+            raise ValueError(
+                f"Requested sample size ({n_samples}) exceeds total users ({total_users})"
+            )
+
+        if n_samples == total_users:
+            logger.info("Sample size equals total users, skipping sampling.")
+            return
+
+        original_records = len(self.sequence_data)
+
+        if stratify:
+            user_stats["attempts_level"] = pd.cut(
+                user_stats["attempts"],
+                bins=[-np.inf] + attempts_bins + [np.inf],
+                labels=["low", "medium", "high"],
+            )
+            user_stats["correct_level"] = pd.cut(
+                user_stats["correct_rate"],
+                bins=[-np.inf] + correct_bins + [np.inf],
+                labels=["low", "medium", "high"],
+            )
+            user_stats["skill_level"] = pd.cut(
+                user_stats["skill_count"],
+                bins=[-np.inf] + skill_bins + [np.inf],
+                labels=["narrow", "medium", "broad"],
+            )
+
+            user_stats["strata"] = (
+                user_stats["attempts_level"].astype(str)
+                + "_"
+                + user_stats["correct_level"].astype(str)
+                + "_"
+                + user_stats["skill_level"].astype(str)
+            )
+
+            strata_counts = user_stats["strata"].value_counts()
+            num_strata = len(strata_counts)
+
+            logger.info(f"Created {num_strata} strata for stratified sampling.")
+
+            sampled_users = []
+            strata_distribution = {}
+
+            if balance:
+                quota_per_strata = max(1, n_samples // num_strata)
+                for strata, count in strata_counts.items():
+                    quota = min(quota_per_strata, count)
+                    strata_users = user_stats[
+                        user_stats["strata"] == strata
+                    ].index.tolist()
+
+                    strata_seed = (self.seed + hash(strata) % 2**32) % 2**32
+                    rng = np.random.RandomState(strata_seed)
+
+                    sampled = rng.choice(strata_users, size=quota, replace=False)
+                    sampled_users.extend(sampled)
+
+                    strata_distribution[strata] = {"original": count, "sampled": quota}
+            else:
+                for strata, count in strata_counts.items():
+                    quota = max(1, int(count / total_users * n_samples))
+                    strata_users = user_stats[
+                        user_stats["strata"] == strata
+                    ].index.tolist()
+
+                    strata_seed = (self.seed + hash(strata) % 2**32) % 2**32
+                    rng = np.random.RandomState(strata_seed)
+
+                    sampled = rng.choice(
+                        strata_users, size=min(quota, count), replace=False
+                    )
+                    sampled_users.extend(sampled)
+
+                    strata_distribution[strata] = {
+                        "original": count,
+                        "sampled": len(sampled),
+                    }
+
+            if len(sampled_users) > n_samples:
+                rng = np.random.RandomState(self.seed)
+                sampled_users = rng.choice(
+                    sampled_users, size=n_samples, replace=False
+                ).tolist()
+                for strata in strata_distribution:
+                    strata_distribution[strata]["sampled"] = len(
+                        [
+                            u
+                            for u in sampled_users
+                            if u in user_stats[user_stats["strata"] == strata].index
+                        ]
+                    )
+            elif len(sampled_users) < n_samples:
+                remaining = n_samples - len(sampled_users)
+                unsampled_users = [
+                    u for u in user_stats.index if u not in sampled_users
+                ]
+                rng = np.random.RandomState(self.seed)
+                additional = rng.choice(
+                    unsampled_users, size=remaining, replace=False
+                ).tolist()
+                sampled_users.extend(additional)
+
+        else:
+            logger.info("Performing simple random sampling without stratification.")
+            rng = np.random.RandomState(self.seed)
+            sampled_users = rng.choice(
+                user_stats.index, size=n_samples, replace=False
+            ).tolist()
+            strata_distribution = {}
+
+        sampled_users_set = set(sampled_users)
+        self.sequence_data = self.sequence_data[
+            self.sequence_data["user"].isin(sampled_users_set)
+        ].reset_index(drop=True)
+
+        user_id_map = {
+            old_id: new_id
+            for new_id, old_id in enumerate(sorted(self.sequence_data["user"].unique()))
+        }
+        self.sequence_data["user"] = (
+            self.sequence_data["user"].map(user_id_map).astype(int)
+        )
+
+        sampled_questions = self.sequence_data["question"].unique()
+        self.question_data = self.question_data[
+            self.question_data["question"].isin(sampled_questions)
+        ].reset_index(drop=True)
+
+        sampled_records = len(self.sequence_data)
+
+        sampling_config = {
+            "n_samples_requested": n_samples,
+            "n_samples_actual": len(sampled_users),
+            "sampling_ratio": len(sampled_users) / total_users,
+            "stratify": stratify,
+            "balance": balance,
+            "attempts_bins": attempts_bins,
+            "correct_bins": correct_bins,
+            "skill_bins": skill_bins,
+        }
+
+        sampling_stats = {
+            "original_users": total_users,
+            "sampled_users": len(sampled_users),
+            "original_records": original_records,
+            "sampled_records": sampled_records,
+            "strata_distribution": strata_distribution,
+        }
+
+        self.add_metadata("sampled", True)
+        self.add_metadata("sampling_config", sampling_config)
+        self.add_metadata("sampling_stats", sampling_stats)
+        self.add_metadata("num_users", int(self.sequence_data["user"].nunique()))
+
+        logger.info(
+            f"Sampling complete: {len(sampled_users)}/{total_users} users, "
+            f"{sampled_records}/{original_records} records"
+        )
+        logger.info(f"Sampling ratio: {sampling_config['sampling_ratio']:.2%}")
 
 
 def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):

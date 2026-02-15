@@ -56,34 +56,22 @@ class EdNetKT1Data(DataSource):
         if not os.path.exists(self.response_data_path):
             raise FileNotFoundError(f"Cannot find: {self.response_data_path}")
 
-        # 检查是否开启调试模式
-        is_debug = hasattr(self.args, "debug") and self.args.debug
-        debug_limit = 200 if is_debug else None
-        if is_debug:
-            logger.debug(f"Debug mode enabled: processing only {debug_limit} files.")
-
         # 统计文件总数
         total_files = 0
         with os.scandir(self.response_data_path) as it:
             for entry in it:
                 if entry.name.endswith(".csv") and entry.is_file():
                     total_files += 1
-                    if debug_limit and total_files >= debug_limit:
-                        break
 
         # 并行处理文件
         processed_batches = []
 
         # 使用os.scandir生成文件路径
         def file_path_generator():
-            count = 0
             with os.scandir(self.response_data_path) as it:
                 for entry in it:
                     if entry.name.endswith(".csv") and entry.is_file():
                         yield entry.path
-                        count += 1
-                        if debug_limit and count >= debug_limit:
-                            break
 
         # 生成chunk的辅助函数
         def chunked(iterable, size):
@@ -95,9 +83,7 @@ class EdNetKT1Data(DataSource):
                 yield chunk
 
         # 配置并行
-        max_workers = os.cpu_count()
-        if max_workers is None:
-            max_workers = 4
+        max_workers = os.cpu_count() or 4
 
         # 增大chunk size以减少开销
         CHUNK_SIZE = 5000
@@ -224,10 +210,27 @@ class EdNetKT1Data(DataSource):
         sequence_data = restrains_sequence_length(
             sequence_data, self.args.min_seq_len, self.args.max_seq_len
         )
-        # 映射ID
-        sequence_data = map_to_continuous_ids(
-            sequence_data, columns=["user", "question"]
+
+        # 统一题目ID映射（基于最终保留的交互）并同步到 question_data，
+        # 避免 sequence_data 与 question_data 出现二次重编码不一致。
+        appeared_questions = sorted(
+            sequence_data["question"].dropna().astype(int).unique().tolist()
         )
+        question_id_map = {q: idx for idx, q in enumerate(appeared_questions)}
+
+        sequence_data["question"] = (
+            sequence_data["question"].astype(int).map(question_id_map).astype(int)
+        )
+
+        question_data = question_data[
+            question_data["question"].astype(int).isin(appeared_questions)
+        ].copy()
+        question_data["question"] = (
+            question_data["question"].astype(int).map(question_id_map).astype(int)
+        )
+
+        # 仅对用户ID重编码，题目ID已在上面统一映射。
+        sequence_data = map_to_continuous_ids(sequence_data, columns=["user"])
         self.sequence_data = sequence_data.copy()
 
         # 构建question_data

@@ -57,21 +57,17 @@ class BaseParamConfig(ABC):
             if "short" in cfg and cfg["short"]:
                 arg_names.insert(0, f"-{cfg['short']}")
 
-            kwargs = {
-                "default": cfg.get("default"),
-                "help": cfg.get("help", ""),
-                "required": cfg.get("required", False),
-            }
+            kwargs = {k: v for k, v in cfg.items() if k not in {"short", "type"}}
 
-            if "choices" in cfg:
-                kwargs["choices"] = cfg["choices"]
+            kwargs.setdefault("default", None)
+            kwargs.setdefault("help", "")
+            kwargs.setdefault("required", False)
 
             if cfg["type"] is bool:
-                if cfg.get("default") is True:
-                    kwargs["action"] = "store_false"
-                else:
-                    kwargs["action"] = "store_true"
-                kwargs.pop("type", None)
+                kwargs.setdefault(
+                    "action",
+                    "store_false" if kwargs.get("default") is True else "store_true",
+                )
             else:
                 kwargs["type"] = cfg["type"]
 
@@ -180,11 +176,6 @@ class DataParams(BaseParamConfig):
                 "default": 200,
                 "help": "Maximum sequence length (default: 200)",
             },
-            "debug": {
-                "type": bool,
-                "default": False,
-                "help": "Enable debug mode (default: False)",
-            },
         }
         return group_name, params
 
@@ -260,6 +251,12 @@ class GeneralParams(BaseParamConfig):
                 "short": "s",
                 "help": "Random seed for reproducibility (default: 42)",
             },
+            "deterministic": {
+                "type": bool,
+                "default": True,
+                "short": "det",
+                "help": "Disable deterministic algorithms (deterministic is enabled by default)",
+            },
             "use_swanlab": {
                 "type": bool,
                 "default": True,
@@ -270,11 +267,55 @@ class GeneralParams(BaseParamConfig):
         return group_name, params
 
 
+class SamplingParams(BaseParamConfig):
+    """数据抽样参数配置。"""
+
+    def define_params(self) -> tuple[str, dict]:
+        group_name = "Sampling Parameters"
+        params = {
+            "sample_users": {
+                "type": int,
+                "default": None,
+                "help": "Number of users to sample (None to disable sampling)",
+            },
+            "sample_stratify": {
+                "type": bool,
+                "default": True,
+                "help": "Enable stratified sampling by user statistics",
+            },
+            "sample_balance": {
+                "type": bool,
+                "default": False,
+                "help": "Balance samples across all strata",
+            },
+            "sample_attempts_bins": {
+                "type": int,
+                "default": [20, 100],
+                "nargs": "+",
+                "help": "Attempt count bin edges (e.g., 20 100 for low/medium/high)",
+            },
+            "sample_correct_bins": {
+                "type": float,
+                "default": [0.4, 0.8],
+                "nargs": "+",
+                "help": "Correct rate bin edges (e.g., 0.4 0.8 for low/medium/high)",
+            },
+            "sample_skill_bins": {
+                "type": int,
+                "default": [5, 15],
+                "nargs": "+",
+                "help": "Skill count bin edges (e.g., 5 15 for narrow/medium/broad)",
+            },
+        }
+        return group_name, params
+
+
 __all__ = [
     "BaseParamConfig",
     "DataParams",
     "EarlyStoppingParams",
     "GeneralParams",
+    "SamplingParams",
     "register_model_params",
     "get_model_params",
     "list_models",
