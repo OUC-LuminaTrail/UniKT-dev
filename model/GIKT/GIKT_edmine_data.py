@@ -1,9 +1,9 @@
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
 
+from utils.config import create_kfold_dataloaders
 from utils.core import get_logger
 from utils.data_process import DataSource
 from utils.net_data import GraphModelData
@@ -87,11 +87,10 @@ class GIKTEdmineModelData(GraphModelData):
         val_dataset = GIKTEdmineDataset(val_data[0], val_data[1], val_data[2])
 
         # 构建数据加载器
-        train_dataloader = DataLoader(
-            train_dataset, batch_size=args.batch_size, shuffle=True
-        )
-        val_dataloader = DataLoader(
-            val_dataset, batch_size=args.batch_size, shuffle=False
+        train_dataloader, val_dataloader = create_kfold_dataloaders(
+            train_dataset,
+            val_dataset,
+            batch_size=args.batch_size,
         )
 
         return (

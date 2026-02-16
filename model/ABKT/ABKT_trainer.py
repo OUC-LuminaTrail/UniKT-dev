@@ -19,6 +19,7 @@ from utils.config import (
     BaseParamConfig,
     EarlyStopping,
     EarlyStoppingConfig,
+    create_optimized_dataloader,
     register_model_params,
 )
 from utils.core import TRAINERS, get_logger
@@ -355,11 +356,13 @@ class ABKTTrainer(MultiTrainer):
             train_users=self.data["train_users"],
             train_sequences=self.data["train_sequences"],
         )
-        train_loader = Data.DataLoader(train_dataset, batch_size=1, shuffle=True)
+        train_loader = create_optimized_dataloader(
+            train_dataset, batch_size=1, shuffle=True
+        )
 
         # 验证数据：使用测试三元组
         val_dataset = KMValidationDataset(self.data["test_triplets"])
-        val_loader = Data.DataLoader(
+        val_loader = create_optimized_dataloader(
             val_dataset, batch_size=len(val_dataset), shuffle=False
         )
 
@@ -414,13 +417,13 @@ class ABKTTrainer(MultiTrainer):
 
         # 创建数据集和加载器
         train_dataset = AMTripletDataset(self.am_train_triplets)
-        train_loader = Data.DataLoader(
+        train_loader = create_optimized_dataloader(
             train_dataset, batch_size=self.args.batch_size, shuffle=True
         )
 
         # 验证数据
         val_dataset = AMTripletDataset(self.am_test_triplets)
-        val_loader = Data.DataLoader(
+        val_loader = create_optimized_dataloader(
             val_dataset, batch_size=len(val_dataset), shuffle=False
         )
 

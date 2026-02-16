@@ -7,8 +7,9 @@ Builds the Heterogeneous Relation Graph (HRG) following the original author's st
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
+from utils.config import create_optimized_dataloader
 from utils.core import get_logger
 from utils.net_data import GraphModelData
 
@@ -189,19 +190,17 @@ class SGKTModelData(GraphModelData):
         train_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
         val_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
 
-        train_loader = DataLoader(
+        train_loader = create_optimized_dataloader(
             train_dataset,
             batch_size=args.batch_size,
             shuffle=True,
-            num_workers=0,
             collate_fn=train_collate_fn,
         )
 
-        val_loader = DataLoader(
+        val_loader = create_optimized_dataloader(
             val_dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            num_workers=0,
             collate_fn=val_collate_fn,
         )
 

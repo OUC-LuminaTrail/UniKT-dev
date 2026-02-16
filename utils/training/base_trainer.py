@@ -24,10 +24,8 @@ from rich.table import Column
 from rich.text import Text
 
 from ..config import (
-    DataLoaderConfig,
     EarlyStopping,
     EarlyStoppingConfig,
-    optimize_dataloader,
 )
 from ..core import get_logger, seed_everything
 from .callbacks import CallbackManager, EarlyStoppingCallback, MemoryCleanupCallback
@@ -123,17 +121,6 @@ class BaseTrainer(ABC):
         if hyperparams is not None:
             deterministic = getattr(hyperparams, "deterministic", True)
         self.seed = seed_everything(seed, deterministic=deterministic)
-
-        # 自动优化 DataLoader 参数
-        if isinstance(self.train_data, torch.utils.data.DataLoader):
-            dataloader_config = DataLoaderConfig(
-                num_workers="auto",
-                pin_memory=True,
-                prefetch_factor=2,
-            )
-            optimize_dataloader(self.train_data, dataloader_config, self.device_)
-            if self.val_data is not None:
-                optimize_dataloader(self.val_data, dataloader_config, self.device_)
 
         # 初始化早停
         self.early_stopping: EarlyStopping | None = None

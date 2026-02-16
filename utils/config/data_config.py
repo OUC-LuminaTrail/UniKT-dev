@@ -48,26 +48,40 @@ class DataLoaderConfig:
         return self.num_workers
 
 
-def optimize_dataloader(
-    loader,
+def create_optimized_dataloader(
+    dataset,
+    batch_size: int = 128,
+    shuffle: bool = True,
     config: DataLoaderConfig | None = None,
     device=None,
-) -> None:
-    """优化 DataLoader 的性能参数。
-
-    此函数直接修改传入的 DataLoader 对象，而不是返回新对象。
+    **kwargs,
+):
+    """创建已优化的 DataLoader。
 
     Args:
-        loader: 要优化的 DataLoader 对象
+        dataset: 数据集
+        batch_size: 批次大小
+        shuffle: 是否打乱数据
         config: DataLoader 配置（默认使用 DataLoaderConfig()）
         device: 计算设备（用于确定 pin_memory）
+        **kwargs: 其他传递给 DataLoader 的参数（优先级高于 config）
 
-    支持的 DataLoader 属性:
-        - num_workers: 数据加载进程数
-        - pin_memory: 固定内存（CUDA 加速）
-        - prefetch_factor: 预取因子
-        - persistent_workers: 保持工作进程存活
+    Returns:
+        优化后的 DataLoader
+
+    Example:
+        >>> from utils.config import DataLoaderConfig, create_optimized_dataloader
+        >>> config = DataLoaderConfig(num_workers=4, pin_memory=True)
+        >>> loader = create_optimized_dataloader(
+        ...     dataset,
+        ...     batch_size=64,
+        ...     shuffle=True,
+        ...     config=config,
+        ...     device=torch.device("cuda")
+        ... )
     """
+    from torch.utils.data import DataLoader
+
     # 使用默认配置
     if config is None:
         config = DataLoaderConfig()
@@ -79,57 +93,34 @@ def optimize_dataloader(
     # 获取 num_workers
     num_workers = config.get_num_workers()
 
-    # 应用配置
-    if hasattr(loader, "num_workers"):
-        loader.num_workers = num_workers
+    # 准备 DataLoader 参数
+    # kwargs 中的参数优先级高于 config
+    loader_kwargs = {
+        "batch_size": batch_size,
+        "shuffle": shuffle,
+        "num_workers": num_workers,
+        "pin_memory": pin_memory,
+        "prefetch_factor": config.prefetch_factor if num_workers > 0 else None,
+        "persistent_workers": config.persistent_workers if num_workers > 0 else False,
+    }
 
-    if hasattr(loader, "pin_memory"):
-        loader.pin_memory = pin_memory
+    # 移除无效参数（prefetch_factor 仅在 num_workers > 0 时有效）
+    if loader_kwargs["prefetch_factor"] is None:
+        del loader_kwargs["prefetch_factor"]
 
-    if num_workers > 0 and hasattr(loader, "persistent_workers"):
-        loader.persistent_workers = config.persistent_workers
+    # 用 kwargs 覆盖默认参数
+    loader_kwargs.update(kwargs)
 
-    # 打印优化信息（仅在首次优化时）
-    if not hasattr(loader, "_optimized_config"):
-        logger.debug(
-            f"DataLoader optimized: num_workers={num_workers}, pin_memory={pin_memory}"
-        )
-        loader._optimized_config = True  # 标记已优化
+    # 创建 DataLoader
+    loader = DataLoader(dataset, **loader_kwargs)
 
-
-def create_optimized_dataloader(
-    dataset,
-    batch_size: int = 128,
-    shuffle: bool = True,
-    config: DataLoaderConfig | None = None,
-    device=None,
-    **kwargs,
-):
-    """创建已优化的 DataLoader。
-
-    这是一个便捷函数，结合了 DataLoader 创建和优化。
-
-    Args:
-        dataset: 数据集
-        batch_size: 批次大小
-        shuffle: 是否打乱数据
-        config: DataLoader 配置
-        device: 计算设备
-        **kwargs: 其他传递给 DataLoader 的参数
-
-    Returns:
-        优化后的 DataLoader
-    """
-    from torch.utils.data import DataLoader
-
-    loader = DataLoader(
-        dataset,
-        batch_size=batch_size,
-        shuffle=shuffle,
-        **kwargs,
+    # 记录优化信息
+    logger.debug(
+        f"Created optimized DataLoader: num_workers={loader_kwargs.get('num_workers')}, "
+        f"pin_memory={loader_kwargs.get('pin_memory')}, "
+        f"prefetch_factor={loader_kwargs.get('prefetch_factor', 'N/A')}, "
+        f"persistent_workers={loader_kwargs.get('persistent_workers', 'N/A')}"
     )
-
-    optimize_dataloader(loader, config, device)
 
     return loader
 
@@ -164,34 +155,77 @@ class KFoldDataLoaderConfig:
             self.shared_config = DataLoaderConfig()
 
 
-def optimize_kfold_dataloaders(
-    train_loader,
-    val_loader,
+def create_kfold_dataloaders(
+    train_dataset,
+    val_dataset,
+    batch_size: int = 128,
     config: KFoldDataLoaderConfig | None = None,
     device=None,
-) -> None:
-    """优化 K 折交叉验证使用的 DataLoader 对。
+    **kwargs,
+) -> tuple:
+    """创建 K 折交叉验证的训练和验证 DataLoader。
+
+    这是一个便捷函数，为训练集和验证集分别创建优化的 DataLoader。
+    训练集使用多进程加载，验证集使用单进程加载。
 
     Args:
-        train_loader: 训练集 DataLoader
-        val_loader: 验证集 DataLoader
-        config: K 折配置
+        train_dataset: 训练数据集
+        val_dataset: 验证数据集
+        batch_size: 批次大小
+        config: K 折 DataLoader 配置（默认使用 KFoldDataLoaderConfig()）
         device: 计算设备
+        **kwargs: 其他传递给 DataLoader 的参数
+
+    Returns:
+        (train_loader, val_loader) 元组
+
+    Example:
+        >>> from utils.config import KFoldDataLoaderConfig, create_kfold_dataloaders
+        >>> config = KFoldDataLoaderConfig(
+        ...     train_config=DataLoaderConfig(num_workers=4),
+        ...     val_config=DataLoaderConfig(num_workers=0)
+        ... )
+        >>> train_loader, val_loader = create_kfold_dataloaders(
+        ...     train_dataset,
+        ...     val_dataset,
+        ...     batch_size=64,
+        ...     config=config,
+        ...     device=torch.device("cuda")
+        ... )
     """
     if config is None:
         config = KFoldDataLoaderConfig()
 
-    # 优化训练集
-    optimize_dataloader(train_loader, config.train_config, device)
+    # 创建训练集 DataLoader
+    train_loader = create_optimized_dataloader(
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        config=config.train_config,
+        device=device,
+        **kwargs,
+    )
 
-    # 优化验证集
-    optimize_dataloader(val_loader, config.val_config, device)
+    # 创建验证集 DataLoader
+    val_loader = create_optimized_dataloader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        config=config.val_config,
+        device=device,
+        **kwargs,
+    )
+
+    logger.debug(
+        f"Created K-fold dataloaders: train={len(train_loader)} batches, val={len(val_loader)} batches"
+    )
+
+    return train_loader, val_loader
 
 
 __all__ = [
     "DataLoaderConfig",
     "KFoldDataLoaderConfig",
-    "optimize_dataloader",
     "create_optimized_dataloader",
-    "optimize_kfold_dataloaders",
+    "create_kfold_dataloaders",
 ]

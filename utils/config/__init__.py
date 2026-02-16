@@ -7,9 +7,8 @@ from .base import BaseConfig
 from .data_config import (
     DataLoaderConfig,
     KFoldDataLoaderConfig,
+    create_kfold_dataloaders,
     create_optimized_dataloader,
-    optimize_dataloader,
-    optimize_kfold_dataloaders,
 )
 from .param_config import (
     BaseParamConfig,
@@ -38,9 +37,8 @@ __all__ = [
     # Data Config
     "DataLoaderConfig",
     "KFoldDataLoaderConfig",
-    "optimize_dataloader",
     "create_optimized_dataloader",
-    "optimize_kfold_dataloaders",
+    "create_kfold_dataloaders",
     # Training Config
     "EarlyStoppingConfig",
     "EarlyStopping",
