@@ -4,8 +4,9 @@
 """
 
 import os
-from typing import Optional
+
 import torch
+
 from ..core import get_logger
 
 logger = get_logger(__name__)
@@ -43,9 +44,9 @@ class CheckpointManager:
         epoch: int,
         model: torch.nn.Module,
         optimizer: torch.optim.Optimizer,
-        scheduler: Optional[object] = None,
-        additional_state: Optional[dict] = None,
-        early_stopping_state: Optional[dict] = None,
+        scheduler: object | None = None,
+        additional_state: dict | None = None,
+        early_stopping_state: dict | None = None,
         filename: str = "checkpoint.pth",
     ):
         """保存完整检查点。
@@ -93,9 +94,9 @@ class CheckpointManager:
         self,
         checkpoint_path: str,
         model: torch.nn.Module,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        scheduler: Optional[object] = None,
-        early_stopping: Optional[object] = None,
+        optimizer: torch.optim.Optimizer | None = None,
+        scheduler: object | None = None,
+        early_stopping: object | None = None,
         device: torch.device = None,
     ) -> dict:
         """加载检查点。

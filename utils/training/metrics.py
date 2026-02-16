@@ -3,11 +3,11 @@
 处理训练/验证指标的累积、计算和记录。
 """
 
-from typing import Dict, List
 import numpy as np
 import torch
 from scipy.special import expit
-from sklearn.metrics import roc_auc_score, accuracy_score, root_mean_squared_error
+from sklearn.metrics import accuracy_score, roc_auc_score, root_mean_squared_error
+
 from ..core import get_logger
 
 logger = get_logger(__name__)
@@ -38,7 +38,7 @@ class MetricsAccumulator:
             use_swanlab: 是否使用 SwanLab 记录指标
         """
         self.use_swanlab = use_swanlab
-        self._accumulators: Dict[str, Dict[str, List]] = {}
+        self._accumulators: dict[str, dict[str, list]] = {}
 
     def reset(self, phase: str):
         """重置指定 phase 的累积器。
@@ -56,7 +56,7 @@ class MetricsAccumulator:
             for key in self._accumulators[phase]:
                 self._accumulators[phase][key] = []
 
-    def update(self, phase: str, outputs: Dict[str, torch.Tensor]):
+    def update(self, phase: str, outputs: dict[str, torch.Tensor]):
         """更新累积器。
 
         Args:
@@ -71,7 +71,7 @@ class MetricsAccumulator:
         accum["y_label"].append(outputs["y_label"].detach().cpu())
         accum["y_pred"].append(outputs["y_predict"].detach().cpu())
 
-    def compute(self, phase: str) -> Dict[str, float]:
+    def compute(self, phase: str) -> dict[str, float]:
         """计算 epoch 级别指标。
 
         Args:
@@ -111,7 +111,7 @@ class MetricsAccumulator:
 
         return metrics
 
-    def log(self, phase: str, metrics: Dict[str, float], epoch: int):
+    def log(self, phase: str, metrics: dict[str, float], epoch: int):
         """记录指标到 SwanLab。
 
         Args:

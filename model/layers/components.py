@@ -1,6 +1,6 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class HistoryRecap(nn.Module):
@@ -27,7 +27,7 @@ class HistoryRecap(nn.Module):
     """
 
     def __init__(self, hist_neighbor_num: int, att_bound: float = 0.0):
-        super(HistoryRecap, self).__init__()
+        super().__init__()
         self.hist_neighbor_num = hist_neighbor_num
         self.att_bound = att_bound
 
@@ -37,8 +37,8 @@ class HistoryRecap(nn.Module):
         next_q_emb: torch.Tensor,  # [B, S, D]
         qa_emb: torch.Tensor,  # [B, S, H]
         user_mask: torch.Tensor,  # [B, S]
-        hist_neighbor_index: torch.Tensor = None,  # [B, S, M] 可选的备用索引
-    ):
+        hist_neighbor_index: torch.Tensor | None = None,  # [B, S, M] 可选的备用索引
+    ) -> torch.Tensor:
         B, S, _ = input_q_emb.size()
         H = qa_emb.size(-1)
         device = input_q_emb.device
@@ -137,7 +137,7 @@ class GeneralInteraction(nn.Module):
     """
 
     def __init__(self, hidden_dim: int):
-        super(GeneralInteraction, self).__init__()
+        super().__init__()
         self.hidden_dim = hidden_dim
 
         # 加性注意力的两个权重向量和偏置
@@ -157,7 +157,7 @@ class GeneralInteraction(nn.Module):
         hist_candidates: torch.Tensor,  # [B, S, M+1, H]
         next_candidates: torch.Tensor,  # [B, S, N+1, H]
         user_mask: torch.Tensor,  # [B, S]
-    ):
+    ) -> torch.Tensor:
         B, S, M_plus_1, H = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
 

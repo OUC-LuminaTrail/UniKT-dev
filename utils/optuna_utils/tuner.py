@@ -1,15 +1,17 @@
 """Optuna 调优器包装器和辅助工具。"""
 
-import os
 import json
-from typing import Any, Callable, Dict, List, Optional
+import os
+from collections.abc import Callable
 from dataclasses import asdict
 from datetime import datetime
+from typing import Any
 
 import optuna
 
-from .config import HyperparameterSpace, OptunaConfig
 from utils.core import get_logger
+
+from .config import HyperparameterSpace, OptunaConfig
 
 logger = get_logger(__name__)
 
@@ -22,9 +24,9 @@ class OptunaTuner:
     def __init__(
         self,
         config: OptunaConfig,
-        param_space: List[HyperparameterSpace],
-        objective_fn: Callable[[optuna.trial.Trial, Dict[str, Any]], float],
-        objective_kwargs: Optional[Dict[str, Any]] = None,
+        param_space: list[HyperparameterSpace],
+        objective_fn: Callable[[optuna.trial.Trial, dict[str, Any]], float],
+        objective_kwargs: dict[str, Any] | None = None,
     ):
         """
         初始化Optuna调优器
@@ -39,7 +41,7 @@ class OptunaTuner:
             space.validate()
 
         # 创建学习目标
-        self.study: Optional[optuna.Study] = None
+        self.study: optuna.Study | None = None
         self._setup_logging()
 
     def _setup_logging(self):
@@ -63,7 +65,7 @@ class OptunaTuner:
 
         return score
 
-    def search(self) -> Dict[str, Any]:
+    def search(self) -> dict[str, Any]:
         """
         执行超参数搜索
         """
@@ -160,7 +162,7 @@ class OptunaTuner:
 
         logger.info(f"Results saved to {self.config.save_dir}")
 
-    def get_best_trial(self) -> Optional[optuna.Trial]:
+    def get_best_trial(self) -> optuna.Trial | None:
         """获取最佳trial"""
         if not self.study:
             return None

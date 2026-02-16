@@ -4,7 +4,6 @@
 """
 
 from dataclasses import dataclass
-from typing import Optional
 
 
 @dataclass
@@ -39,12 +38,12 @@ class EarlyStopping:
 
     def __init__(
         self,
-        config: Optional[EarlyStoppingConfig] = None,
+        config: EarlyStoppingConfig | None = None,
         *,
-        monitor: Optional[str] = None,
-        mode: Optional[str] = None,
-        patience: Optional[int] = None,
-        min_delta: Optional[float] = None,
+        monitor: str | None = None,
+        mode: str | None = None,
+        patience: int | None = None,
+        min_delta: float | None = None,
     ):
         if config is None:
             config = EarlyStoppingConfig()
@@ -59,8 +58,8 @@ class EarlyStopping:
             config.min_delta = min_delta
 
         self.cfg = config
-        self.best_score: Optional[float] = None
-        self.best_epoch: Optional[int] = None
+        self.best_score: float | None = None
+        self.best_epoch: int | None = None
         self.num_bad_epochs: int = 0
 
         mode = self.cfg.mode.lower()
@@ -72,7 +71,7 @@ class EarlyStopping:
         # 通过乘以 sign 统一比较方向
         return (current - best) * self._cmp_sign > self.cfg.min_delta
 
-    def step(self, current: float, epoch: Optional[int] = None) -> bool:
+    def step(self, current: float, epoch: int | None = None) -> bool:
         """输入本轮验证指标，返回是否需要早停。
 
         Args:

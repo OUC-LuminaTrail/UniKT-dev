@@ -1,13 +1,19 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
-from torch_geometric.nn import HeteroConv, Linear, TransformerConv
 from torch.nn import functional as F
-from utils.core import MODELS
+from torch_geometric.nn import HeteroConv, Linear, TransformerConv
+
+from utils.core import register_model
+
 from ..layers import GeneralInteraction, HistoryRecap
 
 
 class GNN_QS(nn.Module):
-    """问题-技能图聚合。
+    """问题-技能图聚合模块。
+
+    使用 TransformerConv 进行多层异构图神经网络聚合。
 
     Args:
         embedding_dim: 节点嵌入维度
@@ -15,16 +21,21 @@ class GNN_QS(nn.Module):
         heads: 注意力头数
         dropout: Dropout 概率
 
-    输入：
-        x: 节点权重
-        edge_index: 边索引
-
-    Returns:
-        x: 聚合后的节点表示
+    Example:
+        >>> gnn = GNN_QS(embedding_dim=128, n_hop=2, heads=4, dropout=0.2)
+        >>> x = {"question": q_emb, "skill": s_emb}
+        >>> edge_index = {("question", "has", "skill"): edge1, ("skill", "rev_has", "question"): edge2}
+        >>> output = gnn(x, edge_index)
     """
 
-    def __init__(self, embedding_dim, n_hop, heads, dropout):
-        super(GNN_QS, self).__init__()
+    def __init__(
+        self,
+        embedding_dim: int,
+        n_hop: int,
+        heads: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
         self.n_hop = n_hop
         self.heads = heads
         self.dropout = dropout
@@ -53,7 +64,20 @@ class GNN_QS(nn.Module):
             self.convs.append(conv)
         self.gnn_conv = nn.ModuleList(self.convs)
 
-    def forward(self, x, edge_index):
+    def forward(
+        self,
+        x: dict[str, torch.Tensor],
+        edge_index: dict[tuple[str, str, str], torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """前向传播。
+
+        Args:
+            x: 节点特征字典
+            edge_index: 边索引字典
+
+        Returns:
+            聚合后的节点表示字典
+        """
         for conv in self.gnn_conv:
             x: torch.Tensor = conv(x, edge_index)
             x = {key: x.relu() for key, x in x.items()}
@@ -64,12 +88,24 @@ class GNN_QS(nn.Module):
         return x
 
 
-@MODELS.register("GIKT")
+@register_model("GIKT")
 class GIKT(nn.Module):
-    """GIKT主模型。"""
+    """GIKT 主模型。
 
-    def __init__(self, args, data_metadata, **kwargs):
-        super(GIKT, self).__init__(**kwargs)
+    基于图神经网络的知识追踪模型，通过问题-技能图结构和历史回顾机制进行预测。
+
+    Args:
+        args: 模型参数配置
+        data_metadata: 数据集元数据，包含 num_questions 和 num_skills
+        **kwargs: 额外的关键字参数
+
+    Example:
+        >>> model = GIKT(args, data_metadata)
+        >>> logits = model(user_sequence, user_response, user_mask, graph, question_skill_matrix)
+    """
+
+    def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
         # 保存参数
         self.args = args
         # 元数据
@@ -130,12 +166,24 @@ class GIKT(nn.Module):
 
     def forward(
         self,
-        user_sequence: torch.Tensor,
-        user_response: torch.Tensor,
-        user_mask: torch.Tensor,
-        graph,
-        question_skill_matrix: torch.Tensor,
-    ):
+        user_sequence: torch.Tensor,  # [B, S]
+        user_response: torch.Tensor,  # [B, S]
+        user_mask: torch.Tensor,  # [B, S]
+        graph: Any,
+        question_skill_matrix: torch.Tensor,  # [Q, K]
+    ) -> torch.Tensor:  # [B, S]
+        """前向传播。
+
+        Args:
+            user_sequence: 用户问题序列 [B, S]
+            user_response: 用户回答序列 [B, S]
+            user_mask: 有效位置掩码 [B, S]
+            graph: 问题-技能异构图
+            question_skill_matrix: 问题-技能关联矩阵 [Q, K]
+
+        Returns:
+            预测 logits [B, S]
+        """
         # 批量大小
         B, _ = user_sequence.size()
 

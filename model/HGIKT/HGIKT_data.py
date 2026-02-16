@@ -1,10 +1,11 @@
 import torch
-from utils.data_process import DataSource
-from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
+
 from utils.core import get_logger
+from utils.data_process import DataSource
+from utils.net_data import GraphModelData
 
 logger = get_logger(__name__)
 
@@ -153,10 +154,10 @@ class HGIKTModelData(GraphModelData):
                 num_difficulty_clusters=3
             )
         """
+        import numpy as np
         from dhg import Hypergraph
         from sklearn.cluster import KMeans
         from tqdm import tqdm
-        import numpy as np
 
         vertex_node_type, _, hyperedge_node_type = edge_type
 

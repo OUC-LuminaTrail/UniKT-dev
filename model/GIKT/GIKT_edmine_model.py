@@ -1,13 +1,14 @@
 import torch
 import torch.nn as nn
 from torch_geometric.nn.dense.linear import Linear
+
 from utils.core import register_model
 
 
 @register_model("GIKTEdmine")
 class GIKTEdmine(nn.Module):
     def __init__(self, args, data_metadata, **kwargs):
-        super(GIKTEdmine, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         # 保存参数
         self.args = args
 

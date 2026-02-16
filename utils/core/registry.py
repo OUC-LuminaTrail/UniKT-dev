@@ -4,7 +4,8 @@
 合并了原有的多个注册表（全局、params、ablation）。
 """
 
-from typing import Dict, Type, Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -28,14 +29,14 @@ class UniversalRegistry:
     def __init__(self, name: str, namespace: str = "kt"):
         self._name = name
         self._namespace = namespace
-        self._registry: Dict[str, Type[T]] = {}
+        self._registry: dict[str, type[T]] = {}
 
     @property
     def full_name(self) -> str:
         """获取完整的注册表名称（包含命名空间）。"""
         return f"{self._namespace}.{self._name}"
 
-    def register(self, name: Optional[str] = None) -> Callable[[Type[T]], Type[T]]:
+    def register(self, name: str | None = None) -> Callable[[type[T]], type[T]]:
         """注册组件。
 
         Args:
@@ -48,7 +49,7 @@ class UniversalRegistry:
             KeyError: 如果名称已存在
         """
 
-        def _register(cls: Type[T]) -> Type[T]:
+        def _register(cls: type[T]) -> type[T]:
             register_name = name if name is not None else cls.__name__
             if register_name in self._registry:
                 raise KeyError(
@@ -59,7 +60,7 @@ class UniversalRegistry:
 
         return _register
 
-    def get(self, name: str) -> Type[T]:
+    def get(self, name: str) -> type[T]:
         """获取已注册的组件。
 
         Args:
@@ -118,7 +119,7 @@ ABLATION_STRATEGIES = UniversalRegistry("strategies", namespace="ablation")
 # ============================================================================
 
 
-def register_model(name: Optional[str] = None):
+def register_model(name: str | None = None):
     """注册模型的便捷函数。
 
     Args:
@@ -132,7 +133,7 @@ def register_model(name: Optional[str] = None):
     return MODELS.register(name)
 
 
-def register_trainer(name: Optional[str] = None):
+def register_trainer(name: str | None = None):
     """注册训练器的便捷函数。
 
     Args:
@@ -146,7 +147,7 @@ def register_trainer(name: Optional[str] = None):
     return TRAINERS.register(name)
 
 
-def register_data_source(name: Optional[str] = None):
+def register_data_source(name: str | None = None):
     """注册数据源的便捷函数。
 
     Args:

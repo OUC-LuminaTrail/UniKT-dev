@@ -6,9 +6,9 @@ Implements dual graph architecture:
 - SG (Session Graph) with GatedGraphConv
 """
 
-from .SGKT_data import SGKTModelData, SGKTDataset
+from .SGKT_data import SGKTDataset, SGKTModelData
 from .SGKT_model import SGKT
-from .SGKT_trainer import SGKTTrainer, SGKTModelParams
+from .SGKT_trainer import SGKTModelParams, SGKTTrainer
 
 __all__ = [
     "SGKTModelData",

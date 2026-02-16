@@ -4,10 +4,9 @@ Module replacement strategy.
 Replaces a target module with a custom implementation.
 """
 
-from typing import Dict, Optional
-
 import torch.nn as nn
-from utils.core import COMPONENTS, ABLATION_STRATEGIES
+
+from utils.core import ABLATION_STRATEGIES, COMPONENTS
 
 from .base import BaseAblationStrategy
 
@@ -39,7 +38,7 @@ class ModuleReplaceStrategy(BaseAblationStrategy):
         self,
         model: nn.Module,
         target: str,
-        params: Optional[Dict] = None,
+        params: dict | None = None,
     ):
         super().__init__(model, target, params)
 

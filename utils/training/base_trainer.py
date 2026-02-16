@@ -3,34 +3,36 @@
 提供训练器的核心功能，包括设备管理、数据加载、训练循环等。
 """
 
-import os
 import argparse
+import os
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, Any
+from typing import Any
+
 import torch
+from rich.console import Group
+from rich.live import Live
 from rich.progress import (
-    Progress,
-    TextColumn,
     BarColumn,
-    TaskProgressColumn,
-    TimeRemainingColumn,
     MofNCompleteColumn,
+    Progress,
     SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
 )
 from rich.table import Column
-from rich.live import Live
-from rich.console import Group
 from rich.text import Text
-from ..core import get_logger, seed_everything
+
 from ..config import (
     DataLoaderConfig,
-    optimize_dataloader,
-    EarlyStoppingConfig,
     EarlyStopping,
+    EarlyStoppingConfig,
+    optimize_dataloader,
 )
-from .metrics import MetricsAccumulator
+from ..core import get_logger, seed_everything
 from .callbacks import CallbackManager, EarlyStoppingCallback, MemoryCleanupCallback
 from .checkpoint import CheckpointManager
+from .metrics import MetricsAccumulator
 
 logger = get_logger(__name__)
 
@@ -70,7 +72,7 @@ class BaseTrainer(ABC):
         opt: torch.optim.Optimizer,
         loss,
         train_data: torch.utils.data.DataLoader,
-        val_data: Optional[torch.utils.data.DataLoader] = None,
+        val_data: torch.utils.data.DataLoader | None = None,
         lr_scheduler=None,
         early_stopping=None,
         hyperparams=None,
@@ -134,7 +136,7 @@ class BaseTrainer(ABC):
                 optimize_dataloader(self.val_data, dataloader_config, self.device_)
 
         # 初始化早停
-        self.early_stopping: Optional[EarlyStopping] = None
+        self.early_stopping: EarlyStopping | None = None
         if early_stopping is not None:
             if isinstance(early_stopping, EarlyStopping):
                 self.early_stopping = early_stopping
@@ -223,7 +225,7 @@ class BaseTrainer(ABC):
         raise NotImplementedError("Subclasses must implement init_model method")
 
     @abstractmethod
-    def forward_pass(self, batch_data: Tuple[Any, ...]) -> dict:
+    def forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
         """模型前向传播。
 
         Args:
@@ -331,8 +333,9 @@ class BaseTrainer(ABC):
         """
         if y_label.numel() == 0:
             raise ValueError(
-                "Empty valid targets in current batch: no positions satisfy the training mask alignment. "
-                "Please check data preprocessing/sampling settings (e.g., min_seq_len, sample_users, batch_size)."
+                "Empty valid targets in current batch: no positions satisfy "
+                "the training mask alignment. Please check data preprocessing/sampling "
+                "settings (e.g., min_seq_len, sample_users, batch_size)."
             )
         return y_hat, y_label
 
@@ -671,7 +674,7 @@ class BaseTrainer(ABC):
 
         return total_loss
 
-    def _run_train_batch(self, batch_data: Tuple[Any, ...]) -> float:
+    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
         """执行一个训练批次。"""
         self.opt.zero_grad()
         output = self.forward_pass(batch_data)
@@ -685,7 +688,7 @@ class BaseTrainer(ABC):
         return loss.item()
 
     @torch.no_grad()
-    def _run_eval_batch(self, batch_data: Tuple[Any, ...]) -> float:
+    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
         """执行一个验证批次。"""
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
@@ -730,7 +733,7 @@ class BaseTrainer(ABC):
             return float("-inf")
         return float(value)
 
-    def _get_early_stopping_state(self) -> Optional[dict]:
+    def _get_early_stopping_state(self) -> dict | None:
         """获取早停状态。"""
         if self.early_stopping is None:
             return None
@@ -767,10 +770,11 @@ class BaseTrainer(ABC):
         if not hasattr(self, "_best_metric"):
             is_better = True
         else:
-            if mode == "max":
-                is_better = metric > self._best_metric
-            else:
-                is_better = metric < self._best_metric
+            is_better = (
+                metric > self._best_metric
+                if mode == "max"
+                else metric < self._best_metric
+            )
 
         if is_better:
             self._best_metric = metric

@@ -4,8 +4,8 @@
 """
 
 from abc import ABC
-from typing import Optional
-from ..config import EarlyStoppingConfig, EarlyStopping
+
+from ..config import EarlyStopping, EarlyStoppingConfig
 from ..core import get_logger
 
 logger = get_logger(__name__)
@@ -124,8 +124,8 @@ class EarlyStoppingCallback(Callback):
     def __init__(
         self,
         *,
-        config: Optional[EarlyStoppingConfig] = None,
-        early_stopping: Optional[EarlyStopping] = None,
+        config: EarlyStoppingConfig | None = None,
+        early_stopping: EarlyStopping | None = None,
     ):
         """初始化早停回调。
 
@@ -217,6 +217,7 @@ class MemoryCleanupCallback(Callback):
     def _cleanup_memory(self, phase: str):
         """清理内存。"""
         import gc
+
         import torch
 
         if torch.cuda.is_available():

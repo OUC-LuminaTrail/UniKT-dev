@@ -4,15 +4,15 @@
 """
 
 from .base_trainer import BaseTrainer
-from .multi_trainer import MultiTrainer, StageConfig
-from .metrics import MetricsAccumulator
 from .callbacks import (
     Callback,
     CallbackManager,
-    EarlyStoppingCallback,
     CheckpointCallback,
+    EarlyStoppingCallback,
     MemoryCleanupCallback,
 )
+from .metrics import MetricsAccumulator
+from .multi_trainer import MultiTrainer, StageConfig
 
 __all__ = [
     "BaseTrainer",

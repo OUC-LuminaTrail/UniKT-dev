@@ -2,22 +2,24 @@
 """KT 模型的消融研究运行器。
 
 Usage:
-    python ablation_study.py --model GIKT --dataset assistments09 --config configs/ablation/gikt_ablation.json
+    python ablation_study.py --model GIKT --dataset assistments09 \\
+        --config configs/ablation/gikt_ablation.json
 """
 
 import argparse
 import sys
+
+import model  # noqa: F401
 from utils.ablation import AblationExperiment, load_ablation_config
-from utils.core import TRAINERS, get_logger
-from utils.data_process import get_data_source
 from utils.config import (
     DataParams,
     EarlyStoppingParams,
     GeneralParams,
     get_model_params,
 )
+from utils.core import TRAINERS, get_logger
+from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
-import model  # noqa: F401
 
 logger = get_logger(__name__)
 
@@ -37,7 +39,7 @@ def parse_args():
 
             config_path = Path(temp_args.config)
             if config_path.exists():
-                with open(config_path, "r", encoding="utf-8") as f:
+                with open(config_path, encoding="utf-8") as f:
                     config_data = json.load(f)
                     model_name = config_data.get("model_name")
         except Exception:

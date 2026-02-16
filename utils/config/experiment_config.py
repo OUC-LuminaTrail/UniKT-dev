@@ -3,9 +3,8 @@
 提供实验配置的数据类定义。
 """
 
-from dataclasses import dataclass, field
-from typing import Optional, List
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from utils.core import get_logger
@@ -42,8 +41,8 @@ class ExperimentConfig:
     model_name: str
     dataset_name: str
     base_dir: str = "runs"
-    tags: Optional[List[str]] = field(default_factory=list)
-    description: Optional[str] = None
+    tags: list[str] | None = field(default_factory=list)
+    description: str | None = None
 
     def to_dict(self) -> dict:
         """转换为字典
@@ -114,7 +113,7 @@ class ExperimentConfig:
         Returns:
             ExperimentConfig 实例
         """
-        with open(filepath, "r", encoding="utf-8") as f:
+        with open(filepath, encoding="utf-8") as f:
             data = json.load(f)
 
         logger.info(f"Experiment config loaded from: {filepath}")

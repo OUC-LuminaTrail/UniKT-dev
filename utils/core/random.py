@@ -3,10 +3,8 @@
 提供统一的随机种子设置功能，确保实验可复现。
 """
 
-from typing import Optional
 
-
-def seed_everything(seed: Optional[int], deterministic: bool = True) -> Optional[int]:
+def seed_everything(seed: int | None, deterministic: bool = True) -> int | None:
     """设置随机种子以确保结果可复现。
 
     此函数会设置 Python、NumPy 和 PyTorch 的随机种子，

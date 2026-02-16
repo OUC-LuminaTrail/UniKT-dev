@@ -5,10 +5,12 @@ Defines the interface and common functionality for all ablation strategies.
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any, Dict, Generator, Optional
+from typing import Any
 
 import torch.nn as nn
+
 from utils.core import COMPONENTS
 
 
@@ -18,7 +20,7 @@ class BaseAblationStrategy(ABC):
     所有消融策略必须继承此类并实现 apply 和 cleanup 方法。
     """
 
-    def __init__(self, model: nn.Module, target: str, params: Optional[Dict] = None):
+    def __init__(self, model: nn.Module, target: str, params: dict | None = None):
         """初始化消融策略。
 
         Args:
@@ -29,7 +31,7 @@ class BaseAblationStrategy(ABC):
         self.model = model
         self.target = target
         self.params = params or {}
-        self._original_state: Optional[Any] = None
+        self._original_state: Any | None = None
         self._handles: list = []
 
     @abstractmethod
@@ -64,8 +66,7 @@ class BaseAblationStrategy(ABC):
             model_modules = sorted([m for m in model_modules if m])
 
             raise AttributeError(
-                f"Model does not have attribute '{self.target}'. "
-                f"Available modules: {model_modules}"
+                f"Model does not have attribute '{self.target}'. Available modules: {model_modules}"
             )
         return getattr(self.model, self.target)
 
@@ -82,7 +83,7 @@ class BaseAblationStrategy(ABC):
 
 @contextmanager
 def apply_ablation(
-    model: nn.Module, strategy_type: str, target: str, params: Optional[Dict] = None
+    model: nn.Module, strategy_type: str, target: str, params: dict | None = None
 ) -> Generator[BaseAblationStrategy, None, None]:
     """应用消融策略的上下文管理器。
 
@@ -144,7 +145,7 @@ class PassThroughModule(nn.Module):
     """
 
     def __init__(self, index: int = 0):
-        super(PassThroughModule, self).__init__()
+        super().__init__()
         self.index = index
 
     def forward(self, *args, **kwargs):

@@ -20,6 +20,7 @@ Log Format:
 
 import logging
 import os
+
 from rich.logging import RichHandler
 
 # Global logger cache to avoid duplicate handlers

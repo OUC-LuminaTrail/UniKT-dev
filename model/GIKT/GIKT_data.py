@@ -1,10 +1,11 @@
 import torch
-from utils.data_process import DataSource
-from utils.net_data import GraphModelData
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
+
 from utils.core import get_logger
+from utils.data_process import DataSource
+from utils.net_data import GraphModelData
 
 logger = get_logger(__name__)
 

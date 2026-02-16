@@ -6,7 +6,7 @@ ABKT 模型训练器
 - Stage 2 (AM): 训练能力模块 GMF，使用 boosting 残差
 """
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -267,7 +267,7 @@ class ABKTTrainer(MultiTrainer):
     def __init__(
         self,
         args=None,
-        data_src: Optional[DataSource] = None,
+        data_src: DataSource | None = None,
         exp_manager=None,
     ):
         """
@@ -299,13 +299,13 @@ class ABKTTrainer(MultiTrainer):
         self.data = self.model_data.prepare_data(args)
 
         # 模型引用（在 init_stage 中设置）
-        self.km_model: Optional[K_CMF] = None
-        self.am_model: Optional[GMF] = None
+        self.km_model: K_CMF | None = None
+        self.am_model: GMF | None = None
 
         # AM 阶段的额外数据（在 prepare_next_stage 中计算）
-        self.am_train_triplets: Optional[torch.Tensor] = None
-        self.am_test_triplets: Optional[torch.Tensor] = None
-        self.adj_norm: Optional[torch.Tensor] = None
+        self.am_train_triplets: torch.Tensor | None = None
+        self.am_test_triplets: torch.Tensor | None = None
+        self.adj_norm: torch.Tensor | None = None
 
         # 最佳指标
         self.best_km_auc = 0.0
@@ -344,7 +344,7 @@ class ABKTTrainer(MultiTrainer):
             skill_num=num_skills,
             user_num=num_users,
             item_num=num_items,
-            Q_matrix=Q_matrix,
+            q_matrix=Q_matrix,
         )
 
         # 保存 Q_matrix 引用

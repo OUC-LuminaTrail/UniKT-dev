@@ -3,17 +3,18 @@
 处理运行单个消融实验和聚合结果。
 """
 
+import copy
 import json
 import time
-import copy
 from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Type
+from typing import Any
+
+from utils.core import get_logger
 
 from .config import AblationConfig, AblationModification, AblationStudyConfig
 from .strategies import apply_ablation
-from utils.core import get_logger
 
 logger = get_logger(__name__)
 
@@ -33,12 +34,12 @@ class AblationResult:
 
     name: str
     description: str
-    metrics: Dict[str, float] = field(default_factory=dict)
-    modifications: List[AblationModification] = field(default_factory=list)
+    metrics: dict[str, float] = field(default_factory=dict)
+    modifications: list[AblationModification] = field(default_factory=list)
     training_time: float = 0.0
     timestamp: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典表示。"""
         return {
             "name": self.name,
@@ -50,7 +51,7 @@ class AblationResult:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AblationResult":
+    def from_dict(cls, data: dict[str, Any]) -> "AblationResult":
         """从字典表示创建。"""
         return cls(
             name=data["name"],
@@ -77,8 +78,8 @@ class ExperimentSummary:
 
     model_name: str
     baseline: AblationResult
-    ablations: List[AblationResult] = field(default_factory=list)
-    comparisons: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    ablations: list[AblationResult] = field(default_factory=list)
+    comparisons: dict[str, dict[str, float]] = field(default_factory=dict)
 
     def compute_comparisons(self, metric: str = "auc") -> None:
         """计算每个消融相对于基线的性能下降。
@@ -101,7 +102,7 @@ class ExperimentSummary:
                 else 0.0,
             }
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary representation."""
         return {
             "model_name": self.model_name,
@@ -149,7 +150,7 @@ class AblationExperiment:
 
     def __init__(
         self,
-        base_trainer: Type,
+        base_trainer: type,
         config: AblationStudyConfig,
         args: Any,
         data_src: Any,
@@ -173,7 +174,7 @@ class AblationExperiment:
         self.output_dir = Path(exp_manager.get_log_dir())
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.results: List[AblationResult] = []
+        self.results: list[AblationResult] = []
 
     def run_baseline(self) -> AblationResult:
         """
@@ -312,7 +313,7 @@ class AblationExperiment:
 
         return summary
 
-    def _collect_metrics(self, trainer: Any) -> Dict[str, float]:
+    def _collect_metrics(self, trainer: Any) -> dict[str, float]:
         """
         Collect metrics from trainer.
 
@@ -325,10 +326,13 @@ class AblationExperiment:
         metrics = {}
 
         # Get best metrics from early stopping if available
-        if hasattr(trainer, "early_stopping") and trainer.early_stopping is not None:
-            if trainer.early_stopping.best_score is not None:
-                monitor = trainer._monitor_name()
-                metrics[monitor] = float(trainer.early_stopping.best_score)
+        if (
+            trainer.early_stopping is not None
+            and hasattr(trainer, "early_stopping")
+            and hasattr(trainer.early_stopping, "best_score")
+        ):
+            monitor = trainer._monitor_name()
+            metrics[monitor] = float(trainer.early_stopping.best_score)
 
         # Get last validation metrics if available
         if hasattr(trainer, "_last_val_metrics"):

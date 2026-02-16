@@ -58,8 +58,7 @@ class ABKTModelData(BaseModelData):
         num_skills = self.data_src.get_metadata("num_skills")
 
         self.logger.info(
-            f"Data statistics: users={num_users}, items={num_items}, "
-            f"skills={num_skills}"
+            f"Data statistics: users={num_users}, items={num_items}, skills={num_skills}"
         )
 
         # 1. 构建 Q-Matrix

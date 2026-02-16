@@ -9,8 +9,8 @@ from .config import (
     load_config_from_json,
     load_param_space_from_json,
 )
+from .trainer import OptunaTunerBuilder, TrainerObjectiveWrapper
 from .tuner import OptunaTuner
-from .trainer import TrainerObjectiveWrapper, OptunaTunerBuilder
 
 __all__ = [
     "HyperparameterSpace",

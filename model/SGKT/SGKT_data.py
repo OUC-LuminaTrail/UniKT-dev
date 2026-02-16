@@ -5,11 +5,12 @@ Implements data preparation for Session Graph-based Knowledge Tracing model.
 Builds the Heterogeneous Relation Graph (HRG) following the original author's strategy.
 """
 
-from torch.utils.data import Dataset, DataLoader
-from utils.net_data import GraphModelData
-from utils.core import get_logger
-import torch
 import numpy as np
+import torch
+from torch.utils.data import DataLoader, Dataset
+
+from utils.core import get_logger
+from utils.net_data import GraphModelData
 
 
 def sample_hist_neighbors(

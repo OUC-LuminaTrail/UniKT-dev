@@ -4,10 +4,10 @@ Parameter freeze strategy.
 Freezes parameters of a target module so they don't participate in gradient updates.
 """
 
-from typing import Dict, Optional
-
 import torch.nn as nn
+
 from utils.core import ABLATION_STRATEGIES
+
 from .base import BaseAblationStrategy
 
 
@@ -28,7 +28,7 @@ class ParameterFreezeStrategy(BaseAblationStrategy):
         self,
         model: nn.Module,
         target: str,
-        params: Optional[Dict] = None,
+        params: dict | None = None,
     ):
         super().__init__(model, target, params)
 

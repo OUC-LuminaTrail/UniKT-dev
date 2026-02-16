@@ -5,13 +5,14 @@
 
 import os
 from dataclasses import dataclass
-from typing import Literal, Union, Optional
+from typing import Literal
+
 from ..core import get_logger
 
 logger = get_logger(__name__)
 
 # 类型定义
-NumWorkersType = Union[int, Literal["auto"]]
+NumWorkersType = int | Literal["auto"]
 
 
 @dataclass
@@ -49,7 +50,7 @@ class DataLoaderConfig:
 
 def optimize_dataloader(
     loader,
-    config: Optional[DataLoaderConfig] = None,
+    config: DataLoaderConfig | None = None,
     device=None,
 ) -> None:
     """优化 DataLoader 的性能参数。
@@ -85,9 +86,8 @@ def optimize_dataloader(
     if hasattr(loader, "pin_memory"):
         loader.pin_memory = pin_memory
 
-    if num_workers > 0:
-        if hasattr(loader, "prefetch_factor"):
-            loader.prefetch_factor = config.prefetch_factor
+    if num_workers > 0 and hasattr(loader, "persistent_workers"):
+        loader.persistent_workers = config.persistent_workers
 
     # 打印优化信息（仅在首次优化时）
     if not hasattr(loader, "_optimized_config"):
@@ -101,7 +101,7 @@ def create_optimized_dataloader(
     dataset,
     batch_size: int = 128,
     shuffle: bool = True,
-    config: Optional[DataLoaderConfig] = None,
+    config: DataLoaderConfig | None = None,
     device=None,
     **kwargs,
 ):
@@ -144,9 +144,9 @@ class KFoldDataLoaderConfig:
         shared_config: 共享的配置参数（优先级较低）
     """
 
-    train_config: Optional[DataLoaderConfig] = None
-    val_config: Optional[DataLoaderConfig] = None
-    shared_config: Optional[DataLoaderConfig] = None
+    train_config: DataLoaderConfig | None = None
+    val_config: DataLoaderConfig | None = None
+    shared_config: DataLoaderConfig | None = None
 
     def __post_init__(self):
         """初始化默认配置。"""
@@ -167,7 +167,7 @@ class KFoldDataLoaderConfig:
 def optimize_kfold_dataloaders(
     train_loader,
     val_loader,
-    config: Optional[KFoldDataLoaderConfig] = None,
+    config: KFoldDataLoaderConfig | None = None,
     device=None,
 ) -> None:
     """优化 K 折交叉验证使用的 DataLoader 对。

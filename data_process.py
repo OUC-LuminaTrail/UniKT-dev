@@ -1,9 +1,10 @@
 """数据下载和处理的命令行工具。"""
 
 from argparse import ArgumentParser
-from utils.data_process import get_data_source
-from utils.core import get_logger
+
 from utils.config import DataParams, GeneralParams, SamplingParams
+from utils.core import get_logger
+from utils.data_process import get_data_source
 
 logger = get_logger(__name__)
 

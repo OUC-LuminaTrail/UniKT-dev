@@ -4,11 +4,13 @@ Feature zeroing strategy.
 Uses forward hooks to zero out specific dimensions of module outputs.
 """
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
+
 from utils.core import ABLATION_STRATEGIES
+
 from .base import BaseAblationStrategy
 
 
@@ -32,7 +34,7 @@ class FeatureZeroStrategy(BaseAblationStrategy):
         self,
         model: nn.Module,
         target: str,
-        params: Optional[Dict] = None,
+        params: dict | None = None,
     ):
         super().__init__(model, target, params)
 

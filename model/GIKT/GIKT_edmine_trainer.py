@@ -4,9 +4,10 @@ GIKT 模型训练器
 """
 
 import torch
-from utils.training import BaseTrainer
+
+from utils.config import BaseParamConfig, register_model_params
 from utils.core import TRAINERS, get_logger
-from utils.config import register_model_params, BaseParamConfig
+from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
 

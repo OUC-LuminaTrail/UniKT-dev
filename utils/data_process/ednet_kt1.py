@@ -1,20 +1,23 @@
-import os
-import pandas as pd
-from tqdm import tqdm
-from typing_extensions import override
-import pyarrow.csv as pv
-import pyarrow as pa
 import concurrent.futures
 import itertools
 import multiprocessing
+import os
 import threading
+
+import pandas as pd
+import pyarrow as pa
+import pyarrow.csv as pv
+from tqdm import tqdm
+from typing_extensions import override
+
+from utils.core import get_logger, register_data_source
+
 from .data_source import (
     DataSource,
-    restrains_sequence_length,
     build_question_data_from_cleared,
     map_to_continuous_ids,
+    restrains_sequence_length,
 )
-from utils.core import get_logger, register_data_source
 
 logger = get_logger(__name__)
 
@@ -86,7 +89,7 @@ class EdNetKT1Data(DataSource):
         max_workers = os.cpu_count() or 4
 
         # 增大chunk size以减少开销
-        CHUNK_SIZE = 5000
+        chunk_size = 5000
 
         logger.info(f"Starting parallel processing with {max_workers} workers...")
 
@@ -117,7 +120,7 @@ class EdNetKT1Data(DataSource):
                 futures = []
 
                 # 提交任务
-                for chunk in chunked(file_path_generator(), CHUNK_SIZE):
+                for chunk in chunked(file_path_generator(), chunk_size):
                     future = executor.submit(process_chunk, chunk, progress_queue)
                     futures.append(future)
 

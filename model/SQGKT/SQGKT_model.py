@@ -1,13 +1,30 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
 from torch_geometric.nn.dense.linear import Linear
+
 from utils.core import register_model
 
 
 @register_model("SQGKT")
 class SQGKT(nn.Module):
-    def __init__(self, args, data_metadata, **kwargs):
-        super(SQGKT, self).__init__(**kwargs)
+    """SQGKT 主模型。
+
+    Sequence Question Graph-based Knowledge Training，基于序列-问题图的知识追踪模型。
+
+    Args:
+        args: 模型参数配置
+        data_metadata: 数据集元数据
+        **kwargs: 额外的关键字参数
+
+    Example:
+        >>> model = SQGKT(args, data_metadata)
+        >>> logits = model(user_seq, question_seq, correctness_seq, mask_seq, qs_table, ...)
+    """
+
+    def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
         # 保存参数
         self.args = args
 
@@ -66,17 +83,34 @@ class SQGKT(nn.Module):
 
     def forward(
         self,
-        user_seq,
-        question_seq,
-        correctness_seq,
-        mask_seq,
-        qs_table,
-        q_neighbors_qs,  # q_neighbors_qs[question_id] -> 技能邻居
-        c_neighbors_qs,  # c_neighbors_qs[skill_id] -> 问题邻居
-        uq_table,
-        u_neighbors_uq,  # u_neighbors_uq[user_id] -> 问题邻居
-        q_neighbors_uq,  # q_neighbors_uq[question_id] -> 用户邻居
-    ):
+        user_seq: torch.Tensor,  # [B, S]
+        question_seq: torch.Tensor,  # [B, S]
+        correctness_seq: torch.Tensor,  # [B, S]
+        mask_seq: torch.Tensor,  # [B, S]
+        qs_table: torch.Tensor,  # [Q, K]
+        q_neighbors_qs: torch.Tensor,  # [Q, neighbors]
+        c_neighbors_qs: torch.Tensor,  # [K, neighbors]
+        uq_table: torch.Tensor,  # [U, Q, 3]
+        u_neighbors_uq: torch.Tensor,  # [U, neighbors]
+        q_neighbors_uq: torch.Tensor,  # [Q, neighbors]
+    ) -> torch.Tensor:  # [B, S]
+        """前向传播。
+
+        Args:
+            user_seq: 用户序列 [B, S]
+            question_seq: 问题序列 [B, S]
+            correctness_seq: 正确性序列 [B, S]
+            mask_seq: 掩码序列 [B, S]
+            qs_table: 问题-技能关联表 [Q, K]
+            q_neighbors_qs: 问题在问题-技能图中的邻居 [Q, neighbors]
+            c_neighbors_qs: 技能在问题-技能图中的邻居 [K, neighbors]
+            uq_table: 用户-问题因子表 [U, Q, 3]
+            u_neighbors_uq: 用户在用户-问题图中的邻居 [U, neighbors]
+            q_neighbors_uq: 问题在用户-问题图中的邻居 [Q, neighbors]
+
+        Returns:
+            预测 logits [B, S]
+        """
         dim_emb = self.dim_emb
         if not hasattr(self, "device"):
             self.device = question_seq.device
@@ -260,22 +294,54 @@ class SQGKT(nn.Module):
             state_history[:, t] = lstm2_output
         return y_hat
 
-    def aggregate_qs(self, emb_list):
-        """问题-技能图的聚合 (Eq 9-11)"""
+    def aggregate_qs(self, emb_list: list[torch.Tensor]) -> torch.Tensor:
+        """问题-技能图的聚合 (Eq 9-11)。
+
+        Args:
+            emb_list: 嵌入列表
+
+        Returns:
+            聚合后的嵌入
+        """
         agg_hops = self.agg_hops
         for i in range(agg_hops):
             for j in range(agg_hops - i):
                 emb_list[j] = self.sum_aggregate_qs(emb_list[j], emb_list[j + 1], j)
         return torch.tanh(self.MLP_AGG_last_qs(emb_list[0]))
 
-    def sum_aggregate_qs(self, emb_self, emb_neighbor, hop):
-        """问题-技能图的单跳聚合"""
+    def sum_aggregate_qs(
+        self, emb_self: torch.Tensor, emb_neighbor: torch.Tensor, hop: int
+    ) -> torch.Tensor:
+        """问题-技能图的单跳聚合。
+
+        Args:
+            emb_self: 自身嵌入
+            emb_neighbor: 邻居嵌入
+            hop: 当前跳数
+
+        Returns:
+            聚合后的嵌入
+        """
         emb_sum_neighbor = torch.mean(emb_neighbor, dim=-2)
         emb_sum = emb_sum_neighbor + emb_self
         return torch.tanh(self.dropout_gnn(self.mlp4agg_qs[hop](emb_sum)))
 
-    def aggregate_uq(self, emb_list, user_ids=None, uq_table=None):
-        """学生-问题图的聚合 (Eq 12-14)，考虑 g_ij 权重"""
+    def aggregate_uq(
+        self,
+        emb_list: list[torch.Tensor],
+        user_ids: torch.Tensor | None = None,
+        uq_table: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """学生-问题图的聚合 (Eq 12-14)，考虑 g_ij 权重。
+
+        Args:
+            emb_list: 嵌入列表
+            user_ids: 用户ID（可选）
+            uq_table: 用户-问题因子表（可选）
+
+        Returns:
+            聚合后的嵌入
+        """
         agg_hops = self.agg_hops
         for i in range(agg_hops):
             for j in range(agg_hops - i):
@@ -285,9 +351,25 @@ class SQGKT(nn.Module):
         return torch.tanh(self.MLP_AGG_last_uq(emb_list[0]))
 
     def sum_aggregate_uq(
-        self, emb_self, emb_neighbor, hop, user_ids=None, uq_table=None
-    ):
-        """学生-问题图的单跳聚合"""
+        self,
+        emb_self: torch.Tensor,
+        emb_neighbor: torch.Tensor,
+        hop: int,
+        user_ids: torch.Tensor | None = None,
+        uq_table: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """学生-问题图的单跳聚合。
+
+        Args:
+            emb_self: 自身嵌入
+            emb_neighbor: 邻居嵌入
+            hop: 当前跳数
+            user_ids: 用户ID（可选）
+            uq_table: 用户-问题因子表（可选）
+
+        Returns:
+            聚合后的嵌入
+        """
         if hop == 0 and user_ids is not None and uq_table is not None:
             # 只在第一跳（用户->问题）时进行加权
             # emb_self: [num_users_batch, emb_dim]
@@ -328,7 +410,20 @@ class SQGKT(nn.Module):
 
         return torch.tanh(self.dropout_gnn(self.mlp4agg_uq[hop](emb_sum)))
 
-    def predict(self, question_concept, current_history_state):
+    def predict(
+        self,
+        question_concept: torch.Tensor,  # [B, num_qc, dim_emb]
+        current_history_state: torch.Tensor,  # [B, num_state, dim_emb]
+    ) -> torch.Tensor:  # [B]
+        """预测函数。
+
+        Args:
+            question_concept: 问题-概念嵌入 [B, num_qc, dim_emb]
+            current_history_state: 当前历史状态 [B, num_state, dim_emb]
+
+        Returns:
+            预测结果 [B]
+        """
         # question_concept: (batch_size, num_qc, dim_emb), current_history_state: (batch_size, num_state, dim_emb)
         output_g = torch.bmm(
             question_concept, torch.transpose(current_history_state, 1, 2)

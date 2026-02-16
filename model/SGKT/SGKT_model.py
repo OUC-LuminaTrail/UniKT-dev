@@ -1,11 +1,13 @@
 """SGKT model aligned with TensorFlow implementation."""
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.core import MODELS
+
 from ..layers import GeneralInteraction
 
 

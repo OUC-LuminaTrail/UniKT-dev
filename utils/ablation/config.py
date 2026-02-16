@@ -6,7 +6,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal
 
 
 @dataclass
@@ -27,9 +27,9 @@ class AblationModification:
         "module_replace",
     ]
     target: str
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典表示。"""
         return {
             "type": self.type,
@@ -38,7 +38,7 @@ class AblationModification:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AblationModification":
+    def from_dict(cls, data: dict[str, Any]) -> "AblationModification":
         """从字典表示创建。"""
         return cls(
             type=data["type"],
@@ -59,9 +59,9 @@ class AblationConfig:
 
     name: str
     description: str
-    modifications: List[AblationModification] = field(default_factory=list)
+    modifications: list[AblationModification] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典表示。"""
         return {
             "name": self.name,
@@ -70,7 +70,7 @@ class AblationConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AblationConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "AblationConfig":
         """从字典表示创建。"""
         return cls(
             name=data["name"],
@@ -93,9 +93,9 @@ class AblationStudyConfig:
 
     model_name: str
     baseline: AblationConfig
-    ablations: List[AblationConfig] = field(default_factory=list)
+    ablations: list[AblationConfig] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典表示。"""
         return {
             "model_name": self.model_name,
@@ -104,7 +104,7 @@ class AblationStudyConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AblationStudyConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "AblationStudyConfig":
         """从字典表示创建。"""
         return cls(
             model_name=data["model_name"],
@@ -113,9 +113,7 @@ class AblationStudyConfig:
         )
 
 
-def validate_ablation_config(
-    config: Dict[str, Any], model: Optional[Any] = None
-) -> bool:
+def validate_ablation_config(config: dict[str, Any], model: Any | None = None) -> bool:
     """验证消融配置结构。
 
     Args:
@@ -161,8 +159,7 @@ def validate_ablation_config(
                 raise ValueError("Modification must have a 'type'")
             if mod["type"] not in valid_strategies:
                 raise ValueError(
-                    f"Invalid strategy type: {mod['type']}. "
-                    f"Valid types: {valid_strategies}"
+                    f"Invalid strategy type: {mod['type']}. Valid types: {valid_strategies}"
                 )
             if "target" not in mod:
                 raise ValueError("Modification must have a 'target'")
@@ -200,7 +197,7 @@ def load_ablation_config(config_path: str) -> AblationStudyConfig:
     if not path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     validate_ablation_config(data)

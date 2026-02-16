@@ -1,17 +1,42 @@
+from typing import Any
+
 import torch
 import torch.nn as nn
-from torch_geometric.nn import HGTConv, Linear
-from torch.nn import functional as F
 from dhg.nn import HGNNConv
-from utils.core import MODELS
+from torch.nn import functional as F
+from torch_geometric.nn import HGTConv, Linear
+
+from utils.core import register_model
+
 from ..layers import GeneralInteraction, HistoryRecap
 
 
 class HeteroGNN(nn.Module):
-    """基于 HGT 的问题-技能图聚合。"""
+    """基于 HGT 的异质图神经网络模块。
 
-    def __init__(self, embedding_dim, n_hop, heads, dropout, metadata):
-        super(HeteroGNN, self).__init__()
+    使用 Heterogeneous Graph Transformer 进行多层异构图聚合。
+
+    Args:
+        embedding_dim: 节点嵌入维度
+        n_hop: GNN 层数
+        heads: 注意力头数
+        dropout: Dropout 概率
+        metadata: 异构图元数据
+
+    Example:
+        >>> gnn = HeteroGNN(embedding_dim=128, n_hop=2, heads=4, dropout=0.2, metadata=metadata)
+        >>> output = gnn(x_dict, edge_index_dict)
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        n_hop: int,
+        heads: int,
+        dropout: float,
+        metadata: tuple[list[str], list[tuple[str, str, str]]],
+    ) -> None:
+        super().__init__()
         self.n_hop = n_hop
         self.heads = heads
         self.dropout = dropout
@@ -26,7 +51,20 @@ class HeteroGNN(nn.Module):
             )
             self.convs.append(conv)
 
-    def forward(self, x_dict, edge_index_dict):
+    def forward(
+        self,
+        x_dict: dict[str, torch.Tensor],
+        edge_index_dict: dict[tuple[str, str, str], torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """前向传播。
+
+        Args:
+            x_dict: 节点特征字典
+            edge_index_dict: 边索引字典
+
+        Returns:
+            聚合后的节点表示字典
+        """
         for conv in self.convs:
             x_dict = conv(x_dict, edge_index_dict)
             # 对每个节点类型的输出应用激活和 dropout
@@ -57,8 +95,15 @@ class HyperGNN(nn.Module):
         - Θ 是可学习参数
     """
 
-    def __init__(self, in_ch, n_hid, n_class, dropout=0.0, use_edge_weights=True):
-        super(HyperGNN, self).__init__()
+    def __init__(
+        self,
+        in_ch: int,
+        n_hid: int,
+        n_class: int,
+        dropout: float = 0.0,
+        use_edge_weights: bool = True,
+    ) -> None:
+        super().__init__()
         self.use_edge_weights = use_edge_weights
 
         # 第一层卷积：聚合直接邻居问题特征
@@ -72,8 +117,8 @@ class HyperGNN(nn.Module):
             n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True
         )
 
-    def forward(self, x, hg):
-        """前向传播
+    def forward(self, x: torch.Tensor, hg: Any) -> torch.Tensor:  # dhg.Hypergraph
+        """前向传播。
 
         Args:
             x: 输入特征矩阵 [num_vertices, in_ch]
@@ -96,8 +141,8 @@ class MoEFusion(nn.Module):
     使用门控网络(Router)动态分配权重。
     """
 
-    def __init__(self, dim, dropout=0.1):
-        super(MoEFusion, self).__init__()
+    def __init__(self, dim: int, dropout: float = 0.1) -> None:
+        super().__init__()
         self.dim = dim
 
         # 专家网络:
@@ -124,7 +169,7 @@ class MoEFusion(nn.Module):
 
         self.norm = nn.LayerNorm(dim)
 
-    def forward(self, view1, view2):
+    def forward(self, view1: torch.Tensor, view2: torch.Tensor) -> torch.Tensor:
         # 展平批次维度以适应 Linear
         B_shape = view1.shape[:-1]
         v1_flat = view1.reshape(-1, self.dim)
@@ -149,12 +194,31 @@ class MoEFusion(nn.Module):
         return self.norm(fused).reshape(*B_shape, self.dim)
 
 
-@MODELS.register("HGIKT")
+@register_model("HGIKT")
 class HGIKT(nn.Module):
-    """HGIKT主模型。"""
+    """HGIKT 主模型。
 
-    def __init__(self, args, data_metadata, hetero_metadata, **kwargs):
-        super(HGIKT, self).__init__(**kwargs)
+    层次化图知识追踪模型，融合异构图和超图进行预测。
+
+    Args:
+        args: 模型参数配置
+        data_metadata: 数据集元数据
+        hetero_metadata: 异构图元数据
+        **kwargs: 额外的关键字参数
+
+    Example:
+        >>> model = HGIKT(args, data_metadata, hetero_metadata)
+        >>> logits = model(user_sequence, user_response, user_mask, hetero_graph, hypergraph, question_skill_matrix)
+    """
+
+    def __init__(
+        self,
+        args: Any,
+        data_metadata: dict[str, Any],
+        hetero_metadata: tuple[list[str], list[tuple[str, str, str]]],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
         # 保存参数
         self.args = args
         # 元数据
@@ -237,13 +301,26 @@ class HGIKT(nn.Module):
 
     def forward(
         self,
-        user_sequence: torch.Tensor,
-        user_response: torch.Tensor,
-        user_mask: torch.Tensor,
-        hetero_graph: torch.Tensor,
-        hypergraph: torch.Tensor,
-        question_skill_matrix: torch.Tensor,
-    ):
+        user_sequence: torch.Tensor,  # [B, S]
+        user_response: torch.Tensor,  # [B, S]
+        user_mask: torch.Tensor,  # [B, S]
+        hetero_graph: Any,  # HeteroData
+        hypergraph: Any,  # dhg.Hypergraph
+        question_skill_matrix: torch.Tensor,  # [Q, K]
+    ) -> torch.Tensor:  # [B, S]
+        """前向传播。
+
+        Args:
+            user_sequence: 用户问题序列 [B, S]
+            user_response: 用户回答序列 [B, S]
+            user_mask: 有效位置掩码 [B, S]
+            hetero_graph: 异构图数据
+            hypergraph: 超图数据
+            question_skill_matrix: 问题-技能关联矩阵 [Q, K]
+
+        Returns:
+            预测 logits [B, S]
+        """
         # 批量大小
         B, _ = user_sequence.size()
 

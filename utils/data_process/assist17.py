@@ -1,13 +1,16 @@
 import os
+
 import pandas as pd
 from typing_extensions import override
+
+from utils.core import get_logger, register_data_source
+
 from .data_source import (
     DataSource,
-    restrains_sequence_length,
     build_question_data_from_cleared,
     map_to_continuous_ids,
+    restrains_sequence_length,
 )
-from utils.core import get_logger, register_data_source
 
 logger = get_logger(__name__)
 

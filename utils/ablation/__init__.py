@@ -17,6 +17,7 @@ Usage:
     results = experiment.run_all()
 """
 
+from ..core import ABLATION_STRATEGIES
 from .config import (
     AblationConfig,
     AblationModification,
@@ -25,9 +26,6 @@ from .config import (
     save_ablation_config,
     validate_ablation_config,
 )
-
-from ..core import ABLATION_STRATEGIES
-
 from .experiment import (
     AblationExperiment,
     AblationResult,
@@ -36,11 +34,11 @@ from .experiment import (
 
 # Import strategies to register them
 from .strategies import (
-    ModuleDisableStrategy,
-    ModuleZeroStrategy,
     FeatureZeroStrategy,
-    ParameterFreezeStrategy,
+    ModuleDisableStrategy,
     ModuleReplaceStrategy,
+    ModuleZeroStrategy,
+    ParameterFreezeStrategy,
     apply_ablation,
 )
 

@@ -1,9 +1,10 @@
+from typing import Any
+
 from .assist09 import Assistments2009Data
 from .assist12 import Assistments2012Data
 from .assist17 import Assistments2017Data
-from .ednet_kt1 import EdNetKT1Data
 from .data_source import DataSource
-from typing import Any
+from .ednet_kt1 import EdNetKT1Data
 
 
 def get_data_source(dataset_name: str, args: Any) -> DataSource:

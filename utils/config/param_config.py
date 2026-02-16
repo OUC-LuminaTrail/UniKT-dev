@@ -4,8 +4,9 @@
 """
 
 import argparse
-from typing import Dict, Any, Type, Optional, List
 from abc import ABC, abstractmethod
+from typing import Any
+
 from ..core import PARAM_CONFIGS
 
 
@@ -27,7 +28,7 @@ class BaseParamConfig(ABC):
         # 从实例方法定义初始化
         group, params = self.define_params()
         self.group_name: str = group
-        self.params: Dict[str, Dict[str, Any]] = params
+        self.params: dict[str, dict[str, Any]] = params
 
     @abstractmethod
     def define_params(self) -> tuple[str, dict]:
@@ -95,14 +96,14 @@ def register_model_params(model_name: str):
         装饰器函数
     """
 
-    def decorator(cls: Type[BaseParamConfig]) -> Type[BaseParamConfig]:
+    def decorator(cls: type[BaseParamConfig]) -> type[BaseParamConfig]:
         PARAM_CONFIGS.register(model_name)(cls)
         return cls
 
     return decorator
 
 
-def get_model_params(model_name: str) -> Optional[Type[BaseParamConfig]]:
+def get_model_params(model_name: str) -> type[BaseParamConfig] | None:
     """获取模型参数配置类。
 
     Args:
@@ -117,7 +118,7 @@ def get_model_params(model_name: str) -> Optional[Type[BaseParamConfig]]:
         return None
 
 
-def list_models() -> List[str]:
+def list_models() -> list[str]:
     """列出所有已注册的模型参数配置。
 
     Returns:

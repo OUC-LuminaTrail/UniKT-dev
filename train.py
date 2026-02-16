@@ -1,17 +1,18 @@
 """统一的知识追踪训练脚本。"""
 
 import argparse
-from utils.core import TRAINERS, get_logger
-from utils.data_process import get_data_source
+
+import model  # noqa: F401
 from utils.config import (
-    list_models,
-    get_model_params,
     DataParams,
     EarlyStoppingParams,
     GeneralParams,
+    get_model_params,
+    list_models,
 )
+from utils.core import TRAINERS, get_logger
+from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
-import model  # noqa: F401
 
 logger = get_logger(__name__)
 

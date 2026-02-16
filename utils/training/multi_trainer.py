@@ -7,7 +7,7 @@
 import os
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from rich.console import Group
@@ -54,10 +54,10 @@ class StageConfig:
     optimizer: torch.optim.Optimizer
     loss_fn: torch.nn.Module
     train_data: torch.utils.data.DataLoader
-    val_data: Optional[torch.utils.data.DataLoader] = None
+    val_data: torch.utils.data.DataLoader | None = None
     epochs: int = 100
-    lr_scheduler: Optional[Any] = None
-    early_stopping: Optional[EarlyStopping] = None
+    lr_scheduler: Any | None = None
+    early_stopping: EarlyStopping | None = None
 
 
 class MultiTrainer:
@@ -103,9 +103,9 @@ class MultiTrainer:
         args=None,
         data_src=None,
         exp_manager=None,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         use_swanlab: bool = True,
-        seed: Optional[int] = None,
+        seed: int | None = None,
     ):
         """初始化多阶段训练器
 
@@ -148,17 +148,17 @@ class MultiTrainer:
         # 阶段管理
         self._stage_configs: dict[str, StageConfig] = {}
         self._stage_outputs: dict[str, dict] = {}
-        self._current_stage: Optional[str] = None
+        self._current_stage: str | None = None
         self._global_step = 0  # 跨阶段的全局步数
 
         # 当前阶段的组件（运行时设置）
-        self.model: Optional[torch.nn.Module] = None
-        self.opt: Optional[torch.optim.Optimizer] = None
-        self.loss: Optional[torch.nn.Module] = None
-        self.train_data: Optional[torch.utils.data.DataLoader] = None
-        self.val_data: Optional[torch.utils.data.DataLoader] = None
+        self.model: torch.nn.Module | None = None
+        self.opt: torch.optim.Optimizer | None = None
+        self.loss: torch.nn.Module | None = None
+        self.train_data: torch.utils.data.DataLoader | None = None
+        self.val_data: torch.utils.data.DataLoader | None = None
         self.lr_scheduler = None
-        self.early_stopping: Optional[EarlyStopping] = None
+        self.early_stopping: EarlyStopping | None = None
         self.epochs: int = 0
 
         # 指标和检查点管理（所有阶段共享）
@@ -176,7 +176,7 @@ class MultiTrainer:
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def _move_tensor_to_device(
-        self, tensor: torch.Tensor, dtype: Optional[torch.dtype] = None
+        self, tensor: torch.Tensor, dtype: torch.dtype | None = None
     ) -> torch.Tensor:
         """将张量移动到设备
 
@@ -497,8 +497,7 @@ class MultiTrainer:
                 # 检查是否应该停止
                 if self.callback_manager.should_stop():
                     progress.console.log(
-                        f"[bold red][{stage_prefix}] Early stopping triggered "
-                        f"at epoch {epoch + 1}"
+                        f"[bold red][{stage_prefix}] Early stopping triggered at epoch {epoch + 1}"
                     )
                     break
 
@@ -623,7 +622,7 @@ class MultiTrainer:
 
     # ==================== 辅助方法 ====================
 
-    def _is_better_metric(self, current: float, best: Optional[float]) -> bool:
+    def _is_better_metric(self, current: float, best: float | None) -> bool:
         """判断当前指标是否更好
 
         Args:
@@ -655,7 +654,7 @@ class MultiTrainer:
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
 
-    def _select_monitor_value(self, metrics: dict, val_loss: Optional[float]) -> float:
+    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
         """选择监控指标的值"""
         name = self._monitor_name()
 
@@ -681,7 +680,7 @@ class MultiTrainer:
 
         return float(value)
 
-    def _get_early_stopping_state(self) -> Optional[dict]:
+    def _get_early_stopping_state(self) -> dict | None:
         """获取早停状态"""
         if self.early_stopping is None:
             return None
@@ -695,8 +694,8 @@ class MultiTrainer:
         self,
         text: Text,
         stage_prefix: str,
-        best_metric: Optional[float],
-        best_epoch: Optional[int],
+        best_metric: float | None,
+        best_epoch: int | None,
     ):
         """更新最佳指标显示"""
         if self.early_stopping is None:
@@ -831,7 +830,8 @@ class MultiTrainer:
             if best_metric is not None:
                 logger.info(
                     f"  {stage_name.upper()}: Best {self._monitor_name()} = "
-                    f"{best_metric:.4f} (Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'})"
+                    f"{best_metric:.4f} (Epoch "
+                    f"{best_epoch + 1 if best_epoch is not None else 'N/A'})"
                 )
 
         logger.info("=" * 60)

@@ -8,12 +8,11 @@ from .base import (
     IdentityModule,
     apply_ablation,
 )
-
-from .module_disable import ModuleDisableStrategy
-from .module_zero import ModuleZeroStrategy
 from .feature_zero import FeatureZeroStrategy
-from .parameter_freeze import ParameterFreezeStrategy
+from .module_disable import ModuleDisableStrategy
 from .module_replace import ModuleReplaceStrategy
+from .module_zero import ModuleZeroStrategy
+from .parameter_freeze import ParameterFreezeStrategy
 
 __all__ = [
     "BaseAblationStrategy",

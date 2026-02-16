@@ -1,16 +1,18 @@
 """与 Optuna 目标函数集成的 Trainer。"""
 
-from typing import Any, Callable, Dict, List, Optional, Type
 from argparse import Namespace
+from collections.abc import Callable
+from typing import Any
+
+from utils.core import get_logger
 
 from .config import (
-    OptunaConfig,
     HyperparameterSpace,
+    OptunaConfig,
     load_config_from_json,
     load_param_space_from_json,
 )
 from .tuner import OptunaTuner
-from utils.core import get_logger
 
 logger = get_logger(__name__)
 
@@ -22,11 +24,11 @@ class TrainerObjectiveWrapper:
 
     def __init__(
         self,
-        trainer_class: Type,
+        trainer_class: type,
         data_src_fn: Callable[[], Any],
         base_args: Namespace,
         metric_name: str = "auc",
-        max_epochs: Optional[int] = None,
+        max_epochs: int | None = None,
         exp_manager=None,
     ):
         """
@@ -51,7 +53,7 @@ class TrainerObjectiveWrapper:
         if metric_name.lower() not in ["auc", "acc", "rmse", "loss"]:
             raise ValueError(f"Invalid metric_name: {metric_name}")
 
-    def __call__(self, trial, params: Dict[str, Any] = None, **kwargs) -> float:
+    def __call__(self, trial, params: dict[str, Any] = None, **kwargs) -> float:
         """
         执行一次超参数组合的训练
         """
@@ -98,7 +100,7 @@ class TrainerObjectiveWrapper:
             # 因此失败时应返回 -inf，表示该次尝试无效且性能极差
             return float("-inf")
 
-    def _create_trial_args(self, params: Dict[str, Any]) -> Namespace:
+    def _create_trial_args(self, params: dict[str, Any]) -> Namespace:
         """根据trial参数创建新的args"""
         import copy
 
@@ -166,10 +168,10 @@ class OptunaTunerBuilder:
     """
 
     def __init__(self):
-        self.config: Optional[OptunaConfig] = None
-        self.param_spaces: List[HyperparameterSpace] = []
-        self.objective_fn: Optional[Callable] = None
-        self.objective_kwargs: Dict[str, Any] = {}
+        self.config: OptunaConfig | None = None
+        self.param_spaces: list[HyperparameterSpace] = []
+        self.objective_fn: Callable | None = None
+        self.objective_kwargs: dict[str, Any] = {}
 
     def from_config_file(self, config_path: str) -> "OptunaTunerBuilder":
         """从JSON配置文件加载Optuna配置"""
@@ -187,7 +189,7 @@ class OptunaTunerBuilder:
         return self
 
     def with_param_spaces(
-        self, spaces: List[HyperparameterSpace]
+        self, spaces: list[HyperparameterSpace]
     ) -> "OptunaTunerBuilder":
         """设置参数空间"""
         self.param_spaces = spaces

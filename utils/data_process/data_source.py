@@ -1,7 +1,9 @@
-from abc import ABC, abstractmethod
 import os
+from abc import ABC, abstractmethod
+
 import pandas as pd
 from sklearn.model_selection import KFold
+
 from utils.core import get_logger
 
 logger = get_logger(__name__)
@@ -55,6 +57,7 @@ class DataSource(ABC):
 
     def set_random_seed(self):
         import random
+
         import numpy as np
 
         if self.seed is None:
@@ -99,8 +102,9 @@ class DataSource(ABC):
             attempt: 当前尝试次数
             max_retries: 最大重试次数
         """
-        import requests
         from concurrent.futures import ThreadPoolExecutor
+
+        import requests
         import tqdm
 
         # 首先发送HEAD请求检查服务器是否支持Range请求
@@ -220,17 +224,17 @@ class DataSource(ABC):
         """
         import os
         import shutil
-        from pathlib import Path
         import time
+        from pathlib import Path
 
         try:
             import requests
         except Exception:
             requests = None
-        import urllib.request
-        import tarfile
-        import zipfile
         import gzip
+        import tarfile
+        import urllib.request
+        import zipfile
 
         if self.data_url is None:
             raise ValueError("Data URL is not provided.")
@@ -515,6 +519,7 @@ class DataSource(ABC):
             文件的MD5值字符串
         """
         import hashlib
+
         from tqdm import tqdm
 
         hash_md5 = hashlib.md5()
@@ -625,7 +630,7 @@ class DataSource(ABC):
             raise FileNotFoundError(f"Metadata file not found: {self.metadata_path}")
         import json
 
-        with open(self.metadata_path, "r") as f:
+        with open(self.metadata_path) as f:
             self.metadata = json.load(f)
 
     def get_metadata(self, key: str | None = None):

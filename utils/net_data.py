@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
-from utils.data_process import DataSource
+
 from utils.core import get_logger
+from utils.data_process import DataSource
 
 
 class BaseModelData(ABC):
@@ -42,8 +43,8 @@ class BaseModelData(ABC):
             - 验证集为指定fold的数据，训练集为其他fold的数据
             - 需要数据源中有用户到行索引的映射信息
         """
-        from tqdm import tqdm
         import numpy as np
+        from tqdm import tqdm
 
         if len(arrays) == 0:
             raise ValueError(
@@ -266,8 +267,8 @@ class BaseModelData(ABC):
         返回:
             dict: 问题ID -> 区分度分数的字典，通常在 -1 到 1 之间，越大表示区分度越高
         """
-        import tqdm
         import numpy as np
+        import tqdm
 
         data = self.data_src.get_sequence_data()
 
@@ -449,8 +450,7 @@ class BaseModelData(ABC):
                 data_matrix[int(src_idx), int(dst_idx)] += 1
             else:
                 raise ValueError(
-                    f"Unsupported value_type: {value_type}. "
-                    f"Supported types: 'binary', 'count'"
+                    f"Unsupported value_type: {value_type}. Supported types: 'binary', 'count'"
                 )
 
         return data_matrix
@@ -517,8 +517,8 @@ class GraphModelData(BaseModelData):
         return hypergraphs
 
     def build_sequence_data(self, max_seq_len: int, min_seq_len: int):
-        from tqdm import tqdm
         import numpy as np
+        from tqdm import tqdm
 
         data = self.data_src.get_sequence_data()
         num_users = self.data_src.get_metadata("num_users")
@@ -599,10 +599,10 @@ class GraphModelData(BaseModelData):
                 directed=True
             )
         """
-        from torch_geometric.data import HeteroData
-        from torch_geometric.transforms import ToUndirected
         import numpy as np
         import torch
+        from torch_geometric.data import HeteroData
+        from torch_geometric.transforms import ToUndirected
         from tqdm import tqdm
 
         if edge_attrs is None:
@@ -779,9 +779,9 @@ class GraphModelData(BaseModelData):
                 ('question', 'in', 'assignment')
             )
         """
+        import numpy as np
         from dhg import Hypergraph
         from tqdm import tqdm
-        import numpy as np
 
         vertex_node_type, relation, hyperedge_node_type = edge_type
 

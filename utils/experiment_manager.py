@@ -3,10 +3,9 @@
 提供统一的实验日志目录管理，支持普通训练、消融实验和超参数搜索。
 """
 
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
-from datetime import datetime
 
 from utils.core import get_logger
 
@@ -56,7 +55,7 @@ class ExperimentManager:
         model_name: str,
         dataset_name: str,
         base_dir: str = "runs",
-        tags: Optional[list[str]] = None,
+        tags: list[str] | None = None,
     ):
         """初始化实验管理器
 

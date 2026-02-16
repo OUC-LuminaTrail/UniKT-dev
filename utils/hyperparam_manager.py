@@ -5,10 +5,12 @@
 
 import json
 import os
-from typing import Any, Dict, Optional, Union
-from datetime import datetime
 from argparse import Namespace
+from datetime import datetime
+from typing import Any
+
 import torch
+
 from utils.core import get_logger
 
 
@@ -24,7 +26,7 @@ class HyperparameterManager:
     5. 支持版本控制和实验追踪
     """
 
-    def __init__(self, save_dir: Optional[str] = None):
+    def __init__(self, save_dir: str | None = None):
         """
         初始化超参数管理器
 
@@ -32,13 +34,13 @@ class HyperparameterManager:
             save_dir: 保存目录，如果为None则使用默认的runs目录
         """
         self.save_dir = save_dir
-        self.hyperparams: Dict[str, Any] = {}
-        self.metadata: Dict[str, Any] = {
+        self.hyperparams: dict[str, Any] = {}
+        self.metadata: dict[str, Any] = {
             "created_at": datetime.now().isoformat(),
         }
         self.logger = get_logger(__name__)
 
-    def get_hyperparameters_dict(self) -> Dict[str, Any]:
+    def get_hyperparameters_dict(self) -> dict[str, Any]:
         """
         获取当前超参数字典
 
@@ -47,9 +49,7 @@ class HyperparameterManager:
         """
         return self.hyperparams
 
-    def add_hyperparams(
-        self, params: Union[Dict, Namespace], group: Optional[str] = None
-    ):
+    def add_hyperparams(self, params: dict | Namespace, group: str | None = None):
         """
         添加超参数（自动识别并序列化所有传入的参数）
 
@@ -135,7 +135,7 @@ class HyperparameterManager:
                 # 如果失败，返回类型信息
                 return f"<{type(value).__name__} object>"
 
-    def _serialize_params(self, params: Dict) -> Dict:
+    def _serialize_params(self, params: dict) -> dict:
         """
         序列化参数字典
 
@@ -186,7 +186,7 @@ class HyperparameterManager:
 
         self.logger.info(f"Hyperparameters saved to: {filepath}")
 
-    def load(self, filepath: str) -> Dict:
+    def load(self, filepath: str) -> dict:
         """
         从文件加载超参数
 
@@ -203,13 +203,13 @@ class HyperparameterManager:
         _, ext = os.path.splitext(filepath)
 
         if ext == ".json":
-            with open(filepath, "r", encoding="utf-8") as f:
+            with open(filepath, encoding="utf-8") as f:
                 data = json.load(f)
         elif ext in [".yaml", ".yml"]:
             try:
                 import yaml
 
-                with open(filepath, "r", encoding="utf-8") as f:
+                with open(filepath, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
             except ImportError:
                 raise ImportError("PyYAML not installed. Cannot load YAML file.")
@@ -242,7 +242,7 @@ class HyperparameterManager:
 
         return "\n".join(lines)
 
-    def _format_params(self, params: Dict, lines: list, indent: int = 0):
+    def _format_params(self, params: dict, lines: list, indent: int = 0):
         """
         递归格式化参数字典
 
@@ -259,7 +259,7 @@ class HyperparameterManager:
             else:
                 lines.append(f"{indent_str}{key}: {value}")
 
-    def _flatten_dict(self, d: Dict, parent_key: str = "", sep: str = ".") -> Dict:
+    def _flatten_dict(self, d: dict, parent_key: str = "", sep: str = ".") -> dict:
         """
         将嵌套字典展平
 
@@ -280,7 +280,7 @@ class HyperparameterManager:
                 items.append((new_key, v))
         return dict(items)
 
-    def to_namespace(self, group: Optional[str] = None) -> Namespace:
+    def to_namespace(self, group: str | None = None) -> Namespace:
         """
         将超参数转换为Namespace对象
 
@@ -290,11 +290,11 @@ class HyperparameterManager:
         Returns:
             Namespace对象
         """
-        if group:
-            params = self.hyperparams.get(group, {})
-        else:
-            # 如果是分组的，则展平
-            params = self._flatten_dict(self.hyperparams)
+        params = (
+            self.hyperparams.get(group, {})
+            if group
+            else self._flatten_dict(self.hyperparams)
+        )
 
         return Namespace(**params)
 
@@ -323,10 +323,10 @@ class HyperparameterManager:
 
 
 def create_hyperparameter_manager(
-    args: Union[Dict, Namespace],
+    args: dict | Namespace,
     save_dir: str,
-    model_name: Optional[str] = None,
-    dataset_name: Optional[str] = None,
+    model_name: str | None = None,
+    dataset_name: str | None = None,
     auto_group: bool = True,
 ) -> HyperparameterManager:
     """
@@ -351,10 +351,7 @@ def create_hyperparameter_manager(
         manager.add_metadata("dataset_name", dataset_name)
 
     # 转换为字典（如果是Namespace）
-    if isinstance(args, Namespace):
-        args_dict = vars(args)
-    else:
-        args_dict = args
+    args_dict = vars(args) if isinstance(args, Namespace) else args
 
     # 如果需要自动分组
     if auto_group:

@@ -2,8 +2,9 @@
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
+from typing import Any
+
 from optuna.pruners import (
     BasePruner,
     MedianPruner,
@@ -12,10 +13,10 @@ from optuna.pruners import (
 )
 from optuna.samplers import (
     BaseSampler,
-    TPESampler,
-    RandomSampler,
-    GridSampler,
     CmaEsSampler,
+    GridSampler,
+    RandomSampler,
+    TPESampler,
 )
 from optuna.trial import Trial
 
@@ -28,12 +29,12 @@ class HyperparameterSpace:
 
     name: str
     type: str  # 'int', 'float', 'categorical'
-    low: Optional[float] = None
-    high: Optional[float] = None
-    log: Optional[bool] = None  # 用于数值参数的对数采样
-    step: Optional[float] = None  # 用于整数参数的步长
-    choices: Optional[List[Any]] = None  # 用于分类参数
-    default: Optional[Any] = None
+    low: float | None = None
+    high: float | None = None
+    log: bool | None = None  # 用于数值参数的对数采样
+    step: float | None = None  # 用于整数参数的步长
+    choices: list[Any] | None = None  # 用于分类参数
+    default: Any | None = None
 
     def validate(self):
         """验证参数空间配置的完整性"""
@@ -88,24 +89,24 @@ class OptunaConfig:
 
     # 采样器配置
     sampler: str = "tpe"  # 'tpe', 'random', 'grid', 'cmaes'
-    sampler_kwargs: Dict[str, Any] = field(default_factory=dict)
+    sampler_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # 修剪器配置
     pruner: str = "median"  # 'median', 'percentile', 'successive_halving', None
-    pruner_kwargs: Dict[str, Any] = field(default_factory=dict)
+    pruner_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # 搜索配置
     n_trials: int = 100
     n_jobs: int = 1  # 并行任务数
-    timeout: Optional[int] = None  # 单位：秒
-    directions: List[str] = field(
+    timeout: int | None = None  # 单位：秒
+    directions: list[str] = field(
         default_factory=lambda: ["maximize"]
     )  # 'maximize' 或 'minimize'
 
     # 存储和日志
-    study_name: Optional[str] = None
-    db_url: Optional[str] = None  # 持久化数据库URL，如 "sqlite:///study.db"
-    save_dir: Optional[str] = None
+    study_name: str | None = None
+    db_url: str | None = None  # 持久化数据库URL，如 "sqlite:///study.db"
+    save_dir: str | None = None
     verbose: int = 1  # 0=quiet, 1=normal, 2=verbose
 
     def get_sampler(self) -> BaseSampler:
@@ -124,7 +125,7 @@ class OptunaConfig:
         else:
             raise ValueError(f"Unsupported sampler: {sampler_name}")
 
-    def get_pruner(self) -> Optional[BasePruner]:
+    def get_pruner(self) -> BasePruner | None:
         """根据配置创建修剪器"""
         if self.pruner is None:
             return None
@@ -144,14 +145,14 @@ class OptunaConfig:
 
 def load_config_from_json(config_path: str) -> OptunaConfig:
     """从JSON文件加载Optuna配置"""
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config_dict = json.load(f)
     return OptunaConfig(**config_dict)
 
 
-def load_param_space_from_json(space_path: str) -> List[HyperparameterSpace]:
+def load_param_space_from_json(space_path: str) -> list[HyperparameterSpace]:
     """从JSON文件加载参数空间定义"""
-    with open(space_path, "r") as f:
+    with open(space_path) as f:
         spaces_dict = json.load(f)
 
     param_spaces = []

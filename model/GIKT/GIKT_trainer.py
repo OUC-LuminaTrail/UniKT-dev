@@ -1,12 +1,15 @@
-"""
-GIKT 模型训练器
-定义 GIKT 模型特定的训练逻辑
+"""GIKT 模型训练器。
+
+定义 GIKT 模型特定的训练逻辑。
 """
 
+from typing import Any
+
 import torch
-from utils.training import BaseTrainer
+
+from utils.config import BaseParamConfig, register_model_params
 from utils.core import TRAINERS, get_logger
-from utils.config import register_model_params, BaseParamConfig
+from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
 
@@ -15,7 +18,7 @@ __all__ = ["GIKTTrainer", "GIKTModelParams"]
 
 @register_model_params("GIKT")
 class GIKTModelParams(BaseParamConfig):
-    """GIKT model-specific parameters."""
+    """GIKT 模型参数配置。"""
 
     def define_params(self) -> tuple[str, dict]:
         group_name = "GIKT Parameters"
@@ -104,16 +107,22 @@ class GIKTModelParams(BaseParamConfig):
 
 @TRAINERS.register("GIKT")
 class GIKTTrainer(BaseTrainer):
-    """
-    GIKT模型训练器
+    """GIKT 模型训练器。
+
+    负责初始化 GIKT 模型、优化器和训练数据，并实现前向传播逻辑。
+
+    Args:
+        args: 模型参数配置
+        data_src: 数据源实例
+        exp_manager: 实验管理器（可选）
     """
 
     def __init__(
         self,
-        args=None,
-        data_src=None,
-        exp_manager=None,
-    ):
+        args: Any = None,
+        data_src: Any = None,
+        exp_manager: Any = None,
+    ) -> None:
         # 构建数据
         from model.GIKT import GIKTModelData
 
@@ -143,7 +152,9 @@ class GIKTTrainer(BaseTrainer):
             self.device_
         )  # 问题-技能矩阵
 
-    def init_model(self, args, data_src):
+    def init_model(
+        self, args: Any, data_src: Any
+    ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.nn.Module, Any | None]:
         from model.GIKT.GIKT_model import GIKT
 
         logger.info("Initializing GIKT model...")
@@ -164,8 +175,17 @@ class GIKTTrainer(BaseTrainer):
 
         return model, optimizer, loss_fn, lr_scheduler
 
-    def forward_pass(self, batch_data):
-        """GIKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成"""
+    def forward_pass(
+        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ) -> dict[str, torch.Tensor]:
+        """GIKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成。
+
+        Args:
+            batch_data: 包含 (sequence, response, mask) 的元组
+
+        Returns:
+            包含 y_hat, y_label, y_predict 的字典
+        """
         # 解包数据并移动到设备
         sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
