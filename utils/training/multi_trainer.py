@@ -46,7 +46,7 @@ class StageConfig:
         val_data: 验证数据加载器（可选）
         epochs: 该阶段的训练轮数
         lr_scheduler: 学习率调度器（可选）
-        early_stopping: 早停配置（可选）
+        early_stopping: 早停对象（可选）
     """
 
     name: str

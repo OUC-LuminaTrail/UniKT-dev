@@ -5,7 +5,7 @@
 
 from abc import ABC
 
-from ..config import EarlyStopping, EarlyStoppingConfig
+from ..config import EarlyStopping
 from ..core import get_logger
 
 logger = get_logger(__name__)
@@ -124,26 +124,15 @@ class EarlyStoppingCallback(Callback):
     def __init__(
         self,
         *,
-        config: EarlyStoppingConfig | None = None,
-        early_stopping: EarlyStopping | None = None,
+        early_stopping: EarlyStopping,
     ):
         """初始化早停回调。
 
         Args:
-            config: 早停配置
             early_stopping: 早停对象
         """
-        if early_stopping is not None and config is not None:
-            raise ValueError("Provide either 'early_stopping' or 'config', not both.")
-
-        if early_stopping is not None:
-            self.early_stopping = early_stopping
-            self.cfg = early_stopping.cfg
-        else:
-            if config is None:
-                config = EarlyStoppingConfig()
-            self.cfg = config
-            self.early_stopping = EarlyStopping(config)
+        self.early_stopping = early_stopping
+        self.cfg = early_stopping.cfg
 
         self._stop = False
 

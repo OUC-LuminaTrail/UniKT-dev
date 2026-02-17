@@ -5,11 +5,12 @@ Implements data preparation for Session Graph-based Knowledge Tracing model.
 Builds the Heterogeneous Relation Graph (HRG) following the original author's strategy.
 """
 
+from functools import partial
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from utils.config import create_optimized_dataloader
 from utils.core import get_logger
 from utils.net_data import GraphModelData
 
@@ -173,7 +174,7 @@ class SGKTModelData(GraphModelData):
         train_skills = self._extract_skills(train_sequence)
         val_skills = self._extract_skills(val_sequence)
 
-        # 6. Create datasets and data loaders
+        # 6. Create datasets
         hist_neighbor_num = getattr(args, "hist_neighbor_num", 5)
 
         train_dataset = SGKTDataset(
@@ -185,24 +186,8 @@ class SGKTModelData(GraphModelData):
         )
 
         # Create custom collate function with hist_neighbor_num
-        from functools import partial
-
         train_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
         val_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
-
-        train_loader = create_optimized_dataloader(
-            train_dataset,
-            batch_size=args.batch_size,
-            shuffle=True,
-            collate_fn=train_collate_fn,
-        )
-
-        val_loader = create_optimized_dataloader(
-            val_dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            collate_fn=val_collate_fn,
-        )
 
         self.logger.info(
             f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}"
@@ -215,11 +200,13 @@ class SGKTModelData(GraphModelData):
         }
 
         return (
-            train_loader,
-            val_loader,
+            train_dataset,
+            val_dataset,
             hrg_context,
             num_skills,
             num_questions,
+            train_collate_fn,
+            val_collate_fn,
         )
 
     def build_qs_neighbors(

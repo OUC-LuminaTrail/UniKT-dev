@@ -3,7 +3,11 @@
 提供训练相关配置，包括早停配置。
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
+
+import torch
 
 
 @dataclass
@@ -36,27 +40,7 @@ class EarlyStopping:
     - 记录最佳指标值与对应 epoch
     """
 
-    def __init__(
-        self,
-        config: EarlyStoppingConfig | None = None,
-        *,
-        monitor: str | None = None,
-        mode: str | None = None,
-        patience: int | None = None,
-        min_delta: float | None = None,
-    ):
-        if config is None:
-            config = EarlyStoppingConfig()
-        # 允许通过关键字参数覆盖
-        if monitor is not None:
-            config.monitor = monitor
-        if mode is not None:
-            config.mode = mode
-        if patience is not None:
-            config.patience = patience
-        if min_delta is not None:
-            config.min_delta = min_delta
-
+    def __init__(self, config: EarlyStoppingConfig):
         self.cfg = config
         self.best_score: float | None = None
         self.best_epoch: int | None = None
@@ -97,4 +81,83 @@ class EarlyStopping:
         return self.num_bad_epochs >= self.cfg.patience
 
 
-__all__ = ["EarlyStopping", "EarlyStoppingConfig"]
+@dataclass
+class TrainingConfig:
+    """Training configuration for epochs and device.
+
+    Attributes:
+        epochs: Number of training epochs
+        seed: Random seed for reproducibility
+        device: Device to train on (cuda/cpu)
+        checkpoint_path: Path to save/load checkpoints
+    """
+
+    epochs: int = 150
+    seed: int = 42
+    device: torch.device | None = None
+    checkpoint_path: str | None = None
+
+
+@dataclass
+class DataConfig:
+    """Data configuration for training and validation datasets.
+
+    Attributes:
+        train_data: Training DataLoader
+        val_data: Validation DataLoader
+        batch_size: Batch size for DataLoader
+        collate_fn: Optional custom collate function for training
+        val_collate_fn: Optional custom collate function for validation
+    """
+
+    train_data: Any = None
+    val_data: Any = None
+    batch_size: int = 128
+    collate_fn: Callable | None = None
+    val_collate_fn: Callable | None = None
+
+
+@dataclass
+class OptimizationConfig:
+    """Optimization configuration for optimizer, loss, and scheduler.
+
+    Attributes:
+        optimizer: PyTorch optimizer
+        loss_fn: Loss function
+        lr_scheduler: Optional learning rate scheduler
+        early_stopping: Optional early stopping configuration
+    """
+
+    optimizer: Any = None
+    loss_fn: Any = None
+    lr_scheduler: Any = None
+    early_stopping: EarlyStoppingConfig | None = None
+
+
+@dataclass
+class ExperimentConfig:
+    """Experiment tracking configuration.
+
+    Attributes:
+        exp_manager: Experiment manager instance
+        hyperparams: Hyperparameters dictionary or object
+        use_swanlab: Whether to use SwanLab for logging
+        model_name: Name of the model
+        dataset_name: Name of the dataset
+    """
+
+    exp_manager: Any = None
+    hyperparams: Any = None
+    use_swanlab: bool = True
+    model_name: str = ""
+    dataset_name: str = ""
+
+
+__all__ = [
+    "EarlyStopping",
+    "EarlyStoppingConfig",
+    "TrainingConfig",
+    "DataConfig",
+    "OptimizationConfig",
+    "ExperimentConfig",
+]

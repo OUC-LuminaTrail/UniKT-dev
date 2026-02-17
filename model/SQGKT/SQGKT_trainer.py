@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from utils.config import BaseParamConfig, register_model_params
+from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
 from utils.core import TRAINERS, get_logger
 from utils.training import BaseTrainer
 
@@ -121,13 +121,13 @@ class SQGKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 构建数据
+        # 1. 准备数据
         from model.SQGKT.SQGKT_data import SQGKTModelData
 
         model_data = SQGKTModelData(data_src)
         (
-            train_data,
-            val_data,
+            train_dataset,
+            val_dataset,
             qs_table,
             q_neighbors_qs,
             c_neighbors_qs,
@@ -136,51 +136,68 @@ class SQGKTTrainer(BaseTrainer):
             q_neighbors_uq,
         ) = model_data.prepare_data(args)
 
-        model, opt, loss, lr_scheduler = self.init_model(args, data_src)
-        super().__init__(
-            model=model,
-            epochs=args.epochs,
-            opt=opt,
-            loss=loss,
-            train_data=train_data,
-            val_data=val_data,
-            lr_scheduler=lr_scheduler,
-            hyperparams=args,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-            seed=args.seed,
-            exp_manager=exp_manager,
-        )
-
-        self.qs_table = self._move_tensor_to_device(qs_table)
-        self.q_neighbors_qs = self._move_tensor_to_device(q_neighbors_qs)
-        self.c_neighbors_qs = self._move_tensor_to_device(c_neighbors_qs)
-        self.uq_table = self._move_tensor_to_device(uq_table)
-        self.u_neighbors_uq = self._move_tensor_to_device(u_neighbors_uq)
-        self.q_neighbors_uq = self._move_tensor_to_device(q_neighbors_uq)
-
-    def init_model(
-        self, args: Any, data_src: Any
-    ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.nn.Module, Any | None]:
+        # 2. 初始化模型
         from model.SQGKT import SQGKT
 
         logger.info("Initializing SQGKT model...")
         model = SQGKT(args, data_src.get_metadata())
 
-        # 二分类交叉熵损失
+        # 3. 调用父类构造函数
+        super().__init__(model)
+
+        # 4. 创建优化器和损失函数
         loss_fn = torch.nn.BCEWithLogitsLoss()
-        # 优化器
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
-        # 学习率调度器
+
+        # 5. 创建学习率调度器
         lr_scheduler = None
         if args.lr_decay_factor:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer, gamma=args.lr_decay_factor
             )
 
-        return model, optimizer, loss_fn, lr_scheduler
+        # 6. 构建早停配置
+        early_stopping_cfg = None
+        es_patience = getattr(args, "es_patience", None)
+        if es_patience is not None:
+            early_stopping_cfg = EarlyStoppingConfig(
+                monitor=getattr(args, "es_monitor", "auc"),
+                mode=getattr(args, "es_mode", "max"),
+                patience=es_patience,
+                min_delta=getattr(args, "es_min_delta", 0.0),
+            )
+
+        # 7. 配置训练器
+        self.with_training(
+            epochs=args.epochs,
+            seed=args.seed,
+            device=args.device,
+            checkpoint_path=args.checkpoint_path,
+        ).with_data(
+            train_data=train_dataset,
+            val_data=val_dataset,
+            batch_size=args.batch_size,
+        ).with_optimization(
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            early_stopping=early_stopping_cfg,
+        ).with_experiment(
+            exp_manager=exp_manager,
+            hyperparams=args,
+            model_name="SQGKT",
+            dataset_name=getattr(args, "dataset", ""),
+        ).build()
+
+        # 8. 移动静态数据到设备
+        self.qs_table = self._move_tensor_to_device(qs_table)
+        self.q_neighbors_qs = self._move_tensor_to_device(q_neighbors_qs)
+        self.c_neighbors_qs = self._move_tensor_to_device(c_neighbors_qs)
+        self.uq_table = self._move_tensor_to_device(uq_table)
+        self.u_neighbors_uq = self._move_tensor_to_device(u_neighbors_uq)
+        self.q_neighbors_uq = self._move_tensor_to_device(q_neighbors_uq)
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
