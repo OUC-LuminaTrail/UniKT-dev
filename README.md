@@ -110,11 +110,9 @@ kt-exp-graph/
 ├── utils/                             # 工具模块
 │   ├── ablation/                      # 消融实验工具
 │   ├── config/                        # 配置管理
-│   │   ├── base.py
-│   │   ├── data_config.py
-│   │   ├── experiment_config.py
-│   │   ├── param_config.py
-│   │   └── training_config.py
+│   │   ├── data_config.py            # 数据加载器配置
+│   │   ├── param_config.py            # 参数配置
+│   │   └── training_config.py        # 训练配置（含早停）
 │   ├── core/                          # 核心工具
 │   │   ├── logger.py
 │   │   ├── random.py
@@ -127,7 +125,7 @@ kt-exp-graph/
 │   │   └── ednet_kt1.py
 │   ├── optuna_utils/                  # Optuna 工具
 │   ├── training/                      # 训练核心逻辑
-│   │   ├── base_trainer.py
+│   │   ├── base_trainer.py            # 基础训练器
 │   │   ├── callbacks.py
 │   │   ├── checkpoint.py
 │   │   ├── metrics.py
@@ -214,6 +212,12 @@ python train.py -m HGIKT -d assistments09
 
 # 训练 SQGKT 模型
 python train.py -m SQGKT -d assistments09
+
+# 训练 SGKT 模型
+python train.py -m SGKT -d assistments09
+
+# 训练 ABKT 模型
+python train.py -m ABKT -d assistments09
 
 # K折交叉验证训练
 for fold in {0..4}; do
