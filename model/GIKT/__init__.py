@@ -1,3 +1,4 @@
+from .GIKT_analyzer import GIKTAnalyzer
 from .GIKT_data import GIKTModelData
 from .GIKT_edmine_data import GIKTEdmineModelData
 from .GIKT_edmine_model import GIKTEdmine
@@ -14,4 +15,5 @@ __all__ = [
     "GIKTEdmine",
     "GIKTEdmineTrainer",
     "GIKTEdmineModelParams",
+    "GIKTAnalyzer",
 ]
