@@ -95,7 +95,7 @@ class GIKTEdmineTrainer(BaseTrainer):
         exp_manager=None,
     ):
         # 1. 准备数据
-        from model.GIKT import GIKTEdmineModelData
+        from model.GIKTEdmine import GIKTEdmineModelData
 
         model_data = GIKTEdmineModelData(data_src)
         train_dataset, val_dataset, question_neighbors, concept_neighbors, q_table = (
@@ -103,7 +103,7 @@ class GIKTEdmineTrainer(BaseTrainer):
         )
 
         # 2. 初始化模型
-        from model.GIKT.GIKT_edmine_model import GIKTEdmine
+        from model.GIKTEdmine.GIKT_edmine_model import GIKTEdmine
 
         logger.info("Initializing GIKT model...")
         model = GIKTEdmine(args, data_src.get_metadata())
