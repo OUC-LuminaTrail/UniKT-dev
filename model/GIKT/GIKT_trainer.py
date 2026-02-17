@@ -144,7 +144,8 @@ class GIKTTrainer(BaseTrainer):
 
         # 6. 初始化基类训练器
         super().__init__(model)
-        # 6. 构建早停配置
+
+        # 7. 构建早停配置
         early_stopping_cfg = None
         es_patience = getattr(args, "es_patience", None)
         if es_patience is not None:
@@ -155,7 +156,7 @@ class GIKTTrainer(BaseTrainer):
                 min_delta=getattr(args, "es_min_delta", 0.0),
             )
 
-        # 7. 配置训练器
+        # 8. 配置训练器
         self.with_training(
             epochs=args.epochs,
             seed=args.seed,
