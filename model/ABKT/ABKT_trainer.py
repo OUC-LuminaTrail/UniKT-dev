@@ -772,9 +772,9 @@ class ABKTTrainer(MultiTrainer):
         # 添加 g 和 w 到训练三元组
         self.am_train_triplets = torch.cat(
             [train_triplets, g.unsqueeze(1), w.unsqueeze(1)], dim=1
-        ).to(self.device_)
+        )
 
-        self.am_test_triplets = test_triplets_tensor.to(self.device_)
+        self.am_test_triplets = test_triplets_tensor
 
         logger.info(f"Train triplets shape: {self.am_train_triplets.shape}")
         logger.info(f"Test triplets shape: {self.am_test_triplets.shape}")
