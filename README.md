@@ -262,6 +262,100 @@ python optuna_search.py -m GIKT -d assistments09 --n_trials 50
 swanlab login
 ```
 
+### 6. 案例分析工具
+
+案例分析工具用于对训练好的模型进行推理分析，支持用户筛选和可视化。
+
+#### 工作流程
+
+案例分析分为三个步骤：
+
+1. **推理**：加载训练好的模型，对测试数据进行推理并保存预测结果
+2. **筛选**：根据用户行为特征筛选感兴趣的用户
+3. **可视化**：为选定用户生成热力图可视化
+
+#### Step 1: 运行推理
+
+```bash
+# 基本用法（模型和数据集从 hyperparameters.json 自动获取）
+python case_analysis.py inference \
+    -c runs/exp1/best_model.pth \
+    --output_dir outputs/case_analysis/gikt_assist09
+
+# 指定超参数文件
+python case_analysis.py inference \
+    -c runs/exp1/best_model.pth \
+    --hyperparams /path/to/hyperparameters.json \
+    --output_dir outputs/case_analysis/gikt_assist09
+```
+
+**推理参数说明：**
+
+| 参数 | 说明 |
+|------|------|
+| `-c, --checkpoint` | 模型检查点路径（必需） |
+| `--hyperparams` | 超参数 JSON 文件路径（默认：从检查点目录自动检测） |
+| `--data_base_path` | 数据基础路径（默认：`./data`） |
+| `--output_dir` | 输出目录（必需） |
+
+**输出文件：**
+- `predictions.parquet`：所有预测结果
+- `user_summaries.parquet`：用户级别的统计指标
+
+#### Step 2: 筛选用户
+
+```bash
+# 筛选 10 个多样化的用户
+python case_analysis.py select \
+    --predictions_path outputs/case_analysis/gikt_assist09/predictions.parquet \
+    --output_dir outputs/case_analysis/gikt_assist09/diverse \
+    --strategy diverse \
+    --num_users 10
+
+# 筛选错误率最高的用户
+python case_analysis.py select \
+    --predictions_path outputs/case_analysis/gikt_assist09/predictions.parquet \
+    --output_dir outputs/case_analysis/gikt_assist09/extreme \
+    --strategy extreme \
+    --num_users 5
+```
+
+**筛选参数说明：**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--predictions_path` | 预测结果文件路径（必需） | - |
+| `--output_dir` | 输出目录（必需） | - |
+| `--strategy` | 筛选策略：`diverse`（多样化）、`extreme`（极端错误）、`random`（随机） | `diverse` |
+| `--num_users` | 最大用户数 | 10 |
+| `--min_seq_len` | 最小序列长度 | 20 |
+| `--max_seq_len` | 最大序列长度 | 200 |
+| `--min_error` | 最小错误率 | 0.1 |
+| `--max_error` | 最大错误率 | 0.9 |
+
+**输出文件：**
+- `selected_users.json`：选中用户的详细信息
+
+#### Step 3: 生成可视化
+
+```bash
+python case_analysis.py plot \
+    --predictions_path outputs/case_analysis/gikt_assist09/predictions.parquet \
+    --selected_users outputs/case_analysis/gikt_assist09/diverse/selected_users.json \
+    --output_dir outputs/case_analysis/gikt_assist09/diverse
+```
+
+**可视化参数说明：**
+
+| 参数 | 说明 |
+|------|------|
+| `--predictions_path` | 预测结果文件路径（必需） |
+| `--selected_users` | 选中用户文件路径（必需） |
+| `--output_dir` | 输出目录（必需） |
+
+**输出文件：**
+- `figures/user_{id}_heatmap.png`：每个用户的热力图
+
 ## 输出说明
 
 ### SwanLab 日志
