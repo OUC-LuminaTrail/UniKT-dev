@@ -553,9 +553,12 @@ class BaseTrainer(ABC):
 
     def run(self):
         """运行训练循环。"""
-        # Auto-build if not already built
+        # Explicit build required
         if not self._built:
-            self.build()
+            raise RuntimeError(
+                "Trainer has not been built. Please call build() explicitly "
+                "before run()."
+            )
 
         # Initialize SwanLab
         if self.use_swanlab:

@@ -10,7 +10,6 @@
 # 配置管理
 # ============================================================================
 from .config import (
-    BaseConfig,
     BaseParamConfig,
     DataLoaderConfig,
     DataParams,
@@ -55,7 +54,6 @@ __all__ = [
     "get_logger",
     "seed_everything",
     # Config
-    "BaseConfig",
     "EarlyStoppingConfig",
     "EarlyStopping",
     "DataLoaderConfig",

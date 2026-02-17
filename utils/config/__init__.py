@@ -1,9 +1,8 @@
 """统一配置管理模块
 
-提供配置基类、参数配置、数据配置和训练配置。
+提供参数配置、数据配置和训练配置。
 """
 
-from .base import BaseConfig
 from .data_config import (
     DataLoaderConfig,
     KFoldDataLoaderConfig,
@@ -30,8 +29,6 @@ from .training_config import (
 )
 
 __all__ = [
-    # Base
-    "BaseConfig",
     # Param Config
     "BaseParamConfig",
     "DataParams",
