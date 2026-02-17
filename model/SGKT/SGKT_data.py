@@ -355,7 +355,7 @@ class SGKTDataset(Dataset):
     ):
         self.user_sequence = torch.from_numpy(user_sequence).long()
         self.user_response = torch.from_numpy(user_response).long()
-        self.user_mask = torch.from_numpy(user_mask).long()
+        self.user_mask = torch.from_numpy(user_mask).bool()
         self.user_skills = torch.from_numpy(user_skills).long()
         self.hist_neighbor_num = hist_neighbor_num
         self.max_seq_len = user_sequence.shape[1]

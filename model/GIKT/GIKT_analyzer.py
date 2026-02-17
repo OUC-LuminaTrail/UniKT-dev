@@ -44,8 +44,9 @@ class GIKTAnalyzer(BaseCaseAnalyzer):
 
         super().__init__(model, checkpoint_path)
 
-        self.with_inference(val_data, args.batch_size, args.device)
-        self.build_for_inference()
+        self.with_inference(
+            val_data, args.batch_size, args.device
+        ).build_for_inference()
 
         self.graph = graph
         self.question_skill_matrix = question_skill_matrix
@@ -104,11 +105,10 @@ class GIKTAnalyzer(BaseCaseAnalyzer):
         y_predict = outputs["y_predict"]
         y_hat = outputs["y_hat"]
 
-        masks_bool = masks.bool()
         if seq_len > 1:
-            masks_bool[:, 0] = False
+            masks[:, 0] = False
 
-        valid_indices = masks_bool.view(-1).nonzero(as_tuple=True)[0]
+        valid_indices = masks.view(-1).nonzero(as_tuple=True)[0]
 
         question_ids_flat = sequences.view(-1)[valid_indices].cpu().numpy()
         user_ids_flat = users.view(-1)[valid_indices].cpu().numpy()
@@ -119,5 +119,5 @@ class GIKTAnalyzer(BaseCaseAnalyzer):
             "labels": y_label.cpu().numpy(),
             "predictions": y_predict.cpu().numpy(),
             "logits": y_hat.cpu().numpy(),
-            "masks": masks_bool.view(-1)[valid_indices].cpu().numpy(),
+            "masks": masks.view(-1)[valid_indices].cpu().numpy(),
         }
