@@ -112,7 +112,7 @@ class BaseCaseAnalyzer(BaseTrainer):
         self.result_collector = ResultCollector(self.device_)
 
         self._is_built_for_inference = True
-        logger.info("Analyzer built successfully for inference")
+        logger.debug("Analyzer built successfully for inference")
         return self
 
     @abstractmethod

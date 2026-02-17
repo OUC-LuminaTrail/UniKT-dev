@@ -7,11 +7,15 @@ This script provides a command-line interface for:
 3. Generating heatmap visualizations for selected users
 
 Usage:
-    # Step 1: Run inference
+    # Step 1: Run inference (auto-discovery)
     python case_analysis.py inference \\
-        -m GIKT \\
-        -d assistments09 \\
         -c runs/exp1/best_model.pth \\
+        --output_dir outputs/case_analysis/gikt_assist09
+
+    # Step 1: Run inference (explicit hyperparams file)
+    python case_analysis.py inference \\
+        -c runs/exp1/best_model.pth \\
+        --hyperparams /path/to/hyperparameters.json \\
         --output_dir outputs/case_analysis/gikt_assist09
 
     # Step 2: Select users
@@ -40,103 +44,98 @@ from utils.data_process import get_data_source
 logger = get_logger(__name__)
 
 
-def get_model_params(model_name: str, dataset_name: str, data_base_path: str):
-    """Get model parameters from defaults.
+def load_model_params(
+    checkpoint_path: str, hyperparams_path: str | None = None
+) -> tuple[argparse.Namespace, str, str]:
+    """Load model parameters from hyperparameter JSON file.
+
+    Priority:
+    1. Auto-discover from checkpoint directory (default)
+    2. Explicit --hyperparams file (fallback)
 
     Args:
-        model_name: Name of the model
-        dataset_name: Name of the dataset
-        data_base_path: Base path for data
+        checkpoint_path: Path to model checkpoint file
+        hyperparams_path: Optional explicit path to hyperparameters JSON
 
     Returns:
-        Namespace with model parameters
+        Tuple of (Namespace with model parameters, model_name, dataset_name)
+
+    Raises:
+        FileNotFoundError: If hyperparameter file doesn't exist in either location
+        ValueError: If file format is invalid or required parameters are missing
     """
-    import argparse
+    from utils.hyperparam_manager import HyperparameterManager
 
-    # Create args namespace with default values
-    args = argparse.Namespace()
+    target_path = None
 
-    # Common parameters
-    args.dataset = dataset_name
-    args.data_base_path = data_base_path
-    args.fold = -1  # Use validation set
-    args.device = None  # Auto-detect
-    args.seed = 42
-    args.checkpoint_path = None
-
-    # Set model-specific defaults
-    if model_name == "GIKT":
-        args.hidden_dim = 100
-        args.embedding_dim = 100
-        args.lstm_layers = 2
-        args.n_hop = 3
-        args.heads = 2
-        args.history_neighbour = 5
-        args.att_bound = 0.2
-        args.dropout = 0.4
-        args.batch_size = 64
-    elif model_name == "HGIKT":
-        args.hidden_dim = 128
-        args.embedding_dim = 128
-        args.lstm_layers = 1
-        args.n_hop = 3
-        args.heads = 4
-        args.history_neighbour = 5
-        args.att_bound = 0.2
-        args.dropout = 0.3
-        args.batch_size = 64
-    elif model_name == "SQGKT":
-        args.hidden_dim = 128
-        args.embedding_dim = 128
-        args.lstm_layers = 2
-        args.n_hop = 2
-        args.heads = 4
-        args.history_neighbour = 10
-        args.att_bound = 0.2
-        args.dropout = 0.3
-        args.batch_size = 64
-    elif model_name == "SGKT":
-        args.hidden_dim = 256
-        args.embedding_dim = 256
-        args.lstm_layers = 2
-        args.n_hop = 3
-        args.heads = 8
-        args.history_neighbour = 10
-        args.att_bound = 0.2
-        args.dropout = 0.3
-        args.batch_size = 64
-    elif model_name == "ABKT":
-        args.hidden_dim = 64
-        args.embedding_dim = 64
-        args.lstm_layers = 1
-        args.n_hop = 2
-        args.heads = 2
-        args.history_neighbour = 5
-        args.att_bound = 0.2
-        args.dropout = 0.2
-        args.batch_size = 64
+    if hyperparams_path is not None:
+        target_path = hyperparams_path
     else:
-        raise ValueError(f"Unknown model: {model_name}")
+        checkpoint_dir = Path(checkpoint_path).parent.resolve()
+        auto_hyperparams = checkpoint_dir / "hyperparameters.json"
+        if auto_hyperparams.exists():
+            target_path = str(auto_hyperparams)
 
-    return args
+    if target_path is None or not Path(target_path).exists():
+        checkpoint_dir = Path(checkpoint_path).parent.resolve()
+        raise FileNotFoundError(
+            f"Hyperparameter file not found. Searched in:\n"
+            f"  1. Checkpoint directory: {checkpoint_dir}/hyperparameters.json\n"
+            f"  2. Explicit --hyperparams argument: {hyperparams_path}\n"
+            f"Please use --hyperparams to specify the file location."
+        )
+
+    try:
+        manager = HyperparameterManager()
+        manager.load(target_path)
+
+        flat_dict = manager._flatten_dict(manager.hyperparams)
+
+        merged_dict = {}
+        for key, value in flat_dict.items():
+            base_key = key.split(".")[-1] if "." in key else key
+            merged_dict[base_key] = value
+
+        params_ns = argparse.Namespace(**merged_dict)
+
+        model_name = manager.metadata.get("model_name")
+        dataset_name = manager.metadata.get("dataset_name")
+
+        if not model_name:
+            raise ValueError(
+                f"Missing 'model_name' in hyperparameter file metadata: {target_path}"
+            )
+        if not dataset_name:
+            raise ValueError(
+                f"Missing 'dataset_name' in hyperparameter file metadata: {target_path}"
+            )
+
+        return params_ns, model_name, dataset_name
+
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Invalid JSON in hyperparameter file '{target_path}': {e}"
+        ) from e
+    except Exception as e:
+        raise ValueError(
+            f"Error loading hyperparameters from '{target_path}': {e}"
+        ) from e
 
 
 def cmd_inference(args):
     """Step 1: Run inference and save predictions."""
-    logger.info(f"Starting inference for {args.model} on {args.dataset}...")
+    # 1. Load all hyperparameters from file (auto-discover or explicit)
+    model_args, model_name, dataset_name = load_model_params(
+        checkpoint_path=args.checkpoint, hyperparams_path=args.hyperparams
+    )
 
-    # 1. Get model parameters first (needed for data source)
-    model_args = get_model_params(args.model, args.dataset, args.data_base_path)
-    model_args.device = args.device
-    model_args.batch_size = args.batch_size
-    model_args.fold = args.fold
-    model_args.seed = 42
+    logger.info(f"Starting inference for {model_name} on {dataset_name}...")
 
-    # 2. Load data source
-    data_src = get_data_source(args.dataset, model_args)
+    # 2. Load data source using parameters from file
+    data_src = get_data_source(dataset_name, model_args)
 
-    # 3. Create analyzer
-    AnalyzerClass = ANALYZERS.get(args.model)
+    # 3. Create analyzer (model_args contains all necessary parameters)
+    AnalyzerClass = ANALYZERS.get(model_name)
     analyzer = AnalyzerClass(
         args=model_args, data_src=data_src, checkpoint_path=args.checkpoint
     )
@@ -157,9 +156,9 @@ def cmd_inference(args):
     user_metrics.to_parquet(metrics_path, index=False)
 
     logger.info("✓ Inference complete!")
-    logger.info(f"  Predictions saved to: {predictions_path}")
-    logger.info(f"  User metrics saved to: {metrics_path}")
-    logger.info(f"  Total predictions: {len(result_collector.to_dataframe())}")
+    logger.info(f"Predictions saved to: '{predictions_path}'")
+    logger.info(f"User metrics saved to: '{metrics_path}'")
+    logger.info(f"Total predictions: {len(result_collector.to_dataframe())}")
 
 
 def cmd_select(args):
@@ -192,13 +191,8 @@ def cmd_select(args):
     selected_users_path = output_path / "selected_users.json"
     selected_metrics.to_json(selected_users_path, orient="records", indent=2)
 
-    # Save user IDs as text file
-    user_ids_path = output_path / "user_ids.txt"
-    user_ids_path.write_text("\n".join(map(str, selected_users)))
-
     logger.info(f"Output directory: {output_path}")
     logger.info(f"Selected users saved to: {selected_users_path}")
-    logger.info(f"User IDs saved to: {user_ids_path}")
 
     # Print summary statistics
     logger.info("Selected users statistics:")
@@ -253,9 +247,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Step 1: Run inference
-  python case_analysis.py inference -m GIKT -d assistments09 \\
+  # Step 1: Run inference (model/dataset auto-detected from hyperparameters.json)
+  python case_analysis.py inference \\
       -c runs/exp1/best_model.pth --output_dir outputs/case_analysis/gikt_assist09
+
+  # Step 1: Run inference (explicit hyperparams file)
+  python case_analysis.py inference \\
+      -c runs/exp1/best_model.pth --hyperparams /path/to/hyperparameters.json \\
+      --output_dir outputs/case_analysis/gikt_assist09
 
   # Step 2: Select diverse users
   python case_analysis.py select \\
@@ -278,36 +277,19 @@ Examples:
         "inference", help="Run model inference and save predictions"
     )
     parser_inference.add_argument(
-        "-m",
-        "--model",
-        required=True,
-        choices=["GIKT", "HGIKT", "SQGKT", "SGKT", "ABKT"],
-        help="Model name",
-    )
-    parser_inference.add_argument("-d", "--dataset", required=True, help="Dataset name")
-    parser_inference.add_argument(
         "-c", "--checkpoint", required=True, help="Path to model checkpoint"
     )
     parser_inference.add_argument(
-        "--fold",
-        type=int,
-        default=-1,
-        help="Fold index for K-fold CV (default: -1, use validation set)",
+        "--hyperparams",
+        type=str,
+        default=None,
+        help="Path to hyperparameters JSON file (default: auto-detect from checkpoint directory)",
     )
     parser_inference.add_argument(
         "--data_base_path", default="./data", help="Data base path (default: ./data)"
     )
     parser_inference.add_argument(
         "--output_dir", required=True, help="Output directory for results"
-    )
-    parser_inference.add_argument(
-        "--batch_size",
-        type=int,
-        default=64,
-        help="Batch size for inference (default: 64)",
-    )
-    parser_inference.add_argument(
-        "--device", default=None, help="Device to use (cuda/cpu, default: auto-detect)"
     )
 
     # Subcommand: select
