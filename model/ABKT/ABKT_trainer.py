@@ -295,6 +295,10 @@ class ABKTTrainer(MultiTrainer):
         if args is not None and hasattr(args, "device") and args.device:
             device = args.device
 
+        # 注册阶段构建器（必须在 build() 之前）
+        self.with_stage_builder("km", self._build_km_stage)
+        self.with_stage_builder("am", self._build_am_stage)
+
         # 如果提供了 exp_manager，则直接配置
         if exp_manager is not None:
             self.with_experiment(
@@ -307,10 +311,6 @@ class ABKTTrainer(MultiTrainer):
                 device=device,
             )
             self.build()
-
-        # 注册阶段构建器
-        self.with_stage_builder("km", self._build_km_stage)
-        self.with_stage_builder("am", self._build_am_stage)
 
         # 模型引用
         self.km_model: K_CMF | None = None
