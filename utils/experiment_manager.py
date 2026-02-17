@@ -81,7 +81,7 @@ class ExperimentManager:
         self.exp_dir = self.base_dir / exp_type.value / exp_name
         self.exp_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Experiment directory created: {self.exp_dir}")
+        logger.debug(f"Experiment directory created: {self.exp_dir}")
 
     def get_log_dir(self) -> str:
         """获取日志目录路径

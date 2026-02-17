@@ -2,10 +2,18 @@
 
 提供多阶段训练的基础设施，支持顺序执行多个训练阶段，
 每个阶段有独立的模型、优化器、损失函数和早停配置。
+
+Examples:
+    >>> trainer = MyMultiStageTrainer() \\
+    ...     .with_experiment(exp_manager, args) \\
+    ...     .with_stage_builder("km", lambda: km_config) \\
+    ...     .with_stage_builder("am", lambda: am_config) \\
+    ...     .build()
+    >>> trainer.run()
 """
 
 import os
-from abc import abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,7 +54,7 @@ class StageConfig:
         val_data: 验证数据加载器（可选）
         epochs: 该阶段的训练轮数
         lr_scheduler: 学习率调度器（可选）
-        early_stopping: 早停配置（可选）
+        early_stopping: 早停对象（可选）
     """
 
     name: str
@@ -60,6 +68,19 @@ class StageConfig:
     early_stopping: EarlyStopping | None = None
 
 
+@dataclass
+class MultiStageExperimentConfig:
+    """多阶段实验配置数据类"""
+
+    exp_manager: Any
+    hyperparams: Any = None
+    use_swanlab: bool = True
+    model_name: str = ""
+    dataset_name: str = ""
+    seed: int | None = None
+    device: torch.device | None = None
+
+
 class MultiTrainer:
     """多阶段训练器基类
 
@@ -71,25 +92,27 @@ class MultiTrainer:
     - 早停配置
 
     子类需要实现：
-    1. get_stages(): 返回阶段名称列表
-    2. init_stage(stage_name): 初始化指定阶段的配置
-    3. forward_pass(batch_data, stage_name): 实现前向传播
+    1. forward_pass(batch_data, stage_name): 实现前向传播
+    2. _build_stages(): 在 __init__ 中注册所有阶段构建器
 
     可选实现：
-    4. prepare_next_stage(stage_name, stage_outputs): 阶段间数据传递
-    5. compute_loss(outputs, stage_name): 自定义损失计算
+    3. prepare_next_stage(stage_name, stage_outputs): 阶段间数据传递
+    4. compute_loss(outputs, stage_name): 自定义损失计算
+    5. _finish(): 训练完成后的清理工作
 
     Example:
         >>> @TRAINERS.register("ABKT")
         ... class ABKTTrainer(MultiTrainer):
-        ...     def get_stages(self):
-        ...         return ['km', 'am']
+        ...     def __init__(self):
+        ...         super().__init__()
+        ...         # 准备数据
+        ...         self.data = prepare_data(args)
+        ...         # 注册阶段构建器
+        ...         self.with_stage_builder("km", self._build_km_stage) \\
+        ...             .with_stage_builder("am", self._build_am_stage)
         ...
-        ...     def init_stage(self, stage_name):
-        ...         if stage_name == 'km':
-        ...             return StageConfig(name='km', model=..., ...)
-        ...         elif stage_name == 'am':
-        ...             return StageConfig(name='am', model=..., ...)
+        ...     def _build_km_stage(self):
+        ...         return StageConfig(name='km', model=..., ...)
         ...
         ...     def forward_pass(self, batch_data, stage_name):
         ...         if stage_name == 'km':
@@ -98,61 +121,26 @@ class MultiTrainer:
         ...             return {"y_hat": ..., "y_label": ..., "y_predict": ...}
     """
 
-    def __init__(
-        self,
-        args=None,
-        data_src=None,
-        exp_manager=None,
-        device: torch.device | None = None,
-        use_swanlab: bool = True,
-        seed: int | None = None,
-    ):
+    def __init__(self, model: torch.nn.Module | None = None):
         """初始化多阶段训练器
 
         Args:
-            args: 命令行参数
-            data_src: 数据源
-            exp_manager: 实验管理器
-            device: 计算设备（可选）
-            use_swanlab: 是否使用 SwanLab
-            seed: 随机种子（可选）
+            model: 主模型（可选，多阶段训练可能有多个模型）
         """
-        self.args = args
-        self.data_src = data_src
-        self.exp_manager = exp_manager
+        self.model = model
 
-        # 设备管理
-        if device is None:
-            self.device_ = self._try_gpu()
-        else:
-            self.device_ = torch.device(device)
+        # Configuration objects
+        self._experiment_config: MultiStageExperimentConfig | None = None
+        self._stage_builders: dict[str, Callable[[], StageConfig]] = {}
 
-        # 设置随机种子
-        if seed is None and args is not None:
-            seed = getattr(args, "seed", None)
-        self.seed = seed_everything(seed)
+        # Internal state
+        self._built = False
+        self.device_: torch.device | None = None
+        self.seed: int | None = None
+        self.log_dir = None
+        self.use_swanlab = True
 
-        # 日志目录
-        if exp_manager is not None:
-            self.log_dir = exp_manager.get_log_dir()
-            if not os.path.exists(self.log_dir):
-                os.makedirs(self.log_dir)
-        else:
-            self.log_dir = "./runs/multi_trainer_default"
-            os.makedirs(self.log_dir, exist_ok=True)
-
-        # SwanLab 配置
-        self.use_swanlab = use_swanlab
-        self._swanlab_initialized = False
-
-        # 阶段管理
-        self._stage_configs: dict[str, StageConfig] = {}
-        self._stage_outputs: dict[str, dict] = {}
-        self._current_stage: str | None = None
-        self._global_step = 0  # 跨阶段的全局步数
-
-        # 当前阶段的组件（运行时设置）
-        self.model: torch.nn.Module | None = None
+        # Current stage components (set at runtime)
         self.opt: torch.optim.Optimizer | None = None
         self.loss: torch.nn.Module | None = None
         self.train_data: torch.utils.data.DataLoader | None = None
@@ -161,14 +149,130 @@ class MultiTrainer:
         self.early_stopping: EarlyStopping | None = None
         self.epochs: int = 0
 
-        # 指标和检查点管理（所有阶段共享）
-        self.metrics_accumulator = MetricsAccumulator(use_swanlab=use_swanlab)
+        # Stage management
+        self._stage_configs: dict[str, StageConfig] = {}
+        self._stage_outputs: dict[str, dict] = {}
+        self._current_stage: str | None = None
+        self._global_step = 0
+
+        # Components initialized in build()
+        self.metrics_accumulator: MetricsAccumulator | None = None
+        self.checkpoint_manager: CheckpointManager | None = None
+        self.callback_manager: CallbackManager | None = None
+        self.hyperparam_manager = None
+
+    def with_experiment(
+        self,
+        exp_manager,
+        hyperparams=None,
+        use_swanlab: bool = True,
+        model_name: str = "",
+        dataset_name: str = "",
+        seed: int | None = None,
+        device: torch.device | None = None,
+    ) -> "MultiTrainer":
+        """配置实验参数
+
+        Args:
+            exp_manager: 实验管理器实例
+            hyperparams: 超参数（字典或对象，可选）
+            use_swanlab: 是否使用 SwanLab（默认 True）
+            model_name: 模型名称
+            dataset_name: 数据集名称
+            seed: 随机种子（可选）
+            device: 计算设备（可选）
+
+        Returns:
+            Self for method chaining
+        """
+        self._experiment_config = MultiStageExperimentConfig(
+            exp_manager=exp_manager,
+            hyperparams=hyperparams,
+            use_swanlab=use_swanlab,
+            model_name=model_name,
+            dataset_name=dataset_name,
+            seed=seed,
+            device=device,
+        )
+        return self
+
+    def with_stage_builder(
+        self, stage_name: str, builder: Callable[[], StageConfig]
+    ) -> "MultiTrainer":
+        """注册阶段构建器
+
+        Args:
+            stage_name: 阶段名称（如 'km', 'am'）
+            builder: 返回 StageConfig 的无参数函数
+
+        Returns:
+            Self for method chaining
+        """
+        self._stage_builders[stage_name] = builder
+        return self
+
+    def build(self) -> "MultiTrainer":
+        """构建训练器
+
+        Returns:
+            Self for method chaining
+        """
+        if self._built:
+            logger.warning("MultiTrainer already built. Skipping rebuild.")
+            return self
+
+        if self._experiment_config is None:
+            raise ValueError(
+                "Experiment configuration not set. Call with_experiment() first."
+            )
+
+        if not self._stage_builders:
+            raise ValueError(
+                "No stage builders registered. Call with_stage_builder() to add stages."
+            )
+
+        # 1. Setup device
+        if self._experiment_config.device is None:
+            self.device_ = self._try_gpu()
+        else:
+            self.device_ = torch.device(self._experiment_config.device)
+
+        # 2. Setup training parameters
+        self.use_swanlab = self._experiment_config.use_swanlab
+
+        # 3. Set random seed
+        seed = self._experiment_config.seed
+        hyperparams = self._experiment_config.hyperparams
+        if seed is None and hyperparams is not None:
+            seed = getattr(hyperparams, "seed", 42)
+        deterministic = True
+        if hyperparams is not None:
+            deterministic = getattr(hyperparams, "deterministic", True)
+        self.seed = seed_everything(seed, deterministic=deterministic)
+
+        # 4. Create log directory
+        exp_manager = self._experiment_config.exp_manager
+        if exp_manager is None:
+            raise ValueError("exp_manager is required.")
+        self.log_dir = exp_manager.get_log_dir()
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir)
+
+        # 5. Initialize components
+        self.metrics_accumulator = MetricsAccumulator(use_swanlab=self.use_swanlab)
         self.checkpoint_manager = CheckpointManager(self.log_dir)
 
-        # 超参数管理
-        self.hyperparam_manager = None
-        if args is not None:
-            self._setup_hyperparameters(args)
+        # 6. Setup hyperparameters
+        if hyperparams is not None:
+            self._setup_hyperparameters(
+                hyperparams,
+                model_name=self._experiment_config.model_name,
+                dataset_name=self._experiment_config.dataset_name,
+            )
+
+        logger.info("MultiTrainer built successfully")
+        self._built = True
+        return self
 
     @staticmethod
     def _try_gpu() -> torch.device:
@@ -192,32 +296,10 @@ class MultiTrainer:
             result = result.to(dtype)
         return result
 
-    # ==================== 抽象方法 ====================
+    # ==================== 必须实现的方法 ====================
 
-    @abstractmethod
-    def get_stages(self) -> list[str]:
-        """返回阶段名称列表
-
-        Returns:
-            阶段名称列表，如 ['km', 'am']
-        """
-        raise NotImplementedError("Subclasses must implement get_stages method")
-
-    @abstractmethod
-    def init_stage(self, stage_name: str) -> StageConfig:
-        """初始化指定阶段的配置
-
-        Args:
-            stage_name: 阶段名称
-
-        Returns:
-            StageConfig 对象，包含该阶段的所有配置
-        """
-        raise NotImplementedError("Subclasses must implement init_stage method")
-
-    @abstractmethod
     def forward_pass(self, batch_data: tuple[Any, ...], stage_name: str) -> dict:
-        """模型前向传播
+        """模型前向传播（子类必须实现）
 
         Args:
             batch_data: 从 DataLoader 获取的一个批次数据
@@ -263,36 +345,32 @@ class MultiTrainer:
         y_label = outputs["y_label"]
         return self.loss(y_hat, y_label)
 
-    def init_model(self, args, data_src):
-        """兼容 BaseTrainer 接口的占位方法
-
-        MultiTrainer 使用 init_stage() 代替此方法。
-        """
-        raise NotImplementedError(
-            "MultiTrainer uses init_stage() instead of init_model(). "
-            "Please implement get_stages() and init_stage() methods."
-        )
-
     # ==================== 训练循环 ====================
 
     def run(self):
         """运行多阶段训练"""
-        stages = self.get_stages()
+        if not self._built:
+            raise RuntimeError(
+                "MultiTrainer has not been built. Please call build() explicitly "
+                "before run(), or use with_experiment() which calls build() automatically."
+            )
+
+        if self.use_swanlab:
+            self._init_swanlab()
+
+        stages = list(self._stage_builders.keys())
         logger.info(
             f"Starting multi-stage training with {len(stages)} stages: {stages}"
         )
-
-        # 初始化 SwanLab（所有阶段共享一个 run）
-        if self.use_swanlab and not self._swanlab_initialized:
-            self._init_swanlab()
 
         for stage_idx, stage_name in enumerate(stages):
             logger.info("=" * 60)
             logger.info(f"Stage {stage_idx + 1}/{len(stages)}: {stage_name.upper()}")
             logger.info("=" * 60)
 
-            # 初始化阶段配置
-            stage_config = self.init_stage(stage_name)
+            # 通过 builder 获取阶段配置
+            builder = self._stage_builders[stage_name]
+            stage_config = builder()
             self._stage_configs[stage_name] = stage_config
             self._current_stage = stage_name
 
@@ -780,13 +858,15 @@ class MultiTrainer:
                 step=self._global_step,
             )
 
-    def _setup_hyperparameters(self, hyperparams):
+    def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
         """设置超参数"""
         from utils.hyperparam_manager import create_hyperparameter_manager
 
         self.hyperparam_manager = create_hyperparameter_manager(
             args=hyperparams,
             save_dir=self.log_dir,
+            model_name=model_name,
+            dataset_name=dataset_name,
         )
 
         # 添加设备信息

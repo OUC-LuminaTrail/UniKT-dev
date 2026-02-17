@@ -86,8 +86,13 @@ def create_optimized_dataloader(
     if config is None:
         config = DataLoaderConfig()
 
+    # 必须指定设备信息
+    assert device is not None, (
+        "Device information is required to determine pin_memory setting."
+    )
+
     # 确定 pin_memory
-    is_cuda = device is not None and device.type == "cuda"
+    is_cuda = device.type == "cuda"
     pin_memory = config.pin_memory and is_cuda
 
     # 获取 num_workers

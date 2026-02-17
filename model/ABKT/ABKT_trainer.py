@@ -277,29 +277,42 @@ class ABKTTrainer(MultiTrainer):
         Args:
             args: 命令行参数
             data_src: 数据源
-            exp_manager: 实验管理器
+            exp_manager: 实验管理器（可选，可后续通过 with_experiment 配置）
         """
-        # 设置设备
-        device = None
-        if args is not None and hasattr(args, "device") and args.device:
-            device = args.device
-
-        # 调用父类初始化
-        super().__init__(
-            args=args,
-            data_src=data_src,
-            exp_manager=exp_manager,
-            device=device,
-            use_swanlab=True,
-            seed=getattr(args, "seed", None) if args else None,
-        )
+        # 调用父类初始化（无参数）
+        super().__init__()
 
         # 准备数据
         logger.info("Preparing ABKT data...")
         self.model_data = ABKTModelData(data_src)
         self.data = self.model_data.prepare_data(args)
 
-        # 模型引用（在 init_stage 中设置）
+        # 保存 args 供后续使用
+        self.args = args
+
+        # 设备
+        device = None
+        if args is not None and hasattr(args, "device") and args.device:
+            device = args.device
+
+        # 注册阶段构建器（必须在 build() 之前）
+        self.with_stage_builder("km", self._build_km_stage)
+        self.with_stage_builder("am", self._build_am_stage)
+
+        # 如果提供了 exp_manager，则直接配置
+        if exp_manager is not None:
+            self.with_experiment(
+                exp_manager=exp_manager,
+                hyperparams=args,
+                use_swanlab=True,
+                model_name="ABKT",
+                dataset_name=getattr(args, "dataset", "") if args else "",
+                seed=getattr(args, "seed", None) if args else None,
+                device=device,
+            )
+            self.build()
+
+        # 模型引用
         self.km_model: K_CMF | None = None
         self.am_model: GMF | None = None
 
@@ -312,28 +325,8 @@ class ABKTTrainer(MultiTrainer):
         self.best_km_auc = 0.0
         self.best_am_auc = 0.0
 
-    def get_stages(self) -> list[str]:
-        """返回训练阶段列表"""
-        return ["km", "am"]
-
-    def init_stage(self, stage_name: str) -> StageConfig:
-        """初始化指定阶段的配置
-
-        Args:
-            stage_name: 阶段名称 ('km' 或 'am')
-
-        Returns:
-            StageConfig 对象
-        """
-        if stage_name == "km":
-            return self._init_km_stage()
-        elif stage_name == "am":
-            return self._init_am_stage()
-        else:
-            raise ValueError(f"Unknown stage: {stage_name}")
-
-    def _init_km_stage(self) -> StageConfig:
-        """初始化 KM 阶段"""
+    def _build_km_stage(self) -> StageConfig:
+        """构建 KM 阶段配置"""
         Q_matrix = self.data["Q_matrix"].to(self.device_)
         num_users = self.data["num_users"]
         num_items = self.data["num_items"]
@@ -357,13 +350,13 @@ class ABKTTrainer(MultiTrainer):
             train_sequences=self.data["train_sequences"],
         )
         train_loader = create_optimized_dataloader(
-            train_dataset, batch_size=1, shuffle=True
+            train_dataset, batch_size=1, shuffle=True, device=self.device_
         )
 
         # 验证数据：使用测试三元组
         val_dataset = KMValidationDataset(self.data["test_triplets"])
         val_loader = create_optimized_dataloader(
-            val_dataset, batch_size=len(val_dataset), shuffle=False
+            val_dataset, batch_size=len(val_dataset), shuffle=False, device=self.device_
         )
 
         # 优化器
@@ -393,7 +386,7 @@ class ABKTTrainer(MultiTrainer):
             early_stopping=early_stopping,
         )
 
-    def _init_am_stage(self) -> StageConfig:
+    def _build_am_stage(self) -> StageConfig:
         """初始化 AM 阶段"""
         num_users = self.data["num_users"]
         num_items = self.data["num_items"]
@@ -418,13 +411,16 @@ class ABKTTrainer(MultiTrainer):
         # 创建数据集和加载器
         train_dataset = AMTripletDataset(self.am_train_triplets)
         train_loader = create_optimized_dataloader(
-            train_dataset, batch_size=self.args.batch_size, shuffle=True
+            train_dataset,
+            batch_size=self.args.batch_size,
+            shuffle=True,
+            device=self.device_,
         )
 
         # 验证数据
         val_dataset = AMTripletDataset(self.am_test_triplets)
         val_loader = create_optimized_dataloader(
-            val_dataset, batch_size=len(val_dataset), shuffle=False
+            val_dataset, batch_size=len(val_dataset), shuffle=False, device=self.device_
         )
 
         # 优化器
@@ -776,9 +772,9 @@ class ABKTTrainer(MultiTrainer):
         # 添加 g 和 w 到训练三元组
         self.am_train_triplets = torch.cat(
             [train_triplets, g.unsqueeze(1), w.unsqueeze(1)], dim=1
-        ).to(self.device_)
+        )
 
-        self.am_test_triplets = test_triplets_tensor.to(self.device_)
+        self.am_test_triplets = test_triplets_tensor
 
         logger.info(f"Train triplets shape: {self.am_train_triplets.shape}")
         logger.info(f"Test triplets shape: {self.am_test_triplets.shape}")

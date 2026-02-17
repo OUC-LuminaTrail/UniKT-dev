@@ -3,7 +3,6 @@
 提供训练器的核心功能，包括设备管理、数据加载、训练循环等。
 """
 
-import argparse
 import os
 from abc import ABC, abstractmethod
 from typing import Any
@@ -24,8 +23,13 @@ from rich.table import Column
 from rich.text import Text
 
 from ..config import (
+    DataConfig,
     EarlyStopping,
     EarlyStoppingConfig,
+    ExperimentConfig,
+    OptimizationConfig,
+    TrainingConfig,
+    create_optimized_dataloader,
 )
 from ..core import get_logger, seed_everything
 from .callbacks import CallbackManager, EarlyStoppingCallback, MemoryCleanupCallback
@@ -36,180 +40,286 @@ logger = get_logger(__name__)
 
 
 class BaseTrainer(ABC):
-    """训练器基类。
+    """训练器基类
 
     子类需要实现：
-    1. init_optimizer: 初始化优化器
+    1. __init__: 直接初始化模型
     2. forward_pass: 模型前向传播逻辑
 
-    可选实现：
-    3. init_scheduler: 初始化学习率调度器
-
-    Example:
-        >>> @TRAINERS.register("MyModel")
-        ... class MyTrainer(BaseTrainer):
-        ...     def __init__(self, config, data_config, data_src):
-        ...         # 准备数据和模型
-        ...         model = self._init_model(config)
-        ...         train_loader = ...
-        ...         val_loader = ...
-        ...         super().__init__(model, config, train_loader, val_loader)
-        ...
-        ...     def init_optimizer(self):
-        ...         return torch.optim.Adam(self.model.parameters())
-        ...
-        ...     def forward_pass(self, batch):
-        ...         # 前向传播逻辑
-        ...         return {"y_hat": y_hat, "y_label": y_label, "y_predict": y_pred}
+    示例用法：
+        trainer = MyTrainer(model) \\
+            .with_training(epochs=150, seed=42) \\
+            .with_data(train_dataset, val_dataset, batch_size=128) \\
+            .with_optimization(optimizer, loss_fn, lr_scheduler) \\
+            .with_experiment(exp_manager, hyperparams=args) \\
+            .build()
+        trainer.run()
     """
 
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        epochs: int,
-        opt: torch.optim.Optimizer,
-        loss,
-        train_data: torch.utils.data.DataLoader,
-        val_data: torch.utils.data.DataLoader | None = None,
-        lr_scheduler=None,
-        early_stopping=None,
-        hyperparams=None,
-        exp_manager=None,
-        device: torch.device = None,
-        checkpoint_path: str = None,
-        use_swanlab: bool = True,
-        seed: int | None = None,
-    ):
+    def __init__(self, model: torch.nn.Module):
         """初始化训练器。
 
         Args:
             model: PyTorch 模型
-            epochs: 训练 epoch 数
-            opt: 优化器
-            loss: 损失函数
-            train_data: 训练数据加载器
-            val_data: 验证数据加载器（可选）
-            lr_scheduler: 学习率调度器（可选）
-            early_stopping: 早停配置或对象（可选）
-            hyperparams: 超参数（可选）
-            exp_manager: 实验管理器（必需）
-            device: 计算设备（可选）
-            checkpoint_path: 检查点路径（可选）
-            use_swanlab: 是否使用 SwanLab（默认 True）
-            seed: 随机种子（可选）
         """
-        # 设备管理
-        if device is None:
+        self.model = model
+
+        # Configuration objects
+        self._training_config: TrainingConfig | None = None
+        self._data_config: DataConfig | None = None
+        self._optimization_config: OptimizationConfig | None = None
+        self._experiment_config: ExperimentConfig | None = None
+
+        # Internal state
+        self._built = False
+        self.device_: torch.device | None = None
+        self.epochs: int | None = None
+        self.seed: int | None = None
+        self.train_data = None
+        self.val_data = None
+        self.opt = None
+        self.loss = None
+        self.lr_scheduler = None
+        self.early_stopping: EarlyStopping | None = None
+        self.start_epoch = 0
+        self.log_dir = None
+        self.metrics_accumulator = None
+        self.checkpoint_manager = None
+        self.callback_manager = None
+        self.hyperparam_manager = None
+        self.use_swanlab = True
+
+    def with_training(
+        self,
+        epochs: int = 200,
+        seed: int = 42,
+        device: torch.device | None = None,
+        checkpoint_path: str | None = None,
+    ) -> "BaseTrainer":
+        """配置训练参数。
+
+        Args:
+            epochs: 训练 epoch 数
+            seed: 随机种子
+            device: 计算设备（None 则自动检测）
+            checkpoint_path: 检查点路径（用于断点续训）
+
+        Returns:
+            Self for method chaining
+        """
+        self._training_config = TrainingConfig(
+            epochs=epochs,
+            seed=seed,
+            device=device,
+            checkpoint_path=checkpoint_path,
+        )
+        return self
+
+    def with_data(
+        self,
+        train_data,
+        batch_size,
+        val_data,
+        collate_fn=None,
+        val_collate_fn=None,
+    ) -> "BaseTrainer":
+        """配置数据加载器。
+
+        Args:
+            train_data: 训练数据（DataLoader 或 Dataset）
+            batch_size: 批次大小
+            val_data: 验证数据（DataLoader 或 Dataset）
+            collate_fn: 自定义 collate 函数（可选）
+            val_collate_fn: 自定义验证 collate 函数（可选）
+
+        Returns:
+            Self for method chaining
+        """
+        self._data_config = DataConfig(
+            train_data=train_data,
+            batch_size=batch_size,
+            val_data=val_data,
+            collate_fn=collate_fn,
+            val_collate_fn=collate_fn if val_collate_fn is None else val_collate_fn,
+        )
+        return self
+
+    def with_optimization(
+        self,
+        optimizer,
+        loss_fn,
+        lr_scheduler=None,
+        early_stopping: EarlyStoppingConfig | None = None,
+    ) -> "BaseTrainer":
+        """配置优化器、损失函数和调度器。
+
+        Args:
+            optimizer: PyTorch 优化器
+            loss_fn: 损失函数
+            lr_scheduler: 学习率调度器（可选）
+            early_stopping: 早停配置（可选）
+
+        Returns:
+            Self for method chaining
+        """
+        self._optimization_config = OptimizationConfig(
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            early_stopping=early_stopping,
+        )
+        return self
+
+    def with_experiment(
+        self,
+        exp_manager,
+        hyperparams=None,
+        use_swanlab: bool = True,
+        model_name: str = "",
+        dataset_name: str = "",
+    ) -> "BaseTrainer":
+        """配置实验管理和追踪。
+
+        Args:
+            exp_manager: 实验管理器实例
+            hyperparams: 超参数（字典或对象，可选）
+            use_swanlab: 是否使用 SwanLab（默认 True）
+            model_name: 模型名称
+            dataset_name: 数据集名称
+
+        Returns:
+            Self for method chaining
+        """
+        self._experiment_config = ExperimentConfig(
+            exp_manager=exp_manager,
+            hyperparams=hyperparams,
+            use_swanlab=use_swanlab,
+            model_name=model_name,
+            dataset_name=dataset_name,
+        )
+        return self
+
+    def build(self) -> "BaseTrainer":
+        """构建训练器。
+
+        Returns:
+            Self for method chaining
+        """
+        if self._built:
+            logger.warning("Trainer already built. Skipping rebuild.")
+            return self
+
+        # Validate required configurations
+        if self._training_config is None:
+            raise ValueError(
+                "Training configuration not set. Call with_training() first."
+            )
+        if self._data_config is None:
+            raise ValueError("Data configuration not set. Call with_data() first.")
+        if self._optimization_config is None:
+            raise ValueError(
+                "Optimization configuration not set. Call with_optimization() first."
+            )
+        if self._experiment_config is None:
+            raise ValueError(
+                "Experiment configuration not set. Call with_experiment() first."
+            )
+
+        # 1. Setup device
+        if self._training_config.device is None:
             self.device_ = self._try_gpu()
         else:
-            self.device_ = torch.device(device)
+            self.device_ = torch.device(self._training_config.device)
 
-        self.model: torch.nn.Module = model
-        self.epochs: int = epochs
-        self.opt = opt
-        self.loss = loss
-        self.train_data: torch.utils.data.DataLoader = train_data
-        self.val_data: torch.utils.data.DataLoader = val_data
-        self.lr_scheduler = lr_scheduler
-        self.start_epoch = 0
-        self.hyperparams = hyperparams
+        # 2. Setup training parameters
+        self.epochs = self._training_config.epochs
+        self.use_swanlab = self._experiment_config.use_swanlab
 
-        # 设置随机种子
+        # 3. Set random seed
+        hyperparams = self._experiment_config.hyperparams
+        seed = self._training_config.seed
         if seed is None and hyperparams is not None:
-            seed = getattr(hyperparams, "seed", None)
+            seed = getattr(hyperparams, "seed", 42)
         deterministic = True
         if hyperparams is not None:
             deterministic = getattr(hyperparams, "deterministic", True)
         self.seed = seed_everything(seed, deterministic=deterministic)
 
-        # 初始化早停
-        self.early_stopping: EarlyStopping | None = None
-        if early_stopping is not None:
-            if isinstance(early_stopping, EarlyStopping):
-                self.early_stopping = early_stopping
-            elif isinstance(early_stopping, EarlyStoppingConfig):
-                self.early_stopping = EarlyStopping(early_stopping)
-            elif isinstance(early_stopping, dict):
-                self.early_stopping = EarlyStopping(**early_stopping)
-        elif hyperparams is not None:
-            # 从超参数中读取早停配置
-            es_patience = getattr(hyperparams, "es_patience", None)
-            if es_patience is not None:
-                monitor = getattr(hyperparams, "es_monitor", "auc")
-                mode = getattr(hyperparams, "es_mode", "max")
-                min_delta = getattr(hyperparams, "es_min_delta", 0.0)
-                self.early_stopping = EarlyStopping(
-                    EarlyStoppingConfig(
-                        monitor=monitor,
-                        mode=mode,
-                        patience=es_patience,
-                        min_delta=min_delta,
-                    )
-                )
+        # 4. Setup data loaders
+        self._setup_data_loaders()
 
-        # 创建日志目录
+        # 5. Setup optimization
+        self.opt = self._optimization_config.optimizer
+        self.loss = self._optimization_config.loss_fn
+        self.lr_scheduler = self._optimization_config.lr_scheduler
+
+        # 6. Setup early stopping
+        self._setup_early_stopping()
+
+        # 7. Create log directory
+        exp_manager = self._experiment_config.exp_manager
         if exp_manager is None:
             raise ValueError("exp_manager is required.")
-
         self.log_dir = exp_manager.get_log_dir()
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
-        # 初始化组件
-        self.metrics_accumulator = MetricsAccumulator(use_swanlab=use_swanlab)
+        # 8. Initialize components
+        self.metrics_accumulator = MetricsAccumulator(use_swanlab=self.use_swanlab)
         self.checkpoint_manager = CheckpointManager(self.log_dir)
 
-        # 初始化回调
+        # 9. Initialize callbacks
         callbacks = [MemoryCleanupCallback(cleanup_interval=5)]
         if self.early_stopping is not None:
             callbacks.append(EarlyStoppingCallback(early_stopping=self.early_stopping))
         self.callback_manager = CallbackManager(callbacks)
 
-        # 初始化超参数管理器
-        self.hyperparam_manager = None
+        # 10. Setup hyperparameters
         if hyperparams is not None:
-            self._setup_hyperparameters(hyperparams)
-
-        # 断点续训
-        if checkpoint_path:
-            self._load_checkpoint(checkpoint_path)
-
-        # SwanLab 初始化
-        self.use_swanlab = use_swanlab
-        if self.use_swanlab:
-            from pathlib import Path
-
-            experiment_name = Path(self.log_dir).name
-            self._init_swanlab(
-                project_name="kt-exp-graph",
-                experiment_name=f"Run_{experiment_name}",
+            self._setup_hyperparameters(
+                hyperparams,
+                model_name=self._experiment_config.model_name,
+                dataset_name=self._experiment_config.dataset_name,
             )
 
-    @classmethod
-    def add_model_specific_args(cls, parser: argparse.ArgumentParser) -> None:
-        """添加模型特定的参数。
+        # 11. Load checkpoint if provided
+        if self._training_config.checkpoint_path:
+            self._load_checkpoint(self._training_config.checkpoint_path)
 
-        子类可以重写此方法以添加额外的参数。
+        self._built = True
+        logger.info("Trainer built successfully")
+        return self
 
-        Args:
-            parser: ArgumentParser 实例
-        """
-        pass
+    def _setup_data_loaders(self):
+        """设置数据加载器。"""
+        train_data = self._data_config.train_data
+        val_data = self._data_config.val_data
+        collate_fn = self._data_config.collate_fn
+        val_collate_fn = self._data_config.val_collate_fn
+        batch_size = self._data_config.batch_size
 
-    @abstractmethod
-    def init_model(self, args, data_src):
-        """初始化模型、优化器、损失函数和学习率调度器。
+        def _build_loader(data, shuffle, loader_collate_fn):
+            if isinstance(data, torch.utils.data.Dataset):
+                return create_optimized_dataloader(
+                    data,
+                    batch_size=batch_size,
+                    shuffle=shuffle,
+                    device=self.device_,
+                    collate_fn=loader_collate_fn,
+                )
+            return data
 
-        注意：这个方法在旧 API 中使用，新架构中建议直接在 __init__ 中完成初始化。
+        self.train_data = _build_loader(train_data, True, collate_fn)
+        self.val_data = _build_loader(val_data, False, val_collate_fn)
 
-        Args:
-            args: 参数
-            data_src: 数据源
-
-        Returns:
-            (model, optimizer, loss_function, lr_scheduler)
-        """
-        raise NotImplementedError("Subclasses must implement init_model method")
+    def _setup_early_stopping(self):
+        """设置早停。"""
+        early_stopping_cfg = self._optimization_config.early_stopping
+        self.early_stopping = (
+            EarlyStopping(early_stopping_cfg)
+            if early_stopping_cfg is not None
+            else None
+        )
 
     @abstractmethod
     def forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
@@ -222,27 +332,6 @@ class BaseTrainer(ABC):
             包含 "y_hat", "y_label", "y_predict" 的字典
         """
         raise NotImplementedError("Subclasses must implement forward_pass method")
-
-    def init_optimizer(self) -> torch.optim.Optimizer:
-        """初始化优化器。
-
-        子类应该实现此方法以返回自定义的优化器。
-
-        Returns:
-            优化器实例
-        """
-        raise NotImplementedError("Subclasses must implement init_optimizer method")
-
-    def init_scheduler(self, optimizer: torch.optim.Optimizer):
-        """初始化学习率调度器（可选）。
-
-        Args:
-            optimizer: 优化器
-
-        Returns:
-            学习率调度器实例（可选）
-        """
-        return None
 
     @staticmethod
     def _try_gpu() -> torch.device:
@@ -464,6 +553,23 @@ class BaseTrainer(ABC):
 
     def run(self):
         """运行训练循环。"""
+        # Explicit build required
+        if not self._built:
+            raise RuntimeError(
+                "Trainer has not been built. Please call build() explicitly "
+                "before run()."
+            )
+
+        # Initialize SwanLab
+        if self.use_swanlab:
+            from pathlib import Path
+
+            experiment_name = Path(self.log_dir).name
+            self._init_swanlab(
+                project_name="kt-exp-graph",
+                experiment_name=f"Run_{experiment_name}",
+            )
+
         self.model.to(self.device_)
         self.loss = self.loss.to(self.device_)
 

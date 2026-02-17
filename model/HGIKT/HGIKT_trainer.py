@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 
-from utils.config import BaseParamConfig, register_model_params
+from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
 from utils.core import TRAINERS, get_logger
 from utils.training import BaseTrainer
 
@@ -102,7 +102,7 @@ class HGIKTModelParams(BaseParamConfig):
 
 @TRAINERS.register("HGIKT")
 class HGIKTTrainer(BaseTrainer):
-    """HGIKT 模型训练器。
+    """HGIKT 模型训练器 - 使用 Fluent API。
 
     负责初始化 HGIKT 模型、优化器和训练数据，并实现前向传播逻辑。
 
@@ -118,62 +118,78 @@ class HGIKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 构建数据
+        # 1. 准备数据
         from model.HGIKT import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         # 解包数据
-        train_data = data_dict["train_dataloader"]
-        val_data = data_dict["val_dataloader"]
+        train_dataset = data_dict["train_dataset"]
+        val_dataset = data_dict["val_dataset"]
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        model, opt, loss, lr_scheduler = self.init_model(args, data_src)
-        super().__init__(
-            model=model,
-            epochs=args.epochs,
-            opt=opt,
-            loss=loss,
-            train_data=train_data,
-            val_data=val_data,
-            lr_scheduler=lr_scheduler,
-            hyperparams=args,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-            seed=args.seed,
-            exp_manager=exp_manager,
-        )
-
-        # 将静态数据移动到设备
-        self.hetero_graph = self.hetero_graph.to(self.device_)
-        self.hypergraph = self.hypergraph.to(self.device_)
-        self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
-
-    def init_model(
-        self, args: Any, data_src: Any
-    ) -> tuple[torch.nn.Module, torch.optim.Optimizer, torch.nn.Module, Any | None]:
+        # 2. 初始化模型
         from model.HGIKT.HGIKT_model import HGIKT
 
         logger.info("Initializing HGIKT model...")
         model = HGIKT(args, data_src.get_metadata(), self.hetero_graph.metadata())
 
-        # 二分类交叉熵损失
+        # 3. 调用父类构造函数
+        super().__init__(model)
+
+        # 4. 创建优化器和损失函数
         loss_fn = torch.nn.BCEWithLogitsLoss()
-        # 优化器
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
-        # 学习率调度器
+
+        # 5. 创建学习率调度器
         lr_scheduler = None
         if args.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer, gamma=args.lr_decay
             )
 
-        return model, optimizer, loss_fn, lr_scheduler
+        # 6. 构建早停配置
+        early_stopping_cfg = None
+        es_patience = getattr(args, "es_patience", None)
+        if es_patience is not None:
+            early_stopping_cfg = EarlyStoppingConfig(
+                monitor=getattr(args, "es_monitor", "auc"),
+                mode=getattr(args, "es_mode", "max"),
+                patience=es_patience,
+                min_delta=getattr(args, "es_min_delta", 0.0),
+            )
+
+        # 7. 配置训练器
+        self.with_training(
+            epochs=args.epochs,
+            seed=args.seed,
+            device=args.device,
+            checkpoint_path=args.checkpoint_path,
+        ).with_data(
+            train_data=train_dataset,
+            val_data=val_dataset,
+            batch_size=args.batch_size,
+        ).with_optimization(
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            early_stopping=early_stopping_cfg,
+        ).with_experiment(
+            exp_manager=exp_manager,
+            hyperparams=args,
+            model_name="HGIKT",
+            dataset_name=getattr(args, "dataset", ""),
+        ).build()
+
+        # 8. 将静态数据移动到设备
+        self.hetero_graph = self.hetero_graph.to(self.device_)
+        self.hypergraph = self.hypergraph.to(self.device_)
+        self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]

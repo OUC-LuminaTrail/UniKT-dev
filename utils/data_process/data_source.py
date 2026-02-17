@@ -64,8 +64,7 @@ class DataSource(ABC):
             self.seed = 42
         random.seed(self.seed)
         np.random.seed(self.seed)
-
-        self.add_metadata("random_seed", self.seed)
+        logger.debug(f"Random seed set to {self.seed}")
 
     def _download_chunk(self, url, start, end, chunk_path, pbar, chunk_size=8192):
         """
@@ -505,6 +504,7 @@ class DataSource(ABC):
         self.sequence_data.to_parquet(sequence_data_path, index=False)
         md5_hash = self.compute_md5(sequence_data_path)
         self.add_metadata("sequence_data_md5", md5_hash)
+        self.add_metadata("random_seed", self.seed)
         self.save_metadata()
         logger.info("Processed data saved.")
 
@@ -600,6 +600,7 @@ class DataSource(ABC):
             value: 元信息值
         """
         self.metadata[key] = value
+        logger.debug(f"Added {self.dataset} to DataSource metadata: {key} = {value}")
 
     def add_metadatas(self, meta_dict: dict):
         """
@@ -921,6 +922,21 @@ class DataSource(ABC):
             self.question_data["question"].isin(sampled_questions)
         ].reset_index(drop=True)
 
+        # Remap question IDs to be consecutive
+        question_id_map = {
+            old_id: new_id
+            for new_id, old_id in enumerate(
+                sorted(self.question_data["question"].unique())
+            )
+        }
+        self.sequence_data["question"] = (
+            self.sequence_data["question"].map(question_id_map).astype(int)
+        )
+        # Update question_data with remapped IDs
+        self.question_data["question"] = (
+            self.question_data["question"].map(question_id_map).astype(int)
+        )
+
         sampled_records = len(self.sequence_data)
 
         sampling_config = {
@@ -946,6 +962,10 @@ class DataSource(ABC):
         self.add_metadata("sampling_config", sampling_config)
         self.add_metadata("sampling_stats", sampling_stats)
         self.add_metadata("num_users", int(self.sequence_data["user"].nunique()))
+        self.add_metadata(
+            "num_questions", int(self.question_data["question"].nunique())
+        )
+        self.add_metadata("num_skills", int(self.question_data["skill"].nunique()))
 
         logger.info(
             f"Sampling complete: {len(sampled_users)}/{total_users} users, "
