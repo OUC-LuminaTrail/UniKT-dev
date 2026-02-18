@@ -44,9 +44,7 @@ class GIKTAnalyzer(BaseCaseAnalyzer):
 
         super().__init__(model, checkpoint_path)
 
-        self.with_inference(
-            val_data, args.batch_size, args.device
-        ).build_for_inference()
+        self.with_inference(val_data, args.batch_size, args.device).build()
 
         self.graph = graph
         self.question_skill_matrix = question_skill_matrix
