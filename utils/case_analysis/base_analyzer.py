@@ -7,6 +7,17 @@ from abc import abstractmethod
 from typing import Any
 
 import torch
+from rich.live import Live
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
+from typing_extensions import override
 
 from ..config import DataConfig, TrainingConfig, create_optimized_dataloader
 from ..core import get_logger
@@ -40,7 +51,7 @@ class BaseCaseAnalyzer(BaseTrainer):
         self._is_built_for_inference = False
 
     def with_inference(
-        self, data, batch_size: int, device: torch.device | None = None
+        self, data, batch_size: int, collate_fn=None, device: torch.device | None = None
     ) -> "BaseCaseAnalyzer":
         """Configure for inference (simplified alternative to with_training).
 
@@ -53,14 +64,15 @@ class BaseCaseAnalyzer(BaseTrainer):
             Self for method chaining
         """
         self._data_config = DataConfig(
-            train_data=None, val_data=data, batch_size=batch_size
+            train_data=None, val_data=data, batch_size=batch_size, collate_fn=collate_fn
         )
         self._training_config = TrainingConfig(
             epochs=1, seed=None, device=device, checkpoint_path=self.checkpoint_path
         )
         return self
 
-    def build_for_inference(self) -> "BaseCaseAnalyzer":
+    @override
+    def build(self) -> "BaseCaseAnalyzer":
         """Build analyzer without optimizer/loss (inference-only).
 
         Returns:
@@ -83,6 +95,7 @@ class BaseCaseAnalyzer(BaseTrainer):
         # 2. Create dataloader
         val_data = self._data_config.val_data
         batch_size = self._data_config.batch_size
+        collate_fn = self._data_config.collate_fn
 
         if isinstance(val_data, torch.utils.data.Dataset):
             self.val_data = create_optimized_dataloader(
@@ -90,7 +103,7 @@ class BaseCaseAnalyzer(BaseTrainer):
                 batch_size=batch_size,
                 shuffle=False,
                 device=self.device_,
-                collate_fn=None,
+                collate_fn=collate_fn,
             )
         else:
             self.val_data = val_data
@@ -150,20 +163,30 @@ class BaseCaseAnalyzer(BaseTrainer):
             )
 
         logger.info("Running inference...")
-        self.model.eval()
 
-        for batch_idx, batch_data in enumerate(self.val_data):
-            # Forward pass
-            outputs = self.forward_pass(batch_data)
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None),
+            TaskProgressColumn(),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            expand=True,
+        )
 
-            # Extract model-specific data
-            case_data = self.extract_case_data(batch_data, outputs)
+        with Live(progress):
+            inference_task = progress.add_task(
+                "[bold cyan]Inference", total=len(self.val_data)
+            )
 
-            # Add to collector
-            self.result_collector.add_batch(case_data)
+            for batch_data in self.val_data:
+                outputs = self.forward_pass(batch_data)
 
-            if (batch_idx + 1) % 100 == 0:
-                logger.info(f"Processed {batch_idx + 1} batches")
+                case_data = self.extract_case_data(batch_data, outputs)
+
+                self.result_collector.add_batch(case_data)
+
+                progress.advance(inference_task)
 
         logger.info("Inference complete")
         return self.result_collector

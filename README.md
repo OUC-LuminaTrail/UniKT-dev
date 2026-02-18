@@ -274,31 +274,25 @@ swanlab login
 2. **筛选**：根据用户行为特征筛选感兴趣的用户
 3. **可视化**：为选定用户生成热力图可视化
 
+所有结果自动保存在 `<run_dir>/case_analysis/` 目录下。
+
 #### Step 1: 运行推理
 
 ```bash
-# 基本用法（模型和数据集从 hyperparameters.json 自动获取）
+# 基本用法（自动从 run_dir 加载模型和超参数）
 python case_analysis.py inference \
-    -c runs/exp1/best_model.pth \
-    --output_dir outputs/case_analysis/gikt_assist09
-
-# 指定超参数文件
-python case_analysis.py inference \
-    -c runs/exp1/best_model.pth \
-    --hyperparams /path/to/hyperparameters.json \
-    --output_dir outputs/case_analysis/gikt_assist09
+    --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128
 ```
 
 **推理参数说明：**
 
 | 参数 | 说明 |
 |------|------|
-| `-c, --checkpoint` | 模型检查点路径（必需） |
-| `--hyperparams` | 超参数 JSON 文件路径（默认：从检查点目录自动检测） |
+| `--run_dir` | 训练运行目录（必需），自动查找 `best_model.pth` 和 `hyperparameters.json` |
+| `--hyperparams` | 超参数 JSON 文件路径（可选，默认从 run_dir 自动检测） |
 | `--data_base_path` | 数据基础路径（默认：`./data`） |
-| `--output_dir` | 输出目录（必需） |
 
-**输出文件：**
+**输出文件（保存在 `<run_dir>/case_analysis/`）：**
 - `predictions.parquet`：所有预测结果
 - `user_summaries.parquet`：用户级别的统计指标
 
@@ -307,15 +301,13 @@ python case_analysis.py inference \
 ```bash
 # 筛选 10 个多样化的用户
 python case_analysis.py select \
-    --predictions_path outputs/case_analysis/gikt_assist09/predictions.parquet \
-    --output_dir outputs/case_analysis/gikt_assist09/diverse \
+    --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \
     --strategy diverse \
     --num_users 10
 
 # 筛选错误率最高的用户
 python case_analysis.py select \
-    --predictions_path outputs/case_analysis/gikt_assist09/predictions.parquet \
-    --output_dir outputs/case_analysis/gikt_assist09/extreme \
+    --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \
     --strategy extreme \
     --num_users 5
 ```
@@ -324,8 +316,7 @@ python case_analysis.py select \
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
-| `--predictions_path` | 预测结果文件路径（必需） | - |
-| `--output_dir` | 输出目录（必需） | - |
+| `--run_dir` | 训练运行目录（必需） | - |
 | `--strategy` | 筛选策略：`diverse`（多样化）、`extreme`（极端错误）、`random`（随机） | `diverse` |
 | `--num_users` | 最大用户数 | 10 |
 | `--min_seq_len` | 最小序列长度 | 20 |
@@ -333,28 +324,27 @@ python case_analysis.py select \
 | `--min_error` | 最小错误率 | 0.1 |
 | `--max_error` | 最大错误率 | 0.9 |
 
-**输出文件：**
+**输出文件（保存在 `<run_dir>/case_analysis/<strategy>/`）：**
 - `selected_users.json`：选中用户的详细信息
 
 #### Step 3: 生成可视化
 
 ```bash
+# 使用策略名称
 python case_analysis.py plot \
-    --predictions_path outputs/case_analysis/gikt_assist09/predictions.parquet \
-    --selected_users outputs/case_analysis/gikt_assist09/diverse/selected_users.json \
-    --output_dir outputs/case_analysis/gikt_assist09/diverse
+    --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \
+    --selected_users diverse
 ```
 
 **可视化参数说明：**
 
 | 参数 | 说明 |
 |------|------|
-| `--predictions_path` | 预测结果文件路径（必需） |
-| `--selected_users` | 选中用户文件路径（必需） |
-| `--output_dir` | 输出目录（必需） |
+| `--run_dir` | 训练运行目录（必需） |
+| `--selected_users` | 策略名称（diverse/extreme/random）或 selected_users.json 路径 |
 
-**输出文件：**
-- `figures/user_{id}_heatmap.png`：每个用户的热力图
+**输出文件（保存在 `<run_dir>/case_analysis/<strategy>/figures/`）：**
+- `user_{id}_heatmap.png`：每个用户的热力图
 
 ## 输出说明
 
