@@ -43,50 +43,26 @@ class ResultCollector:
         self._df = None  # Cached DataFrame
 
     def add_batch(self, case_data: dict):
-        """Add batch results to collector.
+        required_keys = ["user_ids", "question_ids", "labels", "predictions", "logits"]
+        missing_keys = [k for k in required_keys if k not in case_data]
+        if missing_keys:
+            raise ValueError(f"Missing required keys in case_data: {missing_keys}")
 
-        Args:
-            case_data: Dictionary with batch data. Expected keys:
-                - user_ids: Tensor or list of user IDs
-                - question_ids: Tensor or list of question IDs
-                - skills: Tensor or list of skill IDs (optional)
-                - labels: Tensor or list of ground truth labels
-                - predictions: Tensor or list of predicted probabilities
-                - logits: Tensor or list of raw model outputs
-                - mask: Tensor or list indicating valid positions (optional)
-        """
-        for key in ["user_ids", "question_ids", "labels", "predictions", "logits"]:
-            if key not in case_data:
-                raise ValueError(f"Missing required key in case_data: {key}")
-
-        # Convert tensors to CPU and numpy
         for key, value in case_data.items():
-            if isinstance(value, torch.Tensor):
-                value = value.detach().cpu().numpy()
             if key in self.data:
+                if isinstance(value, torch.Tensor):
+                    value = value.detach().cpu().numpy()
                 self.data[key].extend(
                     value.tolist() if hasattr(value, "tolist") else [value]
                 )
 
-        # Add empty mask if not provided
-        if "mask" not in case_data or len(case_data.get("mask", [])) == 0:
-            batch_size = len(self.data["user_ids"]) - len(self.data["mask"])
-            self.data["mask"].extend([1] * batch_size)
+        for key, default in [("mask", 1), ("skills", 0), ("knowledge_states", None)]:
+            if key not in case_data or len(case_data[key]) == 0:
+                current_len = len(self.data[key])
+                target_len = len(self.data["user_ids"])
+                if current_len < target_len:
+                    self.data[key].extend([default] * (target_len - current_len))
 
-        # Add empty skills if not provided
-        if "skills" not in case_data or len(case_data.get("skills", [])) == 0:
-            batch_size = len(self.data["user_ids"]) - len(self.data["skills"])
-            self.data["skills"].extend([0] * batch_size)
-
-        # Add empty knowledge_states if not provided
-        if (
-            "knowledge_states" not in case_data
-            or len(case_data.get("knowledge_states", [])) == 0
-        ):
-            batch_size = len(self.data["user_ids"]) - len(self.data["knowledge_states"])
-            self.data["knowledge_states"].extend([None] * batch_size)
-
-        # Invalidate cached DataFrame
         self._df = None
 
     def to_dataframe(self) -> pd.DataFrame:

@@ -30,21 +30,12 @@ logger = get_logger(__name__)
 class BaseCaseAnalyzer(BaseTrainer):
     """Base class for case analysis with inference-only capabilities.
 
-    This class extends BaseTrainer to provide simplified inference-only
-    functionality for analyzing model predictions on datasets.
-
     Subclasses must implement:
     - forward_pass: Model forward pass (inherited from BaseTrainer)
     - extract_case_data: Extract model-specific data from batch outputs
     """
 
     def __init__(self, model: torch.nn.Module, checkpoint_path: str):
-        """Initialize the analyzer.
-
-        Args:
-            model: PyTorch model to analyze
-            checkpoint_path: Path to model checkpoint to load
-        """
         super().__init__(model)
         self.checkpoint_path = checkpoint_path
         self.result_collector = None
@@ -53,16 +44,6 @@ class BaseCaseAnalyzer(BaseTrainer):
     def with_inference(
         self, data, batch_size: int, collate_fn=None, device: torch.device | None = None
     ) -> "BaseCaseAnalyzer":
-        """Configure for inference (simplified alternative to with_training).
-
-        Args:
-            data: Dataset to run inference on
-            batch_size: Batch size for inference
-            device: Device to run inference on (None for auto-detect)
-
-        Returns:
-            Self for method chaining
-        """
         self._data_config = DataConfig(
             train_data=None, val_data=data, batch_size=batch_size, collate_fn=collate_fn
         )
@@ -73,42 +54,30 @@ class BaseCaseAnalyzer(BaseTrainer):
 
     @override
     def build(self) -> "BaseCaseAnalyzer":
-        """Build analyzer without optimizer/loss (inference-only).
-
-        Returns:
-            Self for method chaining
-        """
         if self._is_built_for_inference:
             logger.warning("Analyzer already built for inference. Skipping rebuild.")
             return self
 
-        # Validate required configurations
         if self._data_config is None:
             raise ValueError("Data configuration not set. Call with_inference() first.")
 
-        # 1. Setup device
         if self._training_config.device is None:
             self.device_ = self._try_gpu()
         else:
             self.device_ = torch.device(self._training_config.device)
 
-        # 2. Create dataloader
         val_data = self._data_config.val_data
-        batch_size = self._data_config.batch_size
-        collate_fn = self._data_config.collate_fn
-
         if isinstance(val_data, torch.utils.data.Dataset):
             self.val_data = create_optimized_dataloader(
                 val_data,
-                batch_size=batch_size,
+                batch_size=self._data_config.batch_size,
                 shuffle=False,
                 device=self.device_,
-                collate_fn=collate_fn,
+                collate_fn=self._data_config.collate_fn,
             )
         else:
             self.val_data = val_data
 
-        # 3. Load checkpoint
         logger.info(f"Loading checkpoint from {self.checkpoint_path}...")
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device_)
         if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
@@ -117,13 +86,9 @@ class BaseCaseAnalyzer(BaseTrainer):
             self.model.load_state_dict(checkpoint)
         logger.info("Checkpoint loaded successfully")
 
-        # 4. Set model to eval mode
         self.model.to(self.device_)
         self.model.eval()
-
-        # 5. Initialize ResultCollector
         self.result_collector = ResultCollector(self.device_)
-
         self._is_built_for_inference = True
         logger.debug("Analyzer built successfully for inference")
         return self
@@ -132,9 +97,7 @@ class BaseCaseAnalyzer(BaseTrainer):
     def extract_case_data(self, batch_data: Any, outputs: dict) -> dict:
         """Extract model-specific data from batch outputs.
 
-        This method allows each model analyzer to customize what data
-        is collected during inference. At minimum, it should return
-        a dictionary with:
+        Returns dictionary with at minimum:
         - user_ids: User identifiers
         - question_ids: Question identifiers
         - labels: Ground truth labels
@@ -143,7 +106,7 @@ class BaseCaseAnalyzer(BaseTrainer):
 
         Args:
             batch_data: Raw batch data from dataloader
-            outputs: Output dict from forward_pass (contains y_hat, y_label, y_predict)
+            outputs: Output dict from forward_pass (y_hat, y_label, y_predict)
 
         Returns:
             Dictionary with extracted data
@@ -152,11 +115,6 @@ class BaseCaseAnalyzer(BaseTrainer):
 
     @torch.no_grad()
     def run_inference(self) -> ResultCollector:
-        """Run inference and collect all results.
-
-        Returns:
-            ResultCollector with all prediction results
-        """
         if not self._is_built_for_inference:
             raise RuntimeError(
                 "Analyzer not built for inference. Call build_for_inference() first."
@@ -181,11 +139,8 @@ class BaseCaseAnalyzer(BaseTrainer):
 
             for batch_data in self.val_data:
                 outputs = self.forward_pass(batch_data)
-
                 case_data = self.extract_case_data(batch_data, outputs)
-
                 self.result_collector.add_batch(case_data)
-
                 progress.advance(inference_task)
 
         logger.info("Inference complete")

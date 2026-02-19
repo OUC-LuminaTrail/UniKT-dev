@@ -43,36 +43,6 @@ class HeatmapVisualizer:
         output_path: str | None = None,
         show_skill_names: bool = False,
     ) -> plt.Figure:
-        """Plot knowledge-state heatmap for a single user.
-
-        Layout (top to bottom):
-          - Question row – question label (q0, q1, …) for each answered question
-          - Skill row    – skill label (c0, c1, …) for each answered question
-          - Resp row     – ✓ (green) / ✗ (red) correctness markers
-          - Heatmap      – [num_unique_skills × T] matrix of knowledge states
-                           coloured with RdYlGn (red=low mastery, green=high)
-          - x-axis       – 1-based position index
-          - y-axis       – skill labels (c0, c1, …)
-          - colorbar     – placed to the right of the heatmap
-
-        Args:
-            user_data: DataFrame for a single user. Required columns:
-                - position: 0-based position in sequence
-                - question_id: question ID (int) for each answered question
-                - skill: skill ID (int) for each answered question
-                - label: ground truth correctness (0/1)
-                - knowledge_state: list[float] per-skill mastery values
-                  (index == skill ID).
-            user_id: User identifier used in the figure title.
-            output_path: If given, save figure to this path (PNG, 300 dpi).
-            show_skill_names: Unused; kept for API compatibility.
-
-        Returns:
-            matplotlib Figure object.
-
-        Raises:
-            ValueError: If required columns are missing or knowledge_state is invalid.
-        """
         required_cols = {"position", "question_id", "skill", "label", "knowledge_state"}
         missing = required_cols - set(user_data.columns)
         if missing:
@@ -80,12 +50,10 @@ class HeatmapVisualizer:
 
         if user_data["knowledge_state"].isna().any():
             raise ValueError(
-                "knowledge_state column contains None values. "
-                "Model must return knowledge states for case analysis."
+                "knowledge_state column contains None values. Model must return knowledge states for case analysis."
             )
 
         user_data = user_data.sort_values("position").reset_index(drop=True)
-
         return self._plot_knowledge_state_heatmap(user_data, user_id, output_path)
 
     def _plot_knowledge_state_heatmap(
@@ -94,10 +62,8 @@ class HeatmapVisualizer:
         user_id: int,
         output_path: str | None,
     ) -> plt.Figure:
-        """Full knowledge-state heatmap matching the reference design."""
         T = len(user_data)
 
-        # Collect unique skills in order of first appearance
         seen: dict[int, None] = {}
         for s in user_data["skill"]:
             seen.setdefault(int(s), None)
@@ -105,7 +71,6 @@ class HeatmapVisualizer:
         num_skills = len(unique_skills)
         skill_to_row = {s: i for i, s in enumerate(unique_skills)}
 
-        # Build knowledge-state matrix [num_skills × T]
         ks_matrix = np.full((num_skills, T), np.nan)
         for t, (_, row) in enumerate(user_data.iterrows()):
             ks = row.get("knowledge_state")
@@ -115,25 +80,20 @@ class HeatmapVisualizer:
                 if skill_id < len(ks):
                     ks_matrix[row_idx, t] = float(ks[skill_id])
 
-        # Compute actual min/max from matrix (ignoring NaN) for dynamic color scaling
         ks_valid = ks_matrix[~np.isnan(ks_matrix)]
         if ks_valid.size > 0:
             ks_min = float(ks_valid.min())
             ks_max = float(ks_valid.max())
-            # Handle case where all values are identical
             if ks_max - ks_min < 1e-8:
                 ks_min = ks_max - 1.0
         else:
             ks_min, ks_max = 0.0, 1.0
 
-        # Figure dimensions – scale with sequence length and skill count
-        question_row_h = 0.55
-        skill_row_h = 0.55
-        resp_row_h = 0.55
+        header_h = 0.55
         cell_h = max(0.45, min(0.85, 10.0 / max(num_skills, 1)))
         heatmap_h = num_skills * cell_h
         fig_w = max(14, T * 0.38 + 3.0)
-        fig_h = max(4.5, question_row_h + skill_row_h + resp_row_h + heatmap_h + 1.2)
+        fig_h = max(4.5, header_h * 3 + heatmap_h + 1.2)
 
         fig = plt.figure(figsize=(fig_w, fig_h))
         fig.suptitle(
@@ -143,12 +103,11 @@ class HeatmapVisualizer:
             y=0.99,
         )
 
-        # GridSpec: 4 rows × 2 cols (main area + narrow colorbar strip)
         gs = gridspec.GridSpec(
             4,
             2,
             figure=fig,
-            height_ratios=[question_row_h, skill_row_h, resp_row_h, heatmap_h],
+            height_ratios=[header_h, header_h, header_h, heatmap_h],
             width_ratios=[1, 0.015],
             hspace=0.0,
             wspace=0.02,
@@ -164,12 +123,10 @@ class HeatmapVisualizer:
         ax_main = fig.add_subplot(gs[3, 0])
         ax_cbar = fig.add_subplot(gs[3, 1])
 
-        # Draw annotation rows
         self._draw_question_row(ax_question, user_data, T)
         self._draw_skill_row(ax_skill, user_data, unique_skills, T)
         self._draw_resp_row(ax_resp, user_data, T)
 
-        # Main heatmap
         cmap = plt.get_cmap("RdYlGn")
         im = ax_main.imshow(
             ks_matrix,
@@ -180,14 +137,12 @@ class HeatmapVisualizer:
             interpolation="none",
         )
 
-        # y-axis: skill labels aligned left
         ax_main.set_yticks(np.arange(num_skills))
         ax_main.set_yticklabels(
             [self._skill_label(s) for s in unique_skills], fontsize=10
         )
         ax_main.tick_params(axis="y", length=0, pad=4)
 
-        # x-axis: 1-based position labels
         ax_main.set_xticks(np.arange(T))
         ax_main.set_xticklabels([str(t + 1) for t in range(T)], fontsize=8)
         ax_main.tick_params(axis="x", length=0)
@@ -195,11 +150,9 @@ class HeatmapVisualizer:
         for spine in ax_main.spines.values():
             spine.set_visible(False)
 
-        # Colorbar
         cbar = fig.colorbar(im, cax=ax_cbar)
         cbar.ax.tick_params(labelsize=8, length=2)
 
-        # Add value labels in each cell
         self._add_value_labels(
             ax_main,
             ks_matrix,
@@ -220,13 +173,7 @@ class HeatmapVisualizer:
 
         return fig
 
-    def _draw_question_row(
-        self,
-        ax: plt.Axes,
-        user_data: pd.DataFrame,
-        T: int,
-    ) -> None:
-        """Draw the 'Question' header row with question labels."""
+    def _draw_question_row(self, ax, user_data: pd.DataFrame, T: int) -> None:
         ax.set_xlim(-0.5, T - 0.5)
         ax.set_ylim(0, 1)
         ax.set_xticks([])
@@ -246,6 +193,57 @@ class HeatmapVisualizer:
                 va="center",
                 fontsize=9,
                 color="black",
+                fontweight="bold",
+            )
+
+    def _draw_skill_row(
+        self, ax, user_data: pd.DataFrame, unique_skills: list[int], T: int
+    ) -> None:
+        cmap20 = plt.get_cmap("tab20")
+        skill_color = {s: cmap20(i % 20) for i, s in enumerate(unique_skills)}
+
+        ax.set_xlim(-0.5, T - 0.5)
+        ax.set_ylim(0, 1)
+        ax.set_xticks([])
+        ax.set_yticks([0.5])
+        ax.set_yticklabels(["Skill"], fontsize=10, fontweight="bold")
+        ax.tick_params(axis="y", length=0, pad=4)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        for t, (_, row) in enumerate(user_data.iterrows()):
+            skill_id = int(row["skill"])
+            ax.text(
+                t,
+                0.5,
+                self._skill_label(skill_id),
+                ha="center",
+                va="center",
+                fontsize=9,
+                color=skill_color[skill_id],
+                fontweight="bold",
+            )
+
+    def _draw_resp_row(self, ax, user_data: pd.DataFrame, T: int) -> None:
+        ax.set_xlim(-0.5, T - 0.5)
+        ax.set_ylim(0, 1)
+        ax.set_xticks([])
+        ax.set_yticks([0.5])
+        ax.set_yticklabels(["Resp"], fontsize=10, fontweight="bold")
+        ax.tick_params(axis="y", length=0, pad=4)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        for t, (_, row) in enumerate(user_data.iterrows()):
+            correct = int(row["label"]) == 1
+            ax.text(
+                t,
+                0.5,
+                "✓" if correct else "✗",
+                ha="center",
+                va="center",
+                fontsize=11,
+                color="#2e7d32" if correct else "#c62828",
                 fontweight="bold",
             )
 
@@ -315,22 +313,13 @@ class HeatmapVisualizer:
 
     @staticmethod
     def _get_text_color_for_value(normalized_value: float, cmap) -> str:
-        """Determine text color based on background color.
-
-        Args:
-            normalized_value: Normalized value between 0 and 1
-            cmap: Colormap used for the heatmap
-
-        Returns:
-            "black" or "white" depending on background brightness
-        """
         rgb = cmap(normalized_value)[:3]
         y = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
         return "black" if y > 0.5 else "white"
 
     def _add_value_labels(
         self,
-        ax: plt.Axes,
+        ax,
         ks_matrix: np.ndarray,
         ks_min: float,
         ks_max: float,
@@ -341,20 +330,6 @@ class HeatmapVisualizer:
         num_skills: int,
         heatmap_h: float,
     ) -> None:
-        """Add value labels in each heatmap cell.
-
-        Args:
-            ax: Matplotlib axes for the heatmap
-            ks_matrix: Knowledge state matrix [num_skills × T]
-            ks_min: Minimum value for color scaling
-            ks_max: Maximum value for color scaling
-            cmap: Colormap used for the heatmap
-            fig_w: Figure width in inches
-            fig_h: Figure height in inches
-            T: Sequence length
-            num_skills: Number of unique skills
-            heatmap_h: Height of the heatmap region in the figure
-        """
         dpi = 300
         cell_width_px = (fig_w / T) * dpi
         cell_height_px = (heatmap_h / fig_h * fig_w / num_skills) * dpi
@@ -365,10 +340,9 @@ class HeatmapVisualizer:
             for j in range(T):
                 if not np.isnan(ks_matrix[i, j]):
                     value = ks_matrix[i, j]
-                    if ks_max > ks_min:
-                        normalized_value = (value - ks_min) / (ks_max - ks_min)
-                    else:
-                        normalized_value = 0.5
+                    normalized_value = (
+                        (value - ks_min) / (ks_max - ks_min) if ks_max > ks_min else 0.5
+                    )
                     text_color = self._get_text_color_for_value(normalized_value, cmap)
                     ax.text(
                         j,
@@ -383,12 +357,10 @@ class HeatmapVisualizer:
 
     @staticmethod
     def _skill_label(skill_id: int) -> str:
-        """Return display label for a skill ID, e.g. 'c0', 'c1', …"""
         return f"c{skill_id}"
 
     @staticmethod
     def _question_label(question_id: int) -> str:
-        """Return display label for a question ID, e.g. 'q0', 'q1', …"""
         return f"q{question_id}"
 
 

@@ -57,18 +57,10 @@ def load_model_params(
     """
     from utils.hyperparam_manager import HyperparameterManager
 
-    target_path = None
+    checkpoint_dir = Path(checkpoint_path).parent.resolve()
+    target_path = hyperparams_path or str(checkpoint_dir / "hyperparameters.json")
 
-    if hyperparams_path is not None:
-        target_path = hyperparams_path
-    else:
-        checkpoint_dir = Path(checkpoint_path).parent.resolve()
-        auto_hyperparams = checkpoint_dir / "hyperparameters.json"
-        if auto_hyperparams.exists():
-            target_path = str(auto_hyperparams)
-
-    if target_path is None or not Path(target_path).exists():
-        checkpoint_dir = Path(checkpoint_path).parent.resolve()
+    if not Path(target_path).exists():
         raise FileNotFoundError(
             f"Hyperparameter file not found. Searched in:\n"
             f"  1. Checkpoint directory: {checkpoint_dir}/hyperparameters.json\n"
@@ -81,12 +73,9 @@ def load_model_params(
         manager.load(target_path)
 
         flat_dict = manager._flatten_dict(manager.hyperparams)
-
-        merged_dict = {}
-        for key, value in flat_dict.items():
-            base_key = key.split(".")[-1] if "." in key else key
-            merged_dict[base_key] = value
-
+        merged_dict = {
+            k.split(".")[-1] if "." in k else k: v for k, v in flat_dict.items()
+        }
         params_ns = argparse.Namespace(**merged_dict)
 
         model_name = manager.metadata.get("model_name")
@@ -116,14 +105,13 @@ def load_model_params(
 def cmd_inference(args):
     """Step 1: Run inference and save predictions."""
     run_dir = Path(args.run_dir).resolve()
-
     checkpoint_path = run_dir / "best_model.pth"
+    hyperparams_path = (
+        Path(args.hyperparams) if args.hyperparams else run_dir / "hyperparameters.json"
+    )
+
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-
-    hyperparams_path = run_dir / "hyperparameters.json"
-    if args.hyperparams:
-        hyperparams_path = Path(args.hyperparams)
 
     model_args, model_name, dataset_name = load_model_params(
         checkpoint_path=str(checkpoint_path),
@@ -133,12 +121,10 @@ def cmd_inference(args):
     logger.info(f"Starting inference for {model_name} on {dataset_name}...")
 
     data_src = get_data_source(dataset_name, model_args)
-
     AnalyzerClass = ANALYZERS.get(model_name)
     analyzer = AnalyzerClass(
         args=model_args, data_src=data_src, checkpoint_path=str(checkpoint_path)
     )
-
     result_collector = analyzer.run_inference()
 
     output_dir = run_dir / "case_analysis"
@@ -151,10 +137,11 @@ def cmd_inference(args):
     metrics_path = output_dir / "user_summaries.parquet"
     user_metrics.to_parquet(metrics_path, index=False)
 
+    df = result_collector.to_dataframe()
     logger.info("✓ Inference complete!")
     logger.info(f"Predictions saved to: '{predictions_path}'")
     logger.info(f"User metrics saved to: '{metrics_path}'")
-    logger.info(f"Total predictions: {len(result_collector.to_dataframe())}")
+    logger.info(f"Total predictions: {len(df)}")
 
 
 def cmd_select(args):
@@ -166,8 +153,7 @@ def cmd_select(args):
 
     if not predictions_path.exists():
         raise FileNotFoundError(
-            f"Predictions not found: {predictions_path}\n"
-            f"Please run 'inference' command first."
+            f"Predictions not found: {predictions_path}\nPlease run 'inference' command first."
         )
 
     result_collector = ResultCollector.load(str(predictions_path))
@@ -179,7 +165,7 @@ def cmd_select(args):
         strategy=args.strategy,
     )
 
-    if len(selected_users) == 0:
+    if not selected_users:
         logger.warning("No users selected. Try adjusting the filtering criteria.")
         return
 
@@ -194,7 +180,6 @@ def cmd_select(args):
 
     logger.info(f"Output directory: {output_dir}")
     logger.info(f"Selected users saved to: {selected_users_path}")
-
     logger.info("Selected users statistics:")
     logger.info(
         f" - Num attempts: {selected_metrics['num_attempts'].min():.0f} - {selected_metrics['num_attempts'].max():.0f}"
@@ -214,8 +199,7 @@ def cmd_plot(args):
 
     if not predictions_path.exists():
         raise FileNotFoundError(
-            f"Predictions not found: {predictions_path}\n"
-            f"Please run 'inference' command first."
+            f"Predictions not found: {predictions_path}\nPlease run 'inference' command first."
         )
 
     result_collector = ResultCollector.load(str(predictions_path))
@@ -230,8 +214,7 @@ def cmd_plot(args):
 
     if not selected_users_path.exists():
         raise FileNotFoundError(
-            f"Selected users file not found: {selected_users_path}\n"
-            f"Please run 'select' command first or provide a valid path."
+            f"Selected users file not found: {selected_users_path}\nPlease run 'select' command first or provide a valid path."
         )
 
     selected_data = json.loads(selected_users_path.read_text())
@@ -244,18 +227,17 @@ def cmd_plot(args):
 
     visualizer = HeatmapVisualizer()
 
+    import matplotlib.pyplot as plt
+
     for user_id in selected_users:
         user_data = result_collector.get_user_sequence(user_id)
-        # Truncate sequence if longer than max_seq_len
-        if args.max_seq_len is not None and len(user_data) > args.max_seq_len:
+        if args.max_seq_len and len(user_data) > args.max_seq_len:
             user_data = user_data.head(args.max_seq_len).reset_index(drop=True)
         fig = visualizer.plot_user_heatmap(
             user_data,
             user_id,
             output_path=str(output_dir / f"user_{user_id}_heatmap.png"),
         )
-        import matplotlib.pyplot as plt
-
         plt.close(fig)
 
     logger.info(f"Generated {len(selected_users)} individual user heatmaps")
