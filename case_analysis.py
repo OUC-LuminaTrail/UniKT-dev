@@ -173,7 +173,7 @@ def cmd_select(args):
     result_collector = ResultCollector.load(str(predictions_path))
 
     selected_users = result_collector.select_users(
-        num_attempts_range=(args.min_seq_len, args.max_seq_len),
+        min_num_attempts=args.min_seq_len,
         error_rate_range=(args.min_error, args.max_error),
         max_users=args.num_users,
         strategy=args.strategy,
@@ -246,6 +246,9 @@ def cmd_plot(args):
 
     for user_id in selected_users:
         user_data = result_collector.get_user_sequence(user_id)
+        # Truncate sequence if longer than max_seq_len
+        if args.max_seq_len is not None and len(user_data) > args.max_seq_len:
+            user_data = user_data.head(args.max_seq_len).reset_index(drop=True)
         fig = visualizer.plot_user_heatmap(
             user_data,
             user_id,
@@ -318,12 +321,6 @@ Examples:
         help="Minimum sequence length (default: 20)",
     )
     parser_select.add_argument(
-        "--max_seq_len",
-        type=int,
-        default=200,
-        help="Maximum sequence length (default: 200)",
-    )
-    parser_select.add_argument(
         "--min_error", type=float, default=0.1, help="Minimum error rate (default: 0.1)"
     )
     parser_select.add_argument(
@@ -344,6 +341,12 @@ Examples:
         "--selected_users",
         required=True,
         help="Strategy name (diverse/extreme/random) or path to selected_users.json",
+    )
+    parser_plot.add_argument(
+        "--max_seq_len",
+        type=int,
+        default=None,
+        help="Maximum sequence length for plotting (default: None, no truncation)",
     )
 
     args = parser.parse_args()

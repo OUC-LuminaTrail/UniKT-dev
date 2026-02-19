@@ -244,7 +244,7 @@ class ResultCollector:
 
     def select_users(
         self,
-        num_attempts_range: tuple[int, int] = (10, 200),
+        min_num_attempts: int = 10,
         error_rate_range: tuple[float, float] = (0.1, 0.9),
         confidence_range: tuple[float, float] = (0.3, 0.95),
         max_users: int = 20,
@@ -253,7 +253,7 @@ class ResultCollector:
         """Select users based on filtering criteria.
 
         Args:
-            num_attempts_range: Range of valid attempt counts (min, max)
+            min_num_attempts: Minimum attempt count required
             error_rate_range: Range of valid error rates (min, max)
             confidence_range: Range of valid avg confidence (min, max)
             max_users: Maximum number of users to select
@@ -269,8 +269,7 @@ class ResultCollector:
 
         # Apply filters
         filtered = user_metrics[
-            (user_metrics["num_attempts"] >= num_attempts_range[0])
-            & (user_metrics["num_attempts"] <= num_attempts_range[1])
+            (user_metrics["num_attempts"] >= min_num_attempts)
             & (user_metrics["error_rate"] >= error_rate_range[0])
             & (user_metrics["error_rate"] <= error_rate_range[1])
             & (user_metrics["avg_confidence"] >= confidence_range[0])
