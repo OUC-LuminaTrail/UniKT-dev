@@ -255,9 +255,7 @@ class EdNetKT1Data(DataSource):
                 "num_questions": self.question_data["question"].nunique(),
                 "num_skills": self.question_data["skill"].nunique(),
                 "num_assignments": self.question_data["assignment"].nunique(),
-                "num_templates": self.question_data["template"].nunique()
-                if "template" in self.question_data.columns
-                else 0,
+                "num_templates": self.question_data["template"].nunique(),
                 "max_seq_len": self.args.max_seq_len,
                 "min_seq_len": self.args.min_seq_len,
                 "sequence_columns": sequence_data.columns.tolist(),
