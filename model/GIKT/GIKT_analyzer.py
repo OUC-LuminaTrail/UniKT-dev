@@ -98,13 +98,6 @@ class GIKTAnalyzer(BaseCaseAnalyzer):
         # -> knowledge_states: [B, S, num_skills]，值域 [0, 1] 表示掌握程度
         knowledge_states = torch.sigmoid(torch.matmul(lstm_output, skill_conv.T))
 
-        # 全局 min-max 归一化
-        # 对整个 [B, S, num_skills] 张量统一缩放到 [0, 1]，保留技能间的绝对可比性
-        ks_min = knowledge_states.min().clamp(max=knowledge_states.max() - 1e-8)
-        ks_max = knowledge_states.max()
-        ks_range = (ks_max - ks_min).clamp(min=1e-8)  # 避免除以零
-        knowledge_states = (knowledge_states - ks_min) / ks_range
-
         return {
             "y_hat": y_hat,
             "y_label": y_label,
