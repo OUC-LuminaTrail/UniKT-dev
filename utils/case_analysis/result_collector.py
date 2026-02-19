@@ -38,6 +38,7 @@ class ResultCollector:
             "predictions": [],
             "logits": [],
             "mask": [],
+            "knowledge_states": [],
         }
         self._df = None  # Cached DataFrame
 
@@ -77,6 +78,14 @@ class ResultCollector:
             batch_size = len(self.data["user_ids"]) - len(self.data["skills"])
             self.data["skills"].extend([0] * batch_size)
 
+        # Add empty knowledge_states if not provided
+        if (
+            "knowledge_states" not in case_data
+            or len(case_data.get("knowledge_states", [])) == 0
+        ):
+            batch_size = len(self.data["user_ids"]) - len(self.data["knowledge_states"])
+            self.data["knowledge_states"].extend([None] * batch_size)
+
         # Invalidate cached DataFrame
         self._df = None
 
@@ -107,11 +116,11 @@ class ResultCollector:
                 "prediction": self.data["predictions"],
                 "logit": self.data["logits"],
                 "mask": self.data["mask"],
+                "knowledge_state": self.data["knowledge_states"],
             }
         )
 
-        # Add position column per user
-        df = df.sort_values(["user_id", "question_id"]).reset_index(drop=True)
+        # Add position column per user (preserve insertion order as sequence order)
         df["position"] = df.groupby("user_id").cumcount()
 
         self._df = df
@@ -158,6 +167,17 @@ class ResultCollector:
                 target_col = col if col != "user_id" else "user_ids"
                 target_col = target_col if target_col != "skill" else "skills"
                 collector.data[target_col] = df[col].tolist()
+
+        # Load knowledge_state column (list of lists, must not contain None)
+        if "knowledge_state" in df.columns:
+            if df["knowledge_state"].isna().any():
+                raise ValueError(
+                    "knowledge_state column contains None values. "
+                    "Model must return knowledge states for case analysis."
+                )
+            collector.data["knowledge_states"] = (
+                df["knowledge_state"].apply(list).tolist()
+            )
 
         # Cache DataFrame
         collector._df = df
