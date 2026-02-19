@@ -1,6 +1,6 @@
 """参数配置模块
 
-提供模型参数配置基类和注册表，合并了原有的 params/ 模块。
+提供模型参数配置基类和注册表。
 """
 
 import argparse
@@ -276,8 +276,8 @@ class SamplingParams(BaseParamConfig):
         params = {
             "sample_users": {
                 "type": int,
-                "default": 5000,
-                "help": "Number of users to sample (0/None to disable sampling)",
+                "default": None,
+                "help": "Number of users to sample (None to disable sampling)",
             },
             "sample_stratify": {
                 "type": bool,
