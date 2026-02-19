@@ -320,7 +320,6 @@ python case_analysis.py select \
 | `--strategy` | 筛选策略：`diverse`（多样化）、`extreme`（极端错误）、`random`（随机） | `diverse` |
 | `--num_users` | 最大用户数 | 10 |
 | `--min_seq_len` | 最小序列长度 | 20 |
-| `--max_seq_len` | 最大序列长度 | 200 |
 | `--min_error` | 最小错误率 | 0.1 |
 | `--max_error` | 最大错误率 | 0.9 |
 
@@ -334,6 +333,12 @@ python case_analysis.py select \
 python case_analysis.py plot \
     --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \
     --selected_users diverse
+
+# 限制可视化时的序列最大长度
+python case_analysis.py plot \
+    --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \
+    --selected_users diverse \
+    --max_seq_len 100
 ```
 
 **可视化参数说明：**
@@ -342,6 +347,7 @@ python case_analysis.py plot \
 |------|------|
 | `--run_dir` | 训练运行目录（必需） |
 | `--selected_users` | 策略名称（diverse/extreme/random）或 selected_users.json 路径 |
+| `--max_seq_len` | 可视化时的最大序列长度，超出部分会被裁切（默认：None，不裁切） |
 
 **输出文件（保存在 `<run_dir>/case_analysis/<strategy>/figures/`）：**
 - `user_{id}_heatmap.png`：每个用户的热力图
