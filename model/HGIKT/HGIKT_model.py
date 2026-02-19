@@ -307,6 +307,7 @@ class HGIKT(nn.Module):
         hetero_graph: Any,  # HeteroData
         hypergraph: Any,  # dhg.Hypergraph
         question_skill_matrix: torch.Tensor,  # [Q, K]
+        return_states: bool = False,
     ) -> torch.Tensor:  # [B, S]
         """前向传播。
 
@@ -317,9 +318,10 @@ class HGIKT(nn.Module):
             hetero_graph: 异构图数据
             hypergraph: 超图数据
             question_skill_matrix: 问题-技能关联矩阵 [Q, K]
+            return_states: 是否返回内部状态（用于知识状态计算）
 
         Returns:
-            预测 logits [B, S]
+            预测 logits [B, S]，或 (logits, skill_hetero_conv, lstm_output) 当 return_states=True
         """
         # 批量大小
         B, _ = user_sequence.size()
@@ -469,4 +471,6 @@ class HGIKT(nn.Module):
             student_status, knowledge_status, user_mask
         )  # [B, S]
 
+        if return_states:
+            return logits, skill_hetero_conv, lstm_output
         return logits  # [B, S]

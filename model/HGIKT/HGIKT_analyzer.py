@@ -5,6 +5,7 @@ Provides inference-only capabilities for HGIKT model case analysis.
 
 from typing import Any
 
+import numpy as np
 import torch
 
 from utils.case_analysis.base_analyzer import BaseCaseAnalyzer
@@ -44,6 +45,14 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.num_questions = data_src.get_metadata("num_questions")
         self.num_skills = data_src.get_metadata("num_skills")
 
+        # Build question -> first skill lookup array: shape [num_questions]
+        qs_matrix = question_skill_matrix.numpy()  # [num_questions, num_skills]
+        first_skill = np.argmax(qs_matrix, axis=1)
+        has_skill_per_q = qs_matrix.sum(axis=1) > 0
+        self.question_to_skill = np.where(has_skill_per_q, first_skill, 0).astype(
+            np.int64
+        )
+
         model = HGIKT(args, data_src.get_metadata(), hetero_graph.metadata())
 
         super().__init__(model, checkpoint_path)
@@ -70,21 +79,23 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             batch_data: Tuple of (sequence, response, mask)
 
         Returns:
-            Dictionary with y_hat (flattened), y_label (flattened), y_predict, and full_y_hat (unflattened)
+            Dictionary with y_hat (flattened), y_label (flattened), y_predict,
+            full_y_hat (unflattened), and knowledge_states (for visualization)
         """
         sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        # Model forward pass
-        y_hat_full = self.model(
+        # Model forward pass with return_states=True
+        y_hat_full, skill_hetero_conv, lstm_output = self.model(
             sequence,
             response,
             mask,
             self.hetero_graph,
             self.hypergraph,
             self.question_skill_matrix,
+            return_states=True,
         )
 
         # Extract valid predictions (skip first position)
@@ -98,11 +109,24 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         # Generate binary predictions
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
+        # 计算知识状态：sigmoid(lstm_output @ skill_hetero_conv.T)
+        # skill_hetero_conv: [num_skills, H], lstm_output: [B, S, H]
+        # -> knowledge_states: [B, S, num_skills]，值域 [0, 1] 表示掌握程度
+        knowledge_states = torch.sigmoid(torch.matmul(lstm_output, skill_hetero_conv.T))
+
+        # 全局 min-max 归一化：提升热力图的色彩对比度
+        # 对整个 [B, S, num_skills] 张量统一缩放到 [0, 1]，保留技能间的绝对可比性
+        ks_min = knowledge_states.min().clamp(max=knowledge_states.max() - 1e-8)
+        ks_max = knowledge_states.max()
+        ks_range = (ks_max - ks_min).clamp(min=1e-8)  # 避免除零（所有值完全相同时）
+        knowledge_states = (knowledge_states - ks_min) / ks_range
+
         return {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
             "y_hat_full": y_hat_full,
+            "knowledge_states": knowledge_states,
         }
 
     def extract_case_data(self, batch_data: Any, outputs: dict) -> dict:
@@ -122,6 +146,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         y_label = outputs["y_label"]
         y_predict = outputs["y_predict"]
         y_hat = outputs["y_hat"]
+        knowledge_states = outputs["knowledge_states"]  # [B, S, num_skills]
 
         masks_bool = masks.bool()
         if seq_len > 1:
@@ -141,11 +166,22 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             .numpy()
         )
 
+        # 将知识状态展平：[B, S, num_skills] -> [B*S, num_skills]，取有效位置
+        num_skills = knowledge_states.shape[-1]
+        knowledge_states_flat = (
+            knowledge_states.view(-1, num_skills)[valid_indices].cpu().numpy()
+        )
+
+        # 根据 question_id 查询对应的 skill_id（取第一个关联技能）
+        skill_ids_flat = self.question_to_skill[question_ids_flat]
+
         return {
             "user_ids": user_ids_flat,
             "question_ids": question_ids_flat,
+            "skills": skill_ids_flat,
             "labels": y_label.cpu().numpy(),
             "predictions": y_predict.cpu().numpy(),
             "logits": y_hat.cpu().numpy(),
             "masks": masks_bool.view(-1)[valid_indices].cpu().numpy(),
+            "knowledge_states": knowledge_states_flat,
         }
