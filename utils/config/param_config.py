@@ -276,8 +276,8 @@ class SamplingParams(BaseParamConfig):
         params = {
             "sample_users": {
                 "type": int,
-                "default": None,
-                "help": "Number of users to sample (None to disable sampling)",
+                "default": 5000,
+                "help": "Number of users to sample (0/None to disable sampling)",
             },
             "sample_stratify": {
                 "type": bool,
