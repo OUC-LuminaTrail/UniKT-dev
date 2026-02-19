@@ -112,6 +112,17 @@ class HeatmapVisualizer:
                 if skill_id < len(ks):
                     ks_matrix[row_idx, t] = float(ks[skill_id])
 
+        # Compute actual min/max from matrix (ignoring NaN) for dynamic color scaling
+        ks_valid = ks_matrix[~np.isnan(ks_matrix)]
+        if ks_valid.size > 0:
+            ks_min = float(ks_valid.min())
+            ks_max = float(ks_valid.max())
+            # Handle case where all values are identical
+            if ks_max - ks_min < 1e-8:
+                ks_min = ks_max - 1.0
+        else:
+            ks_min, ks_max = 0.0, 1.0
+
         # Figure dimensions – scale with sequence length and skill count
         skill_row_h = 0.55
         resp_row_h = 0.55
@@ -158,8 +169,8 @@ class HeatmapVisualizer:
             ks_matrix,
             aspect="auto",
             cmap=cmap,
-            vmin=0.0,
-            vmax=1.0,
+            vmin=ks_min,
+            vmax=ks_max,
             interpolation="none",
         )
 
