@@ -161,7 +161,7 @@ class EdNetKT1Data(DataSource):
         # 处理题目信息
         question_data = self.question_data_raw.copy()  # 复制一份以防修改原数据
 
-        # 重命名列：bundle_id -> assignment；tags -> skill
+        # 重命名列
         question_data = question_data.rename(
             columns={
                 "tags": "skill",
@@ -170,21 +170,16 @@ class EdNetKT1Data(DataSource):
             }
         )
 
-        # 移除缺失值（注意：先 dropna 再 astype(str)，避免 NaN 变成字符串 "nan"）
+        # 移除缺失值
         question_data.dropna(subset=["correct_answer", "skill"], inplace=True)
 
-        # 统一类型
-        question_data["question"] = question_data["question"].astype(str)
-        if "skill" in question_data.columns:
-            question_data["skill"] = question_data["skill"].astype(str)
-
-        # 将 tags 完全相同（按集合意义归一化）的组合作为 template
+        # 将 tags 完全相同的组合作为 template
         def _canonicalize_tags(tags: str, sep: str = ";") -> str:
             if tags is None:
                 return None
             if not isinstance(tags, str):
                 tags = str(tags)
-            parts = [p.strip() for p in tags.split(sep) if p is not None and p.strip()]
+            parts = [p.strip() for p in tags.split(sep) if p.strip()]
             if not parts:
                 return None
             parts = sorted(dict.fromkeys(parts))
@@ -192,31 +187,18 @@ class EdNetKT1Data(DataSource):
 
         question_data["template_key"] = question_data["skill"].map(_canonicalize_tags)
 
-        # 将 assignment / template / question 映射为连续 ID（先做一次粗映射，后面会在最终保留集合上再做去空洞）
-        bundles = question_data["assignment"].unique()
-        bundles_id_map = {b: idx for idx, b in enumerate(bundles)}
-        question_data["assignment"] = question_data["assignment"].map(bundles_id_map)
-
-        templates = question_data["template_key"].dropna().unique()
-        templates_id_map = {t: idx for idx, t in enumerate(templates)}
-        question_data["template"] = question_data["template_key"].map(templates_id_map)
-
-        questions = question_data["question"].unique()
-        questions_id_map = {q: idx for idx, q in enumerate(questions)}
-        question_data["question"] = question_data["question"].map(questions_id_map)
+        question_data["question"] = question_data["question"].astype(str)
+        question_data["template"] = question_data["template_key"]
 
         # 处理用户回答数据
         sequence_data = self.sequence_data_raw.copy()
 
-        # 将 question_id 映射为整数 id（与 question_data 保持一致）
-        sequence_data["question_id"] = sequence_data["question_id"].astype(str).map(
-            questions_id_map
-        )
+        # 确保 question_id 是字符串类型，方便后续映射
+        sequence_data["question_id"] = sequence_data["question_id"].astype(str)
         # 从question_data中构建question到correct_answer的映射
-        q_ans_map = question_data.set_index("question")["correct_answer"].to_dict()
+        q_ans_map = question_data.set_index("question")["correct_answer"]
         # 过滤掉不在题目元数据中的题目
-        valid_questions = sequence_data["question_id"].isin(q_ans_map.keys())
-        sequence_data = sequence_data[valid_questions]
+        sequence_data = sequence_data[sequence_data["question_id"].isin(q_ans_map.index)]
         # 按照question_id映射正确答案
         sequence_data["correct_answer"] = sequence_data["question_id"].map(q_ans_map)
         # 计算label
@@ -240,30 +222,18 @@ class EdNetKT1Data(DataSource):
             sequence_data, self.args.min_seq_len, self.args.max_seq_len
         )
 
-        # 统一题目ID映射（基于最终保留的交互）并同步到 question_data，
-        # 避免 sequence_data 与 question_data 出现二次重编码不一致。
-        appeared_questions = sorted(
-            sequence_data["question"].dropna().astype(int).unique().tolist()
-        )
+        # 重新映射题目ID为连续整数，方便后续处理。只保留在交互数据中出现过的题目。
+        appeared_questions = sorted(sequence_data["question"].dropna().unique().tolist())
         question_id_map = {q: idx for idx, q in enumerate(appeared_questions)}
 
-        sequence_data["question"] = (
-            sequence_data["question"].astype(int).map(question_id_map).astype(int)
-        )
+        sequence_data["question"] = sequence_data["question"].map(question_id_map)
 
-        question_data = question_data[
-            question_data["question"].astype(int).isin(appeared_questions)
-        ].copy()
-        question_data["question"] = (
-            question_data["question"].astype(int).map(question_id_map).astype(int)
-        )
+        question_data = question_data[question_data["question"].isin(appeared_questions)].copy()
+        question_data["question"] = question_data["question"].map(question_id_map)
 
-        # 在最终保留的问题集合上，重新对 assignment/template 做连续 ID 映射，避免出现空洞导致图构建跳过边。
+        # 对于assignment和template列进行类别编码，转换为整数类型
         for col in ["assignment", "template"]:
-            if col in question_data.columns:
-                question_data[col] = (
-                    question_data[col].astype("category").cat.codes.astype(int)
-                )
+            question_data[col] = question_data[col].astype("category").cat.codes.astype(int)
 
         # 仅对用户ID重编码，题目ID已在上面统一映射。
         sequence_data = map_to_continuous_ids(sequence_data, columns=["user"])
