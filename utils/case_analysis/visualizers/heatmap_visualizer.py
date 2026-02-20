@@ -97,7 +97,7 @@ class HeatmapVisualizer:
 
         fig = plt.figure(figsize=(fig_w, fig_h))
         fig.suptitle(
-            f"User {user_id} – Knowledge State Heatmap",
+            f"User {user_id} - Knowledge State Heatmap",
             fontsize=13,
             fontweight="bold",
             y=0.99,
