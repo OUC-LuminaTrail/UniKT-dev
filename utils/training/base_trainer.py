@@ -536,6 +536,8 @@ class BaseTrainer(ABC):
         if lark_webhook:
             callbacks.append(LarkCallback(webhook_url=lark_webhook, secret=lark_secret))
 
+        settings = swanlab.Settings(log_proxy_type="stderr")
+
         swanlab.init(
             workspace=os.getenv("SWANLAB_WORKSPACE", None),
             project_name=project_name,
@@ -546,6 +548,7 @@ class BaseTrainer(ABC):
             callbacks=callbacks,
             group=self.model.__class__.__name__,
             tags=["cuda" if torch.cuda.is_available() else "cpu"],
+            settings=settings,
         )
         logger.info(
             f"SwanLab initialized for project: {project_name}, run: {experiment_name}"
