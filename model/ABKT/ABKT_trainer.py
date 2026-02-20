@@ -365,7 +365,7 @@ class ABKTTrainer(MultiTrainer):
         # 早停
         early_stopping = EarlyStopping(
             EarlyStoppingConfig(
-                monitor="auc",
+                monitor="acc",
                 mode="max",
                 patience=self.args.km_patience,
             )
@@ -624,7 +624,7 @@ class ABKTTrainer(MultiTrainer):
 
         # 构建输出字典
         output = {
-            "y_hat": final_pred,
+            "y_hat": final_pred.clamp(0.0, 1.0),
             "y_label": correct,
             "y_predict": y_predict,
             "am_pred": am_pred,
