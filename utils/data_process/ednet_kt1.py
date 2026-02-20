@@ -30,7 +30,7 @@ class EdNetKT1Data(DataSource):
 
     def __init__(self, args):
         super().__init__(
-            dataset="ednet",
+            dataset="ednet_kt1",
             data_base_path=args.data_base_path,
             data_url="http://cdn.lionhao.top/KTDataset/EdNetKT1.zip",
             seed=args.seed,
