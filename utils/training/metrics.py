@@ -94,6 +94,13 @@ class MetricsAccumulator:
 
         # 检查预测值是否为概率值，如果不是则自动应用 sigmoid
         if not ((y_hat >= 0).all() and (y_hat <= 1).all()):
+            out_of_range = ((y_hat < 0) | (y_hat > 1)).sum()
+            total = len(y_hat)
+            logger.warning(
+                f"[{phase.upper()}] Auto-sigmoid triggered: {out_of_range}/{total} "
+                f"values out of [0,1] range. "
+                f"min={y_hat.min():.4f}, max={y_hat.max():.4f}"
+            )
             y_hat = expit(y_hat)  # 数值稳定的 sigmoid 实现
 
         # 计算指标
