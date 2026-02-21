@@ -1,6 +1,6 @@
 """统一实验管理模块
 
-提供统一的实验日志目录管理，支持普通训练、消融实验和超参数搜索。
+提供统一的实验日志目录管理，支持普通训练和超参数搜索。
 """
 
 from datetime import datetime
@@ -16,7 +16,6 @@ class ExperimentType(Enum):
     """实验类型枚举"""
 
     NORMAL = "normal"
-    ABLATION = "ablation"
     HYPERPARAM_SEARCH = "hyperparam_search"
 
 
@@ -26,7 +25,7 @@ class ExperimentManager:
     职责：
     1. 创建符合规范的实验目录结构
     2. 生成统一的命名格式
-    3. 管理实验子目录（用于消融实验等）
+    3. 管理实验子目录
     4. 提供工厂方法从命令行参数创建
 
     Example:
@@ -60,7 +59,7 @@ class ExperimentManager:
         """初始化实验管理器
 
         Args:
-            exp_type: 实验类型（NORMAL/ABLATION/HYPERPARAM_SEARCH）
+            exp_type: 实验类型（NORMAL/HYPERPARAM_SEARCH）
             model_name: 模型名称（GIKT/HGIKT/SQGKT）
             dataset_name: 数据集名称（assist09/assist12/assist17/ednet）
             base_dir: 基础目录（默认: runs）
@@ -91,43 +90,10 @@ class ExperimentManager:
         """
         return str(self.exp_dir)
 
-    def create_sub_experiment(self, sub_name: str) -> "ExperimentManager":
-        """创建子实验管理器，共享时间戳但使用子目录
-
-        用于消融实验等需要多个子实验的场景，所有子实验共享同一个时间戳。
-
-        Args:
-            sub_name: 子实验名称（如 "full_model", "no_gnn"）
-
-        Returns:
-            新的 ExperimentManager 实例，指向子目录
-
-        Example:
-            >>> parent_manager = ExperimentManager(...)
-            >>> child_manager = parent_manager.create_sub_experiment("full_model")
-            >>> # parent: runs/ablation/GIKT_assist09_20241201-120000/
-            >>> # child:  runs/ablation/GIKT_assist09_20241201-120000/full_model/
-        """
-        # 创建子实验目录
-        sub_dir = self.exp_dir / sub_name
-        sub_dir.mkdir(parents=True, exist_ok=True)
-
-        # 创建一个新的 ExperimentManager，复用父管理器的时间戳和配置
-        sub_manager = ExperimentManager.__new__(ExperimentManager)
-        sub_manager.exp_type = self.exp_type
-        sub_manager.model_name = self.model_name
-        sub_manager.dataset_name = self.dataset_name
-        sub_manager.base_dir = self.base_dir
-        sub_manager.tags = self.tags + [sub_name]
-        sub_manager.exp_dir = sub_dir
-
-        logger.debug(f"Sub-experiment created: {sub_dir}")
-        return sub_manager
-
     def create_subdir(self, name: str) -> Path:
         """创建子目录
 
-        用于消融实验等需要多个子目录的场景。
+        用于需要多个子目录的场景。
 
         Args:
             name: 子目录名称
@@ -138,7 +104,7 @@ class ExperimentManager:
         Example:
             >>> manager = ExperimentManager(...)
             >>> full_model_dir = manager.create_subdir("full_model")
-            >>> # runs/ablation/GIKT_assist09_20241201-120000/full_model/
+            >>> # runs/normal/GIKT_assist09_20241201-120000/full_model/
         """
         subdir = self.exp_dir / name
         subdir.mkdir(parents=True, exist_ok=True)

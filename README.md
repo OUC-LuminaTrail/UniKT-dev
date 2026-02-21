@@ -82,10 +82,6 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
 ```
 kt-exp-graph/
 ├── configs/                           # 配置与参数空间
-│   ├── ablation/                      # 消融实验配置
-│   │   ├── gikt_ablation.json
-│   │   ├── hgikt_ablation.json
-│   │   └── sqgkt_ablation.json
 │   └── optuna/                        # Optuna 搜索配置
 │       ├── optuna_config.json
 │       ├── param_space_gikt.json
@@ -108,7 +104,6 @@ kt-exp-graph/
 ├── runs/                              # 实验运行日志与检查点
 ├── swanlog/                           # SwanLab 本地日志
 ├── utils/                             # 工具模块
-│   ├── ablation/                      # 消融实验工具
 │   ├── config/                        # 配置管理
 │   │   ├── data_config.py            # 数据加载器配置
 │   │   ├── param_config.py            # 参数配置
@@ -136,7 +131,6 @@ kt-exp-graph/
 ├── scripts/
 │   ├── run_kfold.sh                   # K 折训练脚本
 │   └── setup_env.sh                   # 环境配置脚本
-├── ablation_study.py                  # 消融实验脚本
 ├── data_process.py                    # 数据预处理脚本（下载/清洗/划分）
 ├── optuna_search.py                   # 超参数搜索脚本
 └── train.py                           # 模型训练脚本
@@ -230,18 +224,7 @@ python train.py -m GIKT -d assistments09 --es_patience 10 --es_monitor auc --es_
 
 各模型的详细训练说明在 `docs/` 目录下。
 
-### 3. 消融实验研究
-
-消融实验通过配置文件定义不同的策略（如置零特征、禁用模块等）：
-
-```bash
-# 运行 GIKT 的消融实验
-python ablation_study.py --model GIKT --dataset assistments09 --config configs/ablation/gikt_ablation.json
-```
-
-生成的实验结果会记录在 SwanLab 中，方便对比各消融版本的性能。
-
-### 4. 超参数自动化搜索 (Optuna)
+### 3. 超参数自动化搜索 (Optuna)
 
 利用 Optuna 自动寻找最优超参数：
 
@@ -252,7 +235,7 @@ python optuna_search.py -m GIKT -d assistments09 --n_trials 50
 
 搜索的空间由 `configs/optuna/param_space_<model>.json` 定义。
 
-### 5. 查看训练结果
+### 4. 查看训练结果
 
 训练过程中的指标会自动上传到 SwanLab，可以在 SwanLab 官网查看训练曲线、损失、准确率、AUC等指标。
 
