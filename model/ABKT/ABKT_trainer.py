@@ -365,7 +365,7 @@ class ABKTTrainer(MultiTrainer):
         # 早停
         early_stopping = EarlyStopping(
             EarlyStoppingConfig(
-                monitor="auc",
+                monitor="acc",
                 mode="max",
                 patience=self.args.km_patience,
             )
@@ -525,6 +525,8 @@ class ABKTTrainer(MultiTrainer):
             "y_hat": pred,
             "y_label": corrects.float(),
             "y_predict": y_predict,
+            "y_score": pred,
+            "y_prob": pred,
         }
 
     def _forward_km_val(
@@ -591,6 +593,8 @@ class ABKTTrainer(MultiTrainer):
             "y_hat": pred,
             "y_label": corrects.float(),
             "y_predict": y_predict,
+            "y_score": pred,
+            "y_prob": pred,
         }
 
     def _forward_am(self, batch_data: tuple) -> dict:
@@ -627,6 +631,8 @@ class ABKTTrainer(MultiTrainer):
             "y_hat": final_pred,
             "y_label": correct,
             "y_predict": y_predict,
+            "y_score": final_pred,
+            "y_prob": final_pred.clamp(0.0, 1.0),
             "am_pred": am_pred,
             "km_pred": km_pred,
             "u_norm": u_norm,
