@@ -220,4 +220,6 @@ class GIKTTrainer(BaseTrainer):
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
+            "y_score": y_hat,
+            "y_prob": torch.sigmoid(y_hat),
         }

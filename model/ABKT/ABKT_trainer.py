@@ -525,6 +525,8 @@ class ABKTTrainer(MultiTrainer):
             "y_hat": pred,
             "y_label": corrects.float(),
             "y_predict": y_predict,
+            "y_score": pred,
+            "y_prob": pred,
         }
 
     def _forward_km_val(
@@ -591,6 +593,8 @@ class ABKTTrainer(MultiTrainer):
             "y_hat": pred,
             "y_label": corrects.float(),
             "y_predict": y_predict,
+            "y_score": pred,
+            "y_prob": pred,
         }
 
     def _forward_am(self, batch_data: tuple) -> dict:
@@ -624,9 +628,11 @@ class ABKTTrainer(MultiTrainer):
 
         # 构建输出字典
         output = {
-            "y_hat": final_pred.clamp(0.0, 1.0),
+            "y_hat": final_pred,
             "y_label": correct,
             "y_predict": y_predict,
+            "y_score": final_pred,
+            "y_prob": final_pred.clamp(0.0, 1.0),
             "am_pred": am_pred,
             "km_pred": km_pred,
             "u_norm": u_norm,

@@ -198,7 +198,9 @@ class EdNetKT1Data(DataSource):
         # 从question_data中构建question到correct_answer的映射
         q_ans_map = question_data.set_index("question")["correct_answer"]
         # 过滤掉不在题目元数据中的题目
-        sequence_data = sequence_data[sequence_data["question_id"].isin(q_ans_map.index)]
+        sequence_data = sequence_data[
+            sequence_data["question_id"].isin(q_ans_map.index)
+        ]
         # 按照question_id映射正确答案
         sequence_data["correct_answer"] = sequence_data["question_id"].map(q_ans_map)
         # 计算label
@@ -223,17 +225,23 @@ class EdNetKT1Data(DataSource):
         )
 
         # 重新映射题目ID为连续整数，方便后续处理。只保留在交互数据中出现过的题目。
-        appeared_questions = sorted(sequence_data["question"].dropna().unique().tolist())
+        appeared_questions = sorted(
+            sequence_data["question"].dropna().unique().tolist()
+        )
         question_id_map = {q: idx for idx, q in enumerate(appeared_questions)}
 
         sequence_data["question"] = sequence_data["question"].map(question_id_map)
 
-        question_data = question_data[question_data["question"].isin(appeared_questions)].copy()
+        question_data = question_data[
+            question_data["question"].isin(appeared_questions)
+        ].copy()
         question_data["question"] = question_data["question"].map(question_id_map)
 
         # 对于assignment和template列进行类别编码，转换为整数类型
         for col in ["assignment", "template"]:
-            question_data[col] = question_data[col].astype("category").cat.codes.astype(int)
+            question_data[col] = (
+                question_data[col].astype("category").cat.codes.astype(int)
+            )
 
         # 仅对用户ID重编码，题目ID已在上面统一映射。
         sequence_data = map_to_continuous_ids(sequence_data, columns=["user"])
