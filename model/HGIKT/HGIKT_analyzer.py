@@ -71,18 +71,19 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
         """HGIKT forward pass for inference.
 
         Args:
-            batch_data: Tuple of (sequence, response, mask)
+            batch_data: Tuple of (users, sequence, response, mask)
 
         Returns:
             Dictionary with y_hat (flattened), y_label (flattened), y_predict,
             full_y_hat (unflattened), and knowledge_states (for visualization)
         """
-        sequence, response, mask = batch_data
+        users, sequence, response, mask = batch_data
+        users = self._move_tensor_to_device(users)
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
@@ -126,13 +127,13 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         """Extract case data from batch outputs.
 
         Args:
-            batch_data: Raw batch data (sequence, response, mask tuple)
+            batch_data: Raw batch data (users, sequences, responses, masks tuple)
             outputs: Output dict from forward_pass
 
         Returns:
             Dictionary with extracted data (all flattened to valid positions)
         """
-        sequences, responses, masks = batch_data
+        users, sequences, responses, masks = batch_data
 
         batch_size, seq_len = sequences.shape
 
@@ -148,16 +149,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         valid_indices = masks_bool.view(-1).nonzero(as_tuple=True)[0]
 
         question_ids_flat = sequences.view(-1)[valid_indices].cpu().numpy()
-
-        # Generate dummy user IDs (batch indices) since HGIKT doesn't track users
-        user_ids_flat = (
-            torch.arange(batch_size)
-            .view(-1, 1)
-            .expand(-1, seq_len)
-            .reshape(-1)[valid_indices]
-            .cpu()
-            .numpy()
-        )
+        user_ids_flat = users.view(-1)[valid_indices].cpu().numpy()
 
         # 将知识状态展平：[B, S, num_skills] -> [B*S, num_skills]，取有效位置
         num_skills = knowledge_states.shape[-1]
