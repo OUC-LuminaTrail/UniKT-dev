@@ -17,6 +17,7 @@ class ExperimentType(Enum):
 
     NORMAL = "normal"
     HYPERPARAM_SEARCH = "hyperparam_search"
+    ABLATION = "ablation"
 
 
 class ExperimentManager:

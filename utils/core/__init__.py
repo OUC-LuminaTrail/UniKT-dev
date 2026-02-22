@@ -6,7 +6,6 @@
 from .logger import get_logger, reset_loggers, set_log_level
 from .random import seed_everything
 from .registry import (
-    ABLATION_STRATEGIES,
     COMPONENTS,
     DATA_SOURCES,
     MODELS,
@@ -25,7 +24,6 @@ __all__ = [
     "DATA_SOURCES",
     "COMPONENTS",
     "PARAM_CONFIGS",
-    "ABLATION_STRATEGIES",
     "UniversalRegistry",
     "register_model",
     "register_trainer",
