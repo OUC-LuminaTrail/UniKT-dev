@@ -83,9 +83,7 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
 kt-exp-graph/
 ├── configs/                           # 配置与参数空间
 │   ├── ablation/                      # 消融实验配置
-│   │   ├── gikt_ablation.json
-│   │   ├── hgikt_ablation.json
-│   │   └── sqgkt_ablation.json
+│   │   └── hgikt_study.json
 │   └── optuna/                        # Optuna 搜索配置
 │       ├── optuna_config.json
 │       ├── param_space_gikt.json
@@ -100,6 +98,17 @@ kt-exp-graph/
 │   ├── DGEKT/
 │   ├── GIKT/
 │   ├── HGIKT/
+│   │   ├── HGIKT_data.py
+│   │   ├── HGIKT_model.py
+│   │   ├── HGIKT_trainer.py
+│   │   ├── __init__.py
+│   │   └── variants/                  # HGIKT 消融变体
+│   │       ├── __init__.py
+│   │       ├── hgikt_no_hypergraph.py
+│   │       ├── hgikt_no_hypergraph_trainer.py
+│   │       ├── hgikt_no_template_edges.py
+│   │       ├── hgikt_no_template_edges_data.py
+│   │       └── hgikt_no_template_edges_trainer.py
 │   ├── SGKT/
 │   ├── SQGKT/
 │   └── layers/                        # 共享模型组件
@@ -108,7 +117,10 @@ kt-exp-graph/
 ├── runs/                              # 实验运行日志与检查点
 ├── swanlog/                           # SwanLab 本地日志
 ├── utils/                             # 工具模块
-│   ├── ablation/                      # 消融实验工具
+│   ├── ablation/                      # 消融实验框架
+│   │   ├── config.py
+│   │   ├── config_loader.py
+│   │   └── runner.py
 │   ├── config/                        # 配置管理
 │   │   ├── data_config.py            # 数据加载器配置
 │   │   ├── param_config.py            # 参数配置
@@ -133,6 +145,18 @@ kt-exp-graph/
 │   ├── experiment_manager.py
 │   ├── hyperparam_manager.py
 │   └── net_data.py
+├── scripts/
+│   ├── run_kfold.sh                   # K 折训练脚本
+│   └── setup_env.sh                   # 环境配置脚本
+├── ablation_study.py                  # 消融实验脚本
+├── data_process.py                    # 数据预处理脚本（下载/清洗/划分）
+├── optuna_search.py                   # 超参数搜索脚本
+└── train.py                           # 模型训练脚本
+```
+│   ├── hgikt_no_hypergraph_trainer.py
+│   ├── hgikt_no_template_edges.py
+│   ├── hgikt_no_template_edges_data.py
+│   └── hgikt_no_template_edges_trainer.py
 ├── scripts/
 │   ├── run_kfold.sh                   # K 折训练脚本
 │   └── setup_env.sh                   # 环境配置脚本
@@ -230,16 +254,22 @@ python train.py -m GIKT -d assistments09 --es_patience 10 --es_monitor auc --es_
 
 各模型的详细训练说明在 `docs/` 目录下。
 
-### 3. 消融实验研究
+### 3. 消融实验 (Ablation Study)
 
-消融实验通过配置文件定义不同的策略（如置零特征、禁用模块等）：
+消融实验用于分析模型各组件的作用。框架提供了基于模型子类化的消融实验支持。
 
 ```bash
-# 运行 GIKT 的消融实验
-python ablation_study.py --model GIKT --dataset assistments09 --config configs/ablation/gikt_ablation.json
+# 列出所有可用的模型变体
+pixi run python ablation_study.py --list-variants
+
+# 运行批量消融实验
+pixi run python ablation_study.py --config configs/ablation/hgikt_study.json
+
+# 训练单个变体
+pixi run python train.py -m HGIKT_NoHypergraph -d assistments09
 ```
 
-生成的实验结果会记录在 SwanLab 中，方便对比各消融版本的性能。
+详细的消融实验使用方法和创建自定义变体的教程，请参考 `docs/ablation_study.md`。
 
 ### 4. 超参数自动化搜索 (Optuna)
 

@@ -1,7 +1,7 @@
 """统一注册表系统
 
 提供类型安全的组件注册和管理，支持命名空间隔离。
-合并了原有的多个注册表（全局、params、ablation）。
+合并了原有的多个注册表（全局、params）。
 """
 
 from collections.abc import Callable
@@ -109,9 +109,6 @@ COMPONENTS = UniversalRegistry("components", namespace="kt")
 
 # 参数配置注册表
 PARAM_CONFIGS = UniversalRegistry("param_configs", namespace="kt")
-
-# 消融策略注册表
-ABLATION_STRATEGIES = UniversalRegistry("strategies", namespace="ablation")
 
 
 # ============================================================================

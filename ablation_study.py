@@ -1,151 +1,60 @@
-#!/usr/bin/env python3
-"""KT 模型的消融研究运行器。
+"""Ablation study runner - main entry point.
 
-Usage:
-    python ablation_study.py --model GIKT --dataset assistments09 \\
-        --config configs/ablation/gikt_ablation.json
+Run batch ablation experiments using model variants.
 """
 
 import argparse
-import sys
 
 import model  # noqa: F401
-from utils.ablation import AblationExperiment, load_ablation_config
-from utils.config import (
-    DataParams,
-    EarlyStoppingParams,
-    GeneralParams,
-    get_model_params,
-)
-from utils.core import TRAINERS, get_logger
-from utils.data_process import get_data_source
-from utils.experiment_manager import ExperimentManager, ExperimentType
+from utils.ablation.config_loader import load_config
+from utils.ablation.runner import AblationRunner
+from utils.core import get_logger
 
 logger = get_logger(__name__)
 
 
-def parse_args():
-    """解析命令行参数。"""
-    # 预解析 config 参数以获取模型名称
-    temp_parser = argparse.ArgumentParser(add_help=False)
-    temp_parser.add_argument("--config", type=str)
-    temp_args, _ = temp_parser.parse_known_args()
-
-    model_name = None
-    if temp_args.config:
-        try:
-            import json
-            from pathlib import Path
-
-            config_path = Path(temp_args.config)
-            if config_path.exists():
-                with open(config_path, encoding="utf-8") as f:
-                    config_data = json.load(f)
-                    model_name = config_data.get("model_name")
-        except Exception:
-            pass
-
-    # 构建完整的解析器
-    parser = argparse.ArgumentParser(description="Ablation Study Runner for KT Models")
-
-    # 添加通用参数
-    DataParams.add_args(parser)
-    EarlyStoppingParams.add_args(parser)
-    GeneralParams.add_args(parser)
-
-    # 添加模型选择参数
-    if model_name:
-        model_params_cls = get_model_params(model_name)
-        if model_params_cls:
-            model_params_cls.add_args(parser)
-
-    # 添加消融研究特定参数
-    ablation_group = parser.add_argument_group("Ablation Parameters")
-    ablation_group.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to ablation configuration file",
+def main():
+    parser = argparse.ArgumentParser(
+        description="Run ablation studies using model variants"
     )
-    ablation_group.add_argument(
-        "--ablations",
-        type=str,
-        default=None,
-        help="Comma-separated list of ablation names to run (default: all)",
-    )
-
+    parser.add_argument("--config", help="Path to ablation config JSON")
     args = parser.parse_args()
 
-    return args
+    if not args.config:
+        parser.error("--config is required")
 
+    # Load config
+    config = load_config(args.config)
 
-def main():
-    """主入口。"""
-    args = parse_args()
-
-    logger.info("Ablation Study Runner")
-
-    # Load ablation configuration
-    logger.info(f"Loading configuration from: {args.config}")
-    config = load_ablation_config(args.config)
-
-    # 创建实验管理器
-    exp_manager = ExperimentManager(
-        exp_type=ExperimentType.ABLATION,
-        model_name=config.model_name,
-        dataset_name=args.dataset,
-        base_dir="runs",
-    )
-    logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
-
-    logger.info(f"Model: {config.model_name}")
-    logger.info(f"Baseline: {config.baseline.name}")
-    logger.info(f"Ablations: {len(config.ablations)}")
-
-    # Filter ablations if specified
-    if args.ablations:
-        ablation_names = [name.strip() for name in args.ablations.split(",")]
-        config.ablations = [ab for ab in config.ablations if ab.name in ablation_names]
-        logger.info(f"Running selected ablations: {ablation_names}")
-
-    # Get trainer class
-    if config.model_name not in TRAINERS:
-        available = ", ".join(TRAINERS.keys())
-        raise ValueError(
-            f"Model '{config.model_name}' not found. Available: {available}"
-        )
-
-    trainer_cls = TRAINERS.get(config.model_name)
-
-    # Build dataset
-    logger.info(f"Building dataset: {args.dataset}...")
-    data_src = get_data_source(dataset_name=args.dataset, args=args)
-
-    # Create experiment
-    experiment = AblationExperiment(
-        base_trainer=trainer_cls,
-        config=config,
-        args=args,
-        data_src=data_src,
-        exp_manager=exp_manager,
-    )
+    # Print study info
+    logger.info(f"{'=' * 60}")
+    logger.info(f"Ablation Study: {config.study_name}")
+    logger.info(f"Base Model: {config.base_model}")
+    logger.info(f"Dataset: {config.dataset}")
+    logger.info(f"Number of ablations: {len(config.ablations)}")
+    logger.info(f"{'=' * 60}")
 
     # Run experiments
-    logger.info("Starting Ablation Study")
+    runner = AblationRunner(config)
+    results = runner.run_all()
 
-    try:
-        experiment.run_all()
-        logger.info("Ablation Study Completed Successfully!")
-
-        return 0
-
-    except Exception as e:
-        logger.error(f"Error during ablation study: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return 1
+    # Print summary
+    logger.info("=" * 60)
+    logger.info("ABLATION STUDY RESULTS")
+    logger.info("=" * 60)
+    for result in results:
+        logger.info(f"{result['name']}:")
+        logger.info(f"  Variant: {result['variant']}")
+        metrics = result.get("metrics", {})
+        if not metrics:
+            logger.info("  No metrics available")
+            continue
+        for metric_name, metric_value in sorted(metrics.items()):
+            if isinstance(metric_value, float):
+                logger.info(f"  {metric_name}: {metric_value:.4f}")
+            else:
+                logger.info(f"  {metric_name}: {metric_value}")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
