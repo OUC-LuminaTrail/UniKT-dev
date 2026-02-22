@@ -98,7 +98,7 @@ def cmd_process(args):
     dp = get_data_source(args.dataset, args)
     dp.clear_data()
 
-    if args.sample_users:
+    if args.sample_users is not None and args.sample_users > 0:
         dp.sample_users(
             args.sample_users,
             stratify=args.sample_stratify,

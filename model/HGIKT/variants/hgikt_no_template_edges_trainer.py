@@ -1,7 +1,4 @@
-"""HGIKT 模型训练器。
-
-定义 HGIKT 模型特定的训练逻辑。
-"""
+"""Trainer for HGIKT_NoTemplateEdges variant."""
 
 from typing import Any
 
@@ -14,12 +11,13 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT")
-class HGIKTModelParams(BaseParamConfig):
-    """HGIKT 模型参数配置。"""
+@register_model_params("HGIKT_NoTemplateEdges")
+class HGIKTNoTemplateEdgesModelParams(BaseParamConfig):
+    """HGIKT_NoTemplateEdges model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "HGIKT Parameters"
+        # Same parameters as HGIKT
+        group_name = "HGIKT_NoTemplateEdges Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -100,16 +98,12 @@ class HGIKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT")
-class HGIKTTrainer(BaseTrainer):
-    """HGIKT 模型训练器 - 使用 Fluent API。
+@TRAINERS.register("HGIKT_NoTemplateEdges")
+class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
+    """Trainer for HGIKT without template edges.
 
-    负责初始化 HGIKT 模型、优化器和训练数据，并实现前向传播逻辑。
-
-    Args:
-        args: 模型参数配置
-        data_src: 数据源实例
-        exp_manager: 实验管理器（可选）
+    Uses custom data preparation (HGIKTNoTemplateEdgesData) to build
+    hetero_graph without question-template edges.
     """
 
     def __init__(
@@ -118,42 +112,45 @@ class HGIKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 1. 准备数据
-        from model.HGIKT import HGIKTModelData
+        # 1. Prepare data using custom data class
+        from model.HGIKT.variants.hgikt_no_template_edges_data import (
+            HGIKTNoTemplateEdgesData,
+        )
 
-        model_data = HGIKTModelData(data_src)
+        model_data = HGIKTNoTemplateEdgesData(data_src)
         data_dict = model_data.prepare_data(args)
 
-        # 解包数据
         train_dataset = data_dict["train_dataset"]
         val_dataset = data_dict["val_dataset"]
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        # 2. 初始化模型
-        from model.HGIKT.HGIKT_model import HGIKT
+        # 2. Initialize variant model
+        from model.HGIKT.variants.hgikt_no_template_edges import HGIKT_NoTemplateEdges
 
-        logger.info("Initializing HGIKT model...")
-        model = HGIKT(args, data_src.get_metadata(), self.hetero_graph.metadata())
+        logger.info("Initializing HGIKT_NoTemplateEdges model...")
+        model = HGIKT_NoTemplateEdges(
+            args, data_src.get_metadata(), self.hetero_graph.metadata()
+        )
 
-        # 3. 调用父类构造函数
+        # 3. Call parent constructor
         super().__init__(model)
 
-        # 4. 创建优化器和损失函数
+        # 4. Create optimizer and loss function
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
 
-        # 5. 创建学习率调度器
+        # 5. Create learning rate scheduler
         lr_scheduler = None
         if args.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer, gamma=args.lr_decay
             )
 
-        # 6. 构建早停配置
+        # 6. Build early stopping config
         early_stopping_cfg = None
         es_patience = getattr(args, "es_patience", None)
         if es_patience is not None:
@@ -164,7 +161,7 @@ class HGIKTTrainer(BaseTrainer):
                 min_delta=getattr(args, "es_min_delta", 0.0),
             )
 
-        # 7. 配置训练器
+        # 7. Configure trainer
         self.with_training(
             epochs=args.epochs,
             seed=args.seed,
@@ -182,11 +179,11 @@ class HGIKTTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT",
+            model_name="HGIKT_NoTemplateEdges",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
-        # 8. 将静态数据移动到设备
+        # 8. Move static data to device
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
@@ -194,22 +191,12 @@ class HGIKTTrainer(BaseTrainer):
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        """HGIKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成。
-
-        Args:
-            batch_data: 包含 (sequence, response, mask) 的元组
-
-        Returns:
-            包含 y_hat, y_label, y_predict 的字典
-        """
-        # 解包数据并移动到设备
+        """Forward pass matching HGIKT interface."""
         sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        # 模型前向传播
-        # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(
             sequence,
             response,
@@ -217,17 +204,13 @@ class HGIKTTrainer(BaseTrainer):
             self.hetero_graph,
             self.hypergraph,
             self.question_skill_matrix,
-        )  # [B, S]
+        )
 
-        # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, skip_first=True
         )
 
-        # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
-
-        # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
         return {

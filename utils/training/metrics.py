@@ -1,11 +1,16 @@
 """指标计算与聚合模块
 
 处理训练/验证指标的累积、计算和记录。
+
+各模型的 forward_pass 输出须包含以下字段：
+    y_label   : 真实标签（0/1）
+    y_predict : 二元预测（0/1），用于 ACC
+    y_score   : 排序分数（任意实数均可），用于 AUC
+    y_prob    : 预测概率（[0,1]），用于 RMSE
 """
 
 import numpy as np
 import torch
-from scipy.special import expit
 from sklearn.metrics import accuracy_score, roc_auc_score, root_mean_squared_error
 
 from ..core import get_logger
@@ -32,50 +37,36 @@ class MetricsAccumulator:
     """
 
     def __init__(self, use_swanlab: bool = True):
-        """初始化指标累积器。
-
-        Args:
-            use_swanlab: 是否使用 SwanLab 记录指标
-        """
         self.use_swanlab = use_swanlab
         self._accumulators: dict[str, dict[str, list]] = {}
 
     def reset(self, phase: str):
-        """重置指定 phase 的累积器。
-
-        Args:
-            phase: "train" 或 "val"
-        """
-        if phase not in self._accumulators:
-            self._accumulators[phase] = {
-                "y_hat": [],
-                "y_label": [],
-                "y_pred": [],
-            }
-        else:
-            for key in self._accumulators[phase]:
-                self._accumulators[phase][key] = []
+        """重置指定 phase 的累积器。"""
+        self._accumulators[phase] = {
+            "y_label": [],
+            "y_pred": [],
+            "y_score": [],
+            "y_prob": [],
+        }
 
     def update(self, phase: str, outputs: dict[str, torch.Tensor]):
         """更新累积器。
 
         Args:
             phase: "train" 或 "val"
-            outputs: 包含 "y_hat", "y_label", "y_predict" 的字典
+            outputs: 须包含 "y_label", "y_predict", "y_score", "y_prob"
         """
         if phase not in self._accumulators:
             self.reset(phase)
 
         accum = self._accumulators[phase]
-        accum["y_hat"].append(outputs["y_hat"].detach().cpu())
         accum["y_label"].append(outputs["y_label"].detach().cpu())
         accum["y_pred"].append(outputs["y_predict"].detach().cpu())
+        accum["y_score"].append(outputs["y_score"].detach().cpu())
+        accum["y_prob"].append(outputs["y_prob"].detach().cpu())
 
     def compute(self, phase: str) -> dict[str, float]:
         """计算 epoch 级别指标。
-
-        Args:
-            phase: "train" 或 "val"
 
         Returns:
             包含 "acc", "auc", "rmse" 的字典
@@ -87,38 +78,26 @@ class MetricsAccumulator:
         if not accum["y_label"]:
             return {}
 
-        # 拼接所有 batch 并转换为 numpy 数组
         y_label: np.ndarray = torch.cat(accum["y_label"]).numpy()
         y_pred: np.ndarray = torch.cat(accum["y_pred"]).numpy()
-        y_hat: np.ndarray = torch.cat(accum["y_hat"]).numpy()
+        y_score: np.ndarray = torch.cat(accum["y_score"]).numpy()
+        y_prob: np.ndarray = torch.cat(accum["y_prob"]).numpy()
 
-        # 检查预测值是否为概率值，如果不是则自动应用 sigmoid
-        if not ((y_hat >= 0).all() and (y_hat <= 1).all()):
-            y_hat = expit(y_hat)  # 数值稳定的 sigmoid 实现
-
-        # 计算指标
         metrics = {
             "acc": float(accuracy_score(y_label, y_pred)),
         }
 
-        # AUC 可能失败
         try:
-            metrics["auc"] = float(roc_auc_score(y_label, y_hat))
+            metrics["auc"] = float(roc_auc_score(y_label, y_score))
         except ValueError:
             metrics["auc"] = 0.0
 
-        metrics["rmse"] = float(root_mean_squared_error(y_label, y_hat))
+        metrics["rmse"] = float(root_mean_squared_error(y_label, y_prob))
 
         return metrics
 
     def log(self, phase: str, metrics: dict[str, float], epoch: int):
-        """记录指标到 SwanLab。
-
-        Args:
-            phase: "train" 或 "val"
-            metrics: 指标字典
-            epoch: 当前 epoch
-        """
+        """记录指标到 SwanLab。"""
         if not self.use_swanlab:
             return
 
@@ -126,7 +105,6 @@ class MetricsAccumulator:
             import swanlab
 
             prefix = "Train/" if phase == "train" else "Val/"
-
             for name, value in metrics.items():
                 swanlab.log({f"{prefix}{name.upper()}-epoch": value}, step=epoch)
         except ImportError:

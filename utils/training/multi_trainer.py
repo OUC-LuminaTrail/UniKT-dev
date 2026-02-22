@@ -815,6 +815,9 @@ class MultiTrainer:
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
         model_name = type(self).__name__.replace("Trainer", "")
 
+        # 配置swanlab设置
+        settings = swanlab.Settings(log_proxy_type="stderr")
+
         swanlab.init(
             workspace=os.getenv("SWANLAB_WORKSPACE", None),
             project_name="kt-exp-graph",
@@ -823,6 +826,7 @@ class MultiTrainer:
             callbacks=callbacks,
             group=model_name,
             tags=["cuda" if torch.cuda.is_available() else "cpu", "multi-stage"],
+            settings=settings,
         )
 
         self._swanlab_initialized = True
