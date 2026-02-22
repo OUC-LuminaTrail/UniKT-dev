@@ -38,12 +38,12 @@ class AblationRunner:
         results = []
 
         for ablation in self.config.ablations:
-            print(f"\n{'=' * 60}")
-            print(f"Running: {ablation.name}")
-            print(f"Variant: {ablation.variant}")
+            logger.info(f"{'=' * 60}")
+            logger.info(f"Running: {ablation.name}")
+            logger.info(f"Variant: {ablation.variant}")
             if ablation.description:
-                print(f"Description: {ablation.description}")
-            print(f"{'=' * 60}\n")
+                logger.info(f"Description: {ablation.description}")
+            logger.info(f"{'=' * 60}")
 
             # Merge shared params with ablation-specific params
             params = {**self.config.shared_params, **ablation.params}
@@ -90,7 +90,14 @@ class AblationRunner:
 
         # Create and run trainer
         trainer = trainer_cls(args=args, data_src=data_src, exp_manager=exp_manager)
-        metrics = trainer.run()
+        trainer.run()
+
+        # Get final validation metrics from trainer's metrics accumulator
+        metrics = (
+            trainer.metrics_accumulator.compute("val")
+            if trainer.val_data is not None
+            else {}
+        )
 
         return {
             "name": ablation.name,
