@@ -45,13 +45,10 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.num_questions = data_src.get_metadata("num_questions")
         self.num_skills = data_src.get_metadata("num_skills")
 
-        # Build question -> first skill lookup array: shape [num_questions]
-        qs_matrix = question_skill_matrix.numpy()  # [num_questions, num_skills]
-        first_skill = np.argmax(qs_matrix, axis=1)
-        has_skill_per_q = qs_matrix.sum(axis=1) > 0
-        self.question_to_skill = np.where(has_skill_per_q, first_skill, 0).astype(
-            np.int64
-        )
+        # Store full question-skill matrix for multi-skill extraction
+        self.question_skill_matrix_np = (
+            question_skill_matrix.numpy()
+        )  # [num_questions, num_skills]
 
         model = HGIKT(args, data_src.get_metadata(), hetero_graph.metadata())
 
@@ -157,16 +154,37 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             knowledge_states.view(-1, num_skills)[valid_indices].cpu().numpy()
         )
 
-        # 根据 question_id 查询对应的 skill_id（取第一个关联技能）
-        skill_ids_flat = self.question_to_skill[question_ids_flat]
+        # Get all skills for each question (returns list of lists)
+        skill_ids_list = self._get_all_skills_for_questions(question_ids_flat)
 
         return {
             "user_ids": user_ids_flat,
             "question_ids": question_ids_flat,
-            "skills": skill_ids_flat,
+            "skills": skill_ids_list,
             "labels": y_label.cpu().numpy(),
             "predictions": y_predict.cpu().numpy(),
             "logits": y_hat.cpu().numpy(),
             "masks": masks_bool.view(-1)[valid_indices].cpu().numpy(),
             "knowledge_states": knowledge_states_flat,
         }
+
+    def _get_all_skills_for_questions(
+        self, question_ids: np.ndarray
+    ) -> list[list[int]]:
+        """Get all skills for each question, returning as list of lists.
+
+        Args:
+            question_ids: Array of question IDs
+
+        Returns:
+            List of lists, where each inner list contains all skill IDs for that question.
+            Returns [0] if no skills found.
+        """
+        skills_list = []
+        for q_id in question_ids:
+            # Find all skills for this question (where matrix value is 1)
+            question_skills = np.where(self.question_skill_matrix_np[q_id] == 1)[
+                0
+            ].tolist()
+            skills_list.append(question_skills if question_skills else [0])
+        return skills_list

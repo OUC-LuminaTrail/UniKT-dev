@@ -65,8 +65,15 @@ class HeatmapVisualizer:
         T = len(user_data)
 
         seen: dict[int, None] = {}
-        for s in user_data["skill"]:
-            seen.setdefault(int(s), None)
+        for skills in user_data["skill"]:
+            # Handle both list format (new) and int format (old, for backward compatibility)
+            if isinstance(skills, (int, np.integer)):
+                skills = [int(skills)]
+            elif not isinstance(skills, list):
+                skills = list(skills) if hasattr(skills, "__iter__") else [int(skills)]
+
+            for skill_id in skills:
+                seen.setdefault(int(skill_id), None)
         unique_skills: list[int] = list(seen.keys())
         num_skills = len(unique_skills)
         skill_to_row = {s: i for i, s in enumerate(unique_skills)}
@@ -199,6 +206,7 @@ class HeatmapVisualizer:
     def _draw_skill_row(
         self, ax, user_data: pd.DataFrame, unique_skills: list[int], T: int
     ) -> None:
+        """Draw the 'Skill' header row with multiple skills displayed vertically."""
         cmap20 = plt.get_cmap("tab20")
         skill_color = {s: cmap20(i % 20) for i, s in enumerate(unique_skills)}
 
@@ -212,17 +220,46 @@ class HeatmapVisualizer:
             spine.set_visible(False)
 
         for t, (_, row) in enumerate(user_data.iterrows()):
-            skill_id = int(row["skill"])
-            ax.text(
-                t,
-                0.5,
-                self._skill_label(skill_id),
-                ha="center",
-                va="center",
-                fontsize=9,
-                color=skill_color[skill_id],
-                fontweight="bold",
-            )
+            skills = row["skill"]  # Now a list of skill IDs
+
+            # Handle both list format (new) and int format (old, for backward compatibility)
+            if isinstance(skills, (int, np.integer)):
+                skills = [int(skills)]
+            elif not isinstance(skills, list):
+                skills = list(skills) if hasattr(skills, "__iter__") else [int(skills)]
+
+            # Display skills vertically, stacked
+            max_skills_display = 3  # Limit to prevent overflow
+            for i, skill_id in enumerate(skills[:max_skills_display]):
+                # Calculate vertical position: first skill at top, others below
+                y_pos = 0.85 - (i * 0.35)
+                font_size = 9 if i == 0 else 7  # First skill (primary) is larger
+                font_weight = "bold" if i == 0 else "normal"
+
+                ax.text(
+                    t,
+                    y_pos,
+                    self._skill_label(int(skill_id)),
+                    ha="center",
+                    va="center",
+                    fontsize=font_size,
+                    color=skill_color.get(int(skill_id), "black"),
+                    fontweight=font_weight,
+                )
+
+            # Show "+N" indicator if more skills than display limit
+            if len(skills) > max_skills_display:
+                y_pos = 0.85 - (max_skills_display * 0.35)
+                ax.text(
+                    t,
+                    y_pos,
+                    f"+{len(skills) - max_skills_display}",
+                    ha="center",
+                    va="center",
+                    fontsize=6,
+                    color="gray",
+                    fontstyle="italic",
+                )
 
     def _draw_resp_row(self, ax, user_data: pd.DataFrame, T: int) -> None:
         ax.set_xlim(-0.5, T - 0.5)
@@ -244,70 +281,6 @@ class HeatmapVisualizer:
                 va="center",
                 fontsize=11,
                 color="#2e7d32" if correct else "#c62828",
-                fontweight="bold",
-            )
-
-    def _draw_skill_row(
-        self,
-        ax: plt.Axes,
-        user_data: pd.DataFrame,
-        unique_skills: list[int],
-        T: int,
-    ) -> None:
-        """Draw the 'Skill' header row with coloured skill labels."""
-        cmap20 = plt.get_cmap("tab20")
-        skill_color = {s: cmap20(i % 20) for i, s in enumerate(unique_skills)}
-
-        ax.set_xlim(-0.5, T - 0.5)
-        ax.set_ylim(0, 1)
-        ax.set_xticks([])
-        ax.set_yticks([0.5])
-        ax.set_yticklabels(["Skill"], fontsize=10, fontweight="bold")
-        ax.tick_params(axis="y", length=0, pad=4)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-        for t, (_, row) in enumerate(user_data.iterrows()):
-            skill_id = int(row["skill"])
-            ax.text(
-                t,
-                0.5,
-                self._skill_label(skill_id),
-                ha="center",
-                va="center",
-                fontsize=9,
-                color=skill_color[skill_id],
-                fontweight="bold",
-            )
-
-    def _draw_resp_row(
-        self,
-        ax: plt.Axes,
-        user_data: pd.DataFrame,
-        T: int,
-    ) -> None:
-        """Draw the 'Resp' row with ✓/✗ correctness markers."""
-        ax.set_xlim(-0.5, T - 0.5)
-        ax.set_ylim(0, 1)
-        ax.set_xticks([])
-        ax.set_yticks([0.5])
-        ax.set_yticklabels(["Resp"], fontsize=10, fontweight="bold")
-        ax.tick_params(axis="y", length=0, pad=4)
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-        for t, (_, row) in enumerate(user_data.iterrows()):
-            correct = int(row["label"]) == 1
-            symbol = "✓" if correct else "✗"
-            color = "#2e7d32" if correct else "#c62828"  # dark green / dark red
-            ax.text(
-                t,
-                0.5,
-                symbol,
-                ha="center",
-                va="center",
-                fontsize=11,
-                color=color,
                 fontweight="bold",
             )
 

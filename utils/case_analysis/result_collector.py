@@ -56,12 +56,20 @@ class ResultCollector:
                     value.tolist() if hasattr(value, "tolist") else [value]
                 )
 
-        for key, default in [("mask", 1), ("skills", 0), ("knowledge_states", None)]:
+        for key, default in [("mask", 1), ("knowledge_states", None)]:
             if key not in case_data or len(case_data[key]) == 0:
                 current_len = len(self.data[key])
                 target_len = len(self.data["user_ids"])
                 if current_len < target_len:
                     self.data[key].extend([default] * (target_len - current_len))
+
+        # Handle skills separately to support list of lists format
+        if "skills" not in case_data or len(case_data.get("skills", [])) == 0:
+            current_len = len(self.data["skills"])
+            target_len = len(self.data["user_ids"])
+            if current_len < target_len:
+                # Default to [0] for missing skills (list of lists format)
+                self.data["skills"].extend([[0]] * (target_len - current_len))
 
         self._df = None
 
