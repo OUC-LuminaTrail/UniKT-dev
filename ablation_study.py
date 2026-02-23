@@ -10,7 +10,6 @@ from utils.ablation.config_loader import load_config
 from utils.ablation.result_formatter import AblationResultFormatter
 from utils.ablation.runner import AblationRunner
 from utils.core import get_logger
-from utils.experiment_manager import ExperimentManager, ExperimentType
 
 logger = get_logger(__name__)
 
@@ -38,23 +37,15 @@ def main():
 
     # Run experiments
     runner = AblationRunner(config)
-    results = runner.run_all()
-
-    # Create experiment manager for ablation study
-    exp_manager = ExperimentManager(
-        exp_type=ExperimentType.ABLATION,
-        model_name=config.base_model,
-        dataset_name=config.dataset,
-        tags=["study"],
-    )
+    results, exp_base_dir = runner.run_all()
 
     # Format and print results
     formatter = AblationResultFormatter(results, ranking_metric="auc")
-    formatter.print_console_table()
-    # Export to CSV
-    csv_path = exp_manager.exp_dir / "results.csv"
+    # Export to CSV in the ablation study's base directory
+    csv_path = exp_base_dir / "results.csv"
     formatter.export_to_csv(str(csv_path))
     logger.info(f"Results exported to: {csv_path}")
+    formatter.print_console_table()
 
 
 if __name__ == "__main__":
