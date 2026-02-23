@@ -49,37 +49,12 @@ def main():
     )
 
     # Format and print results
-    try:
-        formatter = AblationResultFormatter(results, ranking_metric="auc")
-        logger.info("=" * 60)
-        logger.info("ABLATION STUDY RESULTS")
-        logger.info("=" * 60)
-        formatter.print_console_table()
-
-        # Export to CSV
-        csv_path = exp_manager.exp_dir / "results.csv"
-        formatter.export_to_csv(str(csv_path))
-        logger.info(f"Results exported to: {csv_path}")
-    except Exception as e:
-        logger.warning(f"Failed to use result formatter: {e}")
-        logger.info("Falling back to simple logging...")
-
-        # Fallback: simple logging
-        logger.info("=" * 60)
-        logger.info("ABLATION STUDY RESULTS")
-        logger.info("=" * 60)
-        for result in results:
-            logger.info(f"{result['name']}:")
-            logger.info(f"  Variant: {result['variant']}")
-            metrics = result.get("metrics", {})
-            if not metrics:
-                logger.info("  No metrics available")
-                continue
-            for metric_name, metric_value in sorted(metrics.items()):
-                if isinstance(metric_value, float):
-                    logger.info(f"  {metric_name}: {metric_value:.4f}")
-                else:
-                    logger.info(f"  {metric_name}: {metric_value}")
+    formatter = AblationResultFormatter(results, ranking_metric="auc")
+    formatter.print_console_table()
+    # Export to CSV
+    csv_path = exp_manager.exp_dir / "results.csv"
+    formatter.export_to_csv(str(csv_path))
+    logger.info(f"Results exported to: {csv_path}")
 
 
 if __name__ == "__main__":
