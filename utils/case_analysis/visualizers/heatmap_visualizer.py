@@ -228,32 +228,36 @@ class HeatmapVisualizer:
             elif not isinstance(skills, list):
                 skills = list(skills) if hasattr(skills, "__iter__") else [int(skills)]
 
-            # Display skills vertically, stacked
-            max_skills_display = 3  # Limit to prevent overflow
-            for i, skill_id in enumerate(skills[:max_skills_display]):
-                # Calculate vertical position: first skill at top, others below
-                y_pos = 0.85 - (i * 0.35)
-                font_size = 9 if i == 0 else 7  # First skill (primary) is larger
-                font_weight = "bold" if i == 0 else "normal"
+            # Display skills vertically, centered
+            num_skills = min(len(skills), 3)  # Limit to prevent overflow
+            if num_skills == 1:
+                # Single skill: center at 0.5
+                y_positions = [0.5]
+            elif num_skills == 2:
+                # Two skills: space evenly
+                y_positions = [0.65, 0.35]
+            else:
+                # Three skills: space evenly
+                y_positions = [0.75, 0.5, 0.25]
 
+            for i, skill_id in enumerate(skills[:3]):
                 ax.text(
                     t,
-                    y_pos,
+                    y_positions[i],
                     self._skill_label(int(skill_id)),
                     ha="center",
                     va="center",
-                    fontsize=font_size,
+                    fontsize=8,
                     color=skill_color.get(int(skill_id), "black"),
-                    fontweight=font_weight,
+                    fontweight="normal",
                 )
 
             # Show "+N" indicator if more skills than display limit
-            if len(skills) > max_skills_display:
-                y_pos = 0.85 - (max_skills_display * 0.35)
+            if len(skills) > 3:
                 ax.text(
                     t,
-                    y_pos,
-                    f"+{len(skills) - max_skills_display}",
+                    0.1,
+                    f"+{len(skills) - 3}",
                     ha="center",
                     va="center",
                     fontsize=6,

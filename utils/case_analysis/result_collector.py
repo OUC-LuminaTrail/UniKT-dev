@@ -48,28 +48,33 @@ class ResultCollector:
         if missing_keys:
             raise ValueError(f"Missing required keys in case_data: {missing_keys}")
 
+        # Handle all keys except 'skills' (which needs special handling for list of lists)
         for key, value in case_data.items():
-            if key in self.data:
+            if key in self.data and key != "skills":
                 if isinstance(value, torch.Tensor):
                     value = value.detach().cpu().numpy()
                 self.data[key].extend(
                     value.tolist() if hasattr(value, "tolist") else [value]
                 )
 
+        # Handle skills separately to support list of lists format
+        if "skills" in case_data and len(case_data["skills"]) > 0:
+            # skills is already a list of lists [[1], [1,24], [44], ...]
+            self.data["skills"].extend(case_data["skills"])
+        else:
+            current_len = len(self.data["skills"])
+            target_len = len(self.data["user_ids"])
+            if current_len < target_len:
+                # Default to [0] for missing skills (list of lists format)
+                self.data["skills"].extend([[0]] * (target_len - current_len))
+
+        # Handle other optional keys with defaults
         for key, default in [("mask", 1), ("knowledge_states", None)]:
             if key not in case_data or len(case_data[key]) == 0:
                 current_len = len(self.data[key])
                 target_len = len(self.data["user_ids"])
                 if current_len < target_len:
                     self.data[key].extend([default] * (target_len - current_len))
-
-        # Handle skills separately to support list of lists format
-        if "skills" not in case_data or len(case_data.get("skills", [])) == 0:
-            current_len = len(self.data["skills"])
-            target_len = len(self.data["user_ids"])
-            if current_len < target_len:
-                # Default to [0] for missing skills (list of lists format)
-                self.data["skills"].extend([[0]] * (target_len - current_len))
 
         self._df = None
 
