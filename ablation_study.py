@@ -7,8 +7,10 @@ import argparse
 
 import model  # noqa: F401
 from utils.ablation.config_loader import load_config
+from utils.ablation.result_formatter import AblationResultFormatter
 from utils.ablation.runner import AblationRunner
 from utils.core import get_logger
+from utils.experiment_manager import ExperimentManager, ExperimentType
 
 logger = get_logger(__name__)
 
@@ -38,22 +40,46 @@ def main():
     runner = AblationRunner(config)
     results = runner.run_all()
 
-    # Print summary
-    logger.info("=" * 60)
-    logger.info("ABLATION STUDY RESULTS")
-    logger.info("=" * 60)
-    for result in results:
-        logger.info(f"{result['name']}:")
-        logger.info(f"  Variant: {result['variant']}")
-        metrics = result.get("metrics", {})
-        if not metrics:
-            logger.info("  No metrics available")
-            continue
-        for metric_name, metric_value in sorted(metrics.items()):
-            if isinstance(metric_value, float):
-                logger.info(f"  {metric_name}: {metric_value:.4f}")
-            else:
-                logger.info(f"  {metric_name}: {metric_value}")
+    # Create experiment manager for ablation study
+    exp_manager = ExperimentManager(
+        exp_type=ExperimentType.ABLATION,
+        model_name=config.base_model,
+        dataset_name=config.dataset,
+        tags=["study"],
+    )
+
+    # Format and print results
+    try:
+        formatter = AblationResultFormatter(results, ranking_metric="auc")
+        logger.info("=" * 60)
+        logger.info("ABLATION STUDY RESULTS")
+        logger.info("=" * 60)
+        formatter.print_console_table()
+
+        # Export to CSV
+        csv_path = exp_manager.exp_dir / "results.csv"
+        formatter.export_to_csv(str(csv_path))
+        logger.info(f"Results exported to: {csv_path}")
+    except Exception as e:
+        logger.warning(f"Failed to use result formatter: {e}")
+        logger.info("Falling back to simple logging...")
+
+        # Fallback: simple logging
+        logger.info("=" * 60)
+        logger.info("ABLATION STUDY RESULTS")
+        logger.info("=" * 60)
+        for result in results:
+            logger.info(f"{result['name']}:")
+            logger.info(f"  Variant: {result['variant']}")
+            metrics = result.get("metrics", {})
+            if not metrics:
+                logger.info("  No metrics available")
+                continue
+            for metric_name, metric_value in sorted(metrics.items()):
+                if isinstance(metric_value, float):
+                    logger.info(f"  {metric_name}: {metric_value:.4f}")
+                else:
+                    logger.info(f"  {metric_name}: {metric_value}")
 
 
 if __name__ == "__main__":
