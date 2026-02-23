@@ -66,14 +66,8 @@ class HeatmapVisualizer:
 
         seen: dict[int, None] = {}
         for skills in user_data["skill"]:
-            # Handle both list format (new) and int format (old, for backward compatibility)
-            if isinstance(skills, (int, np.integer)):
-                skills = [int(skills)]
-            elif not isinstance(skills, list):
-                skills = list(skills) if hasattr(skills, "__iter__") else [int(skills)]
-
             for skill_id in skills:
-                seen.setdefault(int(skill_id), None)
+                seen.setdefault(skill_id, None)
         unique_skills: list[int] = list(seen.keys())
         num_skills = len(unique_skills)
         skill_to_row = {s: i for i, s in enumerate(unique_skills)}
@@ -220,13 +214,7 @@ class HeatmapVisualizer:
             spine.set_visible(False)
 
         for t, (_, row) in enumerate(user_data.iterrows()):
-            skills = row["skill"]  # Now a list of skill IDs
-
-            # Handle both list format (new) and int format (old, for backward compatibility)
-            if isinstance(skills, (int, np.integer)):
-                skills = [int(skills)]
-            elif not isinstance(skills, list):
-                skills = list(skills) if hasattr(skills, "__iter__") else [int(skills)]
+            skills = row["skill"]
 
             # Display skills vertically, centered
             num_skills = min(len(skills), 3)  # Limit to prevent overflow
@@ -244,11 +232,11 @@ class HeatmapVisualizer:
                 ax.text(
                     t,
                     y_positions[i],
-                    self._skill_label(int(skill_id)),
+                    self._skill_label(skill_id),
                     ha="center",
                     va="center",
                     fontsize=8,
-                    color=skill_color.get(int(skill_id), "black"),
+                    color=skill_color.get(skill_id, "black"),
                     fontweight="normal",
                 )
 
