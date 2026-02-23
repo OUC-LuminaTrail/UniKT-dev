@@ -852,15 +852,30 @@ class MultiTrainer:
         import swanlab
 
         if self.early_stopping is not None:
-            swanlab.log(
-                {
-                    f"{stage_prefix}/ES/Best": self.early_stopping.best_score
-                    if self.early_stopping.best_score is not None
-                    else 0,
-                    f"{stage_prefix}/ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
-                },
-                step=self._global_step,
-            )
+            log_data = {
+                f"{stage_prefix}/ES/Best": self.early_stopping.best_score
+                if self.early_stopping.best_score is not None
+                else 0,
+                f"{stage_prefix}/ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
+            }
+
+            # 记录最佳轮次的完整指标
+            if self.early_stopping.best_metrics is not None:
+                log_data.update(
+                    {
+                        f"{stage_prefix}/ES/Best_AUC": self.early_stopping.best_metrics.get(
+                            "auc", 0.0
+                        ),
+                        f"{stage_prefix}/ES/Best_ACC": self.early_stopping.best_metrics.get(
+                            "acc", 0.0
+                        ),
+                        f"{stage_prefix}/ES/Best_RMSE": self.early_stopping.best_metrics.get(
+                            "rmse", 0.0
+                        ),
+                    }
+                )
+
+            swanlab.log(log_data, step=self._global_step)
 
     def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
         """设置超参数"""
