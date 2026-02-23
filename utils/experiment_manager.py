@@ -17,7 +17,6 @@ class ExperimentType(Enum):
 
     NORMAL = "normal"
     HYPERPARAM_SEARCH = "hyperparam_search"
-    ABLATION = "ablation"
 
 
 class ExperimentManager:
@@ -90,6 +89,39 @@ class ExperimentManager:
             日志目录的绝对路径字符串
         """
         return str(self.exp_dir)
+
+    def create_sub_experiment(self, sub_name: str) -> "ExperimentManager":
+        """创建子实验管理器，共享时间戳但使用子目录
+
+        用于超参数搜索等需要多个子实验的场景，所有子实验共享同一个时间戳。
+
+        Args:
+            sub_name: 子实验名称（如 "trial_0", "full_model", "no_gnn"）
+
+        Returns:
+            新的 ExperimentManager 实例，指向子目录
+
+        Example:
+            >>> parent_manager = ExperimentManager(...)
+            >>> child_manager = parent_manager.create_sub_experiment("trial_0")
+            >>> # parent: runs/hyperparam_search/GIKT_assist09_20241201-120000/
+            >>> # child:  runs/hyperparam_search/GIKT_assist09_20241201-120000/trial_0/
+        """
+        # 创建子实验目录
+        sub_dir = self.exp_dir / sub_name
+        sub_dir.mkdir(parents=True, exist_ok=True)
+
+        # 创建一个新的 ExperimentManager，复用父管理器的时间戳和配置
+        sub_manager = ExperimentManager.__new__(ExperimentManager)
+        sub_manager.exp_type = self.exp_type
+        sub_manager.model_name = self.model_name
+        sub_manager.dataset_name = self.dataset_name
+        sub_manager.base_dir = self.base_dir
+        sub_manager.tags = self.tags + [sub_name]
+        sub_manager.exp_dir = sub_dir
+
+        logger.debug(f"Sub-experiment created: {sub_dir}")
+        return sub_manager
 
     def create_subdir(self, name: str) -> Path:
         """创建子目录
