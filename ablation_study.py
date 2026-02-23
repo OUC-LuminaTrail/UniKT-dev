@@ -7,6 +7,7 @@ import argparse
 
 import model  # noqa: F401
 from utils.ablation.config_loader import load_config
+from utils.ablation.result_formatter import AblationResultFormatter
 from utils.ablation.runner import AblationRunner
 from utils.core import get_logger
 
@@ -36,24 +37,15 @@ def main():
 
     # Run experiments
     runner = AblationRunner(config)
-    results = runner.run_all()
+    results, exp_base_dir = runner.run_all()
 
-    # Print summary
-    logger.info("=" * 60)
-    logger.info("ABLATION STUDY RESULTS")
-    logger.info("=" * 60)
-    for result in results:
-        logger.info(f"{result['name']}:")
-        logger.info(f"  Variant: {result['variant']}")
-        metrics = result.get("metrics", {})
-        if not metrics:
-            logger.info("  No metrics available")
-            continue
-        for metric_name, metric_value in sorted(metrics.items()):
-            if isinstance(metric_value, float):
-                logger.info(f"  {metric_name}: {metric_value:.4f}")
-            else:
-                logger.info(f"  {metric_name}: {metric_value}")
+    # Format and print results
+    formatter = AblationResultFormatter(results, ranking_metric="auc")
+    # Export to CSV in the ablation study's base directory
+    csv_path = exp_base_dir / "results.csv"
+    formatter.export_to_csv(str(csv_path))
+    logger.info(f"Results exported to: {csv_path}")
+    formatter.print_console_table()
 
 
 if __name__ == "__main__":

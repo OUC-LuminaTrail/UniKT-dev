@@ -4,6 +4,9 @@ from .GIKT.GIKT_edmine_model import GIKTEdmine
 from .GIKT.GIKT_edmine_trainer import GIKTEdmineTrainer
 from .GIKT.GIKT_model import GIKT
 from .GIKT.GIKT_trainer import GIKTTrainer
+
+# Import HGIKT variants to trigger registration
+from .HGIKT import variants  # noqa: F401
 from .HGIKT.HGIKT_model import HGIKT
 from .HGIKT.HGIKT_trainer import HGIKTTrainer
 from .SGKT.SGKT_model import SGKT
