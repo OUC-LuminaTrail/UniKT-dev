@@ -48,12 +48,23 @@ class ResultCollector:
         if missing_keys:
             raise ValueError(f"Missing required keys in case_data: {missing_keys}")
 
-        # Add data from all keys except 'skills'
+        # Add data from all required keys
         for key, value in case_data.items():
-            if key in self.data and key != "skills":
+            if key in self.data and key not in ("skills", "mask", "knowledge_states"):
                 self.data[key].extend(value)
+
         # Add skills (list of lists format)
         self.data["skills"].extend(case_data["skills"])
+
+        # Add optional keys with defaults (analyzers may not always provide these)
+        target_len = len(self.data["user_ids"])
+        if "mask" in case_data and len(case_data["mask"]) > 0:
+            self.data["mask"].extend(case_data["mask"])
+        else:
+            self.data["mask"].extend([1] * (target_len - len(self.data["mask"])))
+
+        if "knowledge_states" in case_data and len(case_data["knowledge_states"]) > 0:
+            self.data["knowledge_states"].extend(case_data["knowledge_states"])
 
         self._df = None
 
