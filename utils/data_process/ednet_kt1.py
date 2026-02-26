@@ -7,6 +7,7 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
+    build_question_data_from_cleared,
     map_to_continuous_ids,
     restrains_sequence_length,
 )
@@ -215,36 +216,18 @@ class EdNetKT1Data(DataSource):
             .with_columns(
                 [
                     pl.col("skill")
-                    .map_elements(_canonicalize_tags, return_dtype=pl.Utf8)
-                    .alias("skill_canonicalized"),
+                    .map_elements(_canonicalize_tags, return_dtype=pl.Utf8),
                     pl.col("question").cast(pl.Utf8),
                 ]
             )
         )
 
-        # Explode multi-skill questions (no effect if no semicolons)
-        question_data = (
-            question_data.with_columns(
-                [pl.col("skill_canonicalized").str.split(";").alias("skill_list")]
-            )
-            .explode("skill_list")
-            .with_columns([pl.col("skill_list").str.strip_chars().alias("skill")])
-            .drop("skill_canonicalized", "skill_list")
-        )
-
-        # Remove duplicates
-        question_data = question_data.unique(subset=["question", "skill"], keep="first")
-
-        # Map skills to continuous integer IDs
-        appeared_skills = (
-            question_data.select(pl.col("skill").drop_nulls().unique())
-            .to_series()
-            .sort()
-            .to_list()
-        )
-        skill_id_map = {skill: idx for idx, skill in enumerate(appeared_skills)}
-        question_data = question_data.with_columns(
-            [pl.col("skill").replace(skill_id_map).cast(pl.Int32)]
+        # Use build_question_data_from_cleared for skill splitting
+        question_data = build_question_data_from_cleared(
+            question_data,
+            skill_column="skill",
+            question_column="question",
+            separator=";",
         )
 
         # For EdNet, skill is also the template

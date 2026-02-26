@@ -862,59 +862,39 @@ def build_question_data_from_cleared(
     cleared_data,
     skill_column: str = "skill",
     question_column: str = "question",
-    seperator: str = "_",
+    separator: str = None,
 ):
     """Build question data from cleaned records.
 
-    Handles multi-skill entries (separated by separator) by expanding them
-    into multiple rows, ensuring each question-skill pair is unique.
+    If separator is provided, splits multi-skill entries into multiple rows.
+    Ensures each question-skill pair is unique and maps skills to continuous IDs.
 
     Args:
         cleared_data: Cleaned polars DataFrame.
         skill_column: Name of skill column (default: "skill").
         question_column: Name of question column (default: "question").
-        seperator: Separator for multi-skill values (default: "_").
+        separator: Separator for multi-skill values (default: None, no splitting).
 
     Returns:
         DataFrame with unique question-skill pairs and continuous skill IDs.
     """
-
-    # Filter null values first to avoid errors when checking for separator
-    cleared_data = cleared_data.filter(pl.col(skill_column).is_not_null())
-
-    # Check if any value contains the separator
-    # Only check string columns - numeric columns can't contain separators
-    schema = cleared_data.collect_schema()
-    skill_dtype = schema[skill_column]
-    has_multi_skill = (
-        skill_dtype == pl.Utf8
-        and cleared_data.select(pl.col(skill_column).str.contains(seperator))
-        .to_series()
-        .any()
-    )
-
-    if has_multi_skill:
+    if separator is not None:
         other_cols = [col for col in cleared_data.columns if col != skill_column]
-        data_expanded = (
+        question_data = (
             cleared_data.with_columns(
-                [
-                    pl.col(skill_column)
-                    .str.split(seperator)
-                    .alias(skill_column + "_list")
-                ]
+                [pl.col(skill_column).str.split(separator).alias(skill_column + "_list")]
             )
             .explode(skill_column + "_list")
             .select(other_cols + [pl.col(skill_column + "_list").alias(skill_column)])
             .unique(subset=[question_column, skill_column], keep="first")
         )
     else:
-        data_expanded = cleared_data.unique(
+        question_data = cleared_data.unique(
             subset=[question_column, skill_column], keep="first"
         )
 
-    data_expanded = map_to_continuous_ids(data_expanded, columns=[skill_column])
-
-    return data_expanded
+    question_data = map_to_continuous_ids(question_data, columns=[skill_column])
+    return question_data
 
 
 __all__ = [

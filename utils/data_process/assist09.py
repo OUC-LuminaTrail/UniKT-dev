@@ -115,18 +115,27 @@ class Assistments2009Data(DataSource):
 
         data = data.unique().collect()
         data = data.sort(["user", "order_id"])
+
         data = restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
+
+        # Keep data before ID mapping for question_data (skills are still strings)
+        data_before_mapping = data.clone()
+
         data = map_to_continuous_ids(
-            data, columns=["user", "question", "assignment", "template"]
+            data, columns=["user", "question", "skill", "assignment", "template"]
+        )
+
+        # Build question_data with skill splitting
+        # ASSISTments 09 uses skill IDs with underscores (e.g., "2_37_70")
+        question_data = build_question_data_from_cleared(
+            data_before_mapping, skill_column="skill", question_column="question", separator="_"
         )
 
         self.cleared_data = data.clone()
         self.sequence_data = data.clone()
-        self.question_data = build_question_data_from_cleared(
-            self.cleared_data, skill_column="skill", question_column="question"
-        )
+        self.question_data = question_data
 
         self.add_metadatas(
             {

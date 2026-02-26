@@ -157,26 +157,31 @@ class Assistments2017Data(DataSource):
         data = data.unique()
         data = data.collect()
 
-        unique_skills = data["skill"].unique().drop_nulls().sort().to_list()
-        skill_id_map = {skill: idx for idx, skill in enumerate(unique_skills)}
-        data = data.with_columns([pl.col("skill").replace(skill_id_map)])
-
         data = data.sort(["user", "startTime"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         data = data.filter(pl.col("skill").is_not_null())
         data = data.filter(pl.col("label").is_in([0, 1]))
+
         data = restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
+
+        # Keep data before ID mapping for question_data (skills are still strings)
+        data_before_mapping = data.clone()
+
         data = map_to_continuous_ids(
             data, columns=["user", "question", "skill", "assignment"]
         )
 
+        # Build question_data with skill splitting
+        # ASSISTments 17 uses descriptive skill names with hyphens (e.g., "subtracting-decimals")
+        question_data = build_question_data_from_cleared(
+            data_before_mapping, skill_column="skill", question_column="question", separator="-"
+        )
+
         self.cleared_data = data.clone()
         self.sequence_data = data.clone()
-        self.question_data = build_question_data_from_cleared(
-            self.cleared_data, skill_column="skill", question_column="question"
-        )
+        self.question_data = question_data
 
         self.add_metadatas(
             {
