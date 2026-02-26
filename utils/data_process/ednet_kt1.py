@@ -7,6 +7,7 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
+    map_to_continuous_ids,
     restrains_sequence_length,
 )
 
@@ -248,6 +249,9 @@ class EdNetKT1Data(DataSource):
 
         # For EdNet, skill is also the template
         question_data = question_data.with_columns([pl.col("skill").alias("template")])
+
+        # Map assignment to continuous integer IDs
+        question_data = map_to_continuous_ids(question_data, columns=["assignment"])
 
         return question_data
 
