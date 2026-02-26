@@ -2,17 +2,19 @@
 
 ## 项目依赖
 
-- Python：3.10
+- Python：3.10.*
 - torch：1.13.1
-- torch_geometric：2.7.0
-- dhg：0.9.5
-- pyg-lib：0.4.0
-- scikit-learn：1.7.2
-- polars：>=1.38.1
-- pandas：2.3.3
-- pyarrow：22.0.0
-- swanlab: 0.7.2
-- python-dotenv: 1.2.1
+- torch_geometric：>=2.7.0,<3
+- dhg：==0.9.*
+- pyg-lib：>=0.4.0,<0.5
+- optuna：>=4.6.0,<5
+- scikit-learn：>=1.7.2,<2
+- polars：>=1.38.1,<2
+- pandas：>=2.3.3,<3
+- pyarrow：>=12.0.1,<13
+- swanlab：<0.8
+- python-dotenv：>=1.2.1,<2
+- 开发/工具：`ruff` (lint/format)、`pytest`
 
 ## 运行环境配置
 
@@ -20,14 +22,20 @@
 
 ### 使用 `pixi`（推荐）
 
-本项目推荐使用 [pixi](https://pixi.sh/) 管理依赖，它可以自动处理 CUDA 版本和 Python 环境。
+本项目推荐使用 `pixi` 管理依赖与环境。
 
 ```bash
-# 安装环境并进入默认 GPU 环境
+# 进入默认 GPU 环境
 pixi shell
 
-# 如果没有 GPU，请进入 CPU 环境
+# 使用 CPU 环境
 pixi shell -e cpu
+
+# 常用任务示例：lint / format / lint+format / 清理缓存
+pixi run lint
+pixi run fmt
+pixi run ckf
+pixi run clean-cache
 
 # 退出环境
 exit
@@ -50,18 +58,24 @@ chmod +x ./scripts/setup_env.sh
 
 ### 手动配置运行环境
 
-```sh
+```bash
+# 创建 conda 环境
 conda create -n ktexp python=3.10
+conda activate ktexp
 
 # CPU
-uv pip install torch==1.13.1+cpu --extra-index-url https://download.pytorch.org/whl/cpu
-uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
-uv pip install dhg optuna pandas pyarrow swanlab python-dotenv  
+pip install "torch==1.13.1" --extra-index-url https://download.pytorch.org/whl/cpu
+pip install "torch-geometric>=2.7.0,<3" pyg-lib>=0.4.0 -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
 
-# CUDA>=11.7
-uv pip install torch==1.13.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
-uv pip install torch_geometric pyg-lib -f https://data.pyg.org/whl/torch-1.13.1+cu117.html
-uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
+# CUDA 11.7
+pip install "torch==1.13.1+cu117" --extra-index-url https://download.pytorch.org/whl/cu117
+pip install "torch-geometric>=2.7.0,<3" "pyg-lib>=0.4.0" -f https://data.pyg.org/whl/torch-1.13.1+cu117.html
+
+# 其它依赖
+pip install "dhg==0.9.*" "optuna>=4.6.0,<5" "pandas>=2.3.3,<3" "pyarrow>=12.0.1,<13" "polars>=1.38.1,<2" "python-dotenv>=1.2.1,<2" "swanlab<0.8"
+
+# 可选开发工具
+pip install ruff pytest
 ```
 
 ### 配置说明
@@ -84,11 +98,7 @@ uv pip install dhg optuna pandas pyarrow swanlab python-dotenv
 kt-exp-graph/
 ├── configs/                           # 配置与参数空间
 │   ├── ablation/                      # 消融实验配置
-│   │   └── hgikt_study.json
 │   └── optuna/                        # Optuna 搜索配置
-│       ├── optuna_config.json
-│       ├── param_space_gikt.json
-│       └── param_space_hgikt.json
 ├── data/                              # 数据目录
 │   ├── assistments09/
 │   ├── assistments12/
@@ -99,37 +109,16 @@ kt-exp-graph/
 │   ├── DGEKT/
 │   ├── GIKT/
 │   ├── HGIKT/
-│   │   ├── HGIKT_data.py
-│   │   ├── HGIKT_model.py
-│   │   ├── HGIKT_trainer.py
-│   │   ├── __init__.py
 │   │   └── variants/                  # HGIKT 消融变体
-│   │       ├── __init__.py
-│   │       ├── hgikt_no_hypergraph.py
-│   │       ├── hgikt_no_hypergraph_trainer.py
-│   │       ├── hgikt_no_template_edges.py
-│   │       ├── hgikt_no_template_edges_data.py
-│   │       └── hgikt_no_template_edges_trainer.py
 │   ├── SGKT/
 │   ├── SQGKT/
 │   └── layers/                        # 共享模型组件
-│       ├── components.py
-│       └── __init__.py
 ├── runs/                              # 实验运行日志与检查点
 ├── swanlog/                           # SwanLab 本地日志
 ├── utils/                             # 工具模块
 │   ├── ablation/                      # 消融实验框架
-│   │   ├── config.py
-│   │   ├── config_loader.py
-│   │   └── runner.py
 │   ├── config/                        # 配置管理
-│   │   ├── data_config.py            # 数据加载器配置
-│   │   ├── param_config.py            # 参数配置
-│   │   └── training_config.py        # 训练配置（含早停）
 │   ├── core/                          # 核心工具
-│   │   ├── logger.py
-│   │   ├── random.py
-│   │   └── registry.py
 │   ├── data_process/                  # 数据处理工具
 │   │   ├── data_source.py
 │   │   ├── assist09.py
@@ -153,11 +142,6 @@ kt-exp-graph/
 ├── data_process.py                    # 数据预处理脚本（下载/清洗/划分）
 ├── optuna_search.py                   # 超参数搜索脚本
 └── train.py                           # 模型训练脚本
-```
-│   ├── hgikt_no_hypergraph_trainer.py
-│   ├── hgikt_no_template_edges.py
-│   ├── hgikt_no_template_edges_data.py
-│   └── hgikt_no_template_edges_trainer.py
 ├── scripts/
 │   ├── run_kfold.sh                   # K 折训练脚本
 │   └── setup_env.sh                   # 环境配置脚本
@@ -260,9 +244,6 @@ python train.py -m GIKT -d assistments09 --es_patience 10 --es_monitor auc --es_
 消融实验用于分析模型各组件的作用。框架提供了基于模型子类化的消融实验支持。
 
 ```bash
-# 列出所有可用的模型变体
-pixi run python ablation_study.py --list-variants
-
 # 运行批量消融实验
 pixi run python ablation_study.py --config configs/ablation/hgikt_study.json
 
@@ -302,4 +283,4 @@ swanlab login
 
 ### 超参数配置
 
-每次训练的超参数会自动保存到 `runs/<timestamp>/hyperparameters.json`，方便实验管理和结果复现。
+每次训练的超参数会自动保存到 `runs/*/<timestamp>/hyperparameters.json`，方便实验管理和结果复现。
