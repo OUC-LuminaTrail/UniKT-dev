@@ -15,6 +15,7 @@ pyarrow = ">=12.0.1,<13"
 python-dotenv = ">=1.2.1,<2"
 ruff = ">=0.15,<0.16"
 pytest = ">=9.0.2,<10"
+polars = ">=1.38.1,<2"
 
 [pypi-dependencies]
 dhg = "==0.9.*"

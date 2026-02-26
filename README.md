@@ -8,6 +8,7 @@
 - dhg：0.9.5
 - pyg-lib：0.4.0
 - scikit-learn：1.7.2
+- polars：>=1.38.1
 - pandas：2.3.3
 - pyarrow：22.0.0
 - swanlab: 0.7.2

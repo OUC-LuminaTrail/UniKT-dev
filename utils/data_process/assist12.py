@@ -1,6 +1,6 @@
 import os
 
-import pandas as pd
+import polars as pl
 from typing_extensions import override
 
 from utils.core import get_logger, register_data_source
@@ -17,9 +17,7 @@ logger = get_logger(__name__)
 
 @register_data_source("assistments12")
 class Assistments2012Data(DataSource):
-    """
-    Assistments 2012 数据集处理类
-    """
+    """ASSISTments 2012 dataset handler."""
 
     def __init__(self, args):
         super().__init__(
@@ -29,22 +27,22 @@ class Assistments2012Data(DataSource):
             seed=args.seed,
         )
         self.args = args
-        # 原始数据文件路径
         self.raw_data_path = os.path.join(
             self.data_folder, "raw", "2012-2013-data-with-predictions-4-final.csv"
         )
 
     @override
     def load_src_data(self):
-        """
-        加载原始数据
-        """
         if not os.path.exists(self.raw_data_path):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
         logger.info(f"Loading raw data from: {self.raw_data_path}")
-        self.raw_data = pd.read_csv(
-            self.raw_data_path, encoding="latin1", low_memory=False
-        )
+        self.raw_data = pl.read_csv(
+            self.raw_data_path,
+            encoding="latin1",
+            ignore_errors=True,
+            try_parse_dates=False,
+            null_values=["NA", ""],
+        ).lazy()
 
     @override
     def clear_data(self):
@@ -56,9 +54,9 @@ class Assistments2012Data(DataSource):
                 raise FileNotFoundError(
                     "Raw data not found. Please fetch the data first."
                 )
-        # 放弃不需要的列
+
         data = self.raw_data.drop(
-            columns=[
+            [
                 "problem_log_id",
                 "skill",
                 # "problem_id",
@@ -96,9 +94,9 @@ class Assistments2012Data(DataSource):
                 "Average_confidence(BORED)",
             ]
         )
-        # 重命名列
+
         data = data.rename(
-            columns={
+            {
                 "user_id": "user",
                 "problem_id": "question",
                 "correct": "label",
@@ -107,45 +105,39 @@ class Assistments2012Data(DataSource):
                 "template_id": "template",
             }
         )
-        # 按时间排序
-        data = data.sort_values(by=["user", "start_time"])
-        # 转换数据类型
-        data["user"] = data["user"].astype(int)
-        # 清除没有技能的问题
-        data = data[data["skill"].notna()]
-        # 清理label列中的异常值，只保留0和1
-        data = data[data["label"].isin([0, 1])]
-        # 移除重复的行
-        data = data.drop_duplicates()
-        # 重置索引
-        data = data.reset_index(drop=True)
 
-        # 限制序列长度
+        data = data.unique()
+        data = data.collect()
+
+        data = data.sort(["user", "start_time"])
+        data = data.with_columns([pl.col("user").cast(pl.Int32)])
+        data = data.filter(pl.col("skill").is_not_null())
+        data = data.filter(pl.col("label").is_in([0, 1]))
+
         data = restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
-        # 将问题ID和技能ID转换为连续整数
+
         data = map_to_continuous_ids(
             data, columns=["user", "question", "skill", "assignment", "template"]
         )
 
-        self.cleared_data = data.copy()
-        self.sequence_data = data.copy()
+        self.cleared_data = data.clone()
+        self.sequence_data = data.clone()
         self.question_data = build_question_data_from_cleared(
             self.cleared_data, skill_column="skill", question_column="question"
         )
 
-        # 保存元信息
         self.add_metadatas(
             {
-                "num_users": self.cleared_data["user"].nunique(),
-                "num_questions": self.question_data["question"].nunique(),
-                "num_skills": self.question_data["skill"].nunique(),
-                "num_assignments": self.question_data["assignment"].nunique(),
-                "num_templates": self.question_data["template"].nunique(),
+                "num_users": self.cleared_data["user"].n_unique(),
+                "num_questions": self.question_data["question"].n_unique(),
+                "num_skills": self.question_data["skill"].n_unique(),
+                "num_assignments": self.question_data["assignment"].n_unique(),
+                "num_templates": self.question_data["template"].n_unique(),
                 "max_seq_len": self.args.max_seq_len,
                 "min_seq_len": self.args.min_seq_len,
-                "columns": data.columns.tolist(),
+                "columns": data.columns,
             }
         )
 

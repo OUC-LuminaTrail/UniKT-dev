@@ -1,33 +1,41 @@
-import concurrent.futures
-import itertools
-import multiprocessing
 import os
-import threading
 
-import pandas as pd
-import pyarrow as pa
-import pyarrow.csv as pv
-from tqdm import tqdm
+import polars as pl
 from typing_extensions import override
 
 from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    build_question_data_from_cleared,
-    map_to_continuous_ids,
     restrains_sequence_length,
 )
 
 logger = get_logger(__name__)
 
 
+def _canonicalize_tags(tags: str, sep: str = ";") -> str | None:
+    """Canonicalize tag string: deduplicate and sort.
+
+    Args:
+        tags: Tag string
+        sep: Separator
+
+    Returns:
+        Canonicalized tag string, or None if input is empty
+    """
+    if tags is None:
+        return None
+    if not isinstance(tags, str):
+        tags = str(tags)
+    parts = [p.strip() for p in tags.split(sep) if p.strip()]
+    if not parts:
+        return None
+    parts = sorted(dict.fromkeys(parts))
+    return sep.join(parts)
+
+
 @register_data_source("ednet_kt1")
 class EdNetKT1Data(DataSource):
-    """
-    EdNetKT1数据集处理类
-    """
-
     def __init__(self, args):
         super().__init__(
             dataset="ednet_kt1",
@@ -36,290 +44,296 @@ class EdNetKT1Data(DataSource):
             seed=args.seed,
         )
         self.args = args
-        # 原始数据文件夹路径
         self.raw_data_folder = os.path.join(self.data_folder, "raw")
 
     @override
     def load_src_data(self):
-        # 实现数据加载逻辑
+        """Load raw data using Polars lazy evaluation with streaming."""
+        self._validate_data_paths()
+
+        question_answer_map = self._load_question_answers()
+        response_pattern = os.path.join(
+            self.raw_data_folder, "EdNet-KT1", "KT1", "*.csv"
+        )
+
+        logger.info(f"Scanning CSV files from: {response_pattern}")
+
+        lazy_df = (
+            pl.scan_csv(
+                response_pattern,
+                schema_overrides={
+                    "question_id": pl.Utf8,
+                    "user_answer": pl.Utf8,
+                    "timestamp": pl.Int64,
+                },
+                include_file_paths="__file_path__",
+                glob=True,
+            )
+            .with_columns(
+                pl.col("__file_path__")
+                .str.extract(r"([^/]+)\.csv$", 1)
+                .str.strip_prefix("u")
+                .cast(pl.Int32)
+                .alias("user_id")
+            )
+            .select(["user_id", "question_id", "user_answer", "timestamp"])
+        )
+
+        lazy_df = self._process_lazy_pipeline(lazy_df, question_answer_map)
+        self.sequence_data_raw = lazy_df.collect(engine="streaming")
+        logger.info(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
+
+    def _validate_data_paths(self):
+        """Validate that required data paths exist."""
         if not os.path.exists(self.raw_data_folder):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_folder}")
         logger.info(f"Loading raw data from: {self.raw_data_folder}")
 
-        # 读取题目信息
-        self.question_data_path = os.path.join(
+        question_path = os.path.join(
             self.raw_data_folder, "EdNet-Contents", "questions.csv"
         )
-        if not os.path.exists(self.question_data_path):
-            raise FileNotFoundError(f"Cannot find: {self.question_data_path}")
-        self.question_data_raw = pd.read_csv(self.question_data_path, low_memory=False)
+        if not os.path.exists(question_path):
+            raise FileNotFoundError(f"Cannot find: {question_path}")
 
-        # 记录响应数据文件夹路径
-        self.response_data_path = os.path.join(self.raw_data_folder, "EdNet-KT1", "KT1")
-        if not os.path.exists(self.response_data_path):
-            raise FileNotFoundError(f"Cannot find: {self.response_data_path}")
+        response_path = os.path.join(self.raw_data_folder, "EdNet-KT1", "KT1")
+        if not os.path.exists(response_path):
+            raise FileNotFoundError(f"Cannot find: {response_path}")
 
-        # 统计文件总数
-        total_files = 0
-        with os.scandir(self.response_data_path) as it:
-            for entry in it:
-                if entry.name.endswith(".csv") and entry.is_file():
-                    total_files += 1
+    def _load_question_answers(self) -> dict[str, str]:
+        """Load question-answer mapping.
 
-        # 并行处理文件
-        processed_batches = []
+        EdNet uses letter answers (a, b, c, d), returns string mapping.
 
-        # 使用os.scandir生成文件路径
-        def file_path_generator():
-            with os.scandir(self.response_data_path) as it:
-                for entry in it:
-                    if entry.name.endswith(".csv") and entry.is_file():
-                        yield entry.path
+        Returns:
+            Dictionary mapping question_id to correct_answer
+        """
+        question_path = os.path.join(
+            self.raw_data_folder, "EdNet-Contents", "questions.csv"
+        )
+        lazy_questions = pl.scan_csv(question_path, try_parse_dates=False)
 
-        # 生成chunk的辅助函数
-        def chunked(iterable, size):
-            it = iter(iterable)
-            while True:
-                chunk = tuple(itertools.islice(it, size))
-                if not chunk:
-                    break
-                yield chunk
+        question_answer_map = (
+            lazy_questions.select(["question_id", "correct_answer"])
+            .filter(
+                pl.col("question_id").is_not_null()
+                & pl.col("correct_answer").is_not_null()
+            )
+            .with_columns(
+                [
+                    pl.col("question_id").cast(pl.Utf8),
+                    pl.col("correct_answer").cast(pl.Utf8),
+                ]
+            )
+            .sort("question_id")
+            .unique(subset=["question_id"], keep="last")
+            .collect()
+            .to_dict(as_series=False)
+        )
 
-        # 配置并行
-        max_workers = os.cpu_count() or 4
+        question_answer_map = dict(
+            zip(
+                question_answer_map["question_id"],
+                question_answer_map["correct_answer"],
+            )
+        )
 
-        # 增大chunk size以减少开销
-        chunk_size = 5000
+        if not question_answer_map:
+            raise ValueError("No valid question-answer mapping found for EdNet-KT1.")
 
-        logger.info(f"Starting parallel processing with {max_workers} workers...")
+        self.question_data_raw = lazy_questions.collect()
+        return question_answer_map
 
-        # 使用Manager Queue进行进程间通信
-        manager = multiprocessing.Manager()
-        progress_queue = manager.Queue()
+    def _process_lazy_pipeline(
+        self, lazy_df: pl.LazyFrame, question_answer_map: dict[str, str]
+    ) -> pl.LazyFrame:
+        """Process lazy DataFrame pipeline with vectorized operations.
 
-        # 启动进度条更新线程
-        pbar = tqdm(total=total_files, desc="Loading files", unit="file")
-        stop_event = threading.Event()
+        Args:
+            lazy_df: Input LazyFrame
+            question_answer_map: Question answer mapping
 
-        def update_progress():
-            while not stop_event.is_set() or not progress_queue.empty():
-                try:
-                    # 尝试获取进度更新，超时时间短一点以免阻塞退出
-                    count = progress_queue.get(timeout=0.1)
-                    pbar.update(count)
-                except Exception:
-                    continue
+        Returns:
+            Processed LazyFrame
+        """
+        lookup_lazy = pl.DataFrame(
+            {
+                "question_id": list(question_answer_map.keys()),
+                "correct_answer": list(question_answer_map.values()),
+            }
+        ).lazy()
 
-        progress_thread = threading.Thread(target=update_progress)
-        progress_thread.start()
-
-        try:
-            with concurrent.futures.ProcessPoolExecutor(
-                max_workers=max_workers
-            ) as executor:
-                futures = []
-
-                # 提交任务
-                for chunk in chunked(file_path_generator(), chunk_size):
-                    future = executor.submit(process_chunk, chunk, progress_queue)
-                    futures.append(future)
-
-                # 获取结果
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        res = future.result()
-                        if res is not None:
-                            processed_batches.append(res)
-                    except Exception as e:
-                        logger.error(f"Error in worker: {e}")
-        finally:
-            # 停止进度条线程
-            stop_event.set()
-            progress_thread.join()
-            pbar.close()
-
-        if not processed_batches:
-            raise ValueError("No data processed from EdNet files.")
-
-        logger.debug("Concatenating all batches...")
-        self.sequence_data_raw = pa.concat_tables(processed_batches).to_pandas()
-        logger.info(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
+        return (
+            lazy_df.join(lookup_lazy, on="question_id", how="inner")
+            .with_columns(
+                [
+                    (pl.col("user_answer") == pl.col("correct_answer"))
+                    .cast(pl.Int8)
+                    .alias("label"),
+                    pl.col("question_id").cast(pl.Utf8),
+                ]
+            )
+            .select(["user_id", "question_id", "label", "timestamp"])
+        )
 
     @override
     def clear_data(self):
+        """Process and clean data."""
         logger.info("Processing Data...")
 
-        # 加载原始数据
-        if (
-            not hasattr(self, "sequence_data_raw")
-            or not hasattr(self, "question_data_raw")
-            or self.sequence_data_raw is None
-            or self.question_data_raw is None
+        if not hasattr(self, "sequence_data_raw") or not hasattr(
+            self, "question_data_raw"
         ):
             self.load_src_data()
 
-        # 处理题目信息
-        question_data = self.question_data_raw.copy()  # 复制一份以防修改原数据
+        question_data = self._process_question_data()
+        sequence_data = self._process_sequence_data()
+        sequence_data, question_data = self._remap_ids(sequence_data, question_data)
 
-        # 重命名列
-        question_data = question_data.rename(
-            columns={
-                "tags": "skill",
-                "question_id": "question",
-                "bundle_id": "assignment",
-            }
-        )
-
-        # 移除缺失值
-        question_data.dropna(subset=["correct_answer", "skill"], inplace=True)
-
-        # 将 tags 完全相同的组合作为 template
-        def _canonicalize_tags(tags: str, sep: str = ";") -> str:
-            if tags is None:
-                return None
-            if not isinstance(tags, str):
-                tags = str(tags)
-            parts = [p.strip() for p in tags.split(sep) if p.strip()]
-            if not parts:
-                return None
-            parts = sorted(dict.fromkeys(parts))
-            return sep.join(parts)
-
-        question_data["template_key"] = question_data["skill"].map(_canonicalize_tags)
-
-        question_data["question"] = question_data["question"].astype(str)
-        question_data["template"] = question_data["template_key"]
-
-        # 处理用户回答数据
-        sequence_data = self.sequence_data_raw.copy()
-
-        # 确保 question_id 是字符串类型，方便后续映射
-        sequence_data["question_id"] = sequence_data["question_id"].astype(str)
-        # 从question_data中构建question到correct_answer的映射
-        q_ans_map = question_data.set_index("question")["correct_answer"]
-        # 过滤掉不在题目元数据中的题目
-        sequence_data = sequence_data[
-            sequence_data["question_id"].isin(q_ans_map.index)
-        ]
-        # 按照question_id映射正确答案
-        sequence_data["correct_answer"] = sequence_data["question_id"].map(q_ans_map)
-        # 计算label
-        sequence_data["label"] = (
-            sequence_data["user_answer"] == sequence_data["correct_answer"]
-        ).astype(int)
-        # 抛弃不需要的列
-        sequence_data = sequence_data[["user_id", "question_id", "label", "timestamp"]]
-        # 重命名
-        sequence_data.rename(
-            columns={"question_id": "question", "user_id": "user"}, inplace=True
-        )
-        # 移除缺失值
-        sequence_data.dropna(subset=["user", "question", "label"], inplace=True)
-        # 排序
-        sequence_data.sort_values(by=["user", "timestamp"], inplace=True)
-
-        # 其他数据清理步骤
-        # 限制序列长度
-        sequence_data = restrains_sequence_length(
-            sequence_data, self.args.min_seq_len, self.args.max_seq_len
-        )
-
-        # 重新映射题目ID为连续整数，方便后续处理。只保留在交互数据中出现过的题目。
-        appeared_questions = sorted(
-            sequence_data["question"].dropna().unique().tolist()
-        )
-        question_id_map = {q: idx for idx, q in enumerate(appeared_questions)}
-
-        sequence_data["question"] = sequence_data["question"].map(question_id_map)
-
-        question_data = question_data[
-            question_data["question"].isin(appeared_questions)
-        ].copy()
-        question_data["question"] = question_data["question"].map(question_id_map)
-
-        # 对于assignment和template列进行类别编码，转换为整数类型
-        for col in ["assignment", "template"]:
-            question_data[col] = (
-                question_data[col].astype("category").cat.codes.astype(int)
-            )
-
-        # 仅对用户ID重编码，题目ID已在上面统一映射。
-        sequence_data = map_to_continuous_ids(sequence_data, columns=["user"])
-        self.sequence_data = sequence_data.copy()
-
-        # 构建question_data
-        self.question_data = build_question_data_from_cleared(
-            question_data,
-            skill_column="skill",
-            question_column="question",
-            seperator=";",
-        )
+        self.sequence_data = sequence_data
+        self.question_data = question_data
+        self._save_metadata()
 
         logger.info(f"Processed {len(sequence_data)} interactions.")
 
-        self.add_metadatas(
-            {
-                "num_users": sequence_data["user"].nunique(),
-                "num_questions": self.question_data["question"].nunique(),
-                "num_skills": self.question_data["skill"].nunique(),
-                "num_assignments": self.question_data["assignment"].nunique(),
-                "num_templates": self.question_data["template"].nunique(),
-                "max_seq_len": self.args.max_seq_len,
-                "min_seq_len": self.args.min_seq_len,
-                "sequence_columns": sequence_data.columns.tolist(),
-                "question_columns": self.question_data.columns.tolist(),
-            }
+    def _process_question_data(self) -> pl.DataFrame:
+        """Process question data with vectorized operations.
+
+        EdNet uses string skill names (e.g., "algebra;geometry"), requires
+        splitting multi-skill questions.
+
+        Returns:
+            Processed question DataFrame with integer skill IDs
+        """
+        question_data = (
+            self.question_data_raw.rename(
+                {"tags": "skill", "question_id": "question", "bundle_id": "assignment"}
+            )
+            .filter(
+                pl.col("correct_answer").is_not_null() & pl.col("skill").is_not_null()
+            )
+            .with_columns(
+                [
+                    pl.col("skill")
+                    .map_elements(_canonicalize_tags, return_dtype=pl.Utf8)
+                    .alias("skill_canonicalized"),
+                    pl.col("question").cast(pl.Utf8),
+                ]
+            )
         )
 
+        # Explode multi-skill questions (no effect if no semicolons)
+        question_data = (
+            question_data.with_columns(
+                [pl.col("skill_canonicalized").str.split(";").alias("skill_list")]
+            )
+            .explode("skill_list")
+            .with_columns([pl.col("skill_list").str.strip_chars().alias("skill")])
+            .drop("skill_canonicalized", "skill_list")
+        )
 
-def process_chunk(file_paths, progress_queue=None):
-    dfs = []
-    processed_count = 0
+        # Remove duplicates
+        question_data = question_data.unique(subset=["question", "skill"], keep="first")
 
-    for file_path in file_paths:
-        try:
-            # 从文件名中提取user_id
-            basename = os.path.basename(file_path)
-            user_id_str = basename.split(".")[0]
-            if user_id_str.startswith("u"):
-                user_id = int(user_id_str[1:])
-            else:
-                continue
+        # Map skills to continuous integer IDs
+        appeared_skills = (
+            question_data.select(pl.col("skill").drop_nulls().unique())
+            .to_series()
+            .sort()
+            .to_list()
+        )
+        skill_id_map = {skill: idx for idx, skill in enumerate(appeared_skills)}
+        question_data = question_data.with_columns(
+            [pl.col("skill").replace(skill_id_map).cast(pl.Int32)]
+        )
 
-            # 读取CSV文件
-            try:
-                table = pv.read_csv(file_path)
-                df = table.to_pandas()
-            except Exception:
-                continue
+        # For EdNet, skill is also the template
+        question_data = question_data.with_columns([pl.col("skill").alias("template")])
 
-            if df.empty:
-                continue
+        return question_data
 
-            df["user_id"] = user_id
+    def _process_sequence_data(self) -> pl.DataFrame:
+        """Process sequence data.
 
-            # 保留必要的列
-            keep_cols = ["user_id", "question_id", "user_answer", "timestamp"]
-            existing_cols = [c for c in keep_cols if c in df.columns]
-            df = df[existing_cols]
+        Returns:
+            Processed sequence DataFrame
+        """
+        required_cols = ["user_id", "question_id", "label", "timestamp"]
+        current_cols = self.sequence_data_raw.columns
+        missing_cols = [col for col in required_cols if col not in current_cols]
+        if missing_cols:
+            raise ValueError(
+                f"Missing required columns in sequence data: {missing_cols}"
+            )
 
-            dfs.append(df)
-        except Exception:
-            pass
-        finally:
-            processed_count += 1
-            # 每处理100个文件更新一次进度
-            if progress_queue and processed_count >= 100:
-                progress_queue.put(processed_count)
-                processed_count = 0
+        sequence_data = (
+            self.sequence_data_raw.select(required_cols)
+            .with_columns([pl.col("question_id").cast(pl.Utf8)])
+            .rename({"question_id": "question", "user_id": "user"})
+            .filter(
+                pl.col("user").is_not_null()
+                & pl.col("question").is_not_null()
+                & pl.col("label").is_not_null()
+            )
+            .sort(["user", "timestamp"])
+        )
 
-    # 发送剩余的处理计数
-    if progress_queue and processed_count > 0:
-        progress_queue.put(processed_count)
+        return restrains_sequence_length(
+            sequence_data, self.args.min_seq_len, self.args.max_seq_len
+        )
 
-    if not dfs:
-        return None
+    def _remap_ids(
+        self, sequence_data: pl.DataFrame, question_data: pl.DataFrame
+    ) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """Remap IDs to continuous integers.
 
-    batch_df = pd.concat(dfs, ignore_index=True)
+        Args:
+            sequence_data: Sequence data
+            question_data: Question data
 
-    return pa.Table.from_pandas(batch_df, preserve_index=False)
+        Returns:
+            Tuple of (sequence_data, question_data) with remapped IDs
+        """
+        # Remap question IDs
+        appeared_questions = (
+            sequence_data.select(pl.col("question").drop_nulls().unique())
+            .to_series()
+            .sort()
+            .to_list()
+        )
+        question_id_map = {q: idx for idx, q in enumerate(appeared_questions)}
+        sequence_data = sequence_data.with_columns(
+            [pl.col("question").replace(question_id_map).cast(pl.Int32)]
+        )
+        question_data = question_data.filter(
+            pl.col("question").is_in(appeared_questions)
+        ).with_columns([pl.col("question").replace(question_id_map).cast(pl.Int32)])
+
+        # Remap user IDs
+        appeared_users = (
+            sequence_data.select(pl.col("user").drop_nulls().unique())
+            .to_series()
+            .sort()
+            .to_list()
+        )
+        user_id_map = {user_id: idx for idx, user_id in enumerate(appeared_users)}
+        sequence_data = sequence_data.with_columns(
+            [pl.col("user").replace(user_id_map).cast(pl.Int32)]
+        )
+
+        return sequence_data, question_data
+
+    def _save_metadata(self):
+        """Save dataset metadata."""
+        self.add_metadatas(
+            {
+                "num_users": self.sequence_data["user"].n_unique(),
+                "num_questions": self.question_data["question"].n_unique(),
+                "num_skills": self.question_data["skill"].n_unique(),
+                "num_assignments": self.question_data["assignment"].n_unique(),
+                "num_templates": self.question_data["template"].n_unique(),
+                "max_seq_len": self.args.max_seq_len,
+                "min_seq_len": self.args.min_seq_len,
+                "sequence_columns": list(self.sequence_data.columns),
+                "question_columns": list(self.question_data.columns),
+            }
+        )

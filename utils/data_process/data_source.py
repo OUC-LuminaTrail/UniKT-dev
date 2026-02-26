@@ -1,7 +1,16 @@
+import hashlib
+import json
 import os
+import shutil
+import time
+import zipfile
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
-import pandas as pd
+import polars as pl
+import requests
+import tqdm
 from sklearn.model_selection import KFold
 
 from utils.core import get_logger
@@ -10,28 +19,10 @@ logger = get_logger(__name__)
 
 
 class DataSource(ABC):
-    """
-    数据源基类
+    """Base class for data source management.
 
-    参数:
-        dataset: 数据集名称（自动转换为小写）
-        data_base_path: 数据存储的基础路径
-        data_url: 数据下载链接 (可选)
-
-    属性:
-        dataset: 数据集名称
-        data_base_path: 数据存储的基础路径
-        data_folder: 数据集文件夹路径
-        data_processed_folder: 预处理后数据的存储路径
-        raw_data: 原始数据 (Pandas DataFrame)
-        processed_data: 预处理后的数据 (Pandas DataFrame)
-        data_url: 数据下载链接 (可选)
-        metadata: 数据元信息字典
-
-    已实现的方法:
-        add_metadata(key, value): 添加数据元信息
-        save_metadata(): 保存数据元信息到 JSON 文件
-        add_kfold_labels(n_splits, random_state, user_id_column): 添加K折交叉验证的分层划分标签
+    Provides common functionality for downloading, loading, processing,
+    and saving dataset files with metadata tracking and integrity checks.
     """
 
     def __init__(
@@ -39,47 +30,31 @@ class DataSource(ABC):
     ):
         super().__init__()
         self.dataset = dataset.lower()
-        # 数据存储的基础路径
         self.data_base_path = data_base_path
-        # 数据集文件夹路径
         self.data_folder = os.path.join(self.data_base_path, self.dataset)
-        # 元数据JSON文件路径
         self.metadata_path = os.path.join(self.data_folder, "metadata.json")
         self.raw_data = None
-        self.cleared_data = None  # 预处理前的中间数据
-        self.sequence_data = None  # 预处理后的答题序列数据
-        self.question_data = None  # 预处理后的题目信息数据
+        self.cleared_data = None
+        self.sequence_data = None
+        self.question_data = None
         self.data_url = data_url
         self.metadata = {}
-        # 设置随机种子
         self.seed = seed
         self.set_random_seed()
 
     def set_random_seed(self):
+        """Set random seeds for reproducibility."""
         import random
 
         import numpy as np
 
-        if self.seed is None:
-            self.seed = 42
-        random.seed(self.seed)
-        np.random.seed(self.seed)
-        logger.debug(f"Random seed set to {self.seed}")
+        seed = self.seed if self.seed is not None else 42
+        random.seed(seed)
+        np.random.seed(seed)
+        logger.debug(f"Random seed set to {seed}")
 
     def _download_chunk(self, url, start, end, chunk_path, pbar, chunk_size=8192):
-        """
-        下载文件的一个块（用于多线程下载）
-
-        参数:
-            url: 下载URL
-            start: 起始字节
-            end: 结束字节
-            chunk_path: 块文件保存路径
-            pbar: 进度条对象
-            chunk_size: 每次读取的块大小
-        """
-        import requests
-
+        """Download a single chunk of a file for multi-threaded downloads."""
         headers = {"Range": f"bytes={start}-{end}"}
         response = requests.get(url, headers=headers, stream=True, timeout=60)
         response.raise_for_status()
@@ -92,29 +67,14 @@ class DataSource(ABC):
                         pbar.update(len(chunk) / (1024 * 1024))
 
     def _download_with_requests(self, archive_path, num_threads, attempt, max_retries):
-        """
-        使用requests库下载文件（支持多线程）
-
-        参数:
-            archive_path: 文件保存路径
-            num_threads: 线程数
-            attempt: 当前尝试次数
-            max_retries: 最大重试次数
-        """
-        from concurrent.futures import ThreadPoolExecutor
-
-        import requests
-        import tqdm
-
-        # 首先发送HEAD请求检查服务器是否支持Range请求
+        """Download file with multi-threading support."""
         head_response = requests.head(self.data_url, timeout=30)
         head_response.raise_for_status()
 
         total_bytes = int(head_response.headers.get("content-length", 0))
         accept_ranges = head_response.headers.get("accept-ranges", "none")
 
-        # 如果服务器不支持Range或文件太小，使用单线程下载
-        if accept_ranges != "bytes" or total_bytes < 10 * 1024 * 1024:  # 小于10MB
+        if accept_ranges != "bytes" or total_bytes < 10 * 1024 * 1024:
             if accept_ranges != "bytes":
                 logger.warning(
                     "Server does not support range requests, using single-threaded download"
@@ -122,14 +82,9 @@ class DataSource(ABC):
             self._download_single_thread(archive_path)
             return
 
-        # 多线程下载
         total_mb = total_bytes / (1024 * 1024)
         chunk_size = total_bytes // num_threads
-
-        # 创建临时目录存储分块文件
         temp_dir = archive_path + ".parts"
-        import os
-
         os.makedirs(temp_dir, exist_ok=True)
 
         try:
@@ -140,9 +95,8 @@ class DataSource(ABC):
                 desc=f"Downloading (attempt {attempt}/{max_retries})",
                 bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}, {rate_fmt}]",
             ) as pbar:
-                # 创建下载任务
-                futures = []
                 with ThreadPoolExecutor(max_workers=num_threads) as executor:
+                    futures = []
                     for i in range(num_threads):
                         start = i * chunk_size
                         end = (
@@ -160,39 +114,24 @@ class DataSource(ABC):
                             chunk_path,
                             pbar,
                         )
-                        futures.append((i, future, chunk_path))
+                        futures.append(future)
 
-                    # 等待所有任务完成
-                    for i, future, chunk_path in futures:
-                        future.result()  # 如果有异常会在这里抛出
+                    for future in futures:
+                        future.result()
 
-            # 合并所有分块文件
             logger.debug("Merging downloaded chunks...")
             with open(archive_path, "wb") as outfile:
                 for i in range(num_threads):
                     chunk_path = os.path.join(temp_dir, f"chunk_{i}")
                     with open(chunk_path, "rb") as infile:
-                        import shutil
-
                         shutil.copyfileobj(infile, outfile)
 
         finally:
-            # 清理临时文件
-            import shutil
-
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
     def _download_single_thread(self, archive_path):
-        """
-        单线程下载文件
-
-        参数:
-            archive_path: 文件保存路径
-        """
-        import requests
-        import tqdm
-
+        """Download file with single thread."""
         with requests.get(self.data_url, stream=True, timeout=60) as r:
             r.raise_for_status()
             total_bytes = int(r.headers.get("content-length", 0))
@@ -213,43 +152,25 @@ class DataSource(ABC):
                             pbar.update(len(chunk) / (1024 * 1024))
 
     def fetch_data(self, force_download=False, max_retries=3, num_threads=4):
-        """
-        下载数据（支持多线程下载、自动重试和强制覆盖）
+        """Download and extract data archive with retry support.
 
-        参数:
-            force_download: 是否强制重新下载（即使文件已存在）
-            max_retries: 最大重试次数
-            num_threads: 多线程下载的线程数（仅在支持Range请求时使用）
+        Args:
+            force_download: Force re-download even if file exists.
+            max_retries: Maximum number of download retry attempts.
+            num_threads: Number of threads for multi-threaded download.
         """
-        import os
-        import shutil
-        import time
-        from pathlib import Path
-
-        try:
-            import requests
-        except Exception:
-            requests = None
-        import gzip
-        import tarfile
-        import urllib.request
-        import zipfile
 
         if self.data_url is None:
             raise ValueError("Data URL is not provided.")
 
-        os.makedirs(os.path.join(self.data_base_path, self.dataset), exist_ok=True)
+        os.makedirs(self.data_folder, exist_ok=True)
 
-        # 推断文件名
         file_name = self.data_url.split("/")[-1]
-        if not file_name:  # 处理以 / 结尾的 URL
+        if not file_name:
             file_name = "downloaded_data"
         archive_path = os.path.join(self.data_folder, file_name)
 
-        # 检查是否需要下载
-        if os.path.exists(archive_path) and not force_download:
-            logger.info(f"Dataset already exists, skip downloading: {archive_path}")
-        else:
+        if not os.path.exists(archive_path) or force_download:
             if force_download and os.path.exists(archive_path):
                 logger.warning(
                     f"Force download enabled, removing existing file: {archive_path}"
@@ -258,31 +179,20 @@ class DataSource(ABC):
 
             logger.info(f"Downloading data from {self.data_url}")
 
-            # 尝试下载，支持重试
             for attempt in range(max_retries):
                 try:
-                    if requests is not None:
-                        self._download_with_requests(
-                            archive_path, num_threads, attempt + 1, max_retries
-                        )
-                    else:
-                        # urllib 回退
-                        logger.warning(
-                            "Using urllib as fallback (no multi-threading support)"
-                        )
-                        urllib.request.urlretrieve(self.data_url, archive_path)
-
+                    self._download_with_requests(
+                        archive_path, num_threads, attempt + 1, max_retries
+                    )
                     logger.info(f"Download finished: {archive_path}")
-                    break  # 下载成功，跳出重试循环
-
+                    break
                 except Exception as e:
-                    # 清理失败的下载文件
                     if os.path.exists(archive_path):
                         os.remove(archive_path)
                         logger.debug(f"Removed incomplete download: {archive_path}")
 
                     if attempt < max_retries - 1:
-                        wait_time = 2**attempt  # 指数退避
+                        wait_time = 2**attempt
                         logger.error(
                             f"Download failed (attempt {attempt + 1}/{max_retries}): {e}"
                         )
@@ -292,87 +202,84 @@ class DataSource(ABC):
                         raise RuntimeError(
                             f"Failed to download data after {max_retries} attempts: {e}"
                         )
+        else:
+            logger.info(f"Dataset already exists, skip downloading: {archive_path}")
 
-        # 计算并保存 MD5
         archive_md5 = self.compute_md5(archive_path)
         self.add_metadata("raw_archive_md5", archive_md5)
         self.add_metadata("raw_archive_filename", file_name)
 
-        # 解压逻辑
         extract_target = os.path.join(self.data_folder, "raw")
         os.makedirs(extract_target, exist_ok=True)
 
-        # 判断是否需要重新解压
-        should_extract = False
+        should_extract = self._should_extract(force_download, extract_target)
+
+        if should_extract:
+            logger.info(f"Extracting archive: {archive_path}")
+            self._extract_archive(archive_path, file_name, extract_target)
+            logger.info(f"Extraction finished: {extract_target}")
+        else:
+            logger.info(
+                f"Raw data directory not empty, skip extraction: {extract_target}"
+            )
+
+        self.add_metadata("raw_data_path", extract_target)
+
+    def _should_extract(self, force_download: bool, extract_target: str) -> bool:
+        """Determine whether extraction is needed."""
         if force_download:
-            # 强制模式：清空并重新解压
             if any(Path(extract_target).iterdir()):
                 logger.warning(
                     f"Force mode enabled, removing existing raw data: {extract_target}"
                 )
                 shutil.rmtree(extract_target)
                 os.makedirs(extract_target, exist_ok=True)
-            should_extract = True
-        elif not any(Path(extract_target).iterdir()):
-            # 目录为空，需要解压
-            should_extract = True
+            return True
+        return not any(Path(extract_target).iterdir())
+
+    def _extract_archive(self, archive_path: str, file_name: str, extract_target: str):
+        """Extract archive file based on its extension."""
+        import gzip
+        import tarfile
+
+        lower_name = file_name.lower()
+
+        if lower_name.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                zf.extractall(extract_target)
+        elif lower_name.endswith((".tar.gz", ".tgz")):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                tf.extractall(extract_target)
+        elif lower_name.endswith(".tar"):
+            with tarfile.open(archive_path, "r:") as tf:
+                tf.extractall(extract_target)
+        elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
+            uncompressed_name = lower_name[:-3]
+            target_file = os.path.join(extract_target, uncompressed_name)
+            with (
+                gzip.open(archive_path, "rb") as f_in,
+                open(target_file, "wb") as f_out,
+            ):
+                shutil.copyfileobj(f_in, f_out)
         else:
-            logger.info(
-                f"Raw data directory not empty, skip extraction: {extract_target}"
-            )
-            return extract_target
-
-        if should_extract:
-            logger.info(f"Extracting archive: {archive_path}")
-            lower_name = file_name.lower()
-            try:
-                if lower_name.endswith(".zip"):
-                    with zipfile.ZipFile(archive_path, "r") as zf:
-                        zf.extractall(extract_target)
-                elif lower_name.endswith((".tar.gz", ".tgz")):
-                    with tarfile.open(archive_path, "r:gz") as tf:
-                        tf.extractall(extract_target)
-                elif lower_name.endswith(".tar"):
-                    with tarfile.open(archive_path, "r:") as tf:
-                        tf.extractall(extract_target)
-                elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
-                    # 处理单文件 .gz
-                    uncompressed_name = lower_name[:-3]
-                    target_file = os.path.join(extract_target, uncompressed_name)
-                    with (
-                        gzip.open(archive_path, "rb") as f_in,
-                        open(target_file, "wb") as f_out,
-                    ):
-                        shutil.copyfileobj(f_in, f_out)
-                else:
-                    # 非压缩文件，直接复制
-                    dest_path = os.path.join(extract_target, file_name)
-                    if archive_path != dest_path:
-                        shutil.copy2(archive_path, dest_path)
-            except Exception as e:
-                raise RuntimeError(f"Failed to extract archive: {e}")
-
-            logger.info(f"Extraction finished: {extract_target}")
-
-        self.add_metadata("raw_data_path", extract_target)
+            dest_path = os.path.join(extract_target, file_name)
+            if archive_path != dest_path:
+                shutil.copy2(archive_path, dest_path)
 
     @abstractmethod
     def load_src_data(self):
-        """
-        加载原始数据
-        """
+        """Load source data. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement load_data method")
 
     def load_processed_data(self):
-        """
-        加载预处理后的数据
+        """Load processed data files with integrity checks.
 
-        异常:
-            FileNotFoundError: 预处理数据文件不存在
-            ValueError: 数据完整性检查失败（MD5不匹配）
+        Raises:
+            FileNotFoundError: Processed data files not found.
+            ValueError: MD5 checksum mismatch.
         """
         self.load_metadata()
-        # 加载预处理后的数据文件
+
         sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_sequence.parquet"
         )
@@ -380,154 +287,96 @@ class DataSource(ABC):
             self.data_folder, f"{self.dataset}_question.parquet"
         )
 
-        # 检查文件是否存在，提供详细的错误信息和修复建议
-        missing_files = []
-        if not os.path.exists(sequence_data_path):
-            missing_files.append(f"  - {sequence_data_path}")
-        if not os.path.exists(question_data_path):
-            missing_files.append(f"  - {question_data_path}")
+        self._validate_data_files_exist([sequence_data_path, question_data_path])
+        self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
+        self._validate_data_integrity(question_data_path, "question_data_md5")
+        self._load_parquet_files(sequence_data_path, question_data_path)
+
+    def _validate_data_files_exist(self, file_paths: list[str]):
+        """Validate that all required data files exist."""
+        missing_files = [
+            f"  - {path}" for path in file_paths if not os.path.exists(path)
+        ]
 
         if missing_files:
             missing_str = "\n".join(missing_files)
             raise FileNotFoundError(
                 f"Processed data files not found for dataset '{self.dataset}':\n"
                 f"{missing_str}\n\n"
-                f"💡 To fix this, please run preprocessing first:\n"
+                f"To fix this, please run preprocessing first:\n"
                 f"   python data_process.py process -d {self.dataset}\n\n"
-                f"📁 Data base path: {self.data_folder}"
+                f"Data base path: {self.data_folder}"
             )
 
-        # 检测文件的MD5值是否匹配
-        md5_hash = self.compute_md5(sequence_data_path)
-        if (
-            "sequence_data_md5" in self.metadata
-            and md5_hash != self.metadata["sequence_data_md5"]
-        ):
+    def _validate_data_integrity(self, file_path: str, md5_key: str):
+        """Validate MD5 checksum of a data file."""
+        if md5_key not in self.metadata:
+            return
+
+        actual_md5 = self.compute_md5(file_path)
+        expected_md5 = self.metadata[md5_key]
+
+        if actual_md5 != expected_md5:
+            data_type = "sequence" if "sequence" in md5_key else "question"
             raise ValueError(
-                f"Processed data file integrity check failed (MD5 mismatch).\n"
-                f"Expected MD5: {self.metadata.get('sequence_data_md5', 'unknown')}\n"
-                f"Actual MD5: {md5_hash}\n\n"
-                f"💡 The data may be corrupted or outdated. Please re-run preprocessing:\n"
-                f"   python data_process.py process -d {self.dataset}"
-            )
-        md5_hash = self.compute_md5(question_data_path)
-        if (
-            "question_data_md5" in self.metadata
-            and md5_hash != self.metadata["question_data_md5"]
-        ):
-            raise ValueError(
-                f"Question data file integrity check failed (MD5 mismatch).\n"
-                f"Expected MD5: {self.metadata.get('question_data_md5', 'unknown')}\n"
-                f"Actual MD5: {md5_hash}\n\n"
-                f"💡 The data may be corrupted or outdated. Please re-run preprocessing:\n"
+                f"{data_type.capitalize()} data file integrity check failed (MD5 mismatch).\n"
+                f"Expected MD5: {expected_md5}\n"
+                f"Actual MD5: {actual_md5}\n\n"
+                f"The data may be corrupted or outdated. Please re-run preprocessing:\n"
                 f"   python data_process.py process -d {self.dataset}"
             )
 
-        # 加载数据
-        self._load_processed_data_safely(sequence_data_path, question_data_path)
+    def _load_parquet_files(self, sequence_path: str, question_path: str):
+        """Load parquet files with error handling."""
+        logger.info(f"Loading sequence data: {sequence_path}")
+        self.sequence_data = pl.read_parquet(sequence_path)
+        logger.info(
+            f"Sequence data loaded successfully: {len(self.sequence_data)} rows"
+        )
 
-    def _load_processed_data_safely(self, sequence_data_path, question_data_path):
-        """
-        安全加载parquet数据,带详细错误信息
-
-        参数:
-            sequence_data_path: 序列数据路径
-            question_data_path: 问题数据路径
-
-        异常:
-            FileNotFoundError: 文件不存在
-            ValueError: 数据格式错误
-            MemoryError: 内存不足
-        """
-        # 加载序列数据
-        try:
-            logger.info(f"Loading sequence data: {sequence_data_path}")
-            self.sequence_data = pd.read_parquet(sequence_data_path)
-            logger.info(
-                f"✓ Sequence data loaded successfully: {self.sequence_data.shape}"
-            )
-        except FileNotFoundError as e:
-            raise FileNotFoundError(
-                f"Data file not found: {sequence_data_path}\n"
-                f"Please run preprocessing first: python data_process.py process -d {self.dataset}"
-            ) from e
-        except Exception as e:
-            logger.error(f"Failed to load sequence data: {e}")
-            raise
-
-        # 加载问题数据
-        try:
-            logger.info(f"Loading question data: {question_data_path}")
-            self.question_data = pd.read_parquet(question_data_path)
-            logger.info(
-                f"✓ Question data loaded successfully: {self.question_data.shape}"
-            )
-        except FileNotFoundError as e:
-            raise FileNotFoundError(
-                f"Data file not found: {question_data_path}\n"
-                f"Please run preprocessing first: python data_process.py process -d {self.dataset}"
-            ) from e
-        except Exception as e:
-            logger.error(f"Failed to load question data: {e}")
-            raise
+        logger.info(f"Loading question data: {question_path}")
+        self.question_data = pl.read_parquet(question_path)
+        logger.info(
+            f"Question data loaded successfully: {len(self.question_data)} rows"
+        )
 
     @abstractmethod
     def clear_data(self):
-        """
-        预处理数据
-
-        注：如果原始数据未加载，应先调用 load_src_data()
-        处理完成后应将结果存储在 self.processed_data 中
-        """
+        """Clean and preprocess raw data. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement clear_data method")
 
     def save_data(self):
-        """
-        保存预处理后的数据
-
-        注：在该方法中应调用 save_metadata() 保存元信息
-        """
+        """Save processed data to parquet files with metadata."""
         logger.info("Saving processed data...")
+
         if self.sequence_data is None or self.question_data is None:
             raise ValueError("Please run clear_data() before saving processed data.")
 
-        # 保存预处理后的答题序列数据
         sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_sequence.parquet"
         )
         question_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_question.parquet"
         )
-        self.question_data.to_parquet(question_data_path, index=False)
-        md5_hash = self.compute_md5(question_data_path)
-        self.add_metadata("question_data_md5", md5_hash)
-        self.sequence_data.to_parquet(sequence_data_path, index=False)
-        md5_hash = self.compute_md5(sequence_data_path)
-        self.add_metadata("sequence_data_md5", md5_hash)
+
+        self.question_data.write_parquet(question_data_path)
+        self.add_metadata("question_data_md5", self.compute_md5(question_data_path))
+
+        self.sequence_data.write_parquet(sequence_data_path)
+        self.add_metadata("sequence_data_md5", self.compute_md5(sequence_data_path))
         self.add_metadata("random_seed", self.seed)
+
         self.save_metadata()
         logger.info("Processed data saved.")
 
     def compute_md5(self, file_path: str) -> str:
-        """
-        计算文件的MD5值
-
-        参数:
-            file_path: 文件路径
-
-        返回:
-            文件的MD5值字符串
-        """
-        import hashlib
-
-        from tqdm import tqdm
-
+        """Compute MD5 checksum of a file."""
         hash_md5 = hashlib.md5()
         file_size = os.path.getsize(file_path)
         file_size_mb = file_size / (1024 * 1024)
 
         with open(file_path, "rb") as f:
-            with tqdm(
+            with tqdm.tqdm(
                 total=file_size_mb,
                 unit="MB",
                 unit_scale=False,
@@ -535,7 +384,7 @@ class DataSource(ABC):
                 bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}]",
             ) as pbar:
                 while True:
-                    chunk = f.read(65536)  # 64KB chunks for faster processing
+                    chunk = f.read(65536)
                     if not chunk:
                         break
                     hash_md5.update(chunk)
@@ -544,137 +393,79 @@ class DataSource(ABC):
         return hash_md5.hexdigest()
 
     def get_sequence_data(self):
-        """
-        获取预处理后的数据
-
-        返回:
-            预处理后的数据
-        """
+        """Get sequence data as pandas DataFrame."""
         if self.sequence_data is None:
-            try:
-                self.load_processed_data()
-            except FileNotFoundError:
-                raise ValueError(
-                    "No processed data available. Please run clear_data() first."
-                )
-        return self.sequence_data
+            self._load_or_raise()
+        return self.sequence_data.to_pandas()
 
     def get_question_data(self):
-        """
-        获取题目信息数据
-
-        返回:
-            题目信息数据
-        """
+        """Get question data as pandas DataFrame."""
         if self.question_data is None:
-            try:
-                self.load_processed_data()
-            except FileNotFoundError:
-                raise ValueError(
-                    "No processed data available. Please run clear_data() first."
-                )
-        return self.question_data
+            self._load_or_raise()
+        return self.question_data.to_pandas()
 
     def get_processed_data(self):
-        """
-        获取预处理后的数据和题目信息数据
-
-        返回:
-            预处理后的数据和题目信息数据的元组 (sequence_data, question_data)
-        """
+        """Get both sequence and question data."""
         if self.sequence_data is None or self.question_data is None:
-            try:
-                self.load_processed_data()
-            except FileNotFoundError:
-                raise ValueError(
-                    "No processed data available. Please run clear_data() first."
-                )
+            self._load_or_raise()
         return self.sequence_data, self.question_data
 
-    def add_metadata(self, key: str, value):
-        """
-        添加数据元信息
+    def _load_or_raise(self):
+        """Load processed data or raise ValueError."""
+        try:
+            self.load_processed_data()
+        except FileNotFoundError:
+            raise ValueError(
+                "No processed data available. Please run clear_data() first."
+            )
 
-        参数:
-            key: 元信息键
-            value: 元信息值
-        """
+    def add_metadata(self, key: str, value):
+        """Add a single metadata entry."""
         self.metadata[key] = value
-        logger.debug(f"Added {self.dataset} to DataSource metadata: {key} = {value}")
+        logger.debug(f"Added {key} = {value} to DataSource metadata")
 
     def add_metadatas(self, meta_dict: dict):
-        """
-        批量添加数据元信息
-
-        参数:
-            meta_dict: 元信息字典
-        """
+        """Add multiple metadata entries."""
         for key, value in meta_dict.items():
             self.add_metadata(key, value)
 
     def save_metadata(self):
-        """
-        保存数据元信息
-        """
+        """Save metadata to JSON file."""
         self.add_metadata("dataset", self.dataset)
         self.add_metadata("data_base_path", self.data_base_path)
-        import json
 
         with open(self.metadata_path, "w") as f:
             json.dump(self.metadata, f, indent=4)
 
     def load_metadata(self):
-        """
-        加载数据元信息
-        """
+        """Load metadata from JSON file."""
         if not os.path.exists(self.metadata_path):
             raise FileNotFoundError(f"Metadata file not found: {self.metadata_path}")
-        import json
 
         with open(self.metadata_path) as f:
             self.metadata = json.load(f)
 
     def get_metadata(self, key: str | None = None):
-        """
-        获取指定键的元信息
-
-        参数:
-            key: 元信息键
-
-        返回:
-            元信息值
-        """
+        """Get metadata entry or entire metadata dict."""
         if not self.metadata:
             self.load_metadata()
-        if key is None:
-            return self.metadata
-        return self.metadata.get(key, None)
+        return self.metadata if key is None else self.metadata.get(key)
 
     def add_kfold_labels(self, n_splits: int = 5):
+        """Add K-fold cross-validation labels at user level.
+
+        Ensures all data from the same user stays in the same fold
+        to prevent data leakage.
+
+        Args:
+            n_splits: Number of folds (default: 5).
+
+        Returns:
+            DataFrame with added 'fold' column (values: 0 to n_splits-1).
+
+        Raises:
+            ValueError: If sequence_data is not loaded.
         """
-        为数据集添加K折交叉验证的分层划分标签
-
-        按用户维度进行分层 K折划分，确保每个用户的所有数据都在同一个fold中，
-        避免数据泄露。
-
-        参数:
-            n_splits: K折的数量，默认为5
-            random_state: 随机种子，确保可重复性，默认为42
-
-        返回:
-            添加了fold标签的数据集 DataFrame（列名为 'fold'，值为 0 到 n_splits-1）
-
-        异常:
-            ValueError: 如果processed_data未加载或user_id_column列不存在
-
-        说明:
-            - 添加的新列名为 'fold'（值为 0 到 n_splits-1）
-            - 如果按用户分层，每个用户的所有数据都会分到同一个fold
-            - 元数据中会记录 'kfold_n_splits' 和 'kfold_random_state'
-            - 会覆盖已存在的 'fold' 列
-        """
-        from tqdm import tqdm
-
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
@@ -682,68 +473,58 @@ class DataSource(ABC):
 
         logger.info(f"Adding K-Fold labels with n_splits={n_splits}")
 
-        # 复制数据以避免修改原始数据
-        data = self.sequence_data.copy()
-        data["fold"] = -1
-
-        # 获取唯一的用户ID
+        data = self.sequence_data.clone().with_columns([pl.lit(-1).alias("fold")])
         unique_users = data["user"].unique()
         user_to_fold = {}
 
-        # 对用户ID进行KFold划分
         kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
-        for fold_idx, (_, test_user_idx) in tqdm(
+        for fold_idx, (_, test_user_idx) in tqdm.tqdm(
             enumerate(kfold.split(unique_users)), total=n_splits, desc="Assigning folds"
         ):
             test_users = unique_users[test_user_idx]
             for user in test_users:
                 user_to_fold[user] = fold_idx
 
-        # 为每个用户的所有行分配对应的fold值
-        data["fold"] = data["user"].map(user_to_fold)
-
-        # 更新processed_data
+        data = data.with_columns([pl.col("user").replace(user_to_fold).alias("fold")])
         self.sequence_data = data
-
-        # 更新元数据
         self.add_metadata("kfold_n_splits", n_splits)
 
         return data
 
     def get_user_stats(self):
-        """
-        计算用户统计特征（答题数、正确率、技能覆盖度）
+        """Compute user statistics: attempts, correct count, skill count, correct rate.
 
-        返回:
-            包含用户统计信息的 DataFrame，索引为用户ID，列包括:
-            - attempts: 答题次数
-            - correct_rate: 正确率
-            - skill_count: 涉及的技能数
+        Returns:
+            DataFrame with columns: user, attempts, correct, skill_count, correct_rate.
+
+        Raises:
+            ValueError: If sequence_data is not loaded.
         """
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
-        # 按用户分组统计
-        user_stats = self.sequence_data.groupby("user").agg(
-            attempts=("label", "count"),
-            correct=("label", "sum"),
+        user_stats = self.sequence_data.group_by("user").agg(
+            pl.len().alias("attempts"),
+            pl.col("label").sum().alias("correct"),
         )
 
-        user_skill = self.sequence_data[["user", "question"]].merge(
-            self.question_data[["question", "skill"]],
+        user_skill = self.sequence_data.select(["user", "question"]).join(
+            self.question_data.select(["question", "skill"]),
             on="question",
             how="left",
         )
-        skill_stats = (
-            user_skill.groupby("user")["skill"].nunique(dropna=True).rename("skills")
+        skill_stats = user_skill.group_by("user").agg(
+            pl.col("skill").n_unique().alias("skill_count")
         )
 
-        user_stats = user_stats.join(skill_stats, how="left")
-        user_stats["skills"] = user_stats["skills"].fillna(0).astype(int)
-        user_stats["correct_rate"] = user_stats["correct"] / user_stats["attempts"]
-        user_stats = user_stats.rename(columns={"skills": "skill_count"})
+        user_stats = user_stats.join(skill_stats, on="user", how="left").with_columns(
+            [
+                pl.col("skill_count").fill_null(0).cast(pl.Int32),
+                (pl.col("correct") / pl.col("attempts")).alias("correct_rate"),
+            ]
+        )
 
         return user_stats
 
@@ -751,38 +532,22 @@ class DataSource(ABC):
         self,
         n_samples: int,
         stratify: bool = True,
-        balance: bool = False,
         attempts_bins: list = [20, 100],
         correct_bins: list = [0.4, 0.8],
-        skill_bins: list = [5, 15],
     ):
+        """Sample users with stratified sampling based on user statistics.
+
+        Stratifies by attempts and correct rate dimensions.
+
+        Args:
+            n_samples: Number of users to sample.
+            stratify: Enable stratified sampling (default: True).
+            attempts_bins: Attempt count bin edges.
+            correct_bins: Correct rate bin edges.
+
+        Raises:
+            ValueError: If n_samples exceeds total users or data not loaded.
         """
-        对用户进行分层抽样
-
-        基于用户的三维统计特征（答题数、正确率、技能覆盖度）进行分层抽样，
-        保留原始数据集的分布特征。
-
-        参数:
-            n_samples: 要抽取的用户数量
-            stratify: 是否启用分层抽样（默认: True）
-            balance: 是否在各层间平衡抽样（默认: False）
-            attempts_bins: 答题数分箱边界（默认: [20, 100]）
-            correct_bins: 正确率分箱边界（默认: [0.4, 0.8]）
-            skill_bins: 技能数分箱边界（默认: [5, 15]）
-
-        返回:
-            None（直接更新 self.sequence_data 和 self.question_data）
-
-        异常:
-            ValueError: 如果 n_samples 大于总用户数或 sequence_data 未加载
-
-        说明:
-            - 抽样使用全局随机种子 self.seed 确保可重复性
-            - 抽样配置和统计信息会记录到 metadata 中
-            - 同时更新 sequence_data 和 question_data 保持一致性
-        """
-        import numpy as np
-
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
@@ -805,149 +570,119 @@ class DataSource(ABC):
         original_records = len(self.sequence_data)
 
         if stratify:
-            user_stats["attempts_level"] = pd.cut(
-                user_stats["attempts"],
-                bins=[-np.inf] + attempts_bins + [np.inf],
-                labels=["low", "medium", "high"],
+            sampled_users = self._sample_users_stratified(
+                user_stats, n_samples, attempts_bins, correct_bins
             )
-            user_stats["correct_level"] = pd.cut(
-                user_stats["correct_rate"],
-                bins=[-np.inf] + correct_bins + [np.inf],
-                labels=["low", "medium", "high"],
-            )
-            user_stats["skill_level"] = pd.cut(
-                user_stats["skill_count"],
-                bins=[-np.inf] + skill_bins + [np.inf],
-                labels=["narrow", "medium", "broad"],
-            )
-
-            user_stats["strata"] = (
-                user_stats["attempts_level"].astype(str)
-                + "_"
-                + user_stats["correct_level"].astype(str)
-                + "_"
-                + user_stats["skill_level"].astype(str)
-            )
-
-            strata_counts = user_stats["strata"].value_counts()
-            num_strata = len(strata_counts)
-
-            logger.info(f"Created {num_strata} strata for stratified sampling.")
-
-            sampled_users = []
-            strata_distribution = {}
-
-            if balance:
-                quota_per_strata = max(1, n_samples // num_strata)
-                for strata, count in strata_counts.items():
-                    quota = min(quota_per_strata, count)
-                    strata_users = user_stats[
-                        user_stats["strata"] == strata
-                    ].index.tolist()
-
-                    strata_seed = (self.seed + hash(strata) % 2**32) % 2**32
-                    rng = np.random.RandomState(strata_seed)
-
-                    sampled = rng.choice(strata_users, size=quota, replace=False)
-                    sampled_users.extend(sampled)
-
-                    strata_distribution[strata] = {"original": count, "sampled": quota}
-            else:
-                for strata, count in strata_counts.items():
-                    quota = max(1, int(count / total_users * n_samples))
-                    strata_users = user_stats[
-                        user_stats["strata"] == strata
-                    ].index.tolist()
-
-                    strata_seed = (self.seed + hash(strata) % 2**32) % 2**32
-                    rng = np.random.RandomState(strata_seed)
-
-                    sampled = rng.choice(
-                        strata_users, size=min(quota, count), replace=False
-                    )
-                    sampled_users.extend(sampled)
-
-                    strata_distribution[strata] = {
-                        "original": count,
-                        "sampled": len(sampled),
-                    }
-
-            if len(sampled_users) > n_samples:
-                rng = np.random.RandomState(self.seed)
-                sampled_users = rng.choice(
-                    sampled_users, size=n_samples, replace=False
-                ).tolist()
-                for strata in strata_distribution:
-                    strata_distribution[strata]["sampled"] = len(
-                        [
-                            u
-                            for u in sampled_users
-                            if u in user_stats[user_stats["strata"] == strata].index
-                        ]
-                    )
-            elif len(sampled_users) < n_samples:
-                remaining = n_samples - len(sampled_users)
-                unsampled_users = [
-                    u for u in user_stats.index if u not in sampled_users
-                ]
-                rng = np.random.RandomState(self.seed)
-                additional = rng.choice(
-                    unsampled_users, size=remaining, replace=False
-                ).tolist()
-                sampled_users.extend(additional)
-
         else:
             logger.info("Performing simple random sampling without stratification.")
-            rng = np.random.RandomState(self.seed)
-            sampled_users = rng.choice(
-                user_stats.index, size=n_samples, replace=False
-            ).tolist()
-            strata_distribution = {}
-
-        sampled_users_set = set(sampled_users)
-        self.sequence_data = self.sequence_data[
-            self.sequence_data["user"].isin(sampled_users_set)
-        ].reset_index(drop=True)
-
-        user_id_map = {
-            old_id: new_id
-            for new_id, old_id in enumerate(sorted(self.sequence_data["user"].unique()))
-        }
-        self.sequence_data["user"] = (
-            self.sequence_data["user"].map(user_id_map).astype(int)
-        )
-
-        sampled_questions = self.sequence_data["question"].unique()
-        self.question_data = self.question_data[
-            self.question_data["question"].isin(sampled_questions)
-        ].reset_index(drop=True)
-
-        # Remap question IDs to be consecutive
-        question_id_map = {
-            old_id: new_id
-            for new_id, old_id in enumerate(
-                sorted(self.question_data["question"].unique())
+            sampled_users = (
+                user_stats.sample(n=n_samples, seed=self.seed)
+                .select("user")
+                .to_series()
+                .to_list()
             )
-        }
-        self.sequence_data["question"] = (
-            self.sequence_data["question"].map(question_id_map).astype(int)
-        )
-        # Update question_data with remapped IDs
-        self.question_data["question"] = (
-            self.question_data["question"].map(question_id_map).astype(int)
+
+        self._apply_sampling_to_data(
+            sampled_users, n_samples, total_users, original_records
         )
 
+    def _sample_users_stratified(
+        self,
+        user_stats: pl.DataFrame,
+        n_samples: int,
+        attempts_bins: list,
+        correct_bins: list,
+    ) -> list:
+        """Perform stratified sampling on users."""
+        user_stats = user_stats.with_columns(
+            [
+                (
+                    self._make_bin_expr("attempts", attempts_bins) * 3
+                    + self._make_bin_expr("correct_rate", correct_bins)
+                ).alias("strata"),
+                ((pl.col("user").cast(pl.Int64) + self.seed) % 2**31)
+                .cast(pl.UInt32)
+                .alias("rand_key"),
+            ]
+        )
+
+        strata_info = user_stats.group_by("strata").agg(pl.len().alias("count"))
+
+        total_in_strata = strata_info.select(pl.sum("count")).item()
+        strata_info = strata_info.with_columns(
+            ((pl.col("count") / total_in_strata * n_samples).cast(pl.Int32))
+            .clip(1)
+            .alias("quota")
+        )
+
+        strata_info = strata_info.sort("strata")
+        logger.info(f"Created {len(strata_info)} strata for stratified sampling.")
+
+        sampled_users = (
+            user_stats.join(strata_info.select(["strata", "quota"]), on="strata")
+            .sort(["strata", "rand_key"])
+            .with_columns(
+                pl.int_range(pl.len(), dtype=pl.UInt32).over("strata").alias("rank")
+            )
+            .filter(pl.col("rank") < pl.col("quota"))
+            .select("user")
+        )
+
+        n_sampled = len(sampled_users)
+        if n_sampled != n_samples:
+            if n_sampled > n_samples:
+                sampled_users = sampled_users.sample(n=n_samples, seed=self.seed)
+            else:
+                unsampled = user_stats.join(
+                    sampled_users, on="user", how="anti"
+                ).select("user")
+                additional = unsampled.sample(n=n_samples - n_sampled, seed=self.seed)
+                sampled_users = pl.concat([sampled_users, additional])
+
+        return sampled_users.to_series().to_list()
+
+    def _make_bin_expr(self, col: str, bins: list) -> pl.Expr:
+        """Create binning expression for a column."""
+        return (
+            pl.when(pl.col(col) <= bins[0])
+            .then(pl.lit(0, dtype=pl.Int8))
+            .when(pl.col(col) <= bins[1])
+            .then(pl.lit(1, dtype=pl.Int8))
+            .otherwise(pl.lit(2, dtype=pl.Int8))
+        )
+
+    def _apply_sampling_to_data(
+        self,
+        sampled_users: list,
+        n_samples: int,
+        total_users: int,
+        original_records: int,
+    ):
+        """Apply sampled users to sequence and question data with ID remapping."""
+        user_stats = self.get_user_stats()
+        strata_distribution = self._compute_strata_distribution(
+            sampled_users, user_stats
+        )
+
+        self.sequence_data = self.sequence_data.filter(
+            pl.col("user").is_in(sampled_users)
+        )
+
+        self._remap_user_ids()
+        self._remap_question_ids()
+
+        num_users = self.sequence_data.select(pl.col("user").n_unique()).item()
+        num_questions = self.question_data.select(pl.col("question").n_unique()).item()
+        num_skills = self.question_data.select(pl.col("skill").n_unique()).item()
         sampled_records = len(self.sequence_data)
 
         sampling_config = {
             "n_samples_requested": n_samples,
             "n_samples_actual": len(sampled_users),
             "sampling_ratio": len(sampled_users) / total_users,
-            "stratify": stratify,
-            "balance": balance,
-            "attempts_bins": attempts_bins,
-            "correct_bins": correct_bins,
-            "skill_bins": skill_bins,
+            "stratify": True,
+            "attempts_bins": [20, 100],
+            "correct_bins": [0.4, 0.8],
         }
 
         sampling_stats = {
@@ -961,11 +696,9 @@ class DataSource(ABC):
         self.add_metadata("sampled", True)
         self.add_metadata("sampling_config", sampling_config)
         self.add_metadata("sampling_stats", sampling_stats)
-        self.add_metadata("num_users", int(self.sequence_data["user"].nunique()))
-        self.add_metadata(
-            "num_questions", int(self.question_data["question"].nunique())
-        )
-        self.add_metadata("num_skills", int(self.question_data["skill"].nunique()))
+        self.add_metadata("num_users", int(num_users))
+        self.add_metadata("num_questions", int(num_questions))
+        self.add_metadata("num_skills", int(num_skills))
 
         logger.info(
             f"Sampling complete: {len(sampled_users)}/{total_users} users, "
@@ -973,38 +706,155 @@ class DataSource(ABC):
         )
         logger.info(f"Sampling ratio: {sampling_config['sampling_ratio']:.2%}")
 
+    def _remap_user_ids(self):
+        """Remap user IDs to consecutive integers starting from 0."""
+        user_id_map = (
+            self.sequence_data.select(pl.col("user").unique())
+            .sort("user")
+            .with_row_index("new_user_id")
+            .select([pl.col("user"), pl.col("new_user_id").cast(pl.Int32)])
+        )
+        self.sequence_data = (
+            self.sequence_data.join(user_id_map, on="user", how="left")
+            .drop("user")
+            .rename({"new_user_id": "user"})
+        )
+
+    def _remap_question_ids(self):
+        """Filter and remap question IDs to consecutive integers."""
+        self.question_data = self.question_data.join(
+            self.sequence_data.select(pl.col("question").unique()),
+            on="question",
+            how="semi",
+        )
+
+        question_id_map = (
+            self.question_data.select(pl.col("question").unique())
+            .sort("question")
+            .with_row_index("new_question_id")
+            .select([pl.col("question"), pl.col("new_question_id").cast(pl.Int32)])
+        )
+        self.question_data = (
+            self.question_data.join(question_id_map, on="question", how="left")
+            .drop("question")
+            .rename({"new_question_id": "question"})
+        )
+        self.sequence_data = (
+            self.sequence_data.join(question_id_map, on="question", how="left")
+            .drop("question")
+            .rename({"new_question_id": "question"})
+        )
+
+    def _compute_strata_distribution(
+        self, sampled_users: list, user_stats: pl.DataFrame
+    ) -> dict:
+        """Compute distribution of users across strata."""
+
+        def _strata_to_str(s):
+            return f"{s // 3}_{s % 3}"
+
+        strata_to_str = _strata_to_str
+
+        strata_cols = user_stats.columns
+        if "strata" not in strata_cols:
+            return {}
+
+        strata_info = user_stats.group_by("strata").agg(pl.len().alias("count"))
+        strata_distribution = {
+            strata_to_str(row["strata"]): {"original": row["count"], "sampled": 0}
+            for row in strata_info.iter_rows(named=True)
+        }
+
+        sampled_strata = (
+            user_stats.filter(pl.col("user").is_in(sampled_users))
+            .group_by("strata")
+            .agg(pl.len().alias("sampled"))
+        )
+
+        for row in sampled_strata.iter_rows(named=True):
+            strata_str = strata_to_str(row["strata"])
+            if strata_str in strata_distribution:
+                strata_distribution[strata_str]["sampled"] = row["sampled"]
+
+        return strata_distribution
+
 
 def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
-    """
-    限制序列长度在min_seq_len和max_seq_len之间
-    """
-    # 过滤答题次数少于min_seq_len的学生
-    if min_seq_len > 1:
-        is_valid_user = data.groupby("user").size() >= min_seq_len
-        valid_user_ids = is_valid_user[is_valid_user].index.tolist()
-        data = data[data["user"].isin(valid_user_ids)].reset_index(drop=True)
+    """Filter sequences to be within min_seq_len and max_seq_len bounds.
 
-    # 答题次数多于max_seq_len的学生将多余的记录删除
-    if max_seq_len is not None:
-        # 保留每个用户的最后max_seq_len条记录
-        data = data.groupby("user", group_keys=False).tail(max_seq_len)
-        data = data.reset_index(drop=True)
+    Args:
+        data: Polars DataFrame or LazyFrame.
+        min_seq_len: Minimum sequence length.
+        max_seq_len: Maximum sequence length (0 or None means no limit).
+
+    Returns:
+        DataFrame or LazyFrame of same type as input.
+    """
+    is_lazy = isinstance(data, pl.LazyFrame)
+
+    if min_seq_len > 1:
+        valid_users = (
+            data.group_by("user")
+            .agg(pl.len().alias("count"))
+            .filter(pl.col("count") >= min_seq_len)
+            .select("user")
+        )
+        valid_users = (
+            valid_users.collect().to_series() if is_lazy else valid_users.to_series()
+        )
+        data = data.filter(pl.col("user").is_in(valid_users))
+
+    if max_seq_len is not None and max_seq_len > 0:
+        data = _truncate_long_sequences(data, max_seq_len)
+
     return data
 
 
+def _truncate_long_sequences(data, max_seq_len: int):
+    """Truncate sequences longer than max_seq_len to last max_seq_len records."""
+    time_col = _find_time_column(data)
+
+    if time_col:
+        data = data.sort(["user", time_col])
+        data = data.with_columns(
+            pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
+        )
+        data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
+        data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
+        data = data.drop(["row_num", "total"])
+    else:
+        data = data.group_by("user").map_groups(
+            lambda df: df.slice(-max_seq_len, max_seq_len),
+            schema=data.schema,
+        )
+
+    return data
+
+
+def _find_time_column(data) -> str | None:
+    """Find a suitable time column for sorting sequences."""
+    for col in ["timestamp", "order_id", "start_time", "startTime"]:
+        if col in data.columns:
+            return col
+    return None
+
+
 def map_to_continuous_ids(data, columns: list[str]):
-    """
-    将指定列映射为连续的整数ID
+    """Map specified columns to consecutive integer IDs.
 
-    参数:
-        data: 输入数据 DataFrame
-        columns: 需要映射的列名列表
+    Args:
+        data: Polars DataFrame.
+        columns: List of column names to map.
 
-    返回:
-        映射后的数据 DataFrame
+    Returns:
+        DataFrame with mapped columns.
     """
     for col in columns:
-        data[col] = data[col].astype("category").cat.codes.astype(int)
+        unique_vals = data[col].unique().sort().to_list()
+        value_map = {val: idx for idx, val in enumerate(unique_vals)}
+        data = data.with_columns(
+            pl.col(col).replace(value_map).cast(pl.Int32).alias(col)
+        )
     return data
 
 
@@ -1014,44 +864,54 @@ def build_question_data_from_cleared(
     question_column: str = "question",
     seperator: str = "_",
 ):
+    """Build question data from cleaned records.
+
+    Handles multi-skill entries (separated by separator) by expanding them
+    into multiple rows, ensuring each question-skill pair is unique.
+
+    Args:
+        cleared_data: Cleaned polars DataFrame.
+        skill_column: Name of skill column (default: "skill").
+        question_column: Name of question column (default: "question").
+        seperator: Separator for multi-skill values (default: "_").
+
+    Returns:
+        DataFrame with unique question-skill pairs and continuous skill IDs.
     """
-    从清理后的数据中构建题目信息数据
 
-    该方法会处理技能列中可能存在的多技能情况（使用_分隔）
-    并将其展开为多行，确保每个问题-技能对唯一
+    # Filter null values first to avoid errors when checking for separator
+    cleared_data = cleared_data.filter(pl.col(skill_column).is_not_null())
 
-    参数:
-        cleared_data: 清理后的数据 DataFrame
-        skill_column: 技能列名，默认为"skill"
-        question_column: 问题列名，默认为"question"
-        seperator: 多技能分隔符，默认为"_"
+    # Check if any value contains the separator
+    # Only check string columns - numeric columns can't contain separators
+    schema = cleared_data.collect_schema()
+    skill_dtype = schema[skill_column]
+    has_multi_skill = (
+        skill_dtype == pl.Utf8
+        and cleared_data.select(pl.col(skill_column).str.contains(seperator))
+        .to_series()
+        .any()
+    )
 
-    返回:
-        处理后的题目信息数据 DataFrame
-    """
-    data = cleared_data.copy()
-
-    # 检查技能列是否包含多技能（以_分隔）
-    if (
-        data[skill_column].dtype == "object"
-        and data[skill_column].str.contains(seperator).any()
-    ):
-        # 技能ID列是seperator分隔的多个技能组成，将其展开为多行
+    if has_multi_skill:
+        other_cols = [col for col in cleared_data.columns if col != skill_column]
         data_expanded = (
-            data.assign(**{skill_column: data[skill_column].str.split(seperator)})
-            .explode(skill_column)
-            .drop_duplicates(subset=[question_column, skill_column])
-            .reset_index(drop=True)
+            cleared_data.with_columns(
+                [
+                    pl.col(skill_column)
+                    .str.split(seperator)
+                    .alias(skill_column + "_list")
+                ]
+            )
+            .explode(skill_column + "_list")
+            .select(other_cols + [pl.col(skill_column + "_list").alias(skill_column)])
+            .unique(subset=[question_column, skill_column], keep="first")
         )
-        # 转换为整数类型
-        data_expanded[skill_column] = data_expanded[skill_column].astype(int)
     else:
-        # 直接去重
-        data_expanded = data.drop_duplicates(
-            subset=[question_column, skill_column]
-        ).reset_index(drop=True)
+        data_expanded = cleared_data.unique(
+            subset=[question_column, skill_column], keep="first"
+        )
 
-    # 将技能映射为连续ID
     data_expanded = map_to_continuous_ids(data_expanded, columns=[skill_column])
 
     return data_expanded
