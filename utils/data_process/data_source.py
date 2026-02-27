@@ -143,6 +143,7 @@ class DataSource(ABC):
             metadata["num_templates"] = self.question_data["template"].n_unique()
 
         self.add_metadatas(metadata)
+        self.save_metadata()
 
         logger.info(f"Saved question_data to: {question_data_path}")
         logger.info(f"Saved sequence_data to: {sequence_data_path}")
