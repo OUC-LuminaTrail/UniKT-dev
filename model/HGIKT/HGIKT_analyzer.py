@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from utils.case_analysis.base_analyzer import BaseCaseAnalyzer
 from utils.core import get_logger, register_analyzer
@@ -107,10 +108,13 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         # Generate binary predictions
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
-        # 计算知识状态：sigmoid(lstm_output @ skill_hetero_conv.T)
-        # skill_hetero_conv: [num_skills, H], lstm_output: [B, S, H]
-        # -> knowledge_states: [B, S, num_skills]，值域 [0, 1] 表示掌握程度
-        knowledge_states = torch.sigmoid(torch.matmul(lstm_output, skill_hetero_conv.T))
+        # 计算知识状态
+        knowledge_states = F.cosine_similarity(
+            lstm_output.unsqueeze(2),  # [B, S, 1, H]
+            skill_hetero_conv.unsqueeze(0).unsqueeze(0),  # [1, 1, num_skills, H]
+            dim=-1,
+        )  # [B, S, num_skills]
+        knowledge_states = (knowledge_states + 1) / 2  # 将[-1, 1]映射到[0, 1]
 
         return {
             "y_hat": y_hat,
