@@ -7,8 +7,6 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    build_question_data_from_cleared,
-    map_to_continuous_ids,
     restrains_sequence_length,
 )
 
@@ -58,7 +56,7 @@ class EdNetKT1Data(DataSource):
             self.raw_data_folder, "EdNet-KT1", "KT1", "*.csv"
         )
 
-        logger.info(f"Scanning CSV files from: {response_pattern}")
+        logger.debug(f"Scanning CSV files from: {response_pattern}")
 
         lazy_df = (
             pl.scan_csv(
@@ -83,7 +81,7 @@ class EdNetKT1Data(DataSource):
 
         lazy_df = self._process_lazy_pipeline(lazy_df, question_answer_map)
         self.sequence_data_raw = lazy_df.collect(engine="streaming")
-        logger.info(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
+        logger.debug(f"Loaded {len(self.sequence_data_raw)} raw interactions.")
 
     def _validate_data_paths(self):
         """Validate that required data paths exist."""
@@ -180,70 +178,120 @@ class EdNetKT1Data(DataSource):
     @override
     def clear_data(self):
         """Process and clean data."""
-        logger.info("Processing Data...")
+        logger.info("Processing EdNet KT1 data...")
 
-        if not hasattr(self, "sequence_data_raw") or not hasattr(
-            self, "question_data_raw"
-        ):
-            self.load_src_data()
+        # Clean raw sequence data
+        cleaned_data = self._clean_raw_data()
+        logger.debug(f"Cleaned data shape: {cleaned_data.shape}")
 
-        question_data = self._process_question_data()
-        sequence_data = self._process_sequence_data()
-        sequence_data, question_data = self._remap_ids(sequence_data, question_data)
+        # Build question ID mapping
+        question_map_df = (
+            cleaned_data.select("question")
+            .unique()
+            .sort("question")
+            .with_row_index("question_id")
+        )
 
-        self.sequence_data = sequence_data
-        self.question_data = question_data
-        self._save_metadata()
+        # Save question mapping for later use
+        question_map = dict(
+            zip(
+                question_map_df["question"].to_list(),
+                question_map_df["question_id"].to_list(),
+            )
+        )
+        self._id_mappings["question"] = question_map
+        logger.debug(f"Built question ID mapping: {len(question_map)} unique questions")
 
-        logger.info(f"Processed {len(sequence_data)} interactions.")
+        # Apply question mapping
+        mapped_data = (
+            cleaned_data.join(question_map_df, on="question", how="left")
+            .with_columns(pl.col("question_id").cast(pl.Int32))
+            .drop("question")
+            .rename({"question_id": "question"})
+        )
 
-    def _process_question_data(self) -> pl.DataFrame:
-        """Process question data with vectorized operations.
+        # Build question_data
+        # Filter to only include questions that exist in cleaned_data
+        valid_questions = set(cleaned_data["question"].unique().to_list())
 
-        EdNet uses string skill names (e.g., "algebra;geometry"), requires
-        splitting multi-skill questions.
-
-        Returns:
-            Processed question DataFrame with integer skill IDs
-        """
-        question_data = (
+        question_meta_raw = (
             self.question_data_raw.rename(
-                {"tags": "skill", "question_id": "question", "bundle_id": "assignment"}
+                {"question_id": "question", "tags": "skill", "bundle_id": "assignment"}
             )
-            .filter(
-                pl.col("correct_answer").is_not_null() & pl.col("skill").is_not_null()
+            .filter(pl.col("question").is_in(valid_questions))
+            .select(["question", "skill", "assignment"])
+            .filter(pl.col("skill").is_not_null())
+        )
+        logger.debug(f"Question metadata raw shape: {question_meta_raw.shape}")
+
+        # Apply question mapping to question metadata
+        question_meta = question_meta_raw.with_columns(
+            pl.col("question").replace(question_map).cast(pl.Int32).alias("question")
+        )
+        logger.debug(f"Question metadata shape: {question_meta.shape}")
+
+        # Split multi-skills
+        # EdNet skill format: "algebra;geometry" -> ["algebra", "geometry"]
+        split_question_data = (
+            question_meta.with_columns(
+                pl.col("skill").map_elements(_canonicalize_tags, return_dtype=pl.Utf8)
             )
+            .with_columns(pl.col("skill").str.split(";").alias("skill_parts"))
+            .explode("skill_parts")
+            .with_columns(pl.col("skill_parts").cast(pl.String).alias("skill"))
+            .select(["question", "skill", "assignment"])
+            .unique(subset=["question", "skill"], keep="first")
+        )
+        logger.debug(f"Split question_data shape: {split_question_data.shape}")
+
+        # Build ID mappings
+        self._build_id_mapping(split_question_data, ["skill", "assignment"])
+        logger.debug(
+            f"ID mappings: skills={self._get_mapped_count('skill')}, "
+            f"assignments={self._get_mapped_count('assignment')}"
+        )
+
+        # Apply ID mappings to question_data
+        question_data = self._apply_id_mapping(
+            split_question_data, columns=["skill", "assignment"]
+        )
+
+        # Build final sequence_data
+        # EdNet uses timestamp as order, no attempt_count/hint_count columns
+        # Use placeholders for attempt_count/hint_count (set to 1 and 0 respectively) since they are required by our format
+        sequence_data = (
+            mapped_data.select(["user", "question", "label", "timestamp"])
             .with_columns(
                 [
-                    pl.col("skill")
-                    .map_elements(_canonicalize_tags, return_dtype=pl.Utf8),
-                    pl.col("question").cast(pl.Utf8),
+                    pl.lit(1).alias("attempt_count"),  # Placeholder
+                    pl.lit(0).alias("hint_count"),  # Placeholder
+                ]
+            )
+            .select(
+                [
+                    "user",
+                    "question",
+                    "label",
+                    "attempt_count",
+                    "hint_count",
+                    "timestamp",
                 ]
             )
         )
 
-        # Use build_question_data_from_cleared for skill splitting
-        question_data = build_question_data_from_cleared(
-            question_data,
-            skill_column="skill",
-            question_column="question",
-            separator=";",
-        )
+        # Build ID mapping for user in sequence_data
+        self._build_id_mapping(sequence_data, ["user"])
+        sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
+        logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
 
-        # For EdNet, skill is also the template
-        question_data = question_data.with_columns([pl.col("skill").alias("template")])
+        # Store processed data in instance variables
+        self.question_data = question_data
+        self.sequence_data = sequence_data
 
-        # Map assignment to continuous integer IDs
-        question_data = map_to_continuous_ids(question_data, columns=["assignment"])
+    def _clean_raw_data(self) -> pl.DataFrame:
+        """Clean raw sequence data."""
+        self.load_src_data()
 
-        return question_data
-
-    def _process_sequence_data(self) -> pl.DataFrame:
-        """Process sequence data.
-
-        Returns:
-            Processed sequence DataFrame
-        """
         required_cols = ["user_id", "question_id", "label", "timestamp"]
         current_cols = self.sequence_data_raw.columns
         missing_cols = [col for col in required_cols if col not in current_cols]
@@ -264,63 +312,10 @@ class EdNetKT1Data(DataSource):
             .sort(["user", "timestamp"])
         )
 
+        # Restrict sequence length
         return restrains_sequence_length(
             sequence_data, self.args.min_seq_len, self.args.max_seq_len
         )
 
-    def _remap_ids(
-        self, sequence_data: pl.DataFrame, question_data: pl.DataFrame
-    ) -> tuple[pl.DataFrame, pl.DataFrame]:
-        """Remap IDs to continuous integers.
 
-        Args:
-            sequence_data: Sequence data
-            question_data: Question data
-
-        Returns:
-            Tuple of (sequence_data, question_data) with remapped IDs
-        """
-        # Remap question IDs
-        appeared_questions = (
-            sequence_data.select(pl.col("question").drop_nulls().unique())
-            .to_series()
-            .sort()
-            .to_list()
-        )
-        question_id_map = {q: idx for idx, q in enumerate(appeared_questions)}
-        sequence_data = sequence_data.with_columns(
-            [pl.col("question").replace(question_id_map).cast(pl.Int32)]
-        )
-        question_data = question_data.filter(
-            pl.col("question").is_in(appeared_questions)
-        ).with_columns([pl.col("question").replace(question_id_map).cast(pl.Int32)])
-
-        # Remap user IDs
-        appeared_users = (
-            sequence_data.select(pl.col("user").drop_nulls().unique())
-            .to_series()
-            .sort()
-            .to_list()
-        )
-        user_id_map = {user_id: idx for idx, user_id in enumerate(appeared_users)}
-        sequence_data = sequence_data.with_columns(
-            [pl.col("user").replace(user_id_map).cast(pl.Int32)]
-        )
-
-        return sequence_data, question_data
-
-    def _save_metadata(self):
-        """Save dataset metadata."""
-        self.add_metadatas(
-            {
-                "num_users": self.sequence_data["user"].n_unique(),
-                "num_questions": self.question_data["question"].n_unique(),
-                "num_skills": self.question_data["skill"].n_unique(),
-                "num_assignments": self.question_data["assignment"].n_unique(),
-                "num_templates": self.question_data["template"].n_unique(),
-                "max_seq_len": self.args.max_seq_len,
-                "min_seq_len": self.args.min_seq_len,
-                "sequence_columns": list(self.sequence_data.columns),
-                "question_columns": list(self.question_data.columns),
-            }
-        )
+__all__ = ["EdNetKT1Data"]

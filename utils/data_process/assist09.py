@@ -7,8 +7,6 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    build_question_data_from_cleared,
-    map_to_continuous_ids,
     restrains_sequence_length,
 )
 
@@ -49,28 +47,112 @@ class Assistments2009Data(DataSource):
 
     @override
     def clear_data(self):
-        logger.info("Processing Data...")
+        """Clean data and build question_data and sequence_data."""
+        logger.info("Processing ASSISTments 2009 data...")
+
+        # Clean raw data
+        cleaned_data = self._clean_raw_data()
+        logger.debug(f"Cleaned data shape: {cleaned_data.shape}")
+
+        # Build question ID mapping
+        question_map_df = (
+            cleaned_data.select("question")
+            .unique()
+            .sort("question")
+            .with_row_index("question_id")
+        )
+
+        # Save question mapping for later use
+        question_map = dict(
+            zip(
+                question_map_df["question"].to_list(),
+                question_map_df["question_id"].to_list(),
+            )
+        )
+        self._id_mappings["question"] = question_map
+        logger.debug(f"Built question ID mapping: {len(question_map)} unique questions")
+
+        # Apply question mapping to cleaned data
+        mapped_data = (
+            cleaned_data.join(question_map_df, on="question", how="left")
+            .with_columns(pl.col("question_id").cast(pl.Int32))
+            .drop("question")
+            .rename({"question_id": "question"})
+        )
+
+        # Build question_data
+        # First, get unique question-assignment-template combos (preserving all questions)
+        question_meta = mapped_data.select(
+            ["question", "assignment", "template"]
+        ).unique(subset=["question"])
+        logger.debug(f"Question metadata shape: {question_meta.shape}")
+
+        # Build base data with question-skill pairs
+        base_question_data = mapped_data.select(["question", "skill"]).unique(
+            subset=["question", "skill"], keep="first"
+        )
+        logger.debug(f"Base question_data shape: {base_question_data.shape}")
+
+        # Split multi-skills
+        # ASSISTments 09 skill format: "2_37_70" -> ["2", "37", "70"]
+        split_skills = (
+            base_question_data.with_columns(
+                pl.col("skill").str.split("_").alias("skill_parts")
+            )
+            .explode("skill_parts")
+            .with_columns(pl.col("skill_parts").cast(pl.String).alias("skill"))
+            .select(["question", "skill"])
+            .unique(subset=["question", "skill"], keep="first")
+        )
+        logger.debug(f"Split skills shape: {split_skills.shape}")
+
+        # Join with question metadata to preserve all questions
+        split_question_data = question_meta.join(
+            split_skills, on="question", how="left"
+        )
+        logger.debug(
+            f"Split question_data shape (after join): {split_question_data.shape}"
+        )
+
+        # Build ID mappings for skill/assignment/template ===
+        # Note: question IDs are already mapped, so we don't remap them
+        self._build_id_mapping(split_question_data, ["skill", "assignment", "template"])
+        logger.debug(
+            f"ID mappings: skills={self._get_mapped_count('skill')}, "
+            f"assignments={self._get_mapped_count('assignment')}, "
+            f"templates={self._get_mapped_count('template')}"
+        )
+
+        # Apply ID mappings to question_data
+        question_data = self._apply_id_mapping(
+            split_question_data, columns=["skill", "assignment", "template"]
+        )
+
+        # Build final sequence_data
+        sequence_data = mapped_data.select(
+            ["user", "question", "label", "attempt_count", "hint_count", "order_id"]
+        )
+
+        # Build ID mapping for user in sequence_data
+        self._build_id_mapping(sequence_data, ["user"])
+        sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
+
+        # Store processed data in instance variables
+        self.question_data = question_data
+        self.sequence_data = sequence_data
+
+    def _clean_raw_data(self) -> pl.DataFrame:
+        """Clean raw sequence data."""
         if self.raw_data is None:
-            try:
-                self.load_src_data()
-            except FileNotFoundError:
-                raise FileNotFoundError(
-                    "Raw data not found. Please fetch the data first."
-                )
+            self.load_src_data()
 
         schema_names = self.raw_data.collect_schema().names()
         data = self.raw_data.drop("") if "" in schema_names else self.raw_data
 
+        # Drop unnecessary columns
         data = data.drop(
             [
-                # "order_id",
-                # "assignment_id",
-                # "user_id",
                 "assistment_id",
-                # "problem_id",
-                # "original",
-                # "correct",
-                # "attempt_count",
                 "ms_first_response",
                 "tutor_mode",
                 "answer_type",
@@ -79,14 +161,11 @@ class Assistments2009Data(DataSource):
                 "position",
                 "type",
                 "base_sequence_id",
-                # "skill_id",
                 "skill_name",
                 "teacher_id",
                 "school_id",
-                # "hint_count",
                 "hint_total",
                 "overlap_time",
-                # "template_id",
                 "answer_id",
                 "answer_text",
                 "first_action",
@@ -96,6 +175,7 @@ class Assistments2009Data(DataSource):
             ]
         )
 
+        # Rename columns
         data = data.rename(
             {
                 "correct": "label",
@@ -107,6 +187,7 @@ class Assistments2009Data(DataSource):
             }
         )
 
+        # Filter invalid data
         data = data.filter(
             pl.col("user").is_not_null()
             & pl.col("skill").is_not_null()
@@ -116,39 +197,12 @@ class Assistments2009Data(DataSource):
         data = data.unique().collect()
         data = data.sort(["user", "order_id"])
 
+        # Restrict sequence length
         data = restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
         )
 
-        # Keep data before ID mapping for question_data (skills are still strings)
-        data_before_mapping = data.clone()
-
-        data = map_to_continuous_ids(
-            data, columns=["user", "question", "skill", "assignment", "template"]
-        )
-
-        # Build question_data with skill splitting
-        # ASSISTments 09 uses skill IDs with underscores (e.g., "2_37_70")
-        question_data = build_question_data_from_cleared(
-            data_before_mapping, skill_column="skill", question_column="question", separator="_"
-        )
-
-        self.cleared_data = data.clone()
-        self.sequence_data = data.clone()
-        self.question_data = question_data
-
-        self.add_metadatas(
-            {
-                "num_users": self.cleared_data["user"].n_unique(),
-                "num_questions": self.question_data["question"].n_unique(),
-                "num_skills": self.question_data["skill"].n_unique(),
-                "num_assignments": self.question_data["assignment"].n_unique(),
-                "num_templates": self.question_data["template"].n_unique(),
-                "max_seq_len": self.args.max_seq_len,
-                "min_seq_len": self.args.min_seq_len,
-                "columns": data.columns,
-            }
-        )
+        return data
 
 
 __all__ = ["Assistments2009Data"]

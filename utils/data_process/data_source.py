@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import random
 import shutil
 import time
 import zipfile
@@ -8,6 +9,8 @@ from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 import polars as pl
 import requests
 import tqdm
@@ -42,16 +45,183 @@ class DataSource(ABC):
         self.seed = seed
         self.set_random_seed()
 
+        # ID mapping storage
+        self._id_mappings: dict = {}
+
     def set_random_seed(self):
         """Set random seeds for reproducibility."""
-        import random
-
-        import numpy as np
-
         seed = self.seed if self.seed is not None else 42
         random.seed(seed)
         np.random.seed(seed)
         logger.debug(f"Random seed set to {seed}")
+
+    def _build_id_mapping(self, data: pl.DataFrame, columns: list[str]):
+        """Build ID mappings from data.
+
+        Args:
+            data: Polars DataFrame
+            columns: List of column names to build mappings for
+        """
+        for col in columns:
+            if col in self._id_mappings:
+                logger.warning(
+                    f"ID mapping for column '{col}' already exists, skipping rebuild"
+                )
+                continue  # Already have mapping, skip
+
+            unique_vals = data[col].unique().sort().to_list()
+            value_map = {val: idx for idx, val in enumerate(unique_vals)}
+
+            self._id_mappings[col] = value_map
+            logger.debug(
+                f"Built ID mapping for '{col}': {len(value_map)} unique values"
+            )
+
+    def _apply_id_mapping(self, data: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
+        """Apply ID mappings to data.
+
+        Args:
+            data: Polars DataFrame
+            columns: List of column names to map
+
+        Returns:
+            DataFrame with mapped columns
+        """
+        for col in columns:
+            if col not in self._id_mappings:
+                raise ValueError(f"No ID mapping exists for column '{col}'")
+
+            value_map = self._id_mappings[col]
+            data = data.with_columns(
+                pl.col(col).replace(value_map).cast(pl.Int32).alias(col)
+            )
+
+        return data
+
+    def _get_mapped_count(self, column: str) -> int:
+        """Get the count of mapped IDs for a column."""
+        if column not in self._id_mappings:
+            raise ValueError(f"No ID mapping exists for column '{column}'")
+        return len(self._id_mappings[column])
+
+    def _export_id_mappings(self) -> dict:
+        """Export ID mappings as a dictionary."""
+        return {
+            f"id_mapping_{col}": mapping for col, mapping in self._id_mappings.items()
+        }
+
+    def save_data(self):
+        """Save processed question and sequence data with metadata."""
+        # Validate and return processed data
+        self._validate_data(self.question_data, self.sequence_data)
+
+        # Save to files
+        question_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_question.parquet"
+        )
+        sequence_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_sequence.parquet"
+        )
+
+        self.question_data.write_parquet(question_data_path)
+        self.sequence_data.write_parquet(sequence_data_path)
+
+        # Save metadata
+        metadata = {
+            "max_seq_len": self.args.max_seq_len,
+            "min_seq_len": self.args.min_seq_len,
+            "random_seed": self.seed,
+            "question_data_md5": self.compute_md5(question_data_path),
+            "sequence_data_md5": self.compute_md5(sequence_data_path),
+            "num_users": self._get_mapped_count("user"),
+            "num_questions": self._get_mapped_count("question"),
+            "num_skills": self.question_data["skill"].n_unique(),
+            "num_assignments": self.question_data["assignment"].n_unique(),
+        }
+
+        if "template" in self.question_data.columns:
+            metadata["num_templates"] = self.question_data["template"].n_unique()
+
+        self.add_metadatas(metadata)
+
+        logger.info(f"Saved question_data to: {question_data_path}")
+        logger.info(f"Saved sequence_data to: {sequence_data_path}")
+
+    @staticmethod
+    def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
+        """Validate consistency between question_data and sequence_data."""
+        # Validate question_data columns
+        expected_question_cols = {"question", "skill", "assignment"}
+        if "template" in question_data.columns:
+            expected_question_cols.add("template")
+
+        actual_question_cols = set(question_data.columns)
+        assert actual_question_cols == expected_question_cols, (
+            f"question_data columns mismatch. "
+            f"Expected: {expected_question_cols}, Got: {actual_question_cols}"
+        )
+
+        # Validate sequence_data columns
+        expected_sequence_cols = {
+            "user",
+            "question",
+            "label",
+            "attempt_count",
+            "hint_count",
+        }
+
+        # Optional time/order columns (different datasets use different names)
+        optional_time_cols = {"order_id", "start_time", "startTime", "timestamp"}
+        actual_time_cols = optional_time_cols.intersection(set(sequence_data.columns))
+
+        # Allow any one time column if present
+        if actual_time_cols:
+            expected_sequence_cols.add(actual_time_cols.pop())
+
+        actual_sequence_cols = set(sequence_data.columns)
+
+        # Check for unexpected columns
+        metadata_cols = {"fold"}
+        unexpected_cols = actual_sequence_cols - expected_sequence_cols - metadata_cols
+        if unexpected_cols:
+            raise AssertionError(
+                f"sequence_data contains unexpected columns: {unexpected_cols}. "
+                f"Expected: {expected_sequence_cols}, Got: {actual_sequence_cols}"
+            )
+
+        # Validate sequence_data doesn't contain skill/assignment/template
+        for col in ["skill", "assignment", "template"]:
+            assert col not in sequence_data.columns, (
+                f"sequence_data should not contain '{col}' column"
+            )
+
+        # Validate question_id consistency
+        q_questions = set(question_data["question"].unique().to_list())
+        s_questions = set(sequence_data["question"].unique().to_list())
+
+        # All sequence_data questions must exist in question_data
+        missing_questions = s_questions - q_questions
+        if missing_questions:
+            raise AssertionError(
+                f"question_id mismatch: {len(missing_questions)} questions in sequence_data "
+                f"not found in question_data"
+            )
+
+        # Extra questions in question_data are allowed (e.g., multi-skill questions)
+        assert q_questions == s_questions, (
+            f"question_id mismatch: question_data has {len(q_questions)} unique, "
+            f"sequence_data has {len(s_questions)} unique"
+        )
+
+        # Validate ID range consistency
+        q_max = question_data["question"].max()
+        s_max = sequence_data["question"].max()
+        assert q_max == s_max, (
+            f"question_id range mismatch: question_data max={q_max}, "
+            f"sequence_data max={s_max}"
+        )
+
+        logger.info("Data validation passed!")
 
     def _download_chunk(self, url, start, end, chunk_path, pbar, chunk_size=8192):
         """Download a single chunk of a file for multi-threaded downloads."""
@@ -345,79 +515,32 @@ class DataSource(ABC):
         """Clean and preprocess raw data. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement clear_data method")
 
-    def save_data(self):
-        """Save processed data to parquet files with metadata."""
-        logger.info("Saving processed data...")
-
-        if self.sequence_data is None or self.question_data is None:
-            raise ValueError("Please run clear_data() before saving processed data.")
-
-        sequence_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_sequence.parquet"
-        )
-        question_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_question.parquet"
-        )
-
-        self.question_data.write_parquet(question_data_path)
-        self.add_metadata("question_data_md5", self.compute_md5(question_data_path))
-
-        self.sequence_data.write_parquet(sequence_data_path)
-        self.add_metadata("sequence_data_md5", self.compute_md5(sequence_data_path))
-        self.add_metadata("random_seed", self.seed)
-
-        self.save_metadata()
-        logger.info("Processed data saved.")
-
     def compute_md5(self, file_path: str) -> str:
         """Compute MD5 checksum of a file."""
         hash_md5 = hashlib.md5()
-        file_size = os.path.getsize(file_path)
-        file_size_mb = file_size / (1024 * 1024)
 
         with open(file_path, "rb") as f:
-            with tqdm.tqdm(
-                total=file_size_mb,
-                unit="MB",
-                unit_scale=False,
-                desc="Computing MD5",
-                bar_format="{desc}: {percentage:3.0f}%|{bar}| {n:.2f}/{total:.2f}MB [{elapsed}<{remaining}]",
-            ) as pbar:
-                while True:
-                    chunk = f.read(65536)
-                    if not chunk:
-                        break
-                    hash_md5.update(chunk)
-                    pbar.update(len(chunk) / (1024 * 1024))
+            while True:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                hash_md5.update(chunk)
+
+        logger.debug(f"Computed MD5 for {file_path}: {hash_md5.hexdigest()}")
 
         return hash_md5.hexdigest()
 
-    def get_sequence_data(self):
-        """Get sequence data as pandas DataFrame."""
+    def get_sequence_data(self) -> pd.DataFrame:
+        """Get user sequence data."""
         if self.sequence_data is None:
-            self._load_or_raise()
+            self.load_processed_data()
         return self.sequence_data.to_pandas()
 
-    def get_question_data(self):
-        """Get question data as pandas DataFrame."""
+    def get_question_data(self) -> pd.DataFrame:
+        """Get question metadata."""
         if self.question_data is None:
-            self._load_or_raise()
-        return self.question_data.to_pandas()
-
-    def get_processed_data(self):
-        """Get both sequence and question data."""
-        if self.sequence_data is None or self.question_data is None:
-            self._load_or_raise()
-        return self.sequence_data, self.question_data
-
-    def _load_or_raise(self):
-        """Load processed data or raise ValueError."""
-        try:
             self.load_processed_data()
-        except FileNotFoundError:
-            raise ValueError(
-                "No processed data available. Please run clear_data() first."
-            )
+        return self.question_data.to_pandas()
 
     def add_metadata(self, key: str, value):
         """Add a single metadata entry."""
@@ -449,7 +572,11 @@ class DataSource(ABC):
         """Get metadata entry or entire metadata dict."""
         if not self.metadata:
             self.load_metadata()
-        return self.metadata if key is None else self.metadata.get(key)
+        if key is not None and key not in self.metadata:
+            raise KeyError(
+                f"Metadata key '{key}' not found in dataset '{self.dataset}'"
+            )
+        return self.metadata if key is None else self.metadata[key]
 
     def add_kfold_labels(self, n_splits: int = 5):
         """Add K-fold cross-validation labels at user level.
@@ -471,25 +598,23 @@ class DataSource(ABC):
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
-        logger.info(f"Adding K-Fold labels with n_splits={n_splits}")
-
-        data = self.sequence_data.clone().with_columns([pl.lit(-1).alias("fold")])
-        unique_users = data["user"].unique()
-        user_to_fold = {}
+        unique_users = self.sequence_data["user"].unique()
+        fold_assignment = np.zeros(len(unique_users), dtype=np.int32)
 
         kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
-        for fold_idx, (_, test_user_idx) in tqdm.tqdm(
-            enumerate(kfold.split(unique_users)), total=n_splits, desc="Assigning folds"
-        ):
-            test_users = unique_users[test_user_idx]
-            for user in test_users:
-                user_to_fold[user] = fold_idx
+        for fold_idx, (_, test_indices) in enumerate(kfold.split(unique_users)):
+            fold_assignment[test_indices] = fold_idx
 
-        data = data.with_columns([pl.col("user").replace(user_to_fold).alias("fold")])
-        self.sequence_data = data
+        user_fold_map = pl.DataFrame(
+            {"user": unique_users, "fold": pl.Series(fold_assignment, dtype=pl.Int32)}
+        )
+
+        self.sequence_data = self.sequence_data.join(
+            user_fold_map, on="user", how="left"
+        )
         self.add_metadata("kfold_n_splits", n_splits)
 
-        return data
+        logger.info(f"Added K-fold labels with n_splits={n_splits} to sequence_data")
 
     def get_user_stats(self):
         """Compute user statistics: attempts, correct count, skill count, correct rate.
@@ -548,11 +673,6 @@ class DataSource(ABC):
         Raises:
             ValueError: If n_samples exceeds total users or data not loaded.
         """
-        if self.sequence_data is None:
-            raise ValueError(
-                "No processed data available. Please call load_processed_data() or clear_data() first."
-            )
-
         logger.info(f"Sampling {n_samples} users from dataset...")
 
         user_stats = self.get_user_stats()
@@ -839,67 +959,7 @@ def _find_time_column(data) -> str | None:
     return None
 
 
-def map_to_continuous_ids(data, columns: list[str]):
-    """Map specified columns to consecutive integer IDs.
-
-    Args:
-        data: Polars DataFrame.
-        columns: List of column names to map.
-
-    Returns:
-        DataFrame with mapped columns.
-    """
-    for col in columns:
-        unique_vals = data[col].unique().sort().to_list()
-        value_map = {val: idx for idx, val in enumerate(unique_vals)}
-        data = data.with_columns(
-            pl.col(col).replace(value_map).cast(pl.Int32).alias(col)
-        )
-    return data
-
-
-def build_question_data_from_cleared(
-    cleared_data,
-    skill_column: str = "skill",
-    question_column: str = "question",
-    separator: str = None,
-):
-    """Build question data from cleaned records.
-
-    If separator is provided, splits multi-skill entries into multiple rows.
-    Ensures each question-skill pair is unique and maps skills to continuous IDs.
-
-    Args:
-        cleared_data: Cleaned polars DataFrame.
-        skill_column: Name of skill column (default: "skill").
-        question_column: Name of question column (default: "question").
-        separator: Separator for multi-skill values (default: None, no splitting).
-
-    Returns:
-        DataFrame with unique question-skill pairs and continuous skill IDs.
-    """
-    if separator is not None:
-        other_cols = [col for col in cleared_data.columns if col != skill_column]
-        question_data = (
-            cleared_data.with_columns(
-                [pl.col(skill_column).str.split(separator).alias(skill_column + "_list")]
-            )
-            .explode(skill_column + "_list")
-            .select(other_cols + [pl.col(skill_column + "_list").alias(skill_column)])
-            .unique(subset=[question_column, skill_column], keep="first")
-        )
-    else:
-        question_data = cleared_data.unique(
-            subset=[question_column, skill_column], keep="first"
-        )
-
-    question_data = map_to_continuous_ids(question_data, columns=[skill_column])
-    return question_data
-
-
 __all__ = [
     "DataSource",
     "restrains_sequence_length",
-    "map_to_continuous_ids",
-    "build_question_data_from_cleared",
 ]
