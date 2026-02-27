@@ -17,6 +17,7 @@ ruff = ">=0.15,<0.16"
 pytest = ">=9.0.2,<10"
 seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
+polars = ">=1.38.1,<2"
 
 [pypi-dependencies]
 dhg = "==0.9.*"

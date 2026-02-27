@@ -102,10 +102,8 @@ def cmd_process(args):
         dp.sample_users(
             args.sample_users,
             stratify=args.sample_stratify,
-            balance=args.sample_balance,
             attempts_bins=args.sample_attempts_bins,
             correct_bins=args.sample_correct_bins,
-            skill_bins=args.sample_skill_bins,
         )
 
     if args.kfold and args.kfold > 1:

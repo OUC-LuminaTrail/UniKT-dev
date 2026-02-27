@@ -138,6 +138,7 @@ class CheckpointManager:
             early_stopping.best_score = es_state.get("best_score")
             early_stopping.best_epoch = es_state.get("best_epoch")
             early_stopping.num_bad_epochs = es_state.get("num_bad_epochs", 0)
+            early_stopping.best_metrics = es_state.get("best_metrics")
 
         logger.info("Checkpoint loaded successfully")
         return checkpoint

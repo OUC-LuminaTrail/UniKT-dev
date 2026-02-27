@@ -1,14 +1,12 @@
 import os
 
-import pandas as pd
+import polars as pl
 from typing_extensions import override
 
 from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    build_question_data_from_cleared,
-    map_to_continuous_ids,
     restrains_sequence_length,
 )
 
@@ -17,9 +15,7 @@ logger = get_logger(__name__)
 
 @register_data_source("assistments17")
 class Assistments2017Data(DataSource):
-    """
-    Assistments2017数据集处理类
-    """
+    """ASSISTments 2017 dataset handler."""
 
     def __init__(self, args):
         super().__init__(
@@ -29,36 +25,110 @@ class Assistments2017Data(DataSource):
             seed=args.seed,
         )
         self.args = args
-        # 原始数据文件路径
         self.raw_data_path = os.path.join(
             self.data_folder, "raw", "anonymized_full_release_competition_dataset.csv"
         )
 
     @override
     def load_src_data(self):
-        """
-        加载原始数据
-        """
         if not os.path.exists(self.raw_data_path):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
         logger.info(f"Loading raw data from: {self.raw_data_path}")
-        self.raw_data = pd.read_csv(
-            self.raw_data_path, encoding="latin1", low_memory=False
-        )
+        self.raw_data = pl.read_csv(
+            self.raw_data_path,
+            encoding="latin1",
+            ignore_errors=True,
+            try_parse_dates=False,
+            null_values=["NA", ""],
+        ).lazy()
 
     @override
     def clear_data(self):
-        logger.info("Processing Data...")
+        """Clean data and build question_data and sequence_data."""
+        logger.info("Processing ASSISTments 2017 data...")
+
+        # === Step 1: Clean raw sequence data ===
+        cleaned_data = self._clean_raw_data()
+        logger.debug(f"Cleaned data shape: {cleaned_data.shape}")
+
+        # === Step 2: 向量化构建 question->id 映射并应用 ===
+        question_map_df = (
+            cleaned_data.select("question")
+            .unique()
+            .sort("question")
+            .with_row_index("question_id")
+        )
+
+        # Save question mapping
+        question_map = dict(
+            zip(
+                question_map_df["question"].to_list(),
+                question_map_df["question_id"].to_list(),
+            )
+        )
+        self._id_mappings["question"] = question_map
+        logger.debug(f"Built question ID mapping: {len(question_map)} unique questions")
+
+        # Apply question mapping
+        mapped_data = (
+            cleaned_data.join(question_map_df, on="question", how="left")
+            .with_columns(pl.col("question_id").cast(pl.Int32))
+            .drop("question")
+            .rename({"question_id": "question"})
+        )
+
+        # Build question_data
+        question_meta = mapped_data.select(["question", "assignment"]).unique(
+            subset=["question"]
+        )
+        logger.debug(f"Question metadata shape: {question_meta.shape}")
+
+        # Build base data with question-skill pairs
+        base_question_data = mapped_data.select(["question", "skill"]).unique(
+            subset=["question", "skill"], keep="first"
+        )
+        logger.debug(f"Base question_data shape: {base_question_data.shape}")
+
+        # Join with question metadata to preserve all questions
+        question_data = question_meta.join(
+            base_question_data, on="question", how="left"
+        )
+        logger.debug(f"question_data shape: {question_data.shape}")
+
+        # Build ID mappings for skill/assignment
+        self._build_id_mapping(question_data, ["skill", "assignment"])
+        logger.debug(
+            f"ID mappings: skills={self._get_mapped_count('skill')}, "
+            f"assignments={self._get_mapped_count('assignment')}"
+        )
+
+        # Apply ID mappings to question_data
+        question_data = self._apply_id_mapping(
+            question_data, columns=["skill", "assignment"]
+        )
+
+        # Build sequence_data
+        sequence_data = mapped_data.select(
+            ["user", "question", "label", "attempt_count", "hint_count", "startTime"]
+        )
+
+        # Build ID mapping for user in sequence_data
+        self._build_id_mapping(sequence_data, ["user"])
+        sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
+        logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
+
+        # Store processed data in instance variables
+        self.question_data = question_data
+        self.sequence_data = sequence_data
+
+    def _clean_raw_data(self) -> pl.DataFrame:
+        """Clean raw sequence data."""
         if self.raw_data is None:
-            try:
-                self.load_src_data()
-            except FileNotFoundError:
-                raise FileNotFoundError(
-                    "Raw data not found. Please fetch the data first."
-                )
+            self.load_src_data()
+
+        # Drop unnecessary columns
         data = self.raw_data.drop(
-            columns=[
-                # "studentId",
+            [
                 "MiddleSchoolId",
                 "InferredGender",
                 "SY ASSISTments Usage",
@@ -73,22 +143,14 @@ class Assistments2017Data(DataSource):
                 "AveResOfftask",
                 "AveResGaming",
                 "action_num",
-                # "skill",
-                # "problemId",
                 "problemType",
-                # "assignmentId",
                 "assistmentId",
-                # "startTime",
                 "endTime",
                 "timeTaken",
-                # "correct",
-                # "original",
                 "hint",
-                # "hintCount",
                 "hintTotal",
                 "scaffold",
                 "bottomHint",
-                # "attemptCount",
                 "frIsHelpRequest",
                 "frPast5HelpRequest",
                 "frPast8HelpRequest",
@@ -142,9 +204,10 @@ class Assistments2017Data(DataSource):
                 "isSTEM",
             ]
         )
-        # 重命名列
+
+        # Rename columns
         data = data.rename(
-            columns={
+            {
                 "studentId": "user",
                 "problemId": "question",
                 "correct": "label",
@@ -154,49 +217,18 @@ class Assistments2017Data(DataSource):
                 "attemptCount": "attempt_count",
             }
         )
-        # 将技能列映射为唯一的整数ID
-        unique_skills = data["skill"].unique()
-        skill_id_map = {skill: idx for idx, skill in enumerate(unique_skills)}
-        data["skill"] = data["skill"].map(skill_id_map)
 
-        # 按时间排序
-        data = data.sort_values(by=["user", "startTime"])
-        # 转换数据类型
-        data["user"] = data["user"].astype(int)
-        # 清除没有技能的问题
-        data = data[data["skill"].notna()]
-        # 清理label列中的异常值，只保留0和1
-        data = data[data["label"].isin([0, 1])]
-        # 移除重复的行
-        data = data.drop_duplicates()
-        # 重置索引
-        data = data.reset_index(drop=True)
-        # 限制序列长度
-        data = restrains_sequence_length(
+        data = data.unique()
+        data = data.collect()
+
+        data = data.sort(["user", "startTime"])
+        data = data.with_columns([pl.col("user").cast(pl.Int32)])
+        data = data.filter(pl.col("skill").is_not_null())
+        data = data.filter(pl.col("label").is_in([0, 1]))
+
+        # Restrict sequence length
+        return restrains_sequence_length(
             data, self.args.min_seq_len, self.args.max_seq_len
-        )
-        # 将问题ID和技能ID转换为连续整数
-        data = map_to_continuous_ids(
-            data, columns=["user", "question", "skill", "assignment"]
-        )
-
-        self.cleared_data = data.copy()
-        self.sequence_data = data.copy()
-        self.question_data = build_question_data_from_cleared(
-            self.cleared_data, skill_column="skill", question_column="question"
-        )
-
-        # 保存元信息
-        self.add_metadatas(
-            {
-                "num_users": self.cleared_data["user"].nunique(),
-                "num_questions": self.question_data["question"].nunique(),
-                "num_skills": self.question_data["skill"].nunique(),
-                "num_assignments": self.question_data["assignment"].nunique(),
-                "max_seq_len": self.args.max_seq_len,
-                "min_seq_len": self.args.min_seq_len,
-                "columns": data.columns.tolist(),
-            }
         )
 
 

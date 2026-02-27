@@ -4,6 +4,8 @@ Uses existing trainer infrastructure to run multiple ablations sequentially.
 """
 
 from argparse import Namespace
+from datetime import datetime
+from pathlib import Path
 
 from utils.ablation.config import AblationStudyConfig
 from utils.core import TRAINERS, get_logger
@@ -29,11 +31,20 @@ class AblationRunner:
         """
         self.config = config
 
+        # Create top-level experiment directory for this ablation study run
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        study_name = getattr(config, "study_name", "ablation_study")
+        base_dir = Path("runs") / "ablation" / f"{study_name}_{timestamp}"
+        base_dir.mkdir(parents=True, exist_ok=True)
+
+        self.exp_base_dir = base_dir
+        logger.info(f"Ablation study directory: {base_dir}")
+
     def run_all(self):
         """Run all ablations in the config.
 
         Returns:
-            List of result dictionaries, one per ablation
+            Tuple of (results list, base_dir path)
         """
         results = []
 
@@ -60,7 +71,7 @@ class AblationRunner:
             result = self._run_single(ablation, trainer_cls, params)
             results.append(result)
 
-        return results
+        return results, self.exp_base_dir
 
     def _run_single(self, ablation, trainer_cls, params):
         """Run a single ablation experiment.
@@ -83,7 +94,14 @@ class AblationRunner:
         args.ablation_name = ablation.name
 
         # Create experiment manager with ABLATION type
-        exp_manager = ExperimentManager.from_args(args, ExperimentType.ABLATION)
+        # Use subdirectory within the top-level ablation study directory
+        exp_manager = ExperimentManager(
+            exp_type=ExperimentType.ABLATION,
+            model_name=ablation.variant,
+            dataset_name=self.config.dataset,
+            base_dir=str(self.exp_base_dir),
+            tags=[f"fold{params.get('fold', 0)}", f"bs{params.get('batch_size', 64)}"],
+        )
 
         # Get data source
         data_src = get_data_source(dataset_name=self.config.dataset, args=args)

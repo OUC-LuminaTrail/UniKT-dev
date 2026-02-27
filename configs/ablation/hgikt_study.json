@@ -39,6 +39,31 @@
       "name": "no_template_edges",
       "variant": "HGIKT_NoTemplateEdges",
       "description": "Remove question-template edges from heterogeneous graph"
+    },
+    {
+      "name": "no_hetero_graph",
+      "variant": "HGIKT_NoHeteroGraph",
+      "description": "Disable heterogeneous graph branch - use only hypergraph"
+    },
+    {
+      "name": "question_skill_only",
+      "variant": "HGIKT_QuestionSkillOnly",
+      "description": "Keep only question-skill edges in heterogeneous graph"
+    },
+    {
+      "name": "no_skill_assignment",
+      "variant": "HGIKT_NoSkillAssignment",
+      "description": "Remove skill-assignment edges from heterogeneous graph"
+    },
+    {
+      "name": "simple_hypergraph",
+      "variant": "HGIKT_SimpleHypergraph",
+      "description": "Use simple hypergraph without difficulty weighting"
+    },
+    {
+      "name": "no_moe",
+      "variant": "HGIKT_NoMoE",
+      "description": "Remove MoE fusion module - use simple addition"
     }
   ]
 }

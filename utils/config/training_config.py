@@ -44,7 +44,8 @@ class EarlyStopping:
         self.cfg = config
         self.best_score: float | None = None
         self.best_epoch: int | None = None
-        self.num_bad_epochs: int = 0
+        self.num_bad_epochs = 0
+        self.best_metrics: dict | None = None
 
         mode = self.cfg.mode.lower()
         if mode not in ("min", "max"):
@@ -55,12 +56,15 @@ class EarlyStopping:
         # 通过乘以 sign 统一比较方向
         return (current - best) * self._cmp_sign > self.cfg.min_delta
 
-    def step(self, current: float, epoch: int | None = None) -> bool:
+    def step(
+        self, current: float, epoch: int | None = None, metrics: dict | None = None
+    ) -> bool:
         """输入本轮验证指标，返回是否需要早停。
 
         Args:
-            current: 当前 epoch 的指标值
+            current: 当前 epoch 的监控指标值
             epoch: 当前 epoch 编号（可选）
+            metrics: 当前 epoch 的完整指标字典（可选）{auc, acc, rmse}
 
         Returns:
             是否应该停止训练
@@ -69,12 +73,14 @@ class EarlyStopping:
             self.best_score = current
             self.best_epoch = epoch
             self.num_bad_epochs = 0
+            self.best_metrics = metrics.copy() if metrics else None
             return False
 
         if self._is_improved(current, self.best_score):
             self.best_score = current
             self.best_epoch = epoch
             self.num_bad_epochs = 0
+            self.best_metrics = metrics.copy() if metrics else None
             return False
 
         self.num_bad_epochs += 1

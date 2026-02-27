@@ -142,17 +142,18 @@ class EarlyStoppingCallback(Callback):
         # 这里简化处理，假设 val_loss 相关
         pass
 
-    def step(self, current: float, epoch: int) -> bool:
+    def step(self, current: float, epoch: int, metrics: dict | None = None) -> bool:
         """执行早停检查。
 
         Args:
             current: 当前指标值
             epoch: 当前 epoch
+            metrics: 完整指标字典（可选）
 
         Returns:
             是否应该停止训练
         """
-        self._stop = self.early_stopping.step(current, epoch)
+        self._stop = self.early_stopping.step(current, epoch, metrics)
         return self._stop
 
     def should_stop(self) -> bool:

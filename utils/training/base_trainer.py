@@ -648,7 +648,7 @@ class BaseTrainer(ABC):
                         # 更新早停回调
                         for cb in self.callback_manager.callbacks:
                             if isinstance(cb, EarlyStoppingCallback):
-                                cb.step(monitor_value, epoch)
+                                cb.step(monitor_value, epoch, metrics)
                                 break
 
                     # 记录早停状态到 SwanLab
@@ -656,13 +656,28 @@ class BaseTrainer(ABC):
                         try:
                             import swanlab
 
-                            swanlab.log(
-                                {
-                                    "ES/Best": self.early_stopping.best_score,
-                                    "ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
-                                },
-                                step=epoch,
-                            )
+                            log_data = {
+                                "ES/Best": self.early_stopping.best_score,
+                                "ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
+                            }
+
+                            # 记录最佳轮次的完整指标
+                            if self.early_stopping.best_metrics is not None:
+                                log_data.update(
+                                    {
+                                        "ES/Best_AUC": self.early_stopping.best_metrics.get(
+                                            "auc", 0.0
+                                        ),
+                                        "ES/Best_ACC": self.early_stopping.best_metrics.get(
+                                            "acc", 0.0
+                                        ),
+                                        "ES/Best_RMSE": self.early_stopping.best_metrics.get(
+                                            "rmse", 0.0
+                                        ),
+                                    }
+                                )
+
+                            swanlab.log(log_data, step=epoch)
                         except ImportError:
                             logger.warning(
                                 "SwanLab is not installed. Skipping Early Stopping logging."
@@ -833,11 +848,15 @@ class BaseTrainer(ABC):
         """获取早停状态。"""
         if self.early_stopping is None:
             return None
-        return {
+        state = {
             "best_score": self.early_stopping.best_score,
             "best_epoch": self.early_stopping.best_epoch,
             "num_bad_epochs": self.early_stopping.num_bad_epochs,
         }
+        # 保存完整指标
+        if self.early_stopping.best_metrics is not None:
+            state["best_metrics"] = self.early_stopping.best_metrics.copy()
+        return state
 
     def _monitor_name(self) -> str:
         """获取早停监控指标名称。"""

@@ -284,11 +284,6 @@ class SamplingParams(BaseParamConfig):
                 "default": True,
                 "help": "Enable stratified sampling by user statistics",
             },
-            "sample_balance": {
-                "type": bool,
-                "default": False,
-                "help": "Balance samples across all strata",
-            },
             "sample_attempts_bins": {
                 "type": int,
                 "default": [20, 100],
@@ -300,12 +295,6 @@ class SamplingParams(BaseParamConfig):
                 "default": [0.4, 0.8],
                 "nargs": "+",
                 "help": "Correct rate bin edges (e.g., 0.4 0.8 for low/medium/high)",
-            },
-            "sample_skill_bins": {
-                "type": int,
-                "default": [5, 15],
-                "nargs": "+",
-                "help": "Skill count bin edges (e.g., 5 15 for narrow/medium/broad)",
             },
         }
         return group_name, params

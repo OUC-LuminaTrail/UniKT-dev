@@ -175,33 +175,40 @@ else
   fi
 fi
 
-# Installation steps
+# PyPI-only packages (torch, torch-geometric, pyg-lib, dhg, swanlab)
 if [ "$INSTALL_TARGET" = "cpu" ]; then
-  echo "Installing CPU dependencies"
+  echo "Installing PyPI packages (CPU version): torch, torch_geometric, pyg_lib"
   pip_install "torch==1.13.1+cpu" --extra-index-url https://download.pytorch.org/whl/cpu
-  pip_install "torch_geometric" "pyg-lib" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
+  pip_install "torch_geometric>=2.7.0,<3" "pyg-lib>=0.4.0,<0.5" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
 else
-  echo "Installing CUDA($CUDA_VER) dependencies"
+  echo "Installing PyPI packages (CUDA version): torch, torch_geometric, pyg_lib"
   pip_install "torch==1.13.1+$CUDA_VER" --extra-index-url https://download.pytorch.org/whl/$CUDA_VER
-  pip_install "torch_geometric" "pyg-lib" -f https://data.pyg.org/whl/torch-1.13.1+$CUDA_VER.html || {
+  pip_install "torch_geometric>=2.7.0,<3" "pyg-lib>=0.4.0,<0.5" -f https://data.pyg.org/whl/torch-1.13.1+$CUDA_VER.html || {
     # Fallback install attempt (indexes or link formats may differ)
-    pip_install "torch_geometric" "pyg-lib" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
+    pip_install "torch_geometric>=2.7.0,<3" "pyg-lib>=0.4.0,<0.5" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
   }
 fi
 
-# Common dependencies
-echo "Installing Other Python packages: dhg, optuna, pandas, pyarrow, swanlab, python-dotenv"
-pip_install dhg optuna pandas pyarrow swanlab python-dotenv
+# Conda-forge dependencies
+echo "Installing dependencies from conda-forge: optuna, scikit-learn, pandas, pyarrow, python-dotenv, ruff, pytest, polars"
+conda install -c conda-forge -y "optuna>=4.6.0,<5" "scikit-learn>=1.7.2,<2" "pandas>=2.3.3,<3" "pyarrow>=12.0.1,<13" "python-dotenv>=1.2.1,<2" "ruff>=0.15,<0.16" "pytest>=9.0.2,<10" "polars>=1.38.1,<2"
+
+# PyPI-only dependencies (dhg, swanlab)
+echo "Installing remaining PyPI packages: dhg, swanlab"
+pip_install "dhg==0.9.*" "swanlab<0.8"
 
 # Print version info for verification
 echo "Installation completed — verification info:"
 python - <<PY
 import sys
 import importlib
-pkgs = ["torch", "torch_geometric", "dhg", "optuna", "pandas", "pyarrow", "swanlab"]
+pkgs = ["torch", "torch_geometric", "dhg", "optuna", "pandas", "pyarrow", "swanlab", "polars", "sklearn", "ruff", "pytest"]
 for p in pkgs:
     try:
-        m = importlib.import_module(p)
+        if p == "sklearn":
+            m = importlib.import_module("sklearn")
+        else:
+            m = importlib.import_module(p)
         v = getattr(m, '__version__', str(m))
         print(f"{p}: {v}")
     except Exception as e:
