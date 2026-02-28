@@ -133,8 +133,8 @@ class DataSource(ABC):
             "random_seed": self.seed,
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
-            "num_users": self._get_mapped_count("user"),
-            "num_questions": self._get_mapped_count("question"),
+            "num_users": self.sequence_data["user"].n_unique(),
+            "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
             "num_assignments": self.question_data["assignment"].n_unique(),
         }
