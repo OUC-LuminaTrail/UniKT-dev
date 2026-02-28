@@ -566,7 +566,7 @@ class GraphModelData(BaseModelData):
             edge_types: 边类型列表，每个元素为三元组 (源节点类型, 边关系名, 目标节点类型)
                        例如: [('user', 'answers', 'question'), ('question', 'has', 'skill')]
             edge_attrs: 边属性字典，键为边类型三元组，值为属性列名列表
-                       例如: {('user', 'answers', 'question'): ['label', 'order_id']}
+                       例如: {('user', 'answers', 'question'): ['label', 'timestamp']}
                        默认为 None（不添加边属性）
             directed: 是否构建有向图，默认为 False（无向图）
             node_features: 节点特征字典，键为节点类型，值为特征张量或None
@@ -595,7 +595,7 @@ class GraphModelData(BaseModelData):
             # 示例3: 构建带边属性的图
             graph = model_data.build_hetero_graph(
                 edge_types=[('user', 'answers', 'question')],
-                edge_attrs={('user', 'answers', 'question'): ['label', 'order_id']},
+                edge_attrs={('user', 'answers', 'question'): ['label', 'timestamp']},
                 directed=True
             )
         """

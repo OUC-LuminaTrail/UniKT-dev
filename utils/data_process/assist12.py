@@ -110,7 +110,7 @@ class Assistments2012Data(DataSource):
 
         # Build final sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "start_time"]
+            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
         )
 
         # Build ID mapping for user in sequence_data
@@ -168,13 +168,14 @@ class Assistments2012Data(DataSource):
                 "assignment_id": "assignment",
                 "skill_id": "skill",
                 "template_id": "template",
+                "start_time": "timestamp",
             }
         )
 
         data = data.unique()
         data = data.collect()
 
-        data = data.sort(["user", "start_time"])
+        data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         # Filter out rows with null skill early (these questions have no skill info)
         data = data.filter(pl.col("skill").is_not_null())

@@ -109,7 +109,7 @@ class Assistments2017Data(DataSource):
 
         # Build sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "startTime"]
+            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
         )
 
         # Build ID mapping for user in sequence_data
@@ -215,13 +215,14 @@ class Assistments2017Data(DataSource):
                 "assignmentId": "assignment",
                 "hintCount": "hint_count",
                 "attemptCount": "attempt_count",
+                "startTime": "timestamp",
             }
         )
 
         data = data.unique()
         data = data.collect()
 
-        data = data.sort(["user", "startTime"])
+        data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         data = data.filter(pl.col("skill").is_not_null())
         data = data.filter(pl.col("label").is_in([0, 1]))

@@ -169,15 +169,8 @@ class DataSource(ABC):
             "label",
             "attempt_count",
             "hint_count",
+            "timestamp",
         }
-
-        # Optional time/order columns (different datasets use different names)
-        optional_time_cols = {"order_id", "start_time", "startTime", "timestamp"}
-        actual_time_cols = optional_time_cols.intersection(set(sequence_data.columns))
-
-        # Allow any one time column if present
-        if actual_time_cols:
-            expected_sequence_cols.add(actual_time_cols.pop())
 
         actual_sequence_cols = set(sequence_data.columns)
 
@@ -933,31 +926,16 @@ def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
 
 def _truncate_long_sequences(data, max_seq_len: int):
     """Truncate sequences longer than max_seq_len to last max_seq_len records."""
-    time_col = _find_time_column(data)
 
-    if time_col:
-        data = data.sort(["user", time_col])
-        data = data.with_columns(
-            pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
-        )
-        data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
-        data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
-        data = data.drop(["row_num", "total"])
-    else:
-        data = data.group_by("user").map_groups(
-            lambda df: df.slice(-max_seq_len, max_seq_len),
-            schema=data.schema,
-        )
+    data = data.sort(["user", "timestamp"])
+    data = data.with_columns(
+        pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
+    )
+    data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
+    data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
+    data = data.drop(["row_num", "total"])
 
     return data
-
-
-def _find_time_column(data) -> str | None:
-    """Find a suitable time column for sorting sequences."""
-    for col in ["timestamp", "order_id", "start_time", "startTime"]:
-        if col in data.columns:
-            return col
-    return None
 
 
 __all__ = [
