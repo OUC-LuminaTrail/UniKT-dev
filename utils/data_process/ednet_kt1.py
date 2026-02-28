@@ -216,11 +216,21 @@ class EdNetKT1Data(DataSource):
 
         question_meta_raw = (
             self.question_data_raw.rename(
-                {"question_id": "question", "tags": "skill", "bundle_id": "assignment"}
+                {
+                    "question_id": "question",
+                    "tags": "template_raw",
+                    "bundle_id": "assignment",
+                }
             )
             .filter(pl.col("question").is_in(valid_questions))
-            .select(["question", "skill", "assignment"])
-            .filter(pl.col("skill").is_not_null())
+            .with_columns(
+                [
+                    pl.col("template_raw").cast(pl.Utf8).alias("template"),
+                    pl.col("template_raw").cast(pl.Utf8).alias("skill"),
+                ]
+            )
+            .select(["question", "skill", "assignment", "template"])
+            .filter(pl.col("template").is_not_null())
         )
         logger.debug(f"Question metadata raw shape: {question_meta_raw.shape}")
 
@@ -239,21 +249,22 @@ class EdNetKT1Data(DataSource):
             .with_columns(pl.col("skill").str.split(";").alias("skill_parts"))
             .explode("skill_parts")
             .with_columns(pl.col("skill_parts").cast(pl.String).alias("skill"))
-            .select(["question", "skill", "assignment"])
+            .select(["question", "skill", "assignment", "template"])
             .unique(subset=["question", "skill"], keep="first")
         )
         logger.debug(f"Split question_data shape: {split_question_data.shape}")
 
         # Build ID mappings
-        self._build_id_mapping(split_question_data, ["skill", "assignment"])
+        self._build_id_mapping(split_question_data, ["skill", "assignment", "template"])
         logger.debug(
             f"ID mappings: skills={self._get_mapped_count('skill')}, "
-            f"assignments={self._get_mapped_count('assignment')}"
+            f"assignments={self._get_mapped_count('assignment')}, "
+            f"templates={self._get_mapped_count('template')}"
         )
 
         # Apply ID mappings to question_data
         question_data = self._apply_id_mapping(
-            split_question_data, columns=["skill", "assignment"]
+            split_question_data, columns=["skill", "assignment", "template"]
         )
 
         # Build final sequence_data
