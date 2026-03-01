@@ -9,6 +9,7 @@ from .callbacks import (
     CallbackManager,
     CheckpointCallback,
     EarlyStoppingCallback,
+    FunctionCallback,
     MemoryCleanupCallback,
 )
 from .metrics import MetricsAccumulator
@@ -24,4 +25,5 @@ __all__ = [
     "EarlyStoppingCallback",
     "CheckpointCallback",
     "MemoryCleanupCallback",
+    "FunctionCallback",
 ]

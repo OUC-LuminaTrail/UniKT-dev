@@ -5,6 +5,7 @@
 
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -32,7 +33,14 @@ from ..config import (
     create_optimized_dataloader,
 )
 from ..core import get_logger, seed_everything
-from .callbacks import CallbackManager, EarlyStoppingCallback, MemoryCleanupCallback
+from .callbacks import (
+    Callback,
+    CallbackManager,
+    CheckpointCallback,
+    EarlyStoppingCallback,
+    FunctionCallback,
+    MemoryCleanupCallback,
+)
 from .checkpoint import CheckpointManager
 from .metrics import MetricsAccumulator
 
@@ -88,6 +96,8 @@ class BaseTrainer(ABC):
         self.callback_manager = None
         self.hyperparam_manager = None
         self.use_swanlab = True
+        self._custom_callbacks: list[Callback] = []
+        self._custom_callback_functions: dict[str, list[Callable]] = {}
 
     def with_training(
         self,
@@ -114,6 +124,38 @@ class BaseTrainer(ABC):
             checkpoint_path=checkpoint_path,
         )
         return self
+
+    def with_callbacks(
+        self,
+        callbacks: list[Callback] | None = None,
+        functions: dict[str, Callable | list[Callable]] | None = None,
+    ) -> "BaseTrainer":
+        """配置自定义回调。
+
+        Args:
+            callbacks: 回调对象列表（可选）
+            functions: 事件名 -> 函数或函数列表（可选）
+
+        Returns:
+            Self for method chaining
+        """
+        if callbacks:
+            self._custom_callbacks.extend(callbacks)
+        if functions:
+            for name, funcs in functions.items():
+                if funcs is None:
+                    continue
+                items = funcs if isinstance(funcs, list) else [funcs]
+                self._custom_callback_functions.setdefault(name, []).extend(items)
+        return self
+
+    def register_callback(self, callback: Callback) -> None:
+        """注册单个回调对象。"""
+        self._custom_callbacks.append(callback)
+
+    def register_callback_fn(self, event: str, func: Callable) -> None:
+        """注册单个回调函数。"""
+        self._custom_callback_functions.setdefault(event, []).append(func)
 
     def with_data(
         self,
@@ -269,9 +311,28 @@ class BaseTrainer(ABC):
         self.checkpoint_manager = CheckpointManager(self.log_dir)
 
         # 9. Initialize callbacks
-        callbacks = [MemoryCleanupCallback(cleanup_interval=5)]
+        callbacks: list[Callback] = []
+        callbacks.extend(self._custom_callbacks)
+        if self._custom_callback_functions:
+            callbacks.append(FunctionCallback(self._custom_callback_functions))
+        callbacks.append(MemoryCleanupCallback(cleanup_interval=5))
         if self.early_stopping is not None:
-            callbacks.append(EarlyStoppingCallback(early_stopping=self.early_stopping))
+            callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping=self.early_stopping,
+                    swanlab_prefix="",
+                )
+            )
+        callbacks.append(
+            CheckpointCallback(
+                checkpoint_manager=self.checkpoint_manager,
+                early_stopping=self.early_stopping,
+                last_filename="last_checkpoint.pth",
+                best_filename=(
+                    "best_model.pth" if self.early_stopping is not None else None
+                ),
+            )
+        )
         self.callback_manager = CallbackManager(callbacks)
 
         # 10. Setup hyperparameters
@@ -577,7 +638,7 @@ class BaseTrainer(ABC):
         self.loss = self.loss.to(self.device_)
 
         # 触发训练开始回调
-        self.callback_manager.on_train_begin(self.epochs)
+        self.callback_manager.on_train_begin(self.epochs, trainer=self)
 
         # 创建进度条
         progress = Progress(
@@ -595,7 +656,7 @@ class BaseTrainer(ABC):
         renderables = [progress]
         if self.early_stopping is not None:
             best_metric_text = Text(
-                f"Best {self._monitor_name()}: N/A", style="bold yellow"
+                f"Best {self._monitor_name().upper()}: N/A", style="bold yellow"
             )
             renderables.insert(0, best_metric_text)
 
@@ -617,7 +678,7 @@ class BaseTrainer(ABC):
                 logger.info(f"Epoch {epoch + 1}/{self.epochs}")
 
                 # Epoch 开始回调
-                self.callback_manager.on_epoch_begin(epoch)
+                self.callback_manager.on_epoch_begin(epoch, trainer=self)
 
                 # 训练阶段
                 progress.update(train_task, visible=True)
@@ -638,89 +699,40 @@ class BaseTrainer(ABC):
                     progress.update(val_task, visible=False)
 
                 # Epoch 结束回调
-                self.callback_manager.on_epoch_end(epoch, train_loss, val_loss)
+                self.callback_manager.on_epoch_end(
+                    epoch, train_loss, val_loss, trainer=self
+                )
 
-                # 早停检查
-                if self.early_stopping is not None and self.val_data is not None:
-                    metrics = self.metrics_accumulator.compute("val")
-                    monitor_value = self._select_monitor_value(metrics, val_loss)
-                    if monitor_value is not None:
-                        # 更新早停回调
-                        for cb in self.callback_manager.callbacks:
-                            if isinstance(cb, EarlyStoppingCallback):
-                                cb.step(monitor_value, epoch, metrics)
-                                break
+                # 更新最佳指标显示
+                if (
+                    self.early_stopping is not None
+                    and best_metric_text is not None
+                    and self.val_data is not None
+                ):
+                    best_epoch = getattr(self, "_best_epoch", None)
+                    patience = self.early_stopping.cfg.patience
+                    remaining = max(0, patience - self.early_stopping.num_bad_epochs)
+                    if hasattr(self, "_best_metric"):
+                        best_str = f"{self._best_metric:.4f}"
+                    else:
+                        best_str = "N/A"
 
-                    # 记录早停状态到 SwanLab
-                    if self.use_swanlab:
-                        try:
-                            import swanlab
-
-                            log_data = {
-                                "ES/Best": self.early_stopping.best_score,
-                                "ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
-                            }
-
-                            # 记录最佳轮次的完整指标
-                            if self.early_stopping.best_metrics is not None:
-                                log_data.update(
-                                    {
-                                        "ES/Best_AUC": self.early_stopping.best_metrics.get(
-                                            "auc", 0.0
-                                        ),
-                                        "ES/Best_ACC": self.early_stopping.best_metrics.get(
-                                            "acc", 0.0
-                                        ),
-                                        "ES/Best_RMSE": self.early_stopping.best_metrics.get(
-                                            "rmse", 0.0
-                                        ),
-                                    }
-                                )
-
-                            swanlab.log(log_data, step=epoch)
-                        except ImportError:
-                            logger.warning(
-                                "SwanLab is not installed. Skipping Early Stopping logging."
-                            )
-
-                    # 更新最佳指标显示（放在 step 之后，确保 num_bad_epochs 已刷新）
-                    if best_metric_text is not None:
-                        best_epoch = getattr(self, "_best_epoch", None)
-                        patience = self.early_stopping.cfg.patience
-                        remaining = max(
-                            0, patience - self.early_stopping.num_bad_epochs
-                        )
-                        if hasattr(self, "_best_metric"):
-                            best_str = f"{self._best_metric:.4f}"
-                        else:
-                            best_str = "N/A"
-
-                        best_metric_text.plain = (
-                            f"Best {self._monitor_name()}: {best_str} "
-                            f"(Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}, "
-                            f"Patience: {remaining}/{patience})"
-                        )
-                        best_metric_text.stylize("bold yellow")
+                    best_metric_text.plain = (
+                        f"Best {self._monitor_name().upper()}: {best_str} "
+                        f"(Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}, "
+                        f"Patience: {remaining}/{patience})"
+                    )
+                    best_metric_text.stylize("bold yellow")
 
                 # 学习率调度器更新
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step()
 
-                # 保存检查点
-                self.checkpoint_manager.save_checkpoint(
-                    epoch,
-                    self.model,
-                    self.opt,
-                    self.lr_scheduler,
-                    early_stopping_state=self._get_early_stopping_state(),
-                    filename="last_checkpoint.pth",
-                )
-
                 # 更新总进度
                 progress.advance(total_task)
 
                 # 检查是否应该停止
-                if self.callback_manager.should_stop():
+                if self.callback_manager.should_stop(trainer=self):
                     progress.console.log(
                         f"[bold red]Early stopping triggered at epoch {epoch + 1}"
                     )
@@ -728,7 +740,7 @@ class BaseTrainer(ABC):
 
         logger.info("Training complete")
         self._finish()
-        self.callback_manager.on_train_end()
+        self.callback_manager.on_train_end(trainer=self)
 
     def _process_epoch(
         self, epoch: int, is_train: bool, progress=None, task_id=None
@@ -749,11 +761,12 @@ class BaseTrainer(ABC):
 
         self.metrics_accumulator.reset(phase)
         self.model.train() if is_train else self.model.eval()
+        self.callback_manager.on_phase_begin(epoch, phase, trainer=self)
 
         total_loss = 0.0
         for batch_idx, batch_data in enumerate(data_loader):
             # Batch 回调
-            self.callback_manager.on_batch_begin(epoch, batch_idx, phase)
+            self.callback_manager.on_batch_begin(epoch, batch_idx, phase, trainer=self)
 
             # 前向传播
             with torch.set_grad_enabled(is_train):
@@ -769,20 +782,18 @@ class BaseTrainer(ABC):
                 progress.advance(task_id)
 
             # Batch 结束回调
-            self.callback_manager.on_batch_end(epoch, batch_idx, phase, loss)
+            self.callback_manager.on_batch_end(
+                epoch, batch_idx, phase, loss, trainer=self
+            )
 
         # 聚合并记录指标
         metrics = self.metrics_accumulator.compute(phase)
         self.metrics_accumulator.log(phase, metrics, epoch)
 
-        # 保存最佳模型检查点（仅在验证阶段）
-        if not is_train and self.early_stopping is not None:
-            monitor_value = self._select_monitor_value(metrics, total_loss)
-            if monitor_value is not None:
-                self._save_best_model_checkpoint(monitor_value, epoch)
-
         # Phase 结束回调
-        self.callback_manager.on_phase_end(epoch, phase, total_loss, metrics)
+        self.callback_manager.on_phase_end(
+            epoch, phase, total_loss, metrics, trainer=self
+        )
 
         return total_loss
 
@@ -816,89 +827,11 @@ class BaseTrainer(ABC):
         y_label = outputs["y_label"]
         return self.loss(y_hat, y_label)
 
-    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
-        """根据配置选择监控指标的值。"""
-        if self.early_stopping is None:
-            name = "auc"
-        else:
-            name = (self.early_stopping.cfg.monitor or "auc").lower()
-
-        value = None
-        if name == "loss":
-            value = float(val_loss) if val_loss is not None else None
-        elif name in metrics:
-            value = metrics[name]
-
-        # 回退策略
-        if value is None:
-            if metrics.get("auc") is not None:
-                value = float(metrics["auc"])
-            elif metrics.get("acc") is not None:
-                value = float(metrics["acc"])
-            elif metrics.get("rmse") is not None:
-                value = float(metrics["rmse"])
-
-        # 如果仍然是 None，返回一个极差的值
-        if value is None:
-            if name in ["loss", "rmse"]:
-                return float("inf")
-            return float("-inf")
-        return float(value)
-
-    def _get_early_stopping_state(self) -> dict | None:
-        """获取早停状态。"""
-        if self.early_stopping is None:
-            return None
-        state = {
-            "best_score": self.early_stopping.best_score,
-            "best_epoch": self.early_stopping.best_epoch,
-            "num_bad_epochs": self.early_stopping.num_bad_epochs,
-        }
-        # 保存完整指标
-        if self.early_stopping.best_metrics is not None:
-            state["best_metrics"] = self.early_stopping.best_metrics.copy()
-        return state
-
     def _monitor_name(self) -> str:
         """获取早停监控指标名称。"""
         if self.early_stopping is None:
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
-
-    def _save_best_model_checkpoint(self, metric: float, epoch: int):
-        """保存最佳模型检查点。
-
-        Args:
-            metric: 用于判断最佳模型的指标值
-            epoch: 当前 epoch
-        """
-        # 确定比较模式 (min 或 max)
-        mode = "max"
-        if self.early_stopping:
-            mode = self.early_stopping.cfg.mode
-        else:
-            # 默认推断
-            name = self._monitor_name()
-            if name in ["rmse", "loss"]:
-                mode = "min"
-
-        is_better = False
-        if not hasattr(self, "_best_metric"):
-            is_better = True
-        else:
-            is_better = (
-                metric > self._best_metric
-                if mode == "max"
-                else metric < self._best_metric
-            )
-
-        if is_better:
-            self._best_metric = metric
-            self._best_epoch = epoch
-            logger.info(
-                f"Saving best model at epoch {epoch + 1} with {self._monitor_name()} {metric:.4f}"
-            )
-            self.checkpoint_manager.save_weights(self.model, "best_model.pth")
 
     def _finish(self):
         """清理资源，结束实验追踪。"""
