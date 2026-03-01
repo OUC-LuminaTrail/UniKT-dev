@@ -611,7 +611,9 @@ class DataSource(ABC):
         # 初始化折标签
         fold_assignment = np.full(num_users, -1, dtype=np.int32)
         # 对非测试集用户进行K折交叉验证
-        logger.debug(f"Splitting {num_users - num_test_users} users into {n_splits} folds...")
+        logger.debug(
+            f"Splitting {num_users - num_test_users} users into {n_splits} folds..."
+        )
         kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
         for fold_idx, (_, val_indices) in enumerate(kfold.split(non_test_indices)):
             fold_assignment[non_test_indices[val_indices]] = fold_idx

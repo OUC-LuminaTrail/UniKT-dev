@@ -28,10 +28,7 @@ class BaseModelData(ABC):
         根据K折交叉验证的fold索引获取训练集和验证集
 
         参数:
-            *arrays: 任意个数、首维为样本数的数组或张量（与 split_data 一致）。
-                     例如：
-                     - GIKT: (sequences, responses, masks)
-                     - SQGKT: (sequences, responses, masks, user_id_sequence)
+            *arrays: 任意个数、首维为用户数的数组或张量。
             fold_idx: 当前的fold索引（关键字参数，必填）。
 
         返回:
@@ -46,6 +43,7 @@ class BaseModelData(ABC):
         import numpy as np
         from tqdm import tqdm
 
+        # 校验输入参数
         if len(arrays) == 0:
             raise ValueError(
                 "get_kfold_split_data requires at least one input array/tensor"
@@ -53,17 +51,15 @@ class BaseModelData(ABC):
 
         # 加载数据以获取折信息
         data = self.data_src.get_sequence_data()
-
         # 检查是否已添加fold列
         if "fold" not in data.columns:
             raise ValueError(
                 "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
             )
 
-        # 获取有效的用户索引（基于序列中实际存在的用户）
+        # 获取有效的用户索引
         num_users = arrays[0].shape[0]
-
-        # 校验所有输入的首维一致
+        # 校验所有输入的用户数一致
         for i, arr in enumerate(arrays):
             if arr.shape[0] != num_users:
                 raise ValueError(
@@ -83,16 +79,12 @@ class BaseModelData(ABC):
                 user_folds[user_idx] = fold_label
 
         # 根据fold标签分割用户数据
+        # 训练集：fold != fold_idx 且 fold != -1
+        train_user_indices = np.where((user_folds != fold_idx) & (user_folds != -1))[0]
         val_user_indices = np.where(user_folds == fold_idx)[0]
-        train_user_indices = np.where(user_folds != fold_idx)[0]
 
-        # 过滤掉fold标签为-1的用户（不在fold中的用户）
-        val_user_indices = val_user_indices[val_user_indices < num_users]
-        train_user_indices = train_user_indices[train_user_indices < num_users]
-
-        # 索引列表
-        val_idx_list = val_user_indices.tolist()
-        train_idx_list = train_user_indices.tolist()
+        train_idx_list = train_user_indices[train_user_indices < num_users].tolist()
+        val_idx_list = val_user_indices[val_user_indices < num_users].tolist()
 
         train_slices = []
         val_slices = []
@@ -123,9 +115,9 @@ class BaseModelData(ABC):
 
         return tuple(train_slices), tuple(val_slices)
 
-    def split_data(self, *arrays, val_ratio: float = 0.2):
+    def split_data(self, *arrays, val_ratio: float = 0.2, test_ratio: float = 0.0):
         r"""
-        随机划分训练集和验证集（支持可变数量的输入数组/张量）。
+        随机划分训练集、验证集和测试集。
 
         参数:
             *arrays: 任意个数、首维为样本数的数组或张量。
@@ -133,21 +125,35 @@ class BaseModelData(ABC):
                      - GIKT: (sequences, responses, masks)
                      - SQGKT: (sequences, responses, masks, user_id_sequence)
             val_ratio: 验证集比例(默认为0.2)
+            test_ratio: 测试集比例(默认为0.0，不分割测试集)
 
         返回:
-            (train_data, val_data):
-                - train_data: 与输入相同结构的元组，包含训练集切片
-                - val_data:   与输入相同结构的元组，包含验证集切片
+            如果 test_ratio == 0:
+                (train_data, val_data):
+                    - train_data: 与输入相同结构的元组，包含训练集切片
+                    - val_data:   与输入相同结构的元组，包含验证集切片
+            如果 test_ratio > 0:
+                (train_data, val_data, test_data):
+                    - train_data: 与输入相同结构的元组，包含训练集切片
+                    - val_data:   与输入相同结构的元组，包含验证集切片
+                    - test_data:  与输入相同结构的元组，包含测试集切片
 
         说明:
             - 将依据第一个输入的首维作为样本维度进行打乱与划分。
             - 要求所有输入的首维大小一致。
             - 同时兼容 numpy.ndarray 与 torch.Tensor（若可用）。
+            - 分割顺序：先分割测试集，再从剩余数据中分割验证集，最后为训练集
         """
         import numpy as np
 
         if len(arrays) == 0:
             raise ValueError("split_data requires at least one input array/tensor")
+
+        # 校验比例参数
+        if val_ratio + test_ratio >= 1.0:
+            raise ValueError(
+                f"val_ratio ({val_ratio}) + test_ratio ({test_ratio}) must be less than 1.0"
+            )
 
         num_users = arrays[0].shape[0]
 
@@ -155,20 +161,27 @@ class BaseModelData(ABC):
         for i, arr in enumerate(arrays):
             if arr.shape[0] != num_users:
                 raise ValueError(
-                    f"第 {i} 个输入首维为 {arr.shape[0]}，与预期的 {num_users} 不一致"
+                    f"Input array {i} shape is {arr.shape}, but expected shape is (num_users, *)"
                 )
 
         indices = np.arange(num_users)
         np.random.shuffle(indices)
         indices = indices.tolist()
 
-        val_size = int(num_users * val_ratio)
-        val_indices = indices[:val_size]
-        train_indices = indices[val_size:]
+        # 分割测试集
+        test_size = int(num_users * test_ratio)
+        test_indices = indices[:test_size]
+        remaining_indices = indices[test_size:]
 
-        # 兼容 numpy 与 torch 的索引切片
+        # 从剩余数据中分割验证集和训练集
+        val_size = int(len(remaining_indices) * val_ratio)
+        val_indices = remaining_indices[:val_size]
+        train_indices = remaining_indices[val_size:]
+
         train_slices = []
         val_slices = []
+        test_slices = []
+
         for arr in arrays:
             # 尝试识别 torch.Tensor
             is_torch_tensor = False
@@ -186,17 +199,26 @@ class BaseModelData(ABC):
                     train_indices, dtype=torch.long, device=arr.device
                 )
                 val_idx = torch.tensor(val_indices, dtype=torch.long, device=arr.device)
+                test_idx = torch.tensor(
+                    test_indices, dtype=torch.long, device=arr.device
+                )
                 train_slices.append(arr.index_select(0, train_idx))
                 val_slices.append(arr.index_select(0, val_idx))
+                test_slices.append(arr.index_select(0, test_idx))
             else:
                 # 视作 numpy 数组或支持 list 索引的结构
                 train_slices.append(arr[train_indices])
                 val_slices.append(arr[val_indices])
+                test_slices.append(arr[test_indices])
 
         train_data = tuple(train_slices)
         val_data = tuple(val_slices)
+        test_data = tuple(test_slices)
 
-        return train_data, val_data
+        if test_ratio > 0:
+            return train_data, val_data, test_data
+        else:
+            return train_data, val_data
 
     def calculate_question_difficulty(self, exclude_fold: int = None):
         """
@@ -518,7 +540,6 @@ class GraphModelData(BaseModelData):
 
     def build_sequence_data(self, max_seq_len: int, min_seq_len: int):
         import numpy as np
-        from tqdm import tqdm
 
         self.logger.info("Building response sequences...")
 
