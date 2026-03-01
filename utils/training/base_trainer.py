@@ -40,6 +40,7 @@ from .callbacks import (
     EarlyStoppingCallback,
     FunctionCallback,
     MemoryCleanupCallback,
+    TestEvaluationCallback,
 )
 from .checkpoint import CheckpointManager
 from .metrics import MetricsAccumulator
@@ -162,8 +163,10 @@ class BaseTrainer(ABC):
         train_data,
         batch_size,
         val_data,
+        test_data=None,
         collate_fn=None,
         val_collate_fn=None,
+        test_collate_fn=None,
     ) -> "BaseTrainer":
         """配置数据加载器。
 
@@ -171,8 +174,10 @@ class BaseTrainer(ABC):
             train_data: 训练数据（DataLoader 或 Dataset）
             batch_size: 批次大小
             val_data: 验证数据（DataLoader 或 Dataset）
+            test_data: 测试数据（DataLoader 或 Dataset，可选）
             collate_fn: 自定义 collate 函数（可选）
             val_collate_fn: 自定义验证 collate 函数（可选）
+            test_collate_fn: 自定义测试 collate 函数（可选）
 
         Returns:
             Self for method chaining
@@ -181,8 +186,10 @@ class BaseTrainer(ABC):
             train_data=train_data,
             batch_size=batch_size,
             val_data=val_data,
+            test_data=test_data,
             collate_fn=collate_fn,
             val_collate_fn=collate_fn if val_collate_fn is None else val_collate_fn,
+            test_collate_fn=collate_fn if test_collate_fn is None else test_collate_fn,
         )
         return self
 
@@ -333,6 +340,7 @@ class BaseTrainer(ABC):
                 ),
             )
         )
+        callbacks.append(TestEvaluationCallback(use_best_model=True))
         self.callback_manager = CallbackManager(callbacks)
 
         # 10. Setup hyperparameters
@@ -355,8 +363,10 @@ class BaseTrainer(ABC):
         """设置数据加载器。"""
         train_data = self._data_config.train_data
         val_data = self._data_config.val_data
+        test_data = self._data_config.test_data
         collate_fn = self._data_config.collate_fn
         val_collate_fn = self._data_config.val_collate_fn
+        test_collate_fn = self._data_config.test_collate_fn
         batch_size = self._data_config.batch_size
 
         def _build_loader(data, shuffle, loader_collate_fn):
@@ -372,6 +382,7 @@ class BaseTrainer(ABC):
 
         self.train_data = _build_loader(train_data, True, collate_fn)
         self.val_data = _build_loader(val_data, False, val_collate_fn)
+        self.test_data = _build_loader(test_data, False, test_collate_fn)
 
     def _setup_early_stopping(self):
         """设置早停。"""
@@ -393,6 +404,17 @@ class BaseTrainer(ABC):
             包含 "y_hat", "y_label", "y_predict" 的字典
         """
         raise NotImplementedError("Subclasses must implement forward_pass method")
+
+    def test_forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
+        """测试集前向传播。
+
+        Args:
+            batch_data: 从 DataLoader 获取的一个批次数据
+
+        Returns:
+            包含 "y_hat", "y_label", "y_predict" 的字典
+        """
+        return self.forward_pass(batch_data)
 
     @staticmethod
     def _try_gpu() -> torch.device:
@@ -739,8 +761,8 @@ class BaseTrainer(ABC):
                     break
 
         logger.info("Training complete")
-        self._finish()
         self.callback_manager.on_train_end(trainer=self)
+        self._finish()
 
     def _process_epoch(
         self, epoch: int, is_train: bool, progress=None, task_id=None
@@ -820,6 +842,61 @@ class BaseTrainer(ABC):
         self.metrics_accumulator.update("val", output)
 
         return loss.item()
+
+    @torch.no_grad()
+    def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
+        """执行一个测试批次。"""
+        output = self.test_forward_pass(batch_data)
+        loss = self._compute_loss(output)
+
+        # 累积预测
+        self.metrics_accumulator.update("test", output)
+
+        return loss.item()
+
+    @torch.no_grad()
+    def _evaluate_on_test_set(self, use_best_model: bool = True) -> dict[str, float]:
+        """训练结束后在测试集上评估并记录指标。"""
+        if self.test_data is None:
+            logger.info("Test data not provided. Skipping test evaluation.")
+            return {}
+
+        best_state = None
+        if use_best_model and self.early_stopping is not None:
+            checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
+            if checkpoint_cb is not None and checkpoint_cb.best_model_state is not None:
+                best_state = checkpoint_cb.best_model_state
+
+        if best_state is not None:
+            current_state = {
+                key: value.detach().cpu().clone()
+                for key, value in self.model.state_dict().items()
+            }
+            self.model.load_state_dict(best_state)
+        else:
+            current_state = None
+
+        self.metrics_accumulator.reset("test")
+        self.model.eval()
+
+        total_loss = 0.0
+        for batch_data in self.test_data:
+            loss = self._run_test_batch(batch_data)
+            total_loss += loss
+
+        metrics = self.metrics_accumulator.compute("test")
+        self.metrics_accumulator.log("test", metrics, epoch=self.epochs or 0)
+
+        if metrics:
+            metrics_str = ", ".join(
+                f"{name.upper()}={value:.4f}" for name, value in metrics.items()
+            )
+            logger.info(f"Test metrics: {metrics_str}")
+
+        if current_state is not None:
+            self.model.load_state_dict(current_state)
+
+        return metrics
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
         """计算损失。"""

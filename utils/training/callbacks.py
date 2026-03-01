@@ -465,6 +465,19 @@ class MemoryCleanupCallback(Callback):
         gc.collect()
 
 
+class TestEvaluationCallback(Callback):
+    """训练结束后执行测试集评估。"""
+
+    def __init__(self, *, use_best_model: bool = True):
+        self.use_best_model = use_best_model
+
+    def on_train_end(self, **kwargs):
+        trainer = kwargs.get("trainer")
+        if trainer is None:
+            return
+        trainer._evaluate_on_test_set(use_best_model=self.use_best_model)
+
+
 __all__ = [
     "Callback",
     "CallbackManager",
@@ -472,4 +485,5 @@ __all__ = [
     "EarlyStoppingCallback",
     "CheckpointCallback",
     "MemoryCleanupCallback",
+    "TestEvaluationCallback",
 ]

@@ -104,7 +104,12 @@ class MetricsAccumulator:
         try:
             import swanlab
 
-            prefix = "Train/" if phase == "train" else "Val/"
+            if phase == "train":
+                prefix = "Train/"
+            elif phase == "val":
+                prefix = "Val/"
+            else:
+                prefix = f"{phase.capitalize()}/"
             for name, value in metrics.items():
                 swanlab.log({f"{prefix}{name.upper()}-epoch": value}, step=epoch)
         except ImportError:

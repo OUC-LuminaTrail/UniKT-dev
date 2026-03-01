@@ -25,7 +25,7 @@ class BaseModelData(ABC):
 
     def split_kfold_data(self, *arrays, fold_idx: int):
         r"""
-        根据K折交叉验证的fold索引获取训练集和验证集
+        根据K折交叉验证的fold索引获取训练集、验证集和测试集
 
         参数:
             *arrays: 任意个数、首维为用户数的数组或张量。
@@ -34,10 +34,10 @@ class BaseModelData(ABC):
         返回:
             train_data: 与输入相同结构的元组，包含训练集切片
             val_data:   与输入相同结构的元组，包含验证集切片
+            test_data:  与输入相同结构的元组，包含测试集切片
 
         说明:
-            - 需要数据源中已添加K折标签（通过 add_kfold_labels）
-            - 验证集为指定fold的数据，训练集为其他fold的数据
+            - 验证集为指定fold (fold_idx) 的数据，测试集为 fold == -1 的数据，训练集为剩余的fold数据
             - 需要数据源中有用户到行索引的映射信息
         """
         import numpy as np
@@ -79,15 +79,20 @@ class BaseModelData(ABC):
                 user_folds[user_idx] = fold_label
 
         # 根据fold标签分割用户数据
+        # 验证集：fold == fold_idx
+        # 测试集：fold == -1
         # 训练集：fold != fold_idx 且 fold != -1
         train_user_indices = np.where((user_folds != fold_idx) & (user_folds != -1))[0]
         val_user_indices = np.where(user_folds == fold_idx)[0]
+        test_user_indices = np.where(user_folds == -1)[0]
 
         train_idx_list = train_user_indices[train_user_indices < num_users].tolist()
         val_idx_list = val_user_indices[val_user_indices < num_users].tolist()
+        test_idx_list = test_user_indices[test_user_indices < num_users].tolist()
 
         train_slices = []
         val_slices = []
+        test_slices = []
         for arr in arrays:
             # 识别 torch.Tensor
             is_torch_tensor = False
@@ -107,13 +112,18 @@ class BaseModelData(ABC):
                 val_idx = torch.tensor(
                     val_idx_list, dtype=torch.long, device=arr.device
                 )
+                test_idx = torch.tensor(
+                    test_idx_list, dtype=torch.long, device=arr.device
+                )
                 train_slices.append(arr.index_select(0, train_idx))
                 val_slices.append(arr.index_select(0, val_idx))
+                test_slices.append(arr.index_select(0, test_idx))
             else:
                 train_slices.append(arr[train_idx_list])
                 val_slices.append(arr[val_idx_list])
+                test_slices.append(arr[test_idx_list])
 
-        return tuple(train_slices), tuple(val_slices)
+        return tuple(train_slices), tuple(val_slices), tuple(test_slices)
 
     def split_data(self, *arrays, val_ratio: float = 0.2, test_ratio: float = 0.0):
         r"""
