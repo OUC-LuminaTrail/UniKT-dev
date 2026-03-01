@@ -572,17 +572,23 @@ class DataSource(ABC):
             )
         return self.metadata if key is None else self.metadata[key]
 
-    def add_kfold_labels(self, n_splits: int = 5):
-        """Add K-fold cross-validation labels at user level.
+    def add_kfold_labels(self, n_splits: int = 5, test_ratio: float = 0.2):
+        """Add K-fold cross-validation labels with test set separation.
 
         Ensures all data from the same user stays in the same fold
         to prevent data leakage.
 
+        The process:
+        1. Split users into test set and non-test set
+        2. Test set users are labeled with -1
+        3. Non-test set users are split into n_splits folds (0 to n_splits-1)
+
         Args:
-            n_splits: Number of folds (default: 5).
+            n_splits: Number of folds for cross-validation (default: 5).
+            test_ratio: Ratio of users to allocate to test set (default: 0.2).
 
         Returns:
-            DataFrame with added 'fold' column (values: 0 to n_splits-1).
+            DataFrame with added 'fold' column (values: -1 for test set, 0 to n_splits-1 for train/val).
 
         Raises:
             ValueError: If sequence_data is not loaded.
@@ -592,12 +598,23 @@ class DataSource(ABC):
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
+        # 获取唯一用户ID
         unique_users = self.sequence_data["user"].unique()
-        fold_assignment = np.zeros(len(unique_users), dtype=np.int32)
+        num_users = len(unique_users)
+        num_test_users = int(num_users * test_ratio)
 
+        # 随机打乱用户ID顺序
+        user_indices = np.arange(num_users)
+        np.random.shuffle(user_indices)
+        # 打乱后取非测试集用户的索引
+        non_test_indices = user_indices[num_test_users:]
+        # 初始化折标签
+        fold_assignment = np.full(num_users, -1, dtype=np.int32)
+        # 对非测试集用户进行K折交叉验证
+        logger.debug(f"Splitting {num_users - num_test_users} users into {n_splits} folds...")
         kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
-        for fold_idx, (_, test_indices) in enumerate(kfold.split(unique_users)):
-            fold_assignment[test_indices] = fold_idx
+        for fold_idx, (_, val_indices) in enumerate(kfold.split(non_test_indices)):
+            fold_assignment[non_test_indices[val_indices]] = fold_idx
 
         user_fold_map = pl.DataFrame(
             {"user": unique_users, "fold": pl.Series(fold_assignment, dtype=pl.Int32)}
@@ -607,8 +624,11 @@ class DataSource(ABC):
             user_fold_map, on="user", how="left"
         )
         self.add_metadata("kfold_n_splits", n_splits)
+        self.add_metadata("test_ratio", test_ratio)
 
-        logger.info(f"Added K-fold labels with n_splits={n_splits} to sequence_data")
+        logger.info(
+            f"Added K-fold labels with n_splits={n_splits}, test_ratio={test_ratio}: "
+        )
 
     def get_user_stats(self):
         """Compute user statistics: attempts, correct count, skill count, correct rate.
