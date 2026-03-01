@@ -93,6 +93,10 @@ class CallbackManager:
         """训练开始。"""
         self.trigger("on_train_begin", epochs)
 
+    def on_train_end(self):
+        """训练结束。"""
+        self.trigger("on_train_end")
+
     def on_epoch_begin(self, epoch: int):
         """Epoch 开始。"""
         self.trigger("on_epoch_begin", epoch)
@@ -138,8 +142,6 @@ class EarlyStoppingCallback(Callback):
 
     def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float):
         """Epoch 结束时检查早停条件。"""
-        # 从 metrics 中选择监控值（需要在调用时传入）
-        # 这里简化处理，假设 val_loss 相关
         pass
 
     def step(self, current: float, epoch: int, metrics: dict | None = None) -> bool:
@@ -217,10 +219,10 @@ class MemoryCleanupCallback(Callback):
                 after = torch.cuda.memory_allocated() / 1024**3
                 if before - after > 0.1:  # 超过100MB
                     logger.debug(
-                        f"[{phase}] GPU内存清理: {before:.2f}GB -> {after:.2f}GB"
+                        f"[{phase}] Cleaned up memory: {before:.2f}GB -> {after:.2f}GB"
                     )
             except Exception as e:
-                logger.warning(f"GPU内存清理失败: {e}")
+                logger.warning(f"Memory cleanup failed: {e}")
 
         # Python垃圾回收
         gc.collect()

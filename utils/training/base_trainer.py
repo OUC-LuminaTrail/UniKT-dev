@@ -728,6 +728,7 @@ class BaseTrainer(ABC):
 
         logger.info("Training complete")
         self._finish()
+        self.callback_manager.on_train_end()
 
     def _process_epoch(
         self, epoch: int, is_train: bool, progress=None, task_id=None
