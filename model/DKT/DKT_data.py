@@ -6,7 +6,7 @@ from typing_extensions import override
 
 from utils.core import get_logger
 from utils.data_process import DataSource
-from utils.net_data import SkillModelData
+from utils.model_data import SkillModelData
 
 logger = get_logger(__name__)
 

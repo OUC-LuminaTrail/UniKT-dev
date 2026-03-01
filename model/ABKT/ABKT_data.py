@@ -11,12 +11,12 @@ from tqdm import tqdm
 
 from utils.core import get_logger
 from utils.data_process import DataSource
-from utils.net_data import BaseModelData
+from utils.model_data import QuestionModelData
 
 logger = get_logger(__name__)
 
 
-class ABKTModelData(BaseModelData):
+class ABKTModelData(QuestionModelData):
     """
     ABKT 模型数据准备类
 

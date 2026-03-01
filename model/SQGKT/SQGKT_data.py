@@ -5,7 +5,7 @@ from typing_extensions import override
 
 from utils.core import get_logger
 from utils.data_process.data_source import DataSource
-from utils.net_data import GraphModelData
+from utils.model_data import QuestionModelData
 
 
 class SQGKTDataset(Dataset):
@@ -27,7 +27,7 @@ class SQGKTDataset(Dataset):
         return len(self.sequences)
 
 
-class SQGKTModelData(GraphModelData):
+class SQGKTModelData(QuestionModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
         self.logger = get_logger(__name__)

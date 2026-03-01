@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import Dataset
 
 from utils.core import get_logger
-from utils.net_data import GraphModelData
+from utils.model_data import QuestionModelData
 
 
 def sample_hist_neighbors(
@@ -90,7 +90,7 @@ def sample_hist_neighbors(
     return result
 
 
-class SGKTModelData(GraphModelData):
+class SGKTModelData(QuestionModelData):
     """
     SGKT data preparation class.
 
