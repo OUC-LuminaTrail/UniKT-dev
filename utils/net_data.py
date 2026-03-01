@@ -520,35 +520,26 @@ class GraphModelData(BaseModelData):
         import numpy as np
         from tqdm import tqdm
 
-        data = self.data_src.get_sequence_data()
+        self.logger.info("Building response sequences...")
+
+        data = self.data_src.get_sequence_data().copy()
         num_users = self.data_src.get_metadata("num_users")
 
-        # 构建用户答题序列
-        user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
-        # 构建用户ID序列
-        user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
-        # 用户作答正确与否序列
-        user_response = np.zeros((num_users, max_seq_len), dtype=int)
-        # 序列掩码，用于区分是否存在作答数据
-        user_mask = np.zeros((num_users, max_seq_len), dtype=int)
-        # 用户序列长度计数器，用于索引
-        num_sequence = [0] * num_users
+        data["seq_pos"] = data.groupby("user").cumcount()
+        data_filtered = data[data["seq_pos"] < max_seq_len]
 
-        for row in tqdm(
-            data.itertuples(), total=data.shape[0], desc="Building user sequences"
-        ):
-            # 获取用户ID、问题ID和作答正确与否
-            user_idx = row.user
-            question_idx = row.question
-            label = row.label
-            # 如果当前用户的序列长度未达到最大长度，则添加数据
-            if num_sequence[user_idx] < max_seq_len:
-                user_sequence[user_idx, num_sequence[user_idx]] = question_idx
-                user_id_sequence[user_idx, num_sequence[user_idx]] = user_idx
-                user_response[user_idx, num_sequence[user_idx]] = label
-                user_mask[user_idx, num_sequence[user_idx]] = 1
-                # 自增对应的用户序列长度
-                num_sequence[user_idx] += 1
+        user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        user_response = np.zeros((num_users, max_seq_len), dtype=int)
+        user_mask = np.zeros((num_users, max_seq_len), dtype=int)
+
+        user_indices = data_filtered["user"].values
+        seq_positions = data_filtered["seq_pos"].values
+
+        user_sequence[user_indices, seq_positions] = data_filtered["question"].values
+        user_id_sequence[user_indices, seq_positions] = user_indices
+        user_response[user_indices, seq_positions] = data_filtered["label"].values
+        user_mask[user_indices, seq_positions] = 1
 
         return user_sequence, user_response, user_mask, user_id_sequence
 
