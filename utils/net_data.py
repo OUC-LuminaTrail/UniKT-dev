@@ -67,7 +67,7 @@ class BaseModelData(ABC):
         for i, arr in enumerate(arrays):
             if arr.shape[0] != num_users:
                 raise ValueError(
-                    f"第 {i} 个输入首维为 {arr.shape[0]}，与预期的 {num_users} 不一致"
+                    f"Input array {i} shape is {arr.shape}, but expected shape is (num_users, *)"
                 )
 
         # 创建用户fold信息映射
