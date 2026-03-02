@@ -54,6 +54,32 @@ class DKTDataset(Dataset):
         return sequence, response, mask
 
 
+class DKTWindowDataset(Dataset):
+    """DKT 窗口测试数据集。
+
+    在普通序列数据的基础上，额外返回 late_group_id，
+    用于 windowlate 指标按组聚合。
+    """
+
+    def __init__(self, sequences, responses, masks, late_group_ids):
+        self.sequences = sequences
+        self.responses = responses
+        self.masks = masks
+        self.late_group_ids = late_group_ids
+
+    def __len__(self) -> int:
+        return len(self.sequences)
+
+    def __getitem__(
+        self, idx: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
+        response = torch.tensor(self.responses[idx], dtype=torch.long)
+        mask = torch.tensor(self.masks[idx], dtype=torch.bool)
+        late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
+        return sequence, response, mask, late_group_id
+
+
 class DKTModelData(SkillModelData):
     """DKT 模型数据加载器
 
@@ -94,18 +120,27 @@ class DKTModelData(SkillModelData):
             logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, _ = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
+        # 构建 windowlate 评估数据
+        window_test_data = self.build_windowlate_data(args.max_seq_len)
+
         # 构建模型数据集
         train_dataset = DKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = DKTDataset(val_data[0], val_data[1], val_data[2])
-
-        logger.debug(
-            f"DKT data prepared: train={len(train_dataset)}, val={len(val_dataset)}"
+        test_dataset = DKTWindowDataset(
+            window_test_data[0],
+            window_test_data[1],
+            window_test_data[2],
+            window_test_data[4],
         )
 
-        return train_dataset, val_dataset
+        logger.debug(
+            f"DKT data prepared: train={len(train_dataset)}, val={len(val_dataset)}, test(window)={len(test_dataset)}"
+        )
+
+        return train_dataset, val_dataset, test_dataset

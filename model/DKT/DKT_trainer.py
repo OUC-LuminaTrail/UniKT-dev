@@ -90,7 +90,7 @@ class DKTTrainer(BaseTrainer):
         from model.DKT.DKT_data import DKTModelData
 
         model_data = DKTModelData(data_src)
-        train_dataset, val_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
 
         # 初始化模型
         from model.DKT.DKT_model import DKT
@@ -139,6 +139,7 @@ class DKTTrainer(BaseTrainer):
         ).with_data(
             train_data=train_dataset,
             val_data=val_dataset,
+            test_data=test_dataset,
             batch_size=args.batch_size,
         ).with_optimization(
             optimizer=optimizer,
@@ -189,4 +190,29 @@ class DKTTrainer(BaseTrainer):
             "y_predict": y_predict,
             "y_score": y_hat,
             "y_prob": y_hat,
+        }
+
+    def test_forward_pass(self, batch_data):
+        sequence, response, mask, late_group_id = batch_data
+
+        sequence = self._move_tensor_to_device(sequence)
+        response = self._move_tensor_to_device(response)
+        mask = self._move_tensor_to_device(mask)
+        late_group_id = self._move_tensor_to_device(late_group_id)
+
+        # 模型前向传播，获取完整的预测结果
+        y_hat_full = self.model(sequence, response, mask)
+        y_hat, y_label, _ = self._extract_valid_predictions(
+            y_hat_full, response, mask, skip_first=False
+        )
+
+        # 按 group_id 聚合预测结果和标签，用于 windowlate 指标计算
+        results = self._aggregate_by_group(y_hat, y_label, late_group_id, mask)
+
+        return {
+            "y_hat": results["y_hat"],
+            "y_label": results["y_label"],
+            "y_predict": results["y_predict"],
+            "y_score": results["y_hat"],
+            "y_prob": results["y_hat"],
         }
