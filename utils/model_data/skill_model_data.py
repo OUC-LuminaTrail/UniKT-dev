@@ -93,10 +93,11 @@ class SkillModelData(BaseModelData):
 
           处理流程：
           1. 仅使用测试集用户交互（fold == -1）。
-          2. 对每个“题目交互”按其关联技能展开为多个目标样本；同题样本共享 group_id。
-          3. 使用“纯问题窗口”确定历史范围：每个目标仅使用此前最多 max_seq_len-1 个题目，
-              然后将该问题窗口内历史按技能展开并填入序列；历史从左侧开始填充，目标紧邻历史末尾。
-          4. 仅目标位置置 mask=1，用于 late_mean 聚合评估。
+          2. 对每个"题目交互"按其关联技能展开为多个目标样本；同题样本共享 group_id。
+          3. 滑动窗口构建：生成固定长度为 max_seq_len 的窗口序列，每个窗口包含
+             max_seq_len 个交互。对于展开后的多技能，一个窗口可能超过 max_seq_len 个位置。
+          4. 第一个窗口（Win-0）：所有位置都预测（mask=1）
+          5. 后续窗口（Win-1, Win-2, ...）：只预测最后一个位置（mask=1），其他位置为0
 
         参数:
             max_seq_len: 最大序列长度
@@ -128,10 +129,6 @@ class SkillModelData(BaseModelData):
             q_skill.groupby("question", sort=False)["skill"].apply(list).to_dict()
         )
 
-        history_width = max_seq_len - 1
-        if history_width < 1:
-            raise ValueError(f"max_seq_len must be at least 2, got {max_seq_len}")
-
         win_sequences = []
         win_responses = []
         win_masks = []
@@ -146,16 +143,19 @@ class SkillModelData(BaseModelData):
             questions = user_df["question"].to_numpy()
             labels = user_df["label"].to_numpy(dtype=int)
             n_interactions = len(questions)
-            # 如果用户交互数不足以构建至少一个样本则跳过
-            if n_interactions <= 1:
+            # 如果用户交互数不足以构建至少一个完整窗口则跳过
+            if n_interactions < max_seq_len:
                 global_group_id += n_interactions
+                self.logger.warning(
+                    f"User {user} has only {n_interactions} interactions, less than max_seq_len={max_seq_len}. Skipping user for window_late evaluation."
+                )
                 continue
 
             # 将题目ID映射到技能ID列表，构建交互对应的技能列表
             inter_skills = [
                 np.asarray(q_skill_map[question], dtype=int) for question in questions
             ]
-            # 计算每个交互对应的技能数
+            # 计算每个交互对应的技能数和前缀和
             skill_counts = np.asarray(
                 [skills.size for skills in inter_skills], dtype=int
             )
@@ -169,30 +169,11 @@ class SkillModelData(BaseModelData):
             )
             global_group_id += n_interactions
 
-            # 按 PyKT 语义选择需要评估的目标交互：
-            # 1) 首窗（长度<=max_seq_len）中除首题外全部目标
-            # 2) 当序列超过 max_seq_len 后，后续滑窗仅取窗口末位作为目标
-            if n_interactions <= max_seq_len:
-                selected_interactions = list(range(1, n_interactions))
-            else:
-                selected_interactions = list(range(1, max_seq_len)) + list(
-                    range(max_seq_len, n_interactions)
-                )
+            # 滑动窗口：每个窗口包含 max_seq_len 个交互
+            # 从位置 0 到 n_interactions - max_seq_len
+            num_windows = n_interactions - max_seq_len + 1
 
-            num_samples = int(sum(skill_counts[idx] for idx in selected_interactions))
-            if num_samples == 0:
-                self.logger.warning(
-                    f"User {user} has no valid samples after multi-skill expansion, skipping"
-                )
-                continue
-
-            seq = np.zeros((num_samples, max_seq_len), dtype=int)
-            rsp = np.zeros((num_samples, max_seq_len), dtype=int)
-            msk = np.zeros((num_samples, max_seq_len), dtype=int)
-            uid = np.zeros((num_samples, max_seq_len), dtype=int)
-            gid = np.full((num_samples, max_seq_len), -1, dtype=np.int64)
-
-            # 构造展开后的全历史序列
+            # 构造展开后的全历史序列（用于快速提取窗口）
             flat_skills = np.concatenate(inter_skills)
             flat_labels = np.concatenate(
                 [
@@ -200,59 +181,70 @@ class SkillModelData(BaseModelData):
                     for idx, skills in enumerate(inter_skills)
                 ]
             )
+            flat_user_ids = np.concatenate(
+                [np.full(skills.size, int(user), dtype=int) for skills in inter_skills]
+            )
+            flat_group_ids = np.concatenate(
+                [
+                    np.full(skills.size, interaction_group_ids[idx], dtype=np.int64)
+                    for idx, skills in enumerate(inter_skills)
+                ]
+            )
 
-            row_ptr = 0
-            for inter_idx in selected_interactions:
-                # 按问题窗口确定历史边界
-                if inter_idx < max_seq_len:
-                    history_start_inter = 0
-                else:
-                    history_start_inter = inter_idx - history_width
-                history_end_inter = inter_idx
+            for window_idx in range(num_windows):
+                # 确定窗口在交互序列中的起止位置
+                window_start_inter = window_idx
+                window_end_inter = window_idx + max_seq_len
 
-                history_start_skill = (
+                # 确定窗口在技能展开序列中的起止位置
+                window_start_skill = (
                     0
-                    if history_start_inter == 0
-                    else int(prefix_counts[history_start_inter - 1])
+                    if window_start_inter == 0
+                    else int(prefix_counts[window_start_inter - 1])
                 )
-                history_end_skill = int(prefix_counts[history_end_inter - 1])
+                window_end_skill = int(prefix_counts[window_end_inter - 1])
 
-                hist_skill_full = flat_skills[history_start_skill:history_end_skill]
-                hist_label_full = flat_labels[history_start_skill:history_end_skill]
+                window_skills = flat_skills[window_start_skill:window_end_skill]
+                window_labels = flat_labels[window_start_skill:window_end_skill]
+                window_users = flat_user_ids[window_start_skill:window_end_skill]
+                window_group_ids = flat_group_ids[window_start_skill:window_end_skill]
 
-                # 若问题窗口展开后技能数超过 history_width，仅保留最近的 history_width 个
-                if hist_skill_full.size > history_width:
-                    hist_skill = hist_skill_full[-history_width:]
-                    hist_label = hist_label_full[-history_width:]
+                window_len = len(window_skills)
+
+                # 如果窗口展开后的技能数超过 max_seq_len，截取最近的 max_seq_len 个
+                if window_len > max_seq_len:
+                    window_skills = window_skills[-max_seq_len:]
+                    window_labels = window_labels[-max_seq_len:]
+                    window_users = window_users[-max_seq_len:]
+                    window_group_ids = window_group_ids[-max_seq_len:]
+                    window_len = max_seq_len
+
+                # 创建一个样本
+                seq = np.zeros((1, max_seq_len), dtype=int)
+                rsp = np.zeros((1, max_seq_len), dtype=int)
+                msk = np.zeros((1, max_seq_len), dtype=int)
+                uid = np.zeros((1, max_seq_len), dtype=int)
+                gid = np.full((1, max_seq_len), -1, dtype=np.int64)
+
+                # 填充窗口数据
+                seq[0, :window_len] = window_skills
+                rsp[0, :window_len] = window_labels
+                uid[0, :window_len] = window_users
+                gid[0, :window_len] = window_group_ids
+
+                # 设置 mask：
+                # - 第一个窗口（window_idx == 0）：所有位置都预测
+                # - 后续窗口：只预测最后一个位置
+                if window_idx == 0:
+                    msk[0, :window_len] = 1
                 else:
-                    hist_skill = hist_skill_full
-                    hist_label = hist_label_full
+                    msk[0, window_len - 1] = 1
 
-                hist_len = int(hist_skill.size)
-                target_pos = hist_len
-
-                target_skills = inter_skills[inter_idx]
-                target_label = labels[inter_idx]
-                target_gid = interaction_group_ids[inter_idx]
-
-                for target_skill in target_skills:
-                    if hist_len > 0:
-                        seq[row_ptr, :hist_len] = hist_skill
-                        rsp[row_ptr, :hist_len] = hist_label
-                        uid[row_ptr, :hist_len] = int(user)
-
-                    seq[row_ptr, target_pos] = int(target_skill)
-                    rsp[row_ptr, target_pos] = int(target_label)
-                    uid[row_ptr, target_pos] = int(user)
-                    msk[row_ptr, target_pos] = 1
-                    gid[row_ptr, target_pos] = int(target_gid)
-                    row_ptr += 1
-
-            win_sequences.append(seq)
-            win_responses.append(rsp)
-            win_masks.append(msk)
-            win_users.append(uid)
-            win_group_ids.append(gid)
+                win_sequences.append(seq)
+                win_responses.append(rsp)
+                win_masks.append(msk)
+                win_users.append(uid)
+                win_group_ids.append(gid)
 
         if len(win_sequences) == 0:
             raise ValueError(
