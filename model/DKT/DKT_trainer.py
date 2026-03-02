@@ -193,25 +193,52 @@ class DKTTrainer(BaseTrainer):
         }
 
     def test_forward_pass(self, batch_data):
-        sequence, response, mask, late_group_id = batch_data
+        """
+        测试前向传播，支持 windowlateauc_mean 评估。
+
+        数据格式说明：
+        - sequence: [技能历史, 目标技能]
+        - response: [历史标签, 0]  # 目标位置 response=0 避免数据泄露
+        - mask: [0, ..., 0, 1]  # 只有最后一个位置需要预测
+        - late_group_id: [g1, ..., gN]  # 最后一个位置是当前题目的 group_id
+        - true_labels: [历史标签, 真实标签]  # 用于评估
+
+        DKT 预测语义：
+        - y_hat[:, t] 预测的是 response[t]
+        - y_hat[:, 0] = 0（无有效预测）
+        - 铍要对齐：y_hat[:, 1:] 对应 true_labels[:, 1:]
+        """
+        sequence, response, mask, late_group_id, true_labels = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
         late_group_id = self._move_tensor_to_device(late_group_id)
+        true_labels = self._move_tensor_to_device(true_labels)
 
-        y_hat_full = self.model(sequence, response, mask)
+        # 模型前向传播
+        y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # DKT 模型在位置 t 的输出预测位置 t+1 的标签
-        y_hat_aligned = y_hat_full[:, :-1]
-        response_aligned = response.float()[:, 1:]
-        mask_aligned = mask[:, 1:]
-        group_id_aligned = late_group_id[:, 1:]
+        # ==================== 关键：DKT 预测对齐 ====================
+        # DKT 的 y_hat[:, t] 预测的是 response[t]
+        # 但 y_hat[:, 0] = 0（无有效预测）
+        # 所以有效预测是 y_hat[:, 1:]，对应 true_labels[:, 1:]
 
+        y_hat_aligned = y_hat_full[:, 1:]  # [B, S-1]，有效预测
+        true_labels_aligned = true_labels[:, 1:]  # [B, S-1]，对应的真实标签
+        mask_aligned = mask[:, 1:]  # [B, S-1]，对应的 mask
+        group_id_aligned = late_group_id[:, 1:]  # [B, S-1]，对应的 group_id
+
+        # 使用 mask 筛选需要预测的位置
         y_hat = torch.masked_select(y_hat_aligned, mask_aligned)
-        y_label = torch.masked_select(response_aligned, mask_aligned)
+        y_label = torch.masked_select(
+            true_labels_aligned, mask_aligned
+        )  # 使用 true_labels！
+        group_ids = torch.masked_select(group_id_aligned, mask_aligned)
+
+        # 按 group_id 聚合
         results = self._aggregate_by_group(
-            y_hat, y_label, group_id_aligned, mask_aligned
+            y_hat, y_label, group_ids, mask=None, fusion_type="mean"
         )
 
         return {
