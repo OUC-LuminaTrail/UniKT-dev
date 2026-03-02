@@ -7,7 +7,7 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    restrains_sequence_length,
+    exclude_short_sequences,
 )
 
 logger = get_logger(__name__)
@@ -226,10 +226,8 @@ class Assistments2017Data(DataSource):
         data = data.filter(pl.col("skill").is_not_null())
         data = data.filter(pl.col("label").is_in([0, 1]))
 
-        # Restrict sequence length
-        data = restrains_sequence_length(
-            data, self.args.min_seq_len, self.args.max_seq_len
-        )
+        # Exclude sequences that are too short
+        data = exclude_short_sequences(data, self.args.min_seq_len)
 
         self.cleaned_raw_data = data
 

@@ -37,12 +37,10 @@ class GIKTModelData(QuestionModelData):
         """
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
-        max_seq_len = self.data_src.get_metadata("max_seq_len")
-        min_seq_len = self.data_src.get_metadata("min_seq_len")
 
         # 构建用户答题序列
         user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            max_seq_len, min_seq_len
+            args.max_seq_len
         )
 
         # 构建异构图

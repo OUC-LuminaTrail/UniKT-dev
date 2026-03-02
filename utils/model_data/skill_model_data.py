@@ -14,13 +14,12 @@ class SkillModelData(BaseModelData):
         super().__init__(data_src)
         self.logger = get_logger(__name__)
 
-    def build_sequence_data(self, max_seq_len: int, min_seq_len: int):
+    def build_sequence_data(self, max_seq_len: int):
         r"""
         构建用户答题序列，将问题ID映射到技能ID，并展开多知识点
 
         参数:
             max_seq_len: 最大序列长度
-            min_seq_len: 最小序列长度
 
         返回:
             user_sequence: 用户技能ID序列，shape为(num_users, max_seq_len)

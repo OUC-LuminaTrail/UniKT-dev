@@ -128,7 +128,6 @@ class DataSource(ABC):
 
         # Save metadata
         metadata = {
-            "max_seq_len": self.args.max_seq_len,
             "min_seq_len": self.args.min_seq_len,
             "random_seed": self.seed,
             "question_data_md5": self.compute_md5(question_data_path),
@@ -920,13 +919,12 @@ class DataSource(ABC):
         return strata_distribution
 
 
-def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
-    """Filter sequences to be within min_seq_len and max_seq_len bounds.
+def exclude_short_sequences(data, min_seq_len: int):
+    """Filter out users with sequence length less than min_seq_len.
 
     Args:
         data: Polars DataFrame or LazyFrame.
         min_seq_len: Minimum sequence length.
-        max_seq_len: Maximum sequence length (0 or None means no limit).
 
     Returns:
         DataFrame or LazyFrame of same type as input.
@@ -945,27 +943,10 @@ def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
         )
         data = data.filter(pl.col("user").is_in(valid_users))
 
-    if max_seq_len is not None and max_seq_len > 0:
-        data = _truncate_long_sequences(data, max_seq_len)
-
-    return data
-
-
-def _truncate_long_sequences(data, max_seq_len: int):
-    """Truncate sequences longer than max_seq_len to last max_seq_len records."""
-
-    data = data.sort(["user", "timestamp"])
-    data = data.with_columns(
-        pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
-    )
-    data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
-    data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
-    data = data.drop(["row_num", "total"])
-
     return data
 
 
 __all__ = [
     "DataSource",
-    "restrains_sequence_length",
+    "exclude_short_sequences",
 ]

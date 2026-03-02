@@ -26,11 +26,9 @@ class HGIKTSimpleHypergraphData(HGIKTModelData):
         All other components remain the same.
         """
         fold_idx = args.fold if args.fold >= 0 else None
-        max_seq_len = self.data_src.get_metadata("max_seq_len")
-        min_seq_len = self.data_src.get_metadata("min_seq_len")
 
         user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            max_seq_len, min_seq_len
+            args.max_seq_len
         )
 
         import torch

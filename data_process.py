@@ -96,7 +96,8 @@ def cmd_download(args):
 def cmd_process(args):
     """Handle `process` subcommand."""
     dp = get_data_source(args.dataset, args)
-    dp.clear_data()
+    dp.clean_raw_data()
+    dp.transform_data()
 
     if args.sample_users is not None and args.sample_users > 0:
         dp.sample_users(

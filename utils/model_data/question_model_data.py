@@ -65,7 +65,19 @@ class QuestionModelData(BaseModelData):
 
         return hypergraphs
 
-    def build_sequence_data(self, max_seq_len: int, min_seq_len: int):
+    def build_sequence_data(self, max_seq_len: int):
+        """
+        构建用户答题序列，过滤长度大于 max_seq_len 的序列
+
+        参数:
+            max_seq_len: 最大序列长度
+
+        说明：
+            - 构建用户答题序列，shape为(num_users, max_seq_len)
+            - 构建用户答题响应序列，shape为(num_users, max_seq_len)
+            - 构建用户答题掩码序列，shape为(num_users, max_seq_len)
+            - 构建用户ID序列，shape为(num_users, max_seq_len)
+        """
         import numpy as np
 
         self.logger.info("Building response sequences...")
@@ -73,6 +85,7 @@ class QuestionModelData(BaseModelData):
         data = self.data_src.get_sequence_data().copy()
         num_users = self.data_src.get_metadata("num_users")
 
+        # 过滤长度大于 max_seq_len 的答题序列
         data["seq_pos"] = data.groupby("user").cumcount()
         data_filtered = data[data["seq_pos"] < max_seq_len]
 
