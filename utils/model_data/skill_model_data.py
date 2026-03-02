@@ -96,8 +96,7 @@ class SkillModelData(BaseModelData):
           2. 对每个"题目交互"按其关联技能展开为多个目标样本；同题样本共享 group_id。
           3. 滑动窗口构建：生成固定长度为 max_seq_len 的窗口序列，每个窗口包含
              max_seq_len 个交互。对于展开后的多技能，一个窗口可能超过 max_seq_len 个位置。
-          4. 第一个窗口（Win-0）：所有位置都预测（mask=1）
-          5. 后续窗口（Win-1, Win-2, ...）：只预测最后一个位置（mask=1），其他位置为0
+          4. 所有窗口都只预测最后一个位置（mask=1），用于 late_mean 聚合评估
 
         参数:
             max_seq_len: 最大序列长度
@@ -110,6 +109,7 @@ class SkillModelData(BaseModelData):
             late_group_id: 逐时间步分组ID，shape=(num_samples, max_seq_len)
         """
         import numpy as np
+        from tqdm import tqdm
 
         data = self.data_src.get_sequence_data().copy()
         question_data = self.data_src.get_question_data()
@@ -138,15 +138,22 @@ class SkillModelData(BaseModelData):
         # 同一用户的交互展开记录
         global_group_id = 0
 
-        for user, user_df in data.groupby("user", sort=False):
+        total_users = int(data["user"].nunique())
+        for user, user_df in tqdm(
+            data.groupby("user", sort=False), total=total_users, desc="Building window_late per user"
+        ):
             # 获取用户的题目和标签序列
             questions = user_df["question"].to_numpy()
             labels = user_df["label"].to_numpy(dtype=int)
             n_interactions = len(questions)
 
-            # 短序列（n_interactions <= max_seq_len）：只生成一个窗口（Win-0），所有位置都预测
-            # 长序列（n_interactions > max_seq_len）：生成滑动窗口，第一个窗口所有位置预测，后续只预测末位
-            num_windows = 1 if n_interactions <= max_seq_len else n_interactions - max_seq_len + 1
+            # 跳过空序列
+            if n_interactions == 0:
+                continue
+
+            # 短序列（n_interactions < max_seq_len）：只生成一个窗口，只预测最后一个位置
+            # 长序列（n_interactions >= max_seq_len）：生成滑动窗口，每个窗口都只预测最后一个位置
+            num_windows = 1 if n_interactions < max_seq_len else n_interactions - max_seq_len + 1
 
             # 将题目ID映射到技能ID列表，构建交互对应的技能列表
             inter_skills = [
@@ -165,10 +172,6 @@ class SkillModelData(BaseModelData):
                 dtype=np.int64,
             )
             global_group_id += n_interactions
-
-            # 滑动窗口：每个窗口包含 max_seq_len 个交互
-            # 从位置 0 到 n_interactions - max_seq_len
-            num_windows = n_interactions - max_seq_len + 1
 
             # 构造展开后的全历史序列（用于快速提取窗口）
             flat_skills = np.concatenate(inter_skills)
@@ -191,11 +194,11 @@ class SkillModelData(BaseModelData):
             for window_idx in range(num_windows):
                 # 确定窗口在交互序列中的起止位置
                 window_start_inter = window_idx
-                # 短序列：窗口长度为 n_interactions
-                # 长序列：窗口长度为 max_seq_len
+                # 短序列（n_interactions < max_seq_len）：窗口长度为 n_interactions
+                # 长序列（n_interactions >= max_seq_len）：窗口长度为 max_seq_len
                 window_end_inter = (
                     n_interactions
-                    if n_interactions <= max_seq_len
+                    if n_interactions < max_seq_len
                     else window_idx + max_seq_len
                 )
 
@@ -235,13 +238,8 @@ class SkillModelData(BaseModelData):
                 uid[0, :window_len] = window_users
                 gid[0, :window_len] = window_group_ids
 
-                # 设置 mask：
-                # - 第一个窗口（window_idx == 0）：所有位置都预测
-                # - 后续窗口：只预测最后一个位置
-                if window_idx == 0:
-                    msk[0, :window_len] = 1
-                else:
-                    msk[0, window_len - 1] = 1
+                # 设置 mask：所有窗口都只预测最后一个位置
+                msk[0, window_len - 1] = 1
 
                 win_sequences.append(seq)
                 win_responses.append(rsp)
