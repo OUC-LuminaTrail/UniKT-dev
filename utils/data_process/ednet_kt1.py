@@ -176,17 +176,16 @@ class EdNetKT1Data(DataSource):
         )
 
     @override
-    def clear_data(self):
+    def transform_data(self):
         """Process and clean data."""
         logger.info("Processing EdNet KT1 data...")
 
-        # Clean raw sequence data
-        cleaned_data = self._clean_raw_data()
-        logger.debug(f"Cleaned data shape: {cleaned_data.shape}")
+        if self.cleaned_raw_data is None:
+            raise ValueError("clean_raw_data must be called before transform_data")
 
         # Build question ID mapping
         question_map_df = (
-            cleaned_data.select("question")
+            self.cleaned_raw_data.select("question")
             .unique()
             .sort("question")
             .with_row_index("question_id")
@@ -204,7 +203,7 @@ class EdNetKT1Data(DataSource):
 
         # Apply question mapping
         mapped_data = (
-            cleaned_data.join(question_map_df, on="question", how="left")
+            self.cleaned_raw_data.join(question_map_df, on="question", how="left")
             .with_columns(pl.col("question_id").cast(pl.Int32))
             .drop("question")
             .rename({"question_id": "question"})
@@ -212,7 +211,7 @@ class EdNetKT1Data(DataSource):
 
         # Build question_data
         # Filter to only include questions that exist in cleaned_data
-        valid_questions = set(cleaned_data["question"].unique().to_list())
+        valid_questions = set(self.cleaned_raw_data["question"].unique().to_list())
 
         question_meta_raw = (
             self.question_data_raw.rename(
@@ -299,7 +298,7 @@ class EdNetKT1Data(DataSource):
         self.question_data = question_data
         self.sequence_data = sequence_data
 
-    def _clean_raw_data(self) -> pl.DataFrame:
+    def clean_raw_data(self):
         """Clean raw sequence data."""
         self.load_src_data()
 
@@ -324,9 +323,11 @@ class EdNetKT1Data(DataSource):
         )
 
         # Restrict sequence length
-        return restrains_sequence_length(
+        data = restrains_sequence_length(
             sequence_data, self.args.min_seq_len, self.args.max_seq_len
         )
+
+        self.cleaned_raw_data = data
 
 
 __all__ = ["EdNetKT1Data"]

@@ -37,7 +37,7 @@ class DataSource(ABC):
         self.data_folder = os.path.join(self.data_base_path, self.dataset)
         self.metadata_path = os.path.join(self.data_folder, "metadata.json")
         self.raw_data = None
-        self.cleared_data = None
+        self.cleaned_raw_data = None  # cleaned raw data
         self.sequence_data = None
         self.question_data = None
         self.data_url = data_url
@@ -505,9 +505,14 @@ class DataSource(ABC):
         )
 
     @abstractmethod
-    def clear_data(self):
-        """Clean and preprocess raw data. Must be implemented by subclasses."""
-        raise NotImplementedError("Subclasses should implement clear_data method")
+    def transform_data(self):
+        """transform cleaned data into standard format. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses should implement transform_data method")
+
+    @abstractmethod
+    def clean_raw_data(self) -> pl.DataFrame:
+        """Clean raw data. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses should implement clean_raw_data method")
 
     def compute_md5(self, file_path: str) -> str:
         """Compute MD5 checksum of a file."""
