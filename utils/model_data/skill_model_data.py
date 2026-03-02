@@ -143,13 +143,10 @@ class SkillModelData(BaseModelData):
             questions = user_df["question"].to_numpy()
             labels = user_df["label"].to_numpy(dtype=int)
             n_interactions = len(questions)
-            # 如果用户交互数不足以构建至少一个完整窗口则跳过
-            if n_interactions < max_seq_len:
-                global_group_id += n_interactions
-                self.logger.warning(
-                    f"User {user} has only {n_interactions} interactions, less than max_seq_len={max_seq_len}. Skipping user for window_late evaluation."
-                )
-                continue
+
+            # 短序列（n_interactions <= max_seq_len）：只生成一个窗口（Win-0），所有位置都预测
+            # 长序列（n_interactions > max_seq_len）：生成滑动窗口，第一个窗口所有位置预测，后续只预测末位
+            num_windows = 1 if n_interactions <= max_seq_len else n_interactions - max_seq_len + 1
 
             # 将题目ID映射到技能ID列表，构建交互对应的技能列表
             inter_skills = [
@@ -194,7 +191,13 @@ class SkillModelData(BaseModelData):
             for window_idx in range(num_windows):
                 # 确定窗口在交互序列中的起止位置
                 window_start_inter = window_idx
-                window_end_inter = window_idx + max_seq_len
+                # 短序列：窗口长度为 n_interactions
+                # 长序列：窗口长度为 max_seq_len
+                window_end_inter = (
+                    n_interactions
+                    if n_interactions <= max_seq_len
+                    else window_idx + max_seq_len
+                )
 
                 # 确定窗口在技能展开序列中的起止位置
                 window_start_skill = (
