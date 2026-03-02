@@ -94,12 +94,12 @@ class SkillModelData(BaseModelData):
           处理流程：
           1. 仅使用测试集用户交互（fold == -1）。
           2. 对每个"题目交互"按其关联技能展开为多个目标样本；同题样本共享 group_id。
-          3. 滑动窗口构建：生成固定长度为 max_seq_len 的窗口序列，每个窗口包含
-             max_seq_len 个交互。对于展开后的多技能，一个窗口可能超过 max_seq_len 个位置。
-          4. 所有窗口都只预测最后一个位置（mask=1），用于 late_mean 聚合评估
+          3. 滑动窗口构建：在展开后的技能序列上生成滑动窗口，每个窗口包含
+             max_seq_len 个技能位置。窗口对应的交互数量可能小于 max_seq_len（多技能展开）。
+          4. 所有窗口都预测最后一个交互的所有技能位置，通过 group_id 聚合。
 
         参数:
-            max_seq_len: 最大序列长度
+            max_seq_len: 最大序列长度（技能位置数量）
 
         返回:
             user_sequence: 评估序列，shape=(num_samples, max_seq_len)
@@ -119,7 +119,6 @@ class SkillModelData(BaseModelData):
                 "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
             )
 
-        # fold == -1 代表测试集用户
         data = data[data["fold"] == -1].copy()
         if data.empty:
             raise ValueError("No test-set interactions (fold == -1) found")
@@ -135,37 +134,30 @@ class SkillModelData(BaseModelData):
         win_users = []
         win_group_ids = []
 
-        # 同一用户的交互展开记录
         global_group_id = 0
 
         total_users = int(data["user"].nunique())
         for user, user_df in tqdm(
-            data.groupby("user", sort=False), total=total_users, desc="Building window_late per user"
+            data.groupby("user", sort=False),
+            total=total_users,
+            desc="Building window_late per user",
         ):
-            # 获取用户的题目和标签序列
             questions = user_df["question"].to_numpy()
             labels = user_df["label"].to_numpy(dtype=int)
             n_interactions = len(questions)
 
-            # 跳过空序列
             if n_interactions == 0:
                 continue
 
-            # 短序列（n_interactions < max_seq_len）：只生成一个窗口，只预测最后一个位置
-            # 长序列（n_interactions >= max_seq_len）：生成滑动窗口，每个窗口都只预测最后一个位置
-            num_windows = 1 if n_interactions < max_seq_len else n_interactions - max_seq_len + 1
-
-            # 将题目ID映射到技能ID列表，构建交互对应的技能列表
             inter_skills = [
                 np.asarray(q_skill_map[question], dtype=int) for question in questions
             ]
-            # 计算每个交互对应的技能数和前缀和
             skill_counts = np.asarray(
                 [skills.size for skills in inter_skills], dtype=int
             )
             prefix_counts = np.cumsum(skill_counts)
+            n_interactions = len(skill_counts)
 
-            # 每个题目交互都拥有唯一 group_id；同题多技能共享 group_id
             interaction_group_ids = np.arange(
                 global_group_id,
                 global_group_id + n_interactions,
@@ -173,7 +165,6 @@ class SkillModelData(BaseModelData):
             )
             global_group_id += n_interactions
 
-            # 构造展开后的全历史序列（用于快速提取窗口）
             flat_skills = np.concatenate(inter_skills)
             flat_labels = np.concatenate(
                 [
@@ -191,24 +182,16 @@ class SkillModelData(BaseModelData):
                 ]
             )
 
-            for window_idx in range(num_windows):
-                # 确定窗口在交互序列中的起止位置
-                window_start_inter = window_idx
-                # 短序列（n_interactions < max_seq_len）：窗口长度为 n_interactions
-                # 长序列（n_interactions >= max_seq_len）：窗口长度为 max_seq_len
-                window_end_inter = (
-                    n_interactions
-                    if n_interactions < max_seq_len
-                    else window_idx + max_seq_len
-                )
+            n_skills = len(flat_skills)
+            num_windows = max(1, n_skills - max_seq_len + 1)
 
-                # 确定窗口在技能展开序列中的起止位置
-                window_start_skill = (
-                    0
-                    if window_start_inter == 0
-                    else int(prefix_counts[window_start_inter - 1])
+            for window_idx in range(num_windows):
+                window_start_skill = window_idx
+                window_end_skill = min(window_idx + max_seq_len, n_skills)
+
+                window_end_inter = np.searchsorted(
+                    prefix_counts, window_end_skill, side="right"
                 )
-                window_end_skill = int(prefix_counts[window_end_inter - 1])
 
                 window_skills = flat_skills[window_start_skill:window_end_skill]
                 window_labels = flat_labels[window_start_skill:window_end_skill]
@@ -217,29 +200,40 @@ class SkillModelData(BaseModelData):
 
                 window_len = len(window_skills)
 
-                # 如果窗口展开后的技能数超过 max_seq_len，截取最近的 max_seq_len 个
-                if window_len > max_seq_len:
-                    window_skills = window_skills[-max_seq_len:]
-                    window_labels = window_labels[-max_seq_len:]
-                    window_users = window_users[-max_seq_len:]
-                    window_group_ids = window_group_ids[-max_seq_len:]
-                    window_len = max_seq_len
-
-                # 创建一个样本
                 seq = np.zeros((1, max_seq_len), dtype=int)
                 rsp = np.zeros((1, max_seq_len), dtype=int)
                 msk = np.zeros((1, max_seq_len), dtype=int)
                 uid = np.zeros((1, max_seq_len), dtype=int)
                 gid = np.full((1, max_seq_len), -1, dtype=np.int64)
 
-                # 填充窗口数据
                 seq[0, :window_len] = window_skills
                 rsp[0, :window_len] = window_labels
                 uid[0, :window_len] = window_users
                 gid[0, :window_len] = window_group_ids
 
-                # 设置 mask：所有窗口都只预测最后一个位置
-                msk[0, window_len - 1] = 1
+                last_inter_idx = window_end_inter - 1
+
+                # 边界条件处理：当 window_end_skill 落在某个交互的技能范围内时，需要调整 last_inter_idx
+                if last_inter_idx + 1 < n_interactions:
+                    next_inter_start = prefix_counts[last_inter_idx]
+                    if next_inter_start < window_end_skill:
+                        last_inter_idx += 1
+
+                last_inter_skill_count = skill_counts[last_inter_idx]
+
+                if last_inter_idx == 0:
+                    last_inter_start_pos = 0
+                else:
+                    last_inter_start_in_flat = prefix_counts[last_inter_idx - 1]
+                    last_inter_start_pos = last_inter_start_in_flat - window_start_skill
+
+                last_inter_end_in_flat = prefix_counts[last_inter_idx] - 1
+                last_inter_end_pos = last_inter_end_in_flat - window_start_skill
+
+                if last_inter_skill_count == 1:
+                    msk[0, last_inter_end_pos] = 1
+                else:
+                    msk[0, last_inter_start_pos : last_inter_end_pos + 1] = 1
 
                 win_sequences.append(seq)
                 win_responses.append(rsp)

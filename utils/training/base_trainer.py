@@ -534,26 +534,27 @@ class BaseTrainer(ABC):
         返回:
             包含聚合后的 y_hat, y_label, y_predict 的字典
         """
-        # 提取有效位置的数据
         valid_group_ids = torch.masked_select(group_id, mask).detach()
-        scores = y_hat.detach().view(-1)
-        labels = y_label.detach().view(-1)
+        scores = y_hat.detach()
+        labels = y_label.detach()
 
-        # 按 group_id 聚合
         unique_groups, inverse = torch.unique(valid_group_ids, return_inverse=True)
         group_count = torch.bincount(inverse)
         group_score_sum = torch.bincount(inverse, weights=scores)
-        group_label_sum = torch.bincount(inverse, weights=labels)
 
-        # 计算均值
         denominator = torch.maximum(
             group_count.float(), torch.tensor(1.0, device=group_count.device)
         )
         group_score_mean = group_score_sum / denominator
-        group_label_mean = group_label_sum / denominator
 
-        # 生成预测结果
-        group_labels = group_label_mean.detach()
+        # 对于标签，取第一个（同题多技能的标签相同，不计算均值）
+        group_label_first = torch.zeros_like(unique_groups, dtype=torch.float)
+        for i, group in enumerate(unique_groups):
+            group_mask = valid_group_ids == group
+            first_idx = torch.where(group_mask)[0][0]
+            group_label_first[i] = labels[first_idx]
+
+        group_labels = group_label_first.detach()
         group_preds = (group_score_mean >= threshold).detach().float()
 
         return {

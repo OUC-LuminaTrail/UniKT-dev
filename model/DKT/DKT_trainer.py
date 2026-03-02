@@ -200,14 +200,19 @@ class DKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask)
         late_group_id = self._move_tensor_to_device(late_group_id)
 
-        # 模型前向传播，获取完整的预测结果
         y_hat_full = self.model(sequence, response, mask)
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=False
-        )
 
-        # 按 group_id 聚合预测结果和标签，用于 windowlate 指标计算
-        results = self._aggregate_by_group(y_hat, y_label, late_group_id, mask)
+        # DKT 模型在位置 t 的输出预测位置 t+1 的标签
+        y_hat_aligned = y_hat_full[:, :-1]
+        response_aligned = response.float()[:, 1:]
+        mask_aligned = mask[:, 1:]
+        group_id_aligned = late_group_id[:, 1:]
+
+        y_hat = torch.masked_select(y_hat_aligned, mask_aligned)
+        y_label = torch.masked_select(response_aligned, mask_aligned)
+        results = self._aggregate_by_group(
+            y_hat, y_label, group_id_aligned, mask_aligned
+        )
 
         return {
             "y_hat": results["y_hat"],
