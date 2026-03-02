@@ -513,6 +513,55 @@ class BaseTrainer(ABC):
         """
         return torch.ge(y_hat, torch.tensor(threshold).to(self.device_)).to(torch.int)
 
+    def _aggregate_by_group(
+        self,
+        y_hat: torch.Tensor,
+        y_label: torch.Tensor,
+        group_id: torch.Tensor,
+        mask: torch.Tensor,
+        threshold: float = 0.5,
+    ) -> dict[str, torch.Tensor]:
+        """
+        根据分组 ID 聚合预测和标签。
+
+        参数:
+            y_hat: 预测值 [B, S] 或 [B, S, K]
+            y_label: 标签 [B, S]
+            group_id: 分组 ID [B, S]
+            mask: 有效位置掩码 [B, S]
+            threshold: 二分类预测阈值 (默认 0.5)
+
+        返回:
+            包含聚合后的 y_hat, y_label, y_predict 的字典
+        """
+        # 提取有效位置的数据
+        valid_group_ids = torch.masked_select(group_id, mask).detach()
+        scores = y_hat.detach().view(-1)
+        labels = y_label.detach().view(-1)
+
+        # 按 group_id 聚合
+        unique_groups, inverse = torch.unique(valid_group_ids, return_inverse=True)
+        group_count = torch.bincount(inverse)
+        group_score_sum = torch.bincount(inverse, weights=scores)
+        group_label_sum = torch.bincount(inverse, weights=labels)
+
+        # 计算均值
+        denominator = torch.maximum(
+            group_count.float(), torch.tensor(1.0, device=group_count.device)
+        )
+        group_score_mean = group_score_sum / denominator
+        group_label_mean = group_label_sum / denominator
+
+        # 生成预测结果
+        group_labels = group_label_mean.detach()
+        group_preds = (group_score_mean >= threshold).detach().float()
+
+        return {
+            "y_hat": group_score_mean,
+            "y_label": group_labels,
+            "y_predict": group_preds,
+        }
+
     def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
         """设置并保存超参数。
 
