@@ -929,10 +929,26 @@ class BaseTrainer(ABC):
         self.metrics_accumulator.reset("test")
         self.model.eval()
 
+        # 创建测试阶段进度条
+        test_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None),
+            TaskProgressColumn(),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            expand=True,
+        )
+
         total_loss = 0.0
-        for batch_data in self.test_data:
-            loss = self._run_test_batch(batch_data)
-            total_loss += loss
+        with test_progress:
+            test_task = test_progress.add_task(
+                "[bold magenta]Testing", total=len(self.test_data)
+            )
+            for batch_data in self.test_data:
+                loss = self._run_test_batch(batch_data)
+                total_loss += loss
+                test_progress.advance(test_task)
 
         metrics = self.metrics_accumulator.compute("test")
         self.metrics_accumulator.log("test", metrics, epoch=self.epochs or 0)
