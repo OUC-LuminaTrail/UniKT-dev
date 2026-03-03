@@ -235,7 +235,12 @@ class GKT(nn.Module):
         concept_idx_mat = (
             self.num_c * torch.ones((batch_size, self.num_c), device=device).long()
         )
-        concept_idx_mat[qt_mask, :] = torch.arange(self.num_c, device=device)
+        # 使用 expand 确保形状匹配，避免 CUDA 上的广播问题
+        concept_idx_mat[qt_mask, :] = (
+            torch.arange(self.num_c, device=device)
+            .unsqueeze(0)
+            .expand(qt_mask.sum().item(), -1)
+        )
         concept_embedding = self.emb_c(concept_idx_mat)  # [batch_size, num_c, emb_size]
 
         # 将当前交互的嵌入放入对应位置
@@ -380,14 +385,17 @@ class GKT(nn.Module):
     ) -> torch.Tensor:
         """前向传播
 
+        预测语义：y[:, t] 预测 response[:, t+1]
+        即在时间步 t 处理完 (sequence[t], response[t]) 后，预测下一个位置 response[t+1]
+
         Args:
             sequence: 概念ID序列，形状为 [batch_size, sequence_length]
             response: 响应序列，形状为 [batch_size, sequence_length]
             mask: 有效位置掩码，形状为 [batch_size, sequence_length]
 
         Returns:
-            预测结果，形状为 [batch_size, sequence_length]
-            在时刻 t 的输出预测的是 t+1 的标签
+            预测结果，形状为 [batch_size, sequence_length - 1]
+            y[:, t] 预测的是 response[:, t+1]
         """
         device = sequence.device
         batch_size, seq_len = sequence.shape
@@ -400,7 +408,7 @@ class GKT(nn.Module):
         questions = sequence
 
         pred_list = []
-        for i in range(seq_len):
+        for i in range(seq_len - 1):  # 只需要处理前 seq_len-1 个位置
             xt = features[:, i]  # [batch_size]
             qt = questions[:, i]  # [batch_size]
             qt_mask = torch.ne(qt, -1)  # [batch_size], qt != -1
@@ -416,15 +424,11 @@ class GKT(nn.Module):
             # 预测步骤
             yt = self._predict_step(h_next, qt)  # [batch_size, num_c]
 
-            # 获取下一时间步的预测
-            if i < seq_len - 1:
-                pred = self._get_next_pred(yt, questions[:, i + 1])
-                pred_list.append(pred)
+            # 获取下一时间步的预测（对 response[:, i+1] 的预测）
+            pred = self._get_next_pred(yt, questions[:, i + 1])
+            pred_list.append(pred)
 
         # 堆叠预测结果
         pred_res = torch.stack(pred_list, dim=1)  # [batch_size, seq_len - 1]
-
-        # 在开头填充一个 0，使输出形状为 [B, S]
-        pred_res = torch.cat([torch.zeros_like(pred_res[:, :1]), pred_res], dim=1)
 
         return pred_res
