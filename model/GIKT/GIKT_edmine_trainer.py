@@ -98,9 +98,14 @@ class GIKTEdmineTrainer(BaseTrainer):
         from model.GIKT import GIKTEdmineModelData
 
         model_data = GIKTEdmineModelData(data_src)
-        train_dataset, val_dataset, test_dataset, question_neighbors, concept_neighbors, q_table = (
-            model_data.prepare_data(args)
-        )
+        (
+            train_dataset,
+            val_dataset,
+            test_dataset,
+            question_neighbors,
+            concept_neighbors,
+            q_table,
+        ) = model_data.prepare_data(args)
 
         # 2. 初始化模型
         from model.GIKT.GIKT_edmine_model import GIKTEdmine

@@ -119,9 +119,9 @@ class SGKTModelData(QuestionModelData):
             num_skills: Number of skills
             num_questions: Number of questions
         """
-        # 1. Build sequence data (reuse base class method)
+        # 1. Build sequence data
         user_sequence, user_response, user_mask, user_id_sequence = (
-            self.build_sequence_data(args.max_seq_len)
+            self.build_sequence_data()
         )
 
         # 2. Build question-skill relationship matrix

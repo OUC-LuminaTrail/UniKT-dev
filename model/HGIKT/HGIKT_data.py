@@ -35,9 +35,7 @@ class HGIKTModelData(QuestionModelData):
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            args.max_seq_len
-        )
+        user_sequence, user_response, user_mask, _ = self.build_sequence_data()
 
         # 构建问题-技能关联矩阵，并转换为torch张量
         question_skill_matrix = torch.from_numpy(

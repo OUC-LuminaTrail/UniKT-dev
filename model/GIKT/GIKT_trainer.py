@@ -125,9 +125,13 @@ class GIKTTrainer(BaseTrainer):
         from model.GIKT import GIKTModelData
 
         model_data = GIKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset, self.graph, self.question_skill_matrix = (
-            model_data.prepare_data(args)
-        )
+        (
+            train_dataset,
+            val_dataset,
+            test_dataset,
+            self.graph,
+            self.question_skill_matrix,
+        ) = model_data.prepare_data(args)
 
         # 4. 创建优化器和损失函数
         loss_fn = torch.nn.BCEWithLogitsLoss()

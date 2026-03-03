@@ -110,6 +110,8 @@ def cmd_process(args):
     if args.kfold and args.kfold > 1:
         dp.add_kfold_labels(n_splits=args.kfold)
 
+    dp.build_split_sequence_data()
+
     dp.save_data()
 
 
