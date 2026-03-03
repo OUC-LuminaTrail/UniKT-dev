@@ -21,50 +21,6 @@ class QuestionModelData(BaseModelData):
         """
         raise NotImplementedError("Subclasses should implement prepare_data method")
 
-    def build_multiple_hypergraphs(
-        self,
-        edge_types: list[tuple[str, str, str]],
-        vertex_type: str = None,
-    ):
-        """
-        批量构建多个超图
-
-        参数:
-            edge_types: 边类型列表，每个元素为三元组 (顶点类型, 边关系名, 超边类型)
-                       例如: [
-                           ('question', 'has', 'skill'),
-                           ('question', 'belongs_to', 'template'),
-                           ('question', 'in', 'assignment')
-                       ]
-            vertex_type: 顶点类型（可选），默认使用每个edge_type的第一个元素
-
-        返回:
-            dict: 字典，键为超边类型名称，值为对应的超图对象
-                 例如: {
-                     'skill': skill_hypergraph,
-                     'template': template_hypergraph,
-                     'assignment': assignment_hypergraph
-                 }
-
-        示例:
-            # 批量构建多个超图
-            hypergraphs = model_data.build_multiple_hypergraphs([
-                ('question', 'has', 'skill'),
-                ('question', 'belongs_to', 'template'),
-            ])
-
-            skill_hg = hypergraphs['skill']
-            template_hg = hypergraphs['template']
-        """
-        hypergraphs = {}
-
-        for edge_type in edge_types:
-            _, _, hyperedge_type = edge_type
-            hypergraph = self.build_hyper_graph(edge_type, vertex_type=vertex_type)
-            hypergraphs[hyperedge_type] = hypergraph
-
-        return hypergraphs
-
     def build_sequence_data(self, max_seq_len: int):
         """
         构建用户答题序列，过滤长度大于 max_seq_len 的序列
