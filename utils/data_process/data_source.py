@@ -861,13 +861,14 @@ class DataSource(ABC):
         )
 
     def _remap_question_ids(self):
-        """Filter and remap question IDs to consecutive integers."""
+        """Filter and remap question IDs and skill IDs to consecutive integers."""
         self.question_data = self.question_data.join(
             self.sequence_data.select(pl.col("question").unique()),
             on="question",
             how="semi",
         )
 
+        # Remap question IDs
         question_id_map = (
             self.question_data.select(pl.col("question").unique())
             .sort("question")
@@ -883,6 +884,19 @@ class DataSource(ABC):
             self.sequence_data.join(question_id_map, on="question", how="left")
             .drop("question")
             .rename({"new_question_id": "question"})
+        )
+
+        # Remap skill IDs
+        skill_id_map = (
+            self.question_data.select(pl.col("skill").unique())
+            .sort("skill")
+            .with_row_index("new_skill_id")
+            .select([pl.col("skill"), pl.col("new_skill_id").cast(pl.Int32)])
+        )
+        self.question_data = (
+            self.question_data.join(skill_id_map, on="skill", how="left")
+            .drop("skill")
+            .rename({"new_skill_id": "skill"})
         )
 
     def _compute_strata_distribution(
