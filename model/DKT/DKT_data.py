@@ -20,12 +20,27 @@ class DKTDataset(Dataset):
         sequences: 概念ID序列
         responses: 响应序列
         masks: 掩码序列
+        late_group_ids: 题目级分组ID（可选，窗口测试时使用）
+        true_labels: 真实标签序列（可选，窗口测试时使用）
+
+    Returns:
+        训练/验证模式 (无 late_group_ids/true_labels):
+            (sequence, response, mask) 元组
+        窗口测试模式 (有 late_group_ids/true_labels):
+            (sequence, response, mask, late_group_id, true_labels) 元组
     """
 
-    def __init__(self, sequences, responses, masks):
+    def __init__(
+        self, sequences, responses, masks, late_group_ids=None, true_labels=None
+    ):
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
+        self.late_group_ids = late_group_ids
+        self.true_labels = true_labels
+
+        # 判断是否为窗口测试模式
+        self._is_window_mode = late_group_ids is not None and true_labels is not None
 
     def __len__(self) -> int:
         """返回数据集长度
@@ -35,62 +50,17 @@ class DKTDataset(Dataset):
         """
         return len(self.sequences)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """获取单个样本
-
-        Args:
-            idx: 样本索引
-
-        Returns:
-            包含 (sequence, response, mask) 的元组
-            - sequence: 概念ID序列
-            - response: 响应序列
-            - mask: 掩码序列
-        """
+    def __getitem__(self, idx: int):
         sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
         response = torch.tensor(self.responses[idx], dtype=torch.long)
         mask = torch.tensor(self.masks[idx], dtype=torch.bool)
+
+        if self._is_window_mode:
+            late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
+            true_labels = torch.tensor(self.true_labels[idx], dtype=torch.long)
+            return sequence, response, mask, late_group_id, true_labels
 
         return sequence, response, mask
-
-
-class DKTWindowDataset(Dataset):
-    """DKT 窗口测试数据集。
-
-    数据格式说明：
-        - sequence: 技能序列 [历史技能, 目标技能]
-        - response: 模型输入的 response [历史标签, 0]
-        - mask: 预测掩码，只有目标位置为 1
-        - late_group_id: 题目级分组ID
-        - true_labels: 真实标签序列 [历史标签, 目标真实标签]，用于评估
-
-    返回格式：
-        sequence: 技能序列 [batch, max_seq_len]
-        response: 模型输入 response [batch, max_seq_len]，目标位置为 0
-        mask: 预测掩码 [batch, max_seq_len]
-        late_group_id: 题目级分组ID [batch, max_seq_len]
-        true_labels: 真实标签 [batch, max_seq_len]，用于评估
-    """
-
-    def __init__(self, sequences, responses, masks, late_group_ids, true_labels):
-        self.sequences = sequences
-        self.responses = responses
-        self.masks = masks
-        self.late_group_ids = late_group_ids
-        self.true_labels = true_labels
-
-    def __len__(self) -> int:
-        return len(self.sequences)
-
-    def __getitem__(
-        self, idx: int
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
-        response = torch.tensor(self.responses[idx], dtype=torch.long)
-        mask = torch.tensor(self.masks[idx], dtype=torch.bool)
-        late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
-        true_labels = torch.tensor(self.true_labels[idx], dtype=torch.long)
-        return sequence, response, mask, late_group_id, true_labels
 
 
 class DKTModelData(SkillModelData):
@@ -145,11 +115,11 @@ class DKTModelData(SkillModelData):
         # 构建模型数据集
         train_dataset = DKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = DKTDataset(val_data[0], val_data[1], val_data[2])
-        test_dataset = DKTWindowDataset(
+        test_dataset = DKTDataset(
             window_test_data[0],
             window_test_data[1],
             window_test_data[2],
-            window_test_data[4],
+            window_test_data[4],  # late_group_ids
             window_test_data[5],  # true_labels
         )
 
