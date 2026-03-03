@@ -40,6 +40,7 @@ class DataSource(ABC):
         self.cleaned_raw_data = None  # cleaned raw data
         self.sequence_data = None
         self.question_data = None
+        self.split_sequence_data = None
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
@@ -122,16 +123,22 @@ class DataSource(ABC):
         sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_sequence.parquet"
         )
+        split_sequence_path = os.path.join(
+            self.data_folder, f"{self.dataset}_split_sequence.parquet"
+        )
 
         self.question_data.write_parquet(question_data_path)
         self.sequence_data.write_parquet(sequence_data_path)
+        self.split_sequence_data.write_parquet(split_sequence_path)
 
         # Save metadata
         metadata = {
             "min_seq_len": self.args.min_seq_len,
+            "max_seq_len": self.args.max_seq_len,
             "random_seed": self.seed,
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
+            "split_sequence_data_md5": self.compute_md5(split_sequence_path),
             "num_users": self.sequence_data["user"].n_unique(),
             "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
@@ -144,8 +151,10 @@ class DataSource(ABC):
         self.update_metadatas(metadata)
         self.save_metadata()
 
-        logger.info(f"Saved question_data to: {question_data_path}")
-        logger.info(f"Saved sequence_data to: {sequence_data_path}")
+        logger.debug(f"Saved question_data to: {question_data_path}")
+        logger.debug(f"Saved sequence_data to: {sequence_data_path}")
+        logger.debug(f"Saved split sequences to: {split_sequence_path}")
+        logger.info(f"Data saved to {self.data_folder}")
 
     @staticmethod
     def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
@@ -449,11 +458,21 @@ class DataSource(ABC):
         question_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_question.parquet"
         )
+        split_sequence_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_split_sequence.parquet"
+        )
 
-        self._validate_data_files_exist([sequence_data_path, question_data_path])
+        self._validate_data_files_exist(
+            [sequence_data_path, question_data_path, split_sequence_data_path]
+        )
         self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
         self._validate_data_integrity(question_data_path, "question_data_md5")
-        self._load_parquet_files(sequence_data_path, question_data_path)
+        self._validate_data_integrity(
+            split_sequence_data_path, "split_sequence_data_md5"
+        )
+        self._load_parquet_files(
+            sequence_data_path, question_data_path, split_sequence_data_path
+        )
 
     def _validate_data_files_exist(self, file_paths: list[str]):
         """Validate that all required data files exist."""
@@ -480,7 +499,13 @@ class DataSource(ABC):
         expected_md5 = self.metadata[md5_key]
 
         if actual_md5 != expected_md5:
-            data_type = "sequence" if "sequence" in md5_key else "question"
+            data_type = (
+                "sequence"
+                if "sequence" in md5_key
+                else "question"
+                if "question" in md5_key
+                else "split_sequence"
+            )
             raise ValueError(
                 f"{data_type.capitalize()} data file integrity check failed (MD5 mismatch).\n"
                 f"Expected MD5: {expected_md5}\n"
@@ -489,18 +514,26 @@ class DataSource(ABC):
                 f"   python data_process.py process -d {self.dataset}"
             )
 
-    def _load_parquet_files(self, sequence_path: str, question_path: str):
+    def _load_parquet_files(
+        self, sequence_path: str, question_path: str, split_sequence_path: str
+    ):
         """Load parquet files with error handling."""
         logger.info(f"Loading sequence data: {sequence_path}")
-        self.sequence_data = pl.read_parquet(sequence_path)
-        logger.info(
-            f"Sequence data loaded successfully: {len(self.sequence_data)} rows"
+        self.sequence_data = pd.read_parquet(sequence_path)
+        logger.debug(
+            f"Sequence data shape: {self.sequence_data.shape}"
+        )
+
+        logger.info(f"Loading split sequence data: {split_sequence_path}")
+        self.split_sequence_data = pd.read_parquet(split_sequence_path)
+        logger.debug(
+            f"Split sequence data shape: {self.split_sequence_data.shape}"
         )
 
         logger.info(f"Loading question data: {question_path}")
-        self.question_data = pl.read_parquet(question_path)
-        logger.info(
-            f"Question data loaded successfully: {len(self.question_data)} rows"
+        self.question_data = pd.read_parquet(question_path)
+        logger.debug(
+            f"Question data shape: {self.question_data.shape}"
         )
 
     @abstractmethod
@@ -532,13 +565,19 @@ class DataSource(ABC):
         """Get user sequence data."""
         if self.sequence_data is None:
             self.load_processed_data()
-        return self.sequence_data.to_pandas()
+        return self.sequence_data
 
     def get_question_data(self) -> pd.DataFrame:
         """Get question metadata."""
         if self.question_data is None:
             self.load_processed_data()
-        return self.question_data.to_pandas()
+        return self.question_data
+
+    def get_split_sequence_data(self) -> pd.DataFrame:
+        """Get split user sequence data."""
+        if self.split_sequence_data is None:
+            self.load_processed_data()
+        return self.split_sequence_data
 
     def update_metadata(self, key: str, value):
         """Update a single metadata entry."""
@@ -575,6 +614,87 @@ class DataSource(ABC):
                 f"Metadata key '{key}' not found in dataset '{self.dataset}'"
             )
         return self.metadata if key is None else self.metadata[key]
+
+    def build_split_sequence_data(self):
+        """构建切分后的序列数据
+
+        参数:
+            max_seq_len: 最大序列长度
+            min_seq_len: 最小序列长度，切分出的子序列长度小于此值将被抛弃
+
+        说明:
+            - 将长度大于 max_seq_len 的用户序列切分成多个子序列
+            - 返回切分后的数据及统计信息
+        """
+        max_seq_len = self.args.max_seq_len
+        min_seq_len = self.args.min_seq_len
+
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+
+        logger.info(
+            f"Building split sequences (max_len={max_seq_len}, min_len={min_seq_len})"
+        )
+
+        # 添加序列位置列，并计算每个用户的序列长度
+        data = self.sequence_data.with_columns(
+            pl.int_range(pl.len()).over("user").alias("seq_pos")
+        ).join(
+            self.sequence_data.group_by("user").agg(pl.len().alias("seq_len")),
+            on="user",
+            how="left",
+        )
+
+        # 计算每条记录所属的切分及其长度
+        data = data.with_columns(
+            [
+                (pl.col("seq_pos") // max_seq_len).alias("split_idx"),
+            ]
+        ).with_columns(
+            pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
+            .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
+            .otherwise(max_seq_len)
+            .alias("split_len"),
+        )
+
+        # 过滤长度不足的切分（只保留有效切分的第一条记录）
+        valid_splits = (
+            data.filter(pl.col("split_len") >= min_seq_len)
+            .select(["user", "split_idx"])
+            .unique()
+        )
+
+        # 为每个有效切分分配新的用户ID
+        valid_splits = valid_splits.with_row_index("new_user_id").sort(
+            "user", "split_idx"
+        )
+
+        # 合并回数据，过滤无效切分的记录
+        data = data.join(valid_splits, on=["user", "split_idx"], how="inner")
+
+        # 更新用户ID和位置
+        data = data.with_columns(
+            [
+                pl.col("new_user_id").cast(pl.Int32).alias("user"),
+                (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
+            ]
+        ).select(
+            [
+                pl.col("user"),
+                pl.col("question"),
+                pl.col("label"),
+                pl.col("relative_pos").alias("seq_pos"),
+            ]
+        )
+
+        # 统计切分信息
+        final_num_users = data["user"].n_unique()
+
+        logger.debug(f"Split into {final_num_users} sub-sequences")
+
+        self.split_sequence_data = data
 
     def add_kfold_labels(self, n_splits: int = 5, test_ratio: float = 0.2):
         """Add K-fold cross-validation labels with test set separation.
@@ -633,7 +753,7 @@ class DataSource(ABC):
         self.update_metadata("test_ratio", test_ratio)
 
         logger.info(
-            f"Added K-fold labels with n_splits={n_splits}, test_ratio={test_ratio}: "
+            f"Added K-fold labels with n_splits={n_splits}, test_ratio={test_ratio}"
         )
 
     def get_user_stats(self):

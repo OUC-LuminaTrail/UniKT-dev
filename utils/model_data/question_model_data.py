@@ -21,41 +21,38 @@ class QuestionModelData(BaseModelData):
         """
         raise NotImplementedError("Subclasses should implement prepare_data method")
 
-    def build_sequence_data(self, max_seq_len: int):
+    def build_sequence_data(self):
         """
-        构建用户答题序列，过滤长度大于 max_seq_len 的序列
+        构建用户答题序列
 
         参数:
             max_seq_len: 最大序列长度
 
         说明：
-            - 构建用户答题序列，shape为(num_users, max_seq_len)
-            - 构建用户答题响应序列，shape为(num_users, max_seq_len)
-            - 构建用户答题掩码序列，shape为(num_users, max_seq_len)
-            - 构建用户ID序列，shape为(num_users, max_seq_len)
+            - 从磁盘加载切分后的序列数据
+            - 构建序列数组
         """
         import numpy as np
 
-        self.logger.info("Building response sequences...")
+        self.logger.info("Building response sequences from split data...")
 
-        data = self.data_src.get_sequence_data().copy()
-        num_users = self.data_src.get_metadata("num_users")
+        # 加载切分后的序列数据
+        data = self.data_src.get_split_sequence_data()
+        max_seq_len = self.data_src.get_metadata("max_seq_len")
+        num_users = data["user"].nunique()
 
-        # 过滤长度大于 max_seq_len 的答题序列
-        data["seq_pos"] = data.groupby("user").cumcount()
-        data_filtered = data[data["seq_pos"] < max_seq_len]
-
+        # 构建序列数组
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_response = np.zeros((num_users, max_seq_len), dtype=int)
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
 
-        user_indices = data_filtered["user"].values
-        seq_positions = data_filtered["seq_pos"].values
+        user_indices = data["user"].values
+        seq_positions = data["seq_pos"].values
 
-        user_sequence[user_indices, seq_positions] = data_filtered["question"].values
+        user_sequence[user_indices, seq_positions] = data["question"].values
         user_id_sequence[user_indices, seq_positions] = user_indices
-        user_response[user_indices, seq_positions] = data_filtered["label"].values
+        user_response[user_indices, seq_positions] = data["label"].values
         user_mask[user_indices, seq_positions] = 1
 
         return user_sequence, user_response, user_mask, user_id_sequence
