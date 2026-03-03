@@ -520,21 +520,15 @@ class DataSource(ABC):
         """Load parquet files with error handling."""
         logger.info(f"Loading sequence data: {sequence_path}")
         self.sequence_data = pd.read_parquet(sequence_path)
-        logger.debug(
-            f"Sequence data shape: {self.sequence_data.shape}"
-        )
+        logger.debug(f"Sequence data shape: {self.sequence_data.shape}")
 
         logger.info(f"Loading split sequence data: {split_sequence_path}")
         self.split_sequence_data = pd.read_parquet(split_sequence_path)
-        logger.debug(
-            f"Split sequence data shape: {self.split_sequence_data.shape}"
-        )
+        logger.debug(f"Split sequence data shape: {self.split_sequence_data.shape}")
 
         logger.info(f"Loading question data: {question_path}")
         self.question_data = pd.read_parquet(question_path)
-        logger.debug(
-            f"Question data shape: {self.question_data.shape}"
-        )
+        logger.debug(f"Question data shape: {self.question_data.shape}")
 
     @abstractmethod
     def transform_data(self):
