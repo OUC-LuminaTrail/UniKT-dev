@@ -141,7 +141,7 @@ class DataSource(ABC):
         if "template" in self.question_data.columns:
             metadata["num_templates"] = self.question_data["template"].n_unique()
 
-        self.add_metadatas(metadata)
+        self.update_metadatas(metadata)
         self.save_metadata()
 
         logger.info(f"Saved question_data to: {question_data_path}")
@@ -369,8 +369,8 @@ class DataSource(ABC):
             logger.info(f"Dataset already exists, skip downloading: {archive_path}")
 
         archive_md5 = self.compute_md5(archive_path)
-        self.add_metadata("raw_archive_md5", archive_md5)
-        self.add_metadata("raw_archive_filename", file_name)
+        self.update_metadata("raw_archive_md5", archive_md5)
+        self.update_metadata("raw_archive_filename", file_name)
 
         extract_target = os.path.join(self.data_folder, "raw")
         os.makedirs(extract_target, exist_ok=True)
@@ -386,7 +386,7 @@ class DataSource(ABC):
                 f"Raw data directory not empty, skip extraction: {extract_target}"
             )
 
-        self.add_metadata("raw_data_path", extract_target)
+        self.update_metadata("raw_data_path", extract_target)
 
     def _should_extract(self, force_download: bool, extract_target: str) -> bool:
         """Determine whether extraction is needed."""
@@ -540,20 +540,20 @@ class DataSource(ABC):
             self.load_processed_data()
         return self.question_data.to_pandas()
 
-    def add_metadata(self, key: str, value):
-        """Add a single metadata entry."""
+    def update_metadata(self, key: str, value):
+        """Update a single metadata entry."""
         self.metadata[key] = value
-        logger.debug(f"Added {key} = {value} to DataSource metadata")
+        logger.debug(f"Updated {key} = {value} in DataSource metadata")
 
-    def add_metadatas(self, meta_dict: dict):
-        """Add multiple metadata entries."""
+    def update_metadatas(self, meta_dict: dict):
+        """Update multiple metadata entries."""
         for key, value in meta_dict.items():
-            self.add_metadata(key, value)
+            self.update_metadata(key, value)
 
     def save_metadata(self):
         """Save metadata to JSON file."""
-        self.add_metadata("dataset", self.dataset)
-        self.add_metadata("data_base_path", self.data_base_path)
+        self.update_metadata("dataset", self.dataset)
+        self.update_metadata("data_base_path", self.data_base_path)
 
         with open(self.metadata_path, "w") as f:
             json.dump(self.metadata, f, indent=4)
@@ -629,8 +629,8 @@ class DataSource(ABC):
         self.sequence_data = self.sequence_data.join(
             user_fold_map, on="user", how="left"
         )
-        self.add_metadata("kfold_n_splits", n_splits)
-        self.add_metadata("test_ratio", test_ratio)
+        self.update_metadata("kfold_n_splits", n_splits)
+        self.update_metadata("test_ratio", test_ratio)
 
         logger.info(
             f"Added K-fold labels with n_splits={n_splits}, test_ratio={test_ratio}: "
@@ -833,12 +833,12 @@ class DataSource(ABC):
             "strata_distribution": strata_distribution,
         }
 
-        self.add_metadata("sampled", True)
-        self.add_metadata("sampling_config", sampling_config)
-        self.add_metadata("sampling_stats", sampling_stats)
-        self.add_metadata("num_users", int(num_users))
-        self.add_metadata("num_questions", int(num_questions))
-        self.add_metadata("num_skills", int(num_skills))
+        self.update_metadata("sampled", True)
+        self.update_metadata("sampling_config", sampling_config)
+        self.update_metadata("sampling_stats", sampling_stats)
+        self.update_metadata("num_users", int(num_users))
+        self.update_metadata("num_questions", int(num_questions))
+        self.update_metadata("num_skills", int(num_skills))
 
         logger.info(
             f"Sampling complete: {len(sampled_users)}/{total_users} users, "
