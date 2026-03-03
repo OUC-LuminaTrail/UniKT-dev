@@ -6,6 +6,8 @@ from .GIKT.GIKT_edmine_model import GIKTEdmine
 from .GIKT.GIKT_edmine_trainer import GIKTEdmineTrainer
 from .GIKT.GIKT_model import GIKT
 from .GIKT.GIKT_trainer import GIKTTrainer
+from .GKT.GKT_model import GKT
+from .GKT.GKT_trainer import GKTTrainer
 
 # Import HGIKT variants to trigger registration
 from .HGIKT import variants  # noqa: F401
@@ -26,6 +28,8 @@ __all__ = [
     "GIKTTrainer",
     "GIKTEdmine",
     "GIKTEdmineTrainer",
+    "GKT",
+    "GKTTrainer",
     "HGIKT",
     "HGIKTTrainer",
     "SGKT",
