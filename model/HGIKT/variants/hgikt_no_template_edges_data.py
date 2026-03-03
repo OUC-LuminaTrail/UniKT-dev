@@ -71,21 +71,23 @@ class HGIKTNoTemplateEdgesData(HGIKTModelData):
             logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, test_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
-            train_data, val_data = self.split_data(
-                user_sequence, user_response, user_mask
+            raise ValueError(
+                "K-fold cross-validation is required for HGIKT_NoTemplateEdges variant."
             )
 
         # Create datasets
         train_dataset = HGIKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = HGIKTDataset(val_data[0], val_data[1], val_data[2])
+        test_dataset = HGIKTDataset(test_data[0], test_data[1], test_data[2])
 
         return {
             "train_dataset": train_dataset,
             "val_dataset": val_dataset,
+            "test_dataset": test_dataset,
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
             "question_skill_matrix": question_skill_matrix,

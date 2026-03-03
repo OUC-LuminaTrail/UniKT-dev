@@ -119,6 +119,7 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
 
         train_dataset = data_dict["train_dataset"]
         val_dataset = data_dict["val_dataset"]
+        test_dataset = data_dict.get("test_dataset")
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
@@ -167,6 +168,7 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
         ).with_data(
             train_data=train_dataset,
             val_data=val_dataset,
+            test_data=test_dataset,
             batch_size=args.batch_size,
         ).with_optimization(
             optimizer=optimizer,

@@ -149,7 +149,7 @@ class SGKTModelData(QuestionModelData):
         # 4. Split data into train/val or k-fold
         if hasattr(args, "fold") and args.fold is not None:
             # K-fold cross validation
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, _ = self.split_kfold_data(
                 user_sequence,
                 user_response,
                 user_mask,

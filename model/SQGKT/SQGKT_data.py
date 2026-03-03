@@ -94,7 +94,7 @@ class SQGKTModelData(QuestionModelData):
                 raise ValueError(
                     f"Fold index {fold_idx} is out of range for {kfold_n_splits} folds."
                 )
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, test_data = self.split_kfold_data(
                 user_id_sequence,
                 user_sequence,
                 user_response,
@@ -102,8 +102,8 @@ class SQGKTModelData(QuestionModelData):
                 fold_idx=fold_idx,
             )
         else:
-            train_data, val_data = self.split_data(
-                user_id_sequence, user_sequence, user_response, user_mask
+            raise ValueError(
+                "Fold index must be specified for k-fold cross-validation."
             )
 
         # 构建模型数据集
@@ -111,10 +111,14 @@ class SQGKTModelData(QuestionModelData):
             train_data[0], train_data[1], train_data[2], train_data[3]
         )
         val_dataset = SQGKTDataset(val_data[0], val_data[1], val_data[2], val_data[3])
+        test_dataset = SQGKTDataset(
+            test_data[0], test_data[1], test_data[2], test_data[3]
+        )
 
         return (
             train_dataset,
             val_dataset,
+            test_dataset,
             qs_table,
             q_neighbors_qs,
             c_neighbors_qs,

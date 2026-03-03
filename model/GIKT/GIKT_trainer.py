@@ -125,7 +125,7 @@ class GIKTTrainer(BaseTrainer):
         from model.GIKT import GIKTModelData
 
         model_data = GIKTModelData(data_src)
-        train_dataset, val_dataset, self.graph, self.question_skill_matrix = (
+        train_dataset, val_dataset, test_dataset, self.graph, self.question_skill_matrix = (
             model_data.prepare_data(args)
         )
 
@@ -165,6 +165,7 @@ class GIKTTrainer(BaseTrainer):
         ).with_data(
             train_data=train_dataset,
             val_data=val_dataset,
+            test_data=test_dataset,
             batch_size=args.batch_size,
         ).with_optimization(
             optimizer=optimizer,

@@ -128,6 +128,7 @@ class SQGKTTrainer(BaseTrainer):
         (
             train_dataset,
             val_dataset,
+            test_dataset,
             qs_table,
             q_neighbors_qs,
             c_neighbors_qs,
@@ -178,6 +179,7 @@ class SQGKTTrainer(BaseTrainer):
         ).with_data(
             train_data=train_dataset,
             val_data=val_dataset,
+            test_data=test_dataset,
             batch_size=args.batch_size,
         ).with_optimization(
             optimizer=optimizer,

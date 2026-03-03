@@ -71,21 +71,21 @@ class GIKTEdmineModelData(QuestionModelData):
             logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, test_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
-            train_data, val_data = self.split_data(
-                user_sequence, user_response, user_mask
-            )
+            raise ValueError("fold_idx must be specified for K-fold cross-validation.")
 
         # 构建模型数据集
         train_dataset = GIKTEdmineDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = GIKTEdmineDataset(val_data[0], val_data[1], val_data[2])
+        test_dataset = GIKTEdmineDataset(test_data[0], test_data[1], test_data[2])
 
         return (
             train_dataset,
             val_dataset,
+            test_dataset,
             question_neighbors,
             concept_neighbors,
             q_table,
