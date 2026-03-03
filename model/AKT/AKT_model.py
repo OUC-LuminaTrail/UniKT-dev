@@ -50,10 +50,12 @@ def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None):
         scores_ = scores_ * mask.float().to(device)
         distcum_scores = torch.cumsum(scores_, dim=-1)
         disttotal_scores = torch.sum(scores_, dim=-1, keepdim=True)
-        position_effect = torch.abs(x1 - x2)[None, None, :, :].type(torch.FloatTensor).to(
-            device
+        position_effect = (
+            torch.abs(x1 - x2)[None, None, :, :].type(torch.FloatTensor).to(device)
         )
-        dist_scores = torch.clamp((disttotal_scores - distcum_scores) * position_effect, min=0.0)
+        dist_scores = torch.clamp(
+            (disttotal_scores - distcum_scores) * position_effect, min=0.0
+        )
         dist_scores = dist_scores.sqrt().detach()
 
     m = nn.Softplus()
@@ -147,7 +149,9 @@ class MultiHeadAttention(nn.Module):
             gammas = self.gammas
             if self.emb_type.find("pdiff") == -1:
                 pdiff = None
-            scores = attention(q, k, v, self.d_k, mask, self.dropout, zero_pad, gammas, pdiff)
+            scores = attention(
+                q, k, v, self.d_k, mask, self.dropout, zero_pad, gammas, pdiff
+            )
 
             concat = scores.transpose(1, 2).contiguous().view(bs, -1, self.d_model)
 
@@ -275,10 +279,24 @@ class Architecture(nn.Module):
         flag_first = True
         for block in self.blocks_2:
             if flag_first:  # Peek current question
-                x = block(mask=1, query=x, key=x, values=x, apply_pos=False, pdiff=pid_embed_data)
+                x = block(
+                    mask=1,
+                    query=x,
+                    key=x,
+                    values=x,
+                    apply_pos=False,
+                    pdiff=pid_embed_data,
+                )
                 flag_first = False
             else:  # Don't peek current response
-                x = block(mask=0, query=x, key=x, values=y, apply_pos=True, pdiff=pid_embed_data)
+                x = block(
+                    mask=0,
+                    query=x,
+                    key=x,
+                    values=y,
+                    apply_pos=True,
+                    pdiff=pid_embed_data,
+                )
                 flag_first = True
         return x
 
@@ -401,9 +419,8 @@ class AKT(nn.Module):
         # Sigmoid激活
         preds = torch.sigmoid(output)
 
-        # 对齐输出格式：y_hat[:, t] 预测 response[t+1]
-        # AKT原始输出：preds[:, t] 预测的是基于 sequence[0:t+1] 和 response[0:t+1] 对 response[t+1] 的预测
-        # 需要在开头填充一个0，使 y_hat[:, 0] = 0（无有效预测）
-        preds = torch.cat([torch.zeros_like(preds[:, :1]), preds[:, :-1]], dim=1)
+        # AKT输出语义说明：
+        # AKT的第二个流（blocks_2）第一层可以"peek current question"
+        # 因此 preds[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
 
         return preds

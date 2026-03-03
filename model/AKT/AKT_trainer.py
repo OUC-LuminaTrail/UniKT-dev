@@ -207,6 +207,10 @@ class AKTTrainer(BaseTrainer):
     ) -> dict[str, torch.Tensor]:
         """AKT 前向传播。
 
+        AKT预测语义：
+        - y_hat[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
+        - y_hat[:, t] 直接对应 response[t]，需要对齐
+
         Args:
             batch_data: 包含 (sequence, response, mask) 的元组
 
@@ -242,20 +246,18 @@ class AKTTrainer(BaseTrainer):
         }
 
     def test_forward_pass(self, batch_data):
-        """
-        测试前向传播，支持 windowlateauc_mean 评估。
+        """测试前向传播，支持 windowlateauc_mean 评估。
 
         数据格式说明：
         - sequence: [技能历史, 目标技能]
-        - response: [历史标签, 0]  # 目标位置 response=0 避免数据泄露
+        - response: [历史标签, 0]  # 目标位置 response=0 占位
         - mask: [0, ..., 0, 1]  # 只有最后一个位置需要预测
         - late_group_id: [g1, ..., gN]  # 最后一个位置是当前题目的 group_id
         - true_labels: [历史标签, 真实标签]  # 用于评估
 
         AKT 预测语义：
-        - y_hat[:, t] 预测的是 response[t]
-        - y_hat[:, 0] = 0（无有效预测）
-        - 需要对齐：y_hat[:, 1:] 对应 true_labels[:, 1:]
+        - y_hat[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
+        - 模型直接输出对齐的预测，无需额外对齐
         """
         sequence, response, mask, late_group_id, true_labels = batch_data
 
@@ -268,22 +270,12 @@ class AKTTrainer(BaseTrainer):
         # 模型前向传播
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # ==================== 关键：AKT 预测对齐 ====================
-        # AKT 的 y_hat[:, t] 预测的是 response[t]
-        # 但 y_hat[:, 0] = 0（无有效预测）
-        # 所以有效预测是 y_hat[:, 1:]，对应 true_labels[:, 1:]
-
-        y_hat_aligned = y_hat_full[:, 1:]  # [B, S-1]，有效预测
-        true_labels_aligned = true_labels[:, 1:]  # [B, S-1]，对应的真实标签
-        mask_aligned = mask[:, 1:]  # [B, S-1]，对应的 mask
-        group_id_aligned = late_group_id[:, 1:]  # [B, S-1]，对应的 group_id
-
-        # 使用 mask 筛选需要预测的位置
-        y_hat = torch.masked_select(y_hat_aligned, mask_aligned)
-        y_label = torch.masked_select(
-            true_labels_aligned, mask_aligned
-        )  # 使用 true_labels！
-        group_ids = torch.masked_select(group_id_aligned, mask_aligned)
+        # AKT 预测对齐
+        # y_hat[:, t] 直接预测 response[t]，无需额外对齐
+        # 使用 mask 筛选需要预测的位置（只有 mask=1 的位置）
+        y_hat = torch.masked_select(y_hat_full, mask)
+        y_label = torch.masked_select(true_labels, mask)
+        group_ids = torch.masked_select(late_group_id, mask)
 
         # 按 group_id 聚合
         results = self._aggregate_by_group(

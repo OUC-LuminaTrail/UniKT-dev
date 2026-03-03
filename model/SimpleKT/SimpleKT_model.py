@@ -136,9 +136,13 @@ class TransformerLayer(nn.Module):
         src_mask = (torch.from_numpy(nopeek_mask) == 0).to(query.device)
 
         if mask == 0:
-            query2 = self.masked_attn_head(query, key, values, mask=src_mask, zero_pad=True)
+            query2 = self.masked_attn_head(
+                query, key, values, mask=src_mask, zero_pad=True
+            )
         else:
-            query2 = self.masked_attn_head(query, key, values, mask=src_mask, zero_pad=False)
+            query2 = self.masked_attn_head(
+                query, key, values, mask=src_mask, zero_pad=False
+            )
 
         query = query + self.dropout1(query2)
         query = self.layer_norm1(query)
@@ -179,18 +183,22 @@ class Architecture(nn.Module):
         super().__init__()
         self.d_model = d_model
 
-        self.blocks_2 = nn.ModuleList([
-            TransformerLayer(
-                d_model=d_model,
-                d_feature=d_model // n_heads,
-                d_ff=d_ff,
-                dropout=dropout,
-                n_heads=n_heads,
-                kq_same=kq_same,
-            )
-            for _ in range(n_blocks)
-        ])
-        self.position_emb = CosinePositionalEmbedding(d_model=self.d_model, max_len=seq_len)
+        self.blocks_2 = nn.ModuleList(
+            [
+                TransformerLayer(
+                    d_model=d_model,
+                    d_feature=d_model // n_heads,
+                    d_ff=d_ff,
+                    dropout=dropout,
+                    n_heads=n_heads,
+                    kq_same=kq_same,
+                )
+                for _ in range(n_blocks)
+            ]
+        )
+        self.position_emb = CosinePositionalEmbedding(
+            d_model=self.d_model, max_len=seq_len
+        )
 
     def forward(self, q_embed_data, qa_embed_data):
         q_posemb = self.position_emb(q_embed_data)
@@ -298,6 +306,10 @@ class SimpleKT(nn.Module):
     ) -> torch.Tensor:
         """前向传播
 
+        SimpleKT 预测语义：
+        - y_hat[:, t] 基于 sequence[0:t+1] 和 response[0:t] 预测 response[t]
+        - 第一个位置：y_hat[:, 0] 基于 sequence[0:1] 和空历史预测 response[0]
+
         Args:
             sequence: 技能ID序列，形状为 [batch_size, seq_len]
             response: 响应序列，形状为 [batch_size, seq_len]
@@ -305,17 +317,12 @@ class SimpleKT(nn.Module):
 
         Returns:
             预测结果，形状为 [batch_size, seq_len]
-            在时刻 t 的输出预测的是 t+1 位置的响应
+            y_hat[:, t] 预测 response[t]
         """
-        # 构建移位序列：用于预测下一个位置
-        # q_data[:, 0] = sequence[:, 0]（第一个技能）
-        # q_data[:, 1:] = sequence[:, 1:]（后续技能）
-        # 这样 y_hat[:, t] 预测的是 response[:, t]
-        q_data = sequence
-        target = response
+        target = torch.cat([response[:, 0:1], response[:, :-1]], dim=1)
 
         # 获取嵌入
-        q_embed_data, qa_embed_data = self.base_emb(q_data, target)
+        q_embed_data, qa_embed_data = self.base_emb(sequence, target)
 
         # 通过 Transformer
         d_output = self.model(q_embed_data, qa_embed_data)
@@ -326,9 +333,5 @@ class SimpleKT(nn.Module):
 
         # Sigmoid 激活
         preds = torch.sigmoid(output)
-
-        # 对齐预测语义：y_hat[:, 0] 无有效预测（没有历史信息）
-        # 将第一个位置的预测置为 0
-        preds = torch.cat([torch.zeros_like(preds[:, :1]), preds[:, 1:]], dim=1)
 
         return preds
