@@ -42,7 +42,7 @@ class AKTModelParams(BaseParamConfig):
             },
             "n_blocks": {
                 "type": int,
-                "default": 2,
+                "default": 1,
                 "help": "Number of transformer blocks",
             },
             "num_attn_heads": {
@@ -52,7 +52,7 @@ class AKTModelParams(BaseParamConfig):
             },
             "dropout": {
                 "type": float,
-                "default": 0.2,
+                "default": 0.05,
                 "help": "Dropout probability",
             },
             "d_ff": {
@@ -88,7 +88,7 @@ class AKTModelParams(BaseParamConfig):
             },
             "learning_rate": {
                 "type": float,
-                "default": 0.001,
+                "default": 1e-5,
                 "short": "lr",
                 "help": "Learning rate for optimizer",
             },

@@ -23,6 +23,8 @@ class SimpleKTModelParams(BaseParamConfig):
         d_ff: 前馈网络维度
         kq_same: 是否共享 key 和 query 的权重
         separate_qa: 是否使用独立的交互嵌入
+        final_fc_dim: 第一层全连接层维度
+        final_fc_dim2: 第二层全连接层维度
     """
 
     def define_params(self) -> tuple[str, dict]:
@@ -64,6 +66,16 @@ class SimpleKTModelParams(BaseParamConfig):
                 "default": 0,
                 "help": "Whether to use separate interaction embedding (1 for yes, 0 for no)",
             },
+            "final_fc_dim": {
+                "type": int,
+                "default": 256,
+                "help": "First fully connected layer dimension in output",
+            },
+            "final_fc_dim2": {
+                "type": int,
+                "default": 256,
+                "help": "Second fully connected layer dimension in output",
+            },
             "epochs": {
                 "type": int,
                 "default": 100,
@@ -72,7 +84,7 @@ class SimpleKTModelParams(BaseParamConfig):
             },
             "learning_rate": {
                 "type": float,
-                "default": 0.001,
+                "default": 1e-4,
                 "short": "lr",
                 "help": "Learning rate for optimizer",
             },
@@ -133,6 +145,8 @@ class SimpleKTTrainer(BaseTrainer):
             seq_len=args.max_seq_len,
             kq_same=args.kq_same,
             separate_qa=bool(args.separate_qa),
+            final_fc_dim=args.final_fc_dim,
+            final_fc_dim2=args.final_fc_dim2,
         )
 
         # 创建优化器和损失函数

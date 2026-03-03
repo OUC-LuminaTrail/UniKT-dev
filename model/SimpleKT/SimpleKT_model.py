@@ -230,6 +230,8 @@ class SimpleKT(nn.Module):
         seq_len: 最大序列长度
         kq_same: 是否共享 key 和 query 的权重
         separate_qa: 是否使用独立的交互嵌入
+        final_fc_dim: 第一层全连接层维度
+        final_fc_dim2: 第二层全连接层维度
     """
 
     def __init__(
@@ -243,6 +245,8 @@ class SimpleKT(nn.Module):
         seq_len: int = 200,
         kq_same: int = 1,
         separate_qa: bool = False,
+        final_fc_dim: int = 256,
+        final_fc_dim2: int = 256,
     ):
         super().__init__()
         self.num_skills = num_skills
@@ -274,13 +278,13 @@ class SimpleKT(nn.Module):
 
         # 输出层
         self.out = nn.Sequential(
-            nn.Linear(d_model + embed_l, d_model),
+            nn.Linear(d_model + embed_l, final_fc_dim),
             nn.ReLU(),
             nn.Dropout(self.dropout),
-            nn.Linear(d_model, d_model // 2),
+            nn.Linear(final_fc_dim, final_fc_dim2),
             nn.ReLU(),
             nn.Dropout(self.dropout),
-            nn.Linear(d_model // 2, 1),
+            nn.Linear(final_fc_dim2, 1),
         )
 
     def base_emb(self, q_data, target):
