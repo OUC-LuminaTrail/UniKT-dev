@@ -41,6 +41,7 @@ class DataSource(ABC):
         self.sequence_data = None
         self.question_data = None
         self.split_sequence_data = None
+        self.windowlate_data = None
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
@@ -126,10 +127,14 @@ class DataSource(ABC):
         split_sequence_path = os.path.join(
             self.data_folder, f"{self.dataset}_split_sequence.parquet"
         )
+        windowlate_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
 
         self.question_data.write_parquet(question_data_path)
         self.sequence_data.write_parquet(sequence_data_path)
         self.split_sequence_data.write_parquet(split_sequence_path)
+        self.windowlate_data.write_parquet(windowlate_data_path)
 
         # Save metadata
         metadata = {
@@ -139,6 +144,7 @@ class DataSource(ABC):
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
             "split_sequence_data_md5": self.compute_md5(split_sequence_path),
+            "windowlate_data_md5": self.compute_md5(windowlate_data_path),
             "num_users": self.sequence_data["user"].n_unique(),
             "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
@@ -154,6 +160,7 @@ class DataSource(ABC):
         logger.debug(f"Saved question_data to: {question_data_path}")
         logger.debug(f"Saved sequence_data to: {sequence_data_path}")
         logger.debug(f"Saved split sequences to: {split_sequence_path}")
+        logger.debug(f"Saved windowlate data to: {windowlate_data_path}")
         logger.info(f"Data saved to {self.data_folder}")
 
     @staticmethod
@@ -461,17 +468,29 @@ class DataSource(ABC):
         split_sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_split_sequence.parquet"
         )
+        windowlate_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
 
         self._validate_data_files_exist(
-            [sequence_data_path, question_data_path, split_sequence_data_path]
+            [
+                sequence_data_path,
+                question_data_path,
+                split_sequence_data_path,
+                windowlate_data_path,
+            ]
         )
         self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
         self._validate_data_integrity(question_data_path, "question_data_md5")
         self._validate_data_integrity(
             split_sequence_data_path, "split_sequence_data_md5"
         )
+        self._validate_data_integrity(windowlate_data_path, "windowlate_data_md5")
         self._load_parquet_files(
-            sequence_data_path, question_data_path, split_sequence_data_path
+            sequence_data_path,
+            question_data_path,
+            split_sequence_data_path,
+            windowlate_data_path,
         )
 
     def _validate_data_files_exist(self, file_paths: list[str]):
@@ -515,7 +534,11 @@ class DataSource(ABC):
             )
 
     def _load_parquet_files(
-        self, sequence_path: str, question_path: str, split_sequence_path: str
+        self,
+        sequence_path: str,
+        question_path: str,
+        split_sequence_path: str,
+        windowlate_path: str,
     ):
         """Load parquet files with error handling."""
         logger.info(f"Loading sequence data: {sequence_path}")
@@ -529,6 +552,10 @@ class DataSource(ABC):
         logger.info(f"Loading question data: {question_path}")
         self.question_data = pd.read_parquet(question_path)
         logger.debug(f"Question data shape: {self.question_data.shape}")
+
+        logger.info(f"Loading windowlate data: {windowlate_path}")
+        self.windowlate_data = pd.read_parquet(windowlate_path)
+        logger.debug(f"Windowlate data shape: {self.windowlate_data.shape}")
 
     @abstractmethod
     def transform_data(self):
@@ -572,6 +599,17 @@ class DataSource(ABC):
         if self.split_sequence_data is None:
             self.load_processed_data()
         return self.split_sequence_data
+
+    def get_windowlate_data(self) -> pd.DataFrame:
+        """Get windowlate evaluation data.
+
+        Returns:
+            DataFrame with windowlate evaluation samples (long format).
+            Columns: sample_id, position, skill, response, mask, user_id, group_id, true_label, fold
+        """
+        if self.windowlate_data is None:
+            self.load_processed_data()
+        return self.windowlate_data
 
     def update_metadata(self, key: str, value):
         """Update a single metadata entry."""
@@ -689,6 +727,190 @@ class DataSource(ABC):
         logger.debug(f"Split into {final_num_users} sub-sequences")
 
         self.split_sequence_data = data
+
+    def build_windowlate_data(self):
+        r"""构建用于 windowlateauc_mean 评估的样本数据。
+
+        核心设计:
+        1. 多技能展开：将涉及多个知识点的题目拆分为多个独立交互
+        2. 历史隔离：同一题目的多个技能共享相同的历史信息
+        3. 滑动窗口：
+           - 短序列（seq_len <= max_seq_len）：生成1个样本，只预测最后一位
+           - 长序列（seq_len > max_seq_len）：生成所有滑动窗口
+             - 第一个窗口（win_idx == 0）：全部预测（mask 全为 1）
+             - 后续窗口（win_idx > 0）：只预测最后一位（mask 只有最后一位为 1）
+
+        Args:
+            max_seq_len: 最大序列长度（窗口大小）
+
+        Returns:
+            Polars DataFrame，长格式，每行代表一个样本的一个位置
+            列: sample_id, position, skill, response, mask, user_id, group_id, true_label, fold
+
+        Raises:
+            ValueError: 如果没有 K-fold 标签或测试集数据为空
+        """
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+
+        if self.question_data is None:
+            raise ValueError("Question data not available.")
+
+        # 检查 fold 列是否存在
+        if "fold" not in self.sequence_data.columns:
+            raise ValueError(
+                "K-fold labels not found in data. Please call add_kfold_labels() first."
+            )
+
+        max_seq_len = self.args.max_seq_len
+        logger.info(f"Building windowlate data (max_seq_len={max_seq_len})...")
+
+        # 筛选测试集数据
+        test_data = self.sequence_data.filter(pl.col("fold") == -1)
+        if len(test_data) == 0:
+            raise ValueError("No test-set interactions (fold == -1) found")
+
+        # 构建题目到技能列表的映射
+        q_skill_map = self.question_data.group_by("question").agg(
+            pl.col("skill").alias("skills")
+        )
+
+        # 将技能列表映射到测试数据
+        test_data = test_data.join(q_skill_map, on="question", how="inner")
+
+        # 按用户分组处理
+        all_samples = []
+        global_sample_id = 0
+        global_group_id = 0
+
+        for user, user_df in test_data.group_by("user"):
+            user_df = user_df.sort("timestamp")
+            questions = user_df["question"].to_list()
+            labels = user_df["label"].to_list()
+            skills_list = user_df["skills"].to_list()
+
+            # 展开多技能
+            expanded_skills = []
+            expanded_labels = []
+            expanded_group_ids = []
+            inter_boundaries = [0]
+
+            for i, (q_skills, label) in enumerate(zip(skills_list, labels)):
+                for skill in q_skills:
+                    expanded_skills.append(skill)
+                    expanded_labels.append(label)
+                    expanded_group_ids.append(global_group_id + i)
+                inter_boundaries.append(inter_boundaries[-1] + len(q_skills))
+
+            global_group_id += len(questions)
+            n_total_skills = len(expanded_skills)
+
+            if n_total_skills == 0:
+                continue
+
+            # 为每个交互构建样本
+            for inter_idx in range(len(questions)):
+                n_skills = len(skills_list[inter_idx])
+                history_end = inter_boundaries[inter_idx]
+
+                if history_end == 0:
+                    continue
+
+                for skill_offset in range(n_skills):
+                    current_skill_pos = inter_boundaries[inter_idx] + skill_offset
+                    seq_len = history_end + 1
+
+                    if seq_len <= max_seq_len:
+                        # 短序列：生成1个样本，只预测最后一位
+                        sample_data = []
+                        for pos in range(seq_len):
+                            sample_data.append(
+                                {
+                                    "sample_id": global_sample_id,
+                                    "position": pos,
+                                    "skill": expanded_skills[pos],
+                                    "response": expanded_labels[pos],
+                                    "mask": 1 if pos == seq_len - 1 else 0,
+                                    "user_id": user,
+                                    "group_id": expanded_group_ids[pos],
+                                    "true_label": expanded_labels[pos],
+                                    "fold": -1,
+                                }
+                            )
+                        all_samples.extend(sample_data)
+                        global_sample_id += 1
+                    else:
+                        # 长序列：构建所有滑动窗口
+                        current_skill = expanded_skills[current_skill_pos]
+                        current_label = expanded_labels[current_skill_pos]
+                        current_group_id = expanded_group_ids[current_skill_pos]
+
+                        # 构建预测序列
+                        pred_skills = expanded_skills[:history_end] + [current_skill]
+                        pred_labels = expanded_labels[:history_end] + [0]
+                        pred_group_ids = expanded_group_ids[:history_end] + [
+                            current_group_id
+                        ]
+                        pred_true_labels = expanded_labels[:history_end] + [
+                            current_label
+                        ]
+
+                        num_windows = seq_len - max_seq_len + 1
+                        for win_idx in range(num_windows):
+                            win_start = win_idx
+
+                            sample_data = []
+                            for pos in range(max_seq_len):
+                                actual_pos = win_start + pos
+                                sample_data.append(
+                                    {
+                                        "sample_id": global_sample_id,
+                                        "position": pos,
+                                        "skill": pred_skills[actual_pos],
+                                        "response": pred_labels[actual_pos],
+                                        "mask": 1
+                                        if (win_idx == 0 or pos == max_seq_len - 1)
+                                        else 0,
+                                        "user_id": user,
+                                        "group_id": pred_group_ids[actual_pos],
+                                        "true_label": pred_true_labels[actual_pos],
+                                        "fold": -1,
+                                    }
+                                )
+                            all_samples.extend(sample_data)
+                            global_sample_id += 1
+
+        if len(all_samples) == 0:
+            raise ValueError(
+                "No valid windowlate evaluation samples generated for test set"
+            )
+
+        # 转换为 Polars DataFrame
+        result = pl.DataFrame(all_samples)
+
+        # 优化数据类型
+        result = result.with_columns(
+            [
+                pl.col("sample_id").cast(pl.Int64),
+                pl.col("position").cast(pl.Int32),
+                pl.col("skill").cast(pl.Int32),
+                pl.col("response").cast(pl.Int8),
+                pl.col("mask").cast(pl.Int8),
+                pl.col("user_id").cast(pl.Int32),
+                pl.col("group_id").cast(pl.Int64),
+                pl.col("true_label").cast(pl.Int8),
+                pl.col("fold").cast(pl.Int32),
+            ]
+        )
+
+        self.windowlate_data = result
+
+        num_samples = result["sample_id"].n_unique()
+        logger.info(f"Built windowlate data: {num_samples} samples, {len(result)} rows")
+
+        return result
 
     def add_kfold_labels(self, n_splits: int = 5, test_ratio: float = 0.2):
         """Add K-fold cross-validation labels with test set separation.

@@ -111,6 +111,7 @@ def cmd_process(args):
         dp.add_kfold_labels(n_splits=args.kfold)
 
     dp.build_split_sequence_data()
+    dp.build_windowlate_data()
 
     dp.save_data()
 
