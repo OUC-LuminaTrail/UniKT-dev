@@ -93,13 +93,8 @@ class SkillModelData(BaseModelData):
 
         核心设计：
         1. 多技能展开：将涉及多个知识点的题目拆分为多个独立交互
-        2. 历史隔离：同一题目的多个技能共享相同的历史信息（避免数据泄露）
+        2. 历史隔离：同一题目的多个技能共享相同的历史信息
         3. 窗口处理：长序列使用滑动窗口，每个窗口只预测最后一个位置
-
-        DKT 预测语义说明：
-        - DKT 模型 y_hat[:, t] 是基于历史 [0, t) 预测位置 t 的结果
-        - 因此，预测位置 t 时，输入序列应包含 [0, t) 的历史
-        - 当前技能作为预测目标，不应包含在历史中
 
         参数:
             max_seq_len: 最大序列长度（窗口大小）
@@ -119,81 +114,54 @@ class SkillModelData(BaseModelData):
         data = self.data_src.get_sequence_data().copy()
         question_data = self.data_src.get_question_data()
 
-        # 边界条件 1: 检查 fold 列是否存在
+        # 检查 fold 列是否存在
         if "fold" not in data.columns:
             raise ValueError(
                 "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
             )
 
-        # 边界条件 2: 筛选测试集数据
+        # 筛选测试集数据
         data = data[data["fold"] == -1].copy()
         if data.empty:
             raise ValueError("No test-set interactions (fold == -1) found")
 
-        # 构建题目到技能列表的映射（保持顺序）
+        # 构建题目到技能列表的映射
         q_skill = question_data[["question", "skill"]].drop_duplicates()
         q_skill_map = (
             q_skill.groupby("question", sort=False)["skill"].apply(list).to_dict()
         )
 
-        # 边界条件 3: 确保所有题目都有对应的技能
-        missing_questions = set(data["question"].unique()) - set(q_skill_map.keys())
-        if missing_questions:
-            self.logger.warning(
-                f"Found {len(missing_questions)} questions without skill mapping, "
-                "they will be skipped"
-            )
-
-        # ==================== 步骤 2: 初始化结果容器 ====================
-        win_sequences = []
-        win_responses = []
-        win_masks = []
-        win_users = []
-        win_group_ids = []
-        win_true_labels = []  # 新增：真实标签容器
-
-        global_group_id = 0  # 全局 group_id 计数器
-
-        # ==================== 步骤 3: 按用户处理 ====================
+        # ==================== 步骤 2: 第一遍 - 计算样本数并收集元数据 ====================
+        user_data_list = []
+        total_samples = 0
+        global_group_id = 0
         total_users = int(data["user"].nunique())
 
         for user, user_df in tqdm(
             data.groupby("user", sort=False),
             total=total_users,
-            desc="Building windowlate data",
+            desc="Counting samples",
         ):
-            # 获取用户的答题序列
             questions = user_df["question"].to_numpy()
             labels = user_df["label"].to_numpy(dtype=int)
+
+            # 过滤无效题目
+            valid_mask = np.array([q in q_skill_map for q in questions])
+            if not valid_mask.any():
+                continue
+
+            questions = questions[valid_mask]
+            labels = labels[valid_mask]
             n_interactions = len(questions)
 
-            # 边界条件 4: 跳过空序列
             if n_interactions == 0:
                 continue
 
-            # 边界条件 5: 跳过所有题目都没有技能映射的用户
-            valid_interactions = [
-                i for i, q in enumerate(questions) if q in q_skill_map
-            ]
-            if not valid_interactions:
-                continue
-
-            # 只处理有效的交互
-            questions = questions[valid_interactions]
-            labels = labels[valid_interactions]
-            n_interactions = len(questions)
-
-            # ----- 多技能展开 -----
-            # 获取每个交互涉及的技能列表
+            # 多技能展开
             inter_skills = [np.asarray(q_skill_map[q], dtype=int) for q in questions]
             skill_counts = np.asarray([s.size for s in inter_skills], dtype=int)
-
-            # 计算交互边界（在展开后的技能序列中的位置）
-            # inter_boundaries[i] 表示第 i 个交互的技能在展开序列中的起始位置
             inter_boundaries = np.cumsum(np.concatenate([[0], skill_counts]))
-            n_total_skills = inter_boundaries[-1]
 
-            # 展开技能和标签
             flat_skills = np.concatenate(inter_skills)
             flat_labels = np.concatenate(
                 [
@@ -201,11 +169,87 @@ class SkillModelData(BaseModelData):
                     for i, s in enumerate(inter_skills)
                 ]
             )
-            flat_user_ids = np.full(n_total_skills, int(user), dtype=int)
 
-            # 为每个交互分配 group_id（同一题目的多个技能共享 group_id）
+            # 计算该用户的样本数
+            user_sample_count = 0
+            sample_info = []
+
+            for inter_idx in range(n_interactions):
+                n_skills = skill_counts[inter_idx]
+                history_end = inter_boundaries[inter_idx]
+
+                if history_end == 0:
+                    continue
+
+                for skill_offset in range(n_skills):
+                    seq_len = history_end + 1
+
+                    if seq_len <= max_seq_len:
+                        user_sample_count += 1
+                        sample_info.append((inter_idx, skill_offset, seq_len, None))
+                    else:
+                        # 滑动窗口：只有最后一个窗口（selectmask[-1] == 1）
+                        num_windows = seq_len - max_seq_len + 1
+                        win_idx = num_windows - 1  # 只保留最后一个窗口
+                        user_sample_count += 1
+                        sample_info.append((inter_idx, skill_offset, seq_len, win_idx))
+
+            if user_sample_count > 0:
+                user_data_list.append(
+                    {
+                        "user": int(user),
+                        "questions": questions,
+                        "labels": labels,
+                        "inter_skills": inter_skills,
+                        "skill_counts": skill_counts,
+                        "inter_boundaries": inter_boundaries,
+                        "flat_skills": flat_skills,
+                        "flat_labels": flat_labels,
+                        "sample_info": sample_info,
+                        "global_group_id_start": global_group_id,
+                    }
+                )
+                global_group_id += n_interactions
+                total_samples += user_sample_count
+
+        # 检查是否生成了有效样本
+        if total_samples == 0:
+            raise ValueError(
+                "No valid windowlate evaluation samples generated for test set"
+            )
+
+        # ==================== 步骤 3: 预分配并填充数组 ====================
+        user_sequence = np.zeros((total_samples, max_seq_len), dtype=int)
+        user_response = np.zeros((total_samples, max_seq_len), dtype=int)
+        user_mask = np.zeros((total_samples, max_seq_len), dtype=int)
+        user_id_sequence = np.zeros((total_samples, max_seq_len), dtype=int)
+        late_group_id = np.full((total_samples, max_seq_len), -1, dtype=np.int64)
+        user_true_labels = np.zeros((total_samples, max_seq_len), dtype=int)
+
+        sample_idx = 0
+
+        for user_data in tqdm(
+            user_data_list,
+            desc="Building samples",
+        ):
+            user = user_data["user"]
+            inter_skills = user_data["inter_skills"]
+            skill_counts = user_data["skill_counts"]
+            inter_boundaries = user_data["inter_boundaries"]
+            flat_skills = user_data["flat_skills"]
+            flat_labels = user_data["flat_labels"]
+            sample_info = user_data["sample_info"]
+            global_group_id_start = user_data["global_group_id_start"]
+
+            n_interactions = len(inter_skills)
+            n_total_skills = inter_boundaries[-1]
+
+            # 展开用户ID和group_id
+            flat_user_ids = np.full(n_total_skills, user, dtype=int)
             inter_group_ids = np.arange(
-                global_group_id, global_group_id + n_interactions, dtype=np.int64
+                global_group_id_start,
+                global_group_id_start + n_interactions,
+                dtype=np.int64,
             )
             flat_group_ids = np.concatenate(
                 [
@@ -213,149 +257,73 @@ class SkillModelData(BaseModelData):
                     for i, s in enumerate(inter_skills)
                 ]
             )
-            global_group_id += n_interactions
 
-            # ----- 步骤 4: 为每个技能位置构建预测序列 -----
-            # 核心逻辑：预测位置 t 时，使用历史 [0, t)
-            # 同一题目的多个技能共享相同的历史边界
-
-            for inter_idx in range(n_interactions):
-                n_skills = skill_counts[inter_idx]
-
-                # 确定历史边界：历史应截止到当前交互之前
-                # 关键设计：同一题目的多个技能共享相同的历史
-                # 即历史 = 当前交互之前的所有技能
+            for inter_idx, skill_offset, seq_len, win_idx in sample_info:
                 history_end = inter_boundaries[inter_idx]
+                current_skill_pos = inter_boundaries[inter_idx] + skill_offset
+                current_skill = flat_skills[current_skill_pos]
+                current_label = flat_labels[current_skill_pos]
+                current_group_id = flat_group_ids[current_skill_pos]
 
-                # 为当前交互的每个技能构建预测序列
-                for skill_offset in range(n_skills):
-                    current_skill_pos = inter_boundaries[inter_idx] + skill_offset
-                    current_skill = flat_skills[current_skill_pos]
-                    current_label = flat_labels[current_skill_pos]
-                    current_group_id = flat_group_ids[current_skill_pos]
+                if seq_len <= max_seq_len:
+                    # 短序列：直接填充
+                    # 填充技能序列
+                    user_sequence[sample_idx, :history_end] = flat_skills[:history_end]
+                    user_sequence[sample_idx, history_end] = current_skill
 
-                    # 构建预测序列：历史 [0, history_end) + 当前技能
-                    # 注意：DKT 的 y_hat[:, t] 使用输入 [0, t] 预测位置 t 的标签
-                    # 输入 x[t] = sequence[t] + num_c * response[t]
-                    # 因此 response[t] 会影响位置 t 的编码
-                    #
-                    # 关键：为避免数据泄露，预测目标的 response 必须为 0！
-                    # - 历史位置 [0, history_end)：response = 实际标签
-                    # - 目标位置 [history_end]：response = 0（待预测）
+                    # 填充响应序列（历史用真实标签，目标用0）
+                    user_response[sample_idx, :history_end] = flat_labels[:history_end]
 
-                    if history_end == 0:
-                        # 边界条件 6: 第一个交互的第一个技能
-                        # 历史为空，只有当前技能
-                        # DKT 模型的 y[:, 0] = 0，无法进行有效预测
-                        # 跳过这种情况
-                        continue
-                    else:
-                        # 正常情况：历史 + 当前技能
-                        pred_skills = np.concatenate(
-                            [flat_skills[:history_end], [current_skill]]
-                        )
-                        # 历史位置用实际标签，目标位置用 0
-                        pred_labels = np.concatenate(
-                            [
-                                flat_labels[:history_end],
-                                [0],  # ✅ 目标位置的 response = 0，避免数据泄露
-                            ]
-                        )
-                        pred_user_ids = np.concatenate(
-                            [flat_user_ids[:history_end], [int(user)]]
-                        )
-                        pred_group_ids = np.concatenate(
-                            [flat_group_ids[:history_end], [current_group_id]]
-                        )
-                        # 真实标签：历史位置用实际标签，目标位置用真实标签
-                        pred_true_labels = np.concatenate(
-                            [
-                                flat_labels[:history_end],
-                                [current_label],  # 目标位置的真实标签
-                            ]
-                        )
+                    # 填充用户ID
+                    user_id_sequence[sample_idx, :history_end] = flat_user_ids[
+                        :history_end
+                    ]
+                    user_id_sequence[sample_idx, history_end] = user
 
-                    seq_len = len(pred_skills)
+                    # 填充group_id
+                    late_group_id[sample_idx, :history_end] = flat_group_ids[
+                        :history_end
+                    ]
+                    late_group_id[sample_idx, history_end] = current_group_id
 
-                    # 构建 selectmask：只有最后一个位置预测
-                    # selectmask[i] = 1 表示位置 i 需要预测
-                    selectmask = np.zeros(seq_len, dtype=int)
-                    selectmask[-1] = 1
+                    # 填充真实标签
+                    user_true_labels[sample_idx, :history_end] = flat_labels[
+                        :history_end
+                    ]
+                    user_true_labels[sample_idx, history_end] = current_label
 
-                    # ----- 步骤 5: 窗口处理 -----
-                    if seq_len <= max_seq_len:
-                        # 短序列：填充到 max_seq_len
-                        pad_len = max_seq_len - seq_len
+                    # 设置mask（只有最后一个位置预测）
+                    user_mask[sample_idx, history_end] = 1
 
-                        padded_skills = np.concatenate(
-                            [pred_skills, np.zeros(pad_len, dtype=int)]
-                        )
-                        padded_labels = np.concatenate(
-                            [pred_labels, np.zeros(pad_len, dtype=int)]
-                        )
-                        padded_user_ids = np.concatenate(
-                            [pred_user_ids, np.zeros(pad_len, dtype=int)]
-                        )
-                        padded_group_ids = np.concatenate(
-                            [pred_group_ids, np.full(pad_len, -1, dtype=np.int64)]
-                        )
-                        # selectmask 填充 0
-                        padded_selectmask = np.concatenate(
-                            [selectmask, np.zeros(pad_len, dtype=int)]
-                        )
-                        # true_labels 填充 0
-                        padded_true_labels = np.concatenate(
-                            [pred_true_labels, np.zeros(pad_len, dtype=int)]
-                        )
+                else:
+                    # 长序列：滑动窗口
+                    win_start = win_idx
+                    win_end = win_idx + max_seq_len
 
-                        win_sequences.append(padded_skills)
-                        win_responses.append(padded_labels)
-                        win_masks.append(padded_selectmask)
-                        win_users.append(padded_user_ids)
-                        win_group_ids.append(padded_group_ids)
-                        win_true_labels.append(padded_true_labels)
+                    # 构建完整预测序列
+                    pred_skills = np.concatenate(
+                        [flat_skills[:history_end], [current_skill]]
+                    )
+                    pred_labels = np.concatenate([flat_labels[:history_end], [0]])
+                    pred_user_ids = np.concatenate(
+                        [flat_user_ids[:history_end], [user]]
+                    )
+                    pred_group_ids = np.concatenate(
+                        [flat_group_ids[:history_end], [current_group_id]]
+                    )
+                    pred_true_labels = np.concatenate(
+                        [flat_labels[:history_end], [current_label]]
+                    )
 
-                    else:
-                        # 长序列：滑动窗口
-                        # 每个窗口大小为 max_seq_len，只预测最后一个位置
-                        num_windows = seq_len - max_seq_len + 1
+                    # 切片窗口
+                    user_sequence[sample_idx] = pred_skills[win_start:win_end]
+                    user_response[sample_idx] = pred_labels[win_start:win_end]
+                    user_id_sequence[sample_idx] = pred_user_ids[win_start:win_end]
+                    late_group_id[sample_idx] = pred_group_ids[win_start:win_end]
+                    user_true_labels[sample_idx] = pred_true_labels[win_start:win_end]
+                    user_mask[sample_idx, -1] = 1
 
-                        for win_idx in range(num_windows):
-                            win_start = win_idx
-                            win_end = win_idx + max_seq_len
-
-                            window_skills = pred_skills[win_start:win_end]
-                            window_labels = pred_labels[win_start:win_end]
-                            window_user_ids = pred_user_ids[win_start:win_end]
-                            window_group_ids = pred_group_ids[win_start:win_end]
-                            window_true_labels = pred_true_labels[win_start:win_end]
-
-                            # 检查窗口最后一个位置是否需要预测
-                            if selectmask[win_end - 1] == 1:
-                                # 重置 selectmask：只预测最后一个位置
-                                window_selectmask = np.zeros(max_seq_len, dtype=int)
-                                window_selectmask[-1] = 1
-
-                                win_sequences.append(window_skills)
-                                win_responses.append(window_labels)
-                                win_masks.append(window_selectmask)
-                                win_users.append(window_user_ids)
-                                win_group_ids.append(window_group_ids)
-                                win_true_labels.append(window_true_labels)
-
-        # ==================== 步骤 6: 结果整合 ====================
-        # 边界条件 7: 检查是否生成了有效样本
-        if len(win_sequences) == 0:
-            raise ValueError(
-                "No valid windowlate evaluation samples generated for test set"
-            )
-
-        user_sequence = np.stack(win_sequences, axis=0)
-        user_response = np.stack(win_responses, axis=0)
-        user_mask = np.stack(win_masks, axis=0)
-        user_id_sequence = np.stack(win_users, axis=0)
-        late_group_id = np.stack(win_group_ids, axis=0)
-        user_true_labels = np.stack(win_true_labels, axis=0)
+                sample_idx += 1
 
         self.logger.debug(
             f"Built windowlate data: samples={user_sequence.shape[0]}, "
