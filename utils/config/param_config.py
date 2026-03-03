@@ -169,8 +169,8 @@ class DataParams(BaseParamConfig):
             },
             "min_seq_len": {
                 "type": int,
-                "default": 10,
-                "help": "Minimum sequence length (default: 10)",
+                "default": 3,
+                "help": "Minimum sequence length (default: 3)",
             },
             "max_seq_len": {
                 "type": int,
