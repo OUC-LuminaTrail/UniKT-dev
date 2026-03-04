@@ -434,6 +434,8 @@ class WindowlateProcessor:
         total_rows = 0
         has_written_rows = False
 
+        logger.info("Saving windowlate data to output path")
+
         try:
             for item in worker_results:
                 if item is None:
