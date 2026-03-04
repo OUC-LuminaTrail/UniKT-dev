@@ -124,7 +124,17 @@ class WindowlateProcessor:
 
             for skill_offset in range(n_skills):
                 current_skill_pos = inter_boundaries[inter_idx] + skill_offset
-                seq_len = history_end + 1
+                current_skill = expanded_skills[current_skill_pos]
+                current_label = expanded_labels[current_skill_pos]
+                current_group_id = expanded_group_ids[current_skill_pos]
+
+                # 统一构建预测序列：历史 + 当前技能
+                pred_skills = expanded_skills[:history_end] + [current_skill]
+                pred_labels = expanded_labels[:history_end] + [0]  # 预测位置置 0
+                pred_group_ids = expanded_group_ids[:history_end] + [current_group_id]
+                pred_true_labels = expanded_labels[:history_end] + [current_label]
+
+                seq_len = len(pred_skills)
 
                 if seq_len <= max_seq_len:
                     # 短序列：单个样本，只预测最后一位
@@ -132,31 +142,20 @@ class WindowlateProcessor:
                         yield (
                             sample_id,
                             pos,
-                            expanded_skills[pos],
-                            expanded_labels[pos],
+                            pred_skills[pos],
+                            pred_labels[pos],
                             1 if pos == seq_len - 1 else 0,
                             user_id,
-                            expanded_group_ids[pos],
-                            expanded_labels[pos],
+                            pred_group_ids[pos],
+                            pred_true_labels[pos],
                         )
+                    sample_id += 1
                 else:
                     # 长序列：滑动窗口
-                    current_skill = expanded_skills[current_skill_pos]
-                    current_label = expanded_labels[current_skill_pos]
-                    current_group_id = expanded_group_ids[current_skill_pos]
-                    pred_skills = expanded_skills[:history_end] + [current_skill]
-                    pred_labels = expanded_labels[:history_end] + [0]
-                    pred_group_ids = expanded_group_ids[:history_end] + [
-                        current_group_id
-                    ]
-                    pred_true_labels = expanded_labels[:history_end] + [current_label]
-
                     num_windows = seq_len - max_seq_len + 1
                     for win_idx in range(num_windows):
                         win_start = win_idx
-
-                        # 第一个窗口全预测，后续窗口只预测最后一位
-                        mask_value = 1 if win_idx == 0 else 0
+                        mask_value = 1 if (win_start + max_seq_len == seq_len) else 0
 
                         for pos in range(max_seq_len):
                             yield (
@@ -170,9 +169,6 @@ class WindowlateProcessor:
                                 pred_true_labels[win_start + pos],
                             )
                         sample_id += 1
-
-                if seq_len <= max_seq_len:
-                    sample_id += 1
 
     # ===== 批量处理 =====
 
