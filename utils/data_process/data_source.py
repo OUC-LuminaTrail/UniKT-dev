@@ -42,6 +42,7 @@ class DataSource(ABC):
         self.sequence_data = None
         self.question_data = None
         self.split_question_sequence_data = None
+        self.split_skill_sequence_data = None
         self.windowlate_data_path = None
         self.data_url = data_url
         self.metadata = {}
@@ -128,6 +129,9 @@ class DataSource(ABC):
         split_question_sequence_path = os.path.join(
             self.data_folder, f"{self.dataset}_split_question_sequence.parquet"
         )
+        split_skill_sequence_path = os.path.join(
+            self.data_folder, f"{self.dataset}_split_skill_sequence.parquet"
+        )
         windowlate_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_windowlate.parquet"
         )
@@ -135,6 +139,7 @@ class DataSource(ABC):
         self.question_data.write_parquet(question_data_path)
         self.sequence_data.write_parquet(sequence_data_path)
         self.split_question_sequence_data.write_parquet(split_question_sequence_path)
+        self.split_skill_sequence_data.write_parquet(split_skill_sequence_path)
 
         # Save metadata
         metadata = {
@@ -143,11 +148,20 @@ class DataSource(ABC):
             "random_seed": self.seed,
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
-            "split_question_sequence_data_md5": self.compute_md5(split_question_sequence_path),
+            "split_question_sequence_data_md5": self.compute_md5(
+                split_question_sequence_path
+            ),
+            "split_skill_sequence_data_md5": self.compute_md5(
+                split_skill_sequence_path
+            ),
             "num_users": self.sequence_data["user"].n_unique(),
             "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
             "num_assignments": self.question_data["assignment"].n_unique(),
+            "num_split_question_users": self.split_question_sequence_data[
+                "user"
+            ].n_unique(),
+            "num_split_skill_users": self.split_skill_sequence_data["user"].n_unique(),
         }
 
         if "template" in self.question_data.columns:
@@ -155,7 +169,10 @@ class DataSource(ABC):
 
         logger.debug(f"Saved question_data to: {question_data_path}")
         logger.debug(f"Saved sequence_data to: {sequence_data_path}")
-        logger.debug(f"Saved split question sequences to: {split_question_sequence_path}")
+        logger.debug(
+            f"Saved split question sequences to: {split_question_sequence_path}"
+        )
+        logger.debug(f"Saved split skill sequences to: {split_skill_sequence_path}")
         if os.path.exists(windowlate_data_path):
             metadata["windowlate_data_md5"] = self.compute_md5(windowlate_data_path)
             logger.debug(f"Windowlate data already saved to: {windowlate_data_path}")
@@ -469,6 +486,9 @@ class DataSource(ABC):
         split_question_sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_split_question_sequence.parquet"
         )
+        split_skill_sequence_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_split_skill_sequence.parquet"
+        )
         windowlate_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_windowlate.parquet"
         )
@@ -479,6 +499,7 @@ class DataSource(ABC):
                 sequence_data_path,
                 question_data_path,
                 split_question_sequence_data_path,
+                split_skill_sequence_data_path,
             ]
         )
         self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
@@ -486,12 +507,16 @@ class DataSource(ABC):
         self._validate_data_integrity(
             split_question_sequence_data_path, "split_question_sequence_data_md5"
         )
+        self._validate_data_integrity(
+            split_skill_sequence_data_path, "split_skill_sequence_data_md5"
+        )
 
         # 加载核心数据
         self._load_parquet_files(
             sequence_data_path,
             question_data_path,
             split_question_sequence_data_path,
+            split_skill_sequence_data_path,
         )
 
         if os.path.exists(windowlate_data_path):
@@ -545,6 +570,7 @@ class DataSource(ABC):
         sequence_path: str,
         question_path: str,
         split_sequence_path: str,
+        split_skill_sequence_path: str,
     ):
         """Load parquet files with error handling."""
         logger.info(f"Loading sequence data: {sequence_path}")
@@ -553,7 +579,15 @@ class DataSource(ABC):
 
         logger.info(f"Loading split sequence data: {split_sequence_path}")
         self.split_question_sequence_data = pl.read_parquet(split_sequence_path)
-        logger.debug(f"Split sequence data shape: {self.split_question_sequence_data.shape}")
+        logger.debug(
+            f"Split sequence data shape: {self.split_question_sequence_data.shape}"
+        )
+
+        logger.info(f"Loading split skill sequence data: {split_skill_sequence_path}")
+        self.split_skill_sequence_data = pl.read_parquet(split_skill_sequence_path)
+        logger.debug(
+            f"Split skill sequence data shape: {self.split_skill_sequence_data.shape}"
+        )
 
         logger.info(f"Loading question data: {question_path}")
         self.question_data = pl.read_parquet(question_path)
@@ -601,6 +635,12 @@ class DataSource(ABC):
         if self.split_question_sequence_data is None:
             self.load_processed_data()
         return self.split_question_sequence_data
+
+    def get_split_skill_sequence_data(self) -> pl.DataFrame:
+        """Get split skill sequence data."""
+        if self.split_skill_sequence_data is None:
+            self.load_processed_data()
+        return self.split_skill_sequence_data
 
     def get_windowlate_data(self) -> pl.LazyFrame:
         """Get windowlate evaluation data.
@@ -730,6 +770,108 @@ class DataSource(ABC):
         logger.debug(f"Split into {final_num_users} sub-sequences")
 
         self.split_question_sequence_data = data
+
+    def build_split_skill_sequence_data(self):
+        """构建切分后的技能序列数据
+
+        1. 先将问题序列展开为技能序列（一个问题可能对应多个技能）
+        2. 然后对展开后的技能序列进行切分
+
+        说明:
+            - 将长度大于 max_seq_len 的用户技能序列切分成多个子序列
+            - 返回切分后的数据及统计信息
+        """
+        max_seq_len = self.args.max_seq_len
+        min_seq_len = self.args.min_seq_len
+
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+        if self.question_data is None:
+            raise ValueError("Question data not available.")
+
+        logger.info(
+            f"Building split skill sequences (max_len={max_seq_len}, min_len={min_seq_len})"
+        )
+
+        # Step 1: 展开问题序列为技能序列
+        # 构建 question -> skills 映射
+        question_skills = self.question_data.group_by("question").agg(
+            pl.col("skill").alias("skills")
+        )
+
+        # 将技能列表展开并与 sequence_data 关联
+        expanded_data = self.sequence_data.join(
+            question_skills, on="question", how="inner"
+        ).explode("skills")
+
+        # 重命名并选择需要的列
+        expanded_data = expanded_data.select(
+            [
+                pl.col("user"),
+                pl.col("skills").alias("skill"),
+                pl.col("label"),
+            ]
+        )
+
+        # Step 2: 添加序列位置列，并计算每个用户的技能序列长度
+        expanded_data = expanded_data.with_columns(
+            pl.int_range(pl.len()).over("user").alias("seq_pos")
+        ).join(
+            expanded_data.group_by("user").agg(pl.len().alias("seq_len")),
+            on="user",
+            how="left",
+        )
+
+        # Step 3: 计算每条记录所属的切分及其长度
+        expanded_data = expanded_data.with_columns(
+            [(pl.col("seq_pos") // max_seq_len).alias("split_idx")]
+        ).with_columns(
+            pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
+            .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
+            .otherwise(max_seq_len)
+            .alias("split_len"),
+        )
+
+        # Step 4: 过滤长度不足的切分
+        valid_splits = (
+            expanded_data.filter(pl.col("split_len") >= min_seq_len)
+            .select(["user", "split_idx"])
+            .unique()
+        )
+
+        # Step 5: 为每个有效切分分配新的用户ID
+        valid_splits = valid_splits.with_row_index("new_user_id").sort(
+            "user", "split_idx"
+        )
+
+        # Step 6: 合并回数据，过滤无效切分的记录
+        expanded_data = expanded_data.join(
+            valid_splits, on=["user", "split_idx"], how="inner"
+        )
+
+        # Step 7: 更新用户ID和位置
+        expanded_data = expanded_data.with_columns(
+            [
+                pl.col("new_user_id").cast(pl.Int32).alias("user"),
+                (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
+            ]
+        ).select(
+            [
+                pl.col("user"),
+                pl.col("skill"),
+                pl.col("label"),
+                pl.col("relative_pos").alias("seq_pos"),
+            ]
+        )
+
+        # 统计切分信息
+        final_num_users = expanded_data["user"].n_unique()
+
+        logger.debug(f"Split into {final_num_users} skill sub-sequences")
+
+        self.split_skill_sequence_data = expanded_data
 
     def build_windowlate_data(self):
         """构建用于 windowlate_auc_mean 评估的样本数据。
