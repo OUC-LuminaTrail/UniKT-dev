@@ -10,13 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import polars as pl
 import requests
 import tqdm
 from sklearn.model_selection import KFold
 
 from utils.core import get_logger
+
+from .windowlate_processor import WindowlateProcessor
 
 logger = get_logger(__name__)
 
@@ -41,6 +42,7 @@ class DataSource(ABC):
         self.sequence_data = None
         self.question_data = None
         self.split_sequence_data = None
+        self.windowlate_data_path = None
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
@@ -126,6 +128,9 @@ class DataSource(ABC):
         split_sequence_path = os.path.join(
             self.data_folder, f"{self.dataset}_split_sequence.parquet"
         )
+        windowlate_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
 
         self.question_data.write_parquet(question_data_path)
         self.sequence_data.write_parquet(sequence_data_path)
@@ -148,13 +153,16 @@ class DataSource(ABC):
         if "template" in self.question_data.columns:
             metadata["num_templates"] = self.question_data["template"].n_unique()
 
-        self.update_metadatas(metadata)
-        self.save_metadata()
-
         logger.debug(f"Saved question_data to: {question_data_path}")
         logger.debug(f"Saved sequence_data to: {sequence_data_path}")
         logger.debug(f"Saved split sequences to: {split_sequence_path}")
+        if os.path.exists(windowlate_data_path):
+            metadata["windowlate_data_md5"] = self.compute_md5(windowlate_data_path)
+            logger.debug(f"Windowlate data already saved to: {windowlate_data_path}")
         logger.info(f"Data saved to {self.data_folder}")
+
+        self.update_metadatas(metadata)
+        self.save_metadata()
 
     @staticmethod
     def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
@@ -447,7 +455,7 @@ class DataSource(ABC):
         """Load processed data files with integrity checks.
 
         Raises:
-            FileNotFoundError: Processed data files not found.
+            FileNotFoundError: Core data files not found.
             ValueError: MD5 checksum mismatch.
         """
         self.load_metadata()
@@ -461,18 +469,36 @@ class DataSource(ABC):
         split_sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_split_sequence.parquet"
         )
+        windowlate_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
 
+        # 验证核心数据文件必须存在
         self._validate_data_files_exist(
-            [sequence_data_path, question_data_path, split_sequence_data_path]
+            [
+                sequence_data_path,
+                question_data_path,
+                split_sequence_data_path,
+            ]
         )
         self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
         self._validate_data_integrity(question_data_path, "question_data_md5")
         self._validate_data_integrity(
             split_sequence_data_path, "split_sequence_data_md5"
         )
+
+        # 加载核心数据
         self._load_parquet_files(
-            sequence_data_path, question_data_path, split_sequence_data_path
+            sequence_data_path,
+            question_data_path,
+            split_sequence_data_path,
         )
+
+        if os.path.exists(windowlate_data_path):
+            self._validate_data_integrity(windowlate_data_path, "windowlate_data_md5")
+            logger.info(f"Loading windowlate data: {windowlate_data_path}")
+            self.windowlate_data = pl.scan_parquet(windowlate_data_path)
+            self.windowlate_data_path = windowlate_data_path
 
     def _validate_data_files_exist(self, file_paths: list[str]):
         """Validate that all required data files exist."""
@@ -515,19 +541,22 @@ class DataSource(ABC):
             )
 
     def _load_parquet_files(
-        self, sequence_path: str, question_path: str, split_sequence_path: str
+        self,
+        sequence_path: str,
+        question_path: str,
+        split_sequence_path: str,
     ):
         """Load parquet files with error handling."""
         logger.info(f"Loading sequence data: {sequence_path}")
-        self.sequence_data = pd.read_parquet(sequence_path)
+        self.sequence_data = pl.read_parquet(sequence_path)
         logger.debug(f"Sequence data shape: {self.sequence_data.shape}")
 
         logger.info(f"Loading split sequence data: {split_sequence_path}")
-        self.split_sequence_data = pd.read_parquet(split_sequence_path)
+        self.split_sequence_data = pl.read_parquet(split_sequence_path)
         logger.debug(f"Split sequence data shape: {self.split_sequence_data.shape}")
 
         logger.info(f"Loading question data: {question_path}")
-        self.question_data = pd.read_parquet(question_path)
+        self.question_data = pl.read_parquet(question_path)
         logger.debug(f"Question data shape: {self.question_data.shape}")
 
     @abstractmethod
@@ -555,23 +584,35 @@ class DataSource(ABC):
 
         return hash_md5.hexdigest()
 
-    def get_sequence_data(self) -> pd.DataFrame:
+    def get_sequence_data(self) -> pl.DataFrame:
         """Get user sequence data."""
         if self.sequence_data is None:
             self.load_processed_data()
         return self.sequence_data
 
-    def get_question_data(self) -> pd.DataFrame:
+    def get_question_data(self) -> pl.DataFrame:
         """Get question metadata."""
         if self.question_data is None:
             self.load_processed_data()
         return self.question_data
 
-    def get_split_sequence_data(self) -> pd.DataFrame:
+    def get_split_sequence_data(self) -> pl.DataFrame:
         """Get split user sequence data."""
         if self.split_sequence_data is None:
             self.load_processed_data()
         return self.split_sequence_data
+
+    def get_windowlate_data(self) -> pl.LazyFrame:
+        """Get windowlate evaluation data.
+
+        Returns:
+            Windowlate evaluation samples (long format).
+            Columns: sample_id, position, skill, response, mask, user_id, group_id, true_label, fold
+        """
+        if self.windowlate_data is None:
+            self.load_processed_data()
+
+        return self.windowlate_data
 
     def update_metadata(self, key: str, value):
         """Update a single metadata entry."""
@@ -689,6 +730,48 @@ class DataSource(ABC):
         logger.debug(f"Split into {final_num_users} sub-sequences")
 
         self.split_sequence_data = data
+
+    def build_windowlate_data(self):
+        """构建用于 windowlate_auc_mean 评估的样本数据。
+
+        数据在此方法中直接流式保存到文件。
+        """
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+        if self.question_data is None:
+            raise ValueError("Question data not available.")
+        if "fold" not in self.sequence_data.columns:
+            raise ValueError(
+                "K-fold labels not found in data. Please call add_kfold_labels() first."
+            )
+
+        # 筛选测试集数据
+        test_data = self.sequence_data.filter(pl.col("fold") == -1)
+        if len(test_data) == 0:
+            raise ValueError("No test-set interactions (fold == -1) found")
+
+        max_seq_len = self.args.max_seq_len
+        logger.info(f"Building windowlate data (max_seq_len={max_seq_len})...")
+
+        # 准备输出路径
+        os.makedirs(self.data_folder, exist_ok=True)
+        output_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
+
+        # 获取配置参数
+        users_per_batch = getattr(self.args, "windowlate_users_per_batch", 1)
+
+        # 构建并直接保存到文件
+        WindowlateProcessor.build(
+            test_data=test_data,
+            question_data=self.question_data,
+            max_seq_len=max_seq_len,
+            output_path=output_path,
+            users_per_batch=users_per_batch,
+        )
 
     def add_kfold_labels(self, n_splits: int = 5, test_ratio: float = 0.2):
         """Add K-fold cross-validation labels with test set separation.

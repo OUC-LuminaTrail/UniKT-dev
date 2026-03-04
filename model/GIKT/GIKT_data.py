@@ -39,7 +39,7 @@ class GIKTModelData(QuestionModelData):
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data()
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
         # 构建异构图
         graph = self.build_hetero_graph(

@@ -27,7 +27,7 @@ class HGIKTSimpleHypergraphData(HGIKTModelData):
         """
         fold_idx = args.fold if args.fold >= 0 else None
 
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data()
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
         import torch
 

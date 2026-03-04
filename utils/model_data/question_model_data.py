@@ -21,9 +21,9 @@ class QuestionModelData(BaseModelData):
         """
         raise NotImplementedError("Subclasses should implement prepare_data method")
 
-    def build_sequence_data(self):
+    def load_sequence_data(self):
         """
-        构建用户答题序列
+        加载用户答题序列
 
         参数:
             max_seq_len: 最大序列长度
@@ -37,7 +37,7 @@ class QuestionModelData(BaseModelData):
         self.logger.info("Building response sequences from split data...")
 
         # 加载切分后的序列数据
-        data = self.data_src.get_split_sequence_data()
+        data = self.data_src.get_split_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_users = data["user"].nunique()
 
@@ -181,7 +181,7 @@ class QuestionModelData(BaseModelData):
             attr_cols = edge_attrs.get(edge_type, [])
             if attr_cols:
                 # 需要从原始数据中提取边属性
-                data = self.data_src.get_sequence_data()
+                data = self.data_src.get_sequence_data().to_pandas()
                 src_col = src_type
                 dst_col = dst_type
 

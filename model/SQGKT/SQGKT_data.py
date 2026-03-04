@@ -42,7 +42,7 @@ class SQGKTModelData(QuestionModelData):
 
         # 构建用户答题序列
         user_sequence, user_response, user_mask, user_id_sequence = (
-            self.build_sequence_data()
+            self.load_sequence_data()
         )
 
         # 构建问题-技能关联矩阵
