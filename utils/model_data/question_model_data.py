@@ -37,7 +37,7 @@ class QuestionModelData(BaseModelData):
         self.logger.info("Building response sequences from split data...")
 
         # 加载切分后的序列数据
-        data = self.data_src.get_split_sequence_data().to_pandas()
+        data = self.data_src.get_split_question_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_users = data["user"].nunique()
 
