@@ -114,7 +114,12 @@ class SimpleKTModelData(SkillModelData):
         train_dataset = SimpleKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = SimpleKTDataset(val_data[0], val_data[1], val_data[2])
         test_dataset = DataLoader(
-            stream_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
+            stream_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True,
+            prefetch_factor=2,
         )
 
         logger.debug(

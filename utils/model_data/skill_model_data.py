@@ -1,9 +1,11 @@
 import os
+from collections.abc import Iterator
 
 import numpy as np
+import pyarrow as pa
 import pyarrow.parquet as pq
 import torch
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, get_worker_info
 
 from utils.core import get_logger
 from utils.data_process import DataSource
@@ -11,7 +13,7 @@ from utils.model_data import BaseModelData
 
 
 class WindowlateIterableDataset(IterableDataset):
-    """Stream windowlate samples from parquet without materializing all samples in memory."""
+    """Stream windowlate samples from parquet."""
 
     def __init__(
         self,
@@ -23,41 +25,44 @@ class WindowlateIterableDataset(IterableDataset):
         self.parquet_path = parquet_path
         self.max_seq_len = max_seq_len
         self.batch_read_rows = batch_read_rows
-        self._num_samples = self._compute_num_samples()
+        self._num_samples = None
+        self._num_row_groups = None
 
-    def _compute_num_samples(self) -> int:
-        import polars as pl
+    def _init_metadata(self) -> None:
+        """延迟初始化元数据"""
+        if self._num_samples is None:
+            import polars as pl
 
-        stats = (
-            pl.scan_parquet(self.parquet_path)
-            .select(pl.col("sample_id").n_unique().alias("num_samples"))
-            .collect(engine="streaming")
-        )
-        return int(stats["num_samples"][0])
+            stats = (
+                pl.scan_parquet(self.parquet_path)
+                .select(pl.col("sample_id").n_unique().alias("num_samples"))
+                .collect(engine="streaming")
+            )
+            self._num_samples = int(stats["num_samples"][0])
+            parquet_file = pq.ParquetFile(self.parquet_path)
+            self._num_row_groups = parquet_file.num_row_groups
 
     def __len__(self) -> int:
+        self._init_metadata()
         return self._num_samples
 
-    def _build_sample_tensors(
-        self,
-        positions: np.ndarray,
-        skills: np.ndarray,
-        responses: np.ndarray,
-        masks: np.ndarray,
-        group_ids: np.ndarray,
-        true_labels: np.ndarray,
-    ):
+    def _build_sample_tensor_fast(
+        self, sample_data: dict[str, np.ndarray]
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """构建样本张量"""
+        positions = sample_data["position"]
+
         sequence = np.zeros(self.max_seq_len, dtype=np.int64)
         response = np.zeros(self.max_seq_len, dtype=np.int64)
         mask = np.zeros(self.max_seq_len, dtype=np.bool_)
         late_group_id = np.full(self.max_seq_len, -1, dtype=np.int64)
         labels = np.zeros(self.max_seq_len, dtype=np.int64)
 
-        sequence[positions] = skills
-        response[positions] = responses
-        mask[positions] = masks.astype(np.bool_)
-        late_group_id[positions] = group_ids
-        labels[positions] = true_labels
+        sequence[positions] = sample_data["skill"]
+        response[positions] = sample_data["response"]
+        mask[positions] = sample_data["mask"].astype(np.bool_)
+        late_group_id[positions] = sample_data["group_id"]
+        labels[positions] = sample_data["true_label"]
 
         return (
             torch.from_numpy(sequence),
@@ -67,95 +72,81 @@ class WindowlateIterableDataset(IterableDataset):
             torch.from_numpy(labels),
         )
 
-    def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
-        if worker_info is not None and worker_info.num_workers > 1:
-            raise RuntimeError(
-                "WindowlateIterableDataset does not support num_workers > 1. "
-                "Please use DataLoader(..., num_workers=0)."
-            )
+    def _read_batch_arrays(self, table: pa.Table) -> dict[str, np.ndarray]:
+        """高效读取 Table 为 numpy 数组"""
+        return {
+            "sample_id": table.column("sample_id").to_numpy(),
+            "position": table.column("position").to_numpy(),
+            "skill": table.column("skill").to_numpy(),
+            "response": table.column("response").to_numpy(),
+            "mask": table.column("mask").to_numpy(),
+            "group_id": table.column("group_id").to_numpy(),
+            "true_label": table.column("true_label").to_numpy(),
+        }
 
+    def _iter_row_groups(
+        self, row_group_indices: list[int]
+    ) -> Iterator[dict[str, np.ndarray]]:
+        """迭代指定的 row groups，返回批量数据"""
         parquet_file = pq.ParquetFile(self.parquet_path)
-        columns = [
-            "sample_id",
-            "position",
-            "skill",
-            "response",
-            "mask",
-            "group_id",
-            "true_label",
-        ]
 
-        current_sample_id = None
-        pos_buf = []
-        skill_buf = []
-        resp_buf = []
-        mask_buf = []
-        group_buf = []
-        label_buf = []
+        for rg_idx in row_group_indices:
+            table = parquet_file.read_row_group(rg_idx)
+            yield self._read_batch_arrays(table)
 
-        def _flush_current():
-            if current_sample_id is None:
-                return None
-            return self._build_sample_tensors(
-                positions=np.asarray(pos_buf, dtype=np.int64),
-                skills=np.asarray(skill_buf, dtype=np.int64),
-                responses=np.asarray(resp_buf, dtype=np.int64),
-                masks=np.asarray(mask_buf, dtype=np.int8),
-                group_ids=np.asarray(group_buf, dtype=np.int64),
-                true_labels=np.asarray(label_buf, dtype=np.int64),
-            )
+    def _process_batch(
+        self, batch: dict[str, np.ndarray]
+    ) -> Iterator[
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+    ]:
+        """处理一个批量数据，yield 单个样本"""
+        sample_ids = batch["sample_id"]
+        if sample_ids.size == 0:
+            return
 
-        for record_batch in parquet_file.iter_batches(
-            batch_size=self.batch_read_rows, columns=columns
-        ):
-            batch = record_batch.to_pydict()
-            sample_ids = np.asarray(batch["sample_id"], dtype=np.int64)
-            positions = np.asarray(batch["position"], dtype=np.int64)
-            skills = np.asarray(batch["skill"], dtype=np.int64)
-            responses = np.asarray(batch["response"], dtype=np.int64)
-            masks = np.asarray(batch["mask"], dtype=np.int8)
-            group_ids = np.asarray(batch["group_id"], dtype=np.int64)
-            true_labels = np.asarray(batch["true_label"], dtype=np.int64)
+        # 找到 sample_id 变化的边界
+        boundaries = np.flatnonzero(sample_ids[1:] != sample_ids[:-1]) + 1
+        starts = np.concatenate(([0], boundaries))
+        ends = np.concatenate((boundaries, [sample_ids.size]))
 
-            if sample_ids.size == 0:
-                continue
+        # 预分配样本数据字典
+        sample_data = {
+            "position": None,
+            "skill": None,
+            "response": None,
+            "mask": None,
+            "group_id": None,
+            "true_label": None,
+        }
 
-            boundaries = np.flatnonzero(sample_ids[1:] != sample_ids[:-1]) + 1
-            starts = np.concatenate(([0], boundaries))
-            ends = np.concatenate((boundaries, [sample_ids.size]))
+        for start, end in zip(starts, ends, strict=False):
+            sample_data["position"] = batch["position"][start:end]
+            sample_data["skill"] = batch["skill"][start:end]
+            sample_data["response"] = batch["response"][start:end]
+            sample_data["mask"] = batch["mask"][start:end]
+            sample_data["group_id"] = batch["group_id"][start:end]
+            sample_data["true_label"] = batch["true_label"][start:end]
 
-            for start, end in zip(starts, ends, strict=False):
-                sid = int(sample_ids[start])
-                if current_sample_id is not None and sid < current_sample_id:
-                    raise ValueError(
-                        "windowlate parquet must be sorted by sample_id. "
-                        f"Found out-of-order sample_id {sid} after {current_sample_id}."
-                    )
-                if current_sample_id is None:
-                    current_sample_id = sid
-                elif sid != current_sample_id:
-                    sample = _flush_current()
-                    if sample is not None:
-                        yield sample
-                    current_sample_id = sid
-                    pos_buf.clear()
-                    skill_buf.clear()
-                    resp_buf.clear()
-                    mask_buf.clear()
-                    group_buf.clear()
-                    label_buf.clear()
+            yield self._build_sample_tensor_fast(sample_data)
 
-                pos_buf.extend(positions[start:end].tolist())
-                skill_buf.extend(skills[start:end].tolist())
-                resp_buf.extend(responses[start:end].tolist())
-                mask_buf.extend(masks[start:end].tolist())
-                group_buf.extend(group_ids[start:end].tolist())
-                label_buf.extend(true_labels[start:end].tolist())
+    def __iter__(self):
+        self._init_metadata()
+        worker_info = get_worker_info()
 
-        sample = _flush_current()
-        if sample is not None:
-            yield sample
+        # 确定要处理的 row groups
+        if worker_info is not None and worker_info.num_workers > 0:
+            # 多进程模式：每个 worker 处理部分 row groups
+            worker_id = worker_info.id
+            num_workers = worker_info.num_workers
+            all_row_groups = list(range(self._num_row_groups))
+            row_group_indices = all_row_groups[worker_id::num_workers]
+        else:
+            # 单进程模式：处理所有 row groups
+            row_group_indices = list(range(self._num_row_groups))
+
+        # 迭代处理分配的 row groups
+        for batch in self._iter_row_groups(row_group_indices):
+            yield from self._process_batch(batch)
 
 
 class SkillModelData(BaseModelData):

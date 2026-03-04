@@ -119,7 +119,12 @@ class GKTModelData(SkillModelData):
         train_dataset = GKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = GKTDataset(val_data[0], val_data[1], val_data[2])
         test_dataset = DataLoader(
-            window_test_data, batch_size=args.batch_size, shuffle=False
+            window_test_data,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True,
+            prefetch_factor=2,
         )
 
         logger.debug(
