@@ -46,34 +46,34 @@ class WindowlateIterableDataset(IterableDataset):
         self._init_metadata()
         return self._num_samples
 
-    def _build_sample_tensor_fast(
-        self, sample_data: dict[str, np.ndarray]
+    def _build_single_tensor(
+        self, sample: dict[str, np.ndarray]
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """构建样本张量"""
-        positions = sample_data["position"]
+        """构建单个样本张量"""
+        positions = sample["position"]
 
         sequence = np.zeros(self.max_seq_len, dtype=np.int64)
         response = np.zeros(self.max_seq_len, dtype=np.int64)
         mask = np.zeros(self.max_seq_len, dtype=np.bool_)
         late_group_id = np.full(self.max_seq_len, -1, dtype=np.int64)
-        labels = np.zeros(self.max_seq_len, dtype=np.int64)
+        label = np.zeros(self.max_seq_len, dtype=np.int64)
 
-        sequence[positions] = sample_data["skill"]
-        response[positions] = sample_data["response"]
-        mask[positions] = sample_data["mask"].astype(np.bool_)
-        late_group_id[positions] = sample_data["group_id"]
-        labels[positions] = sample_data["true_label"]
+        sequence[positions] = sample["skill"]
+        response[positions] = sample["response"]
+        mask[positions] = sample["mask"].astype(np.bool_)
+        late_group_id[positions] = sample["group_id"]
+        label[positions] = sample["true_label"]
 
         return (
             torch.from_numpy(sequence),
             torch.from_numpy(response),
             torch.from_numpy(mask),
             torch.from_numpy(late_group_id),
-            torch.from_numpy(labels),
+            torch.from_numpy(label),
         )
 
     def _read_batch_arrays(self, table: pa.Table) -> dict[str, np.ndarray]:
-        """高效读取 Table 为 numpy 数组"""
+        """读取 Table 为 numpy 数组"""
         return {
             "sample_id": table.column("sample_id").to_numpy(),
             "position": table.column("position").to_numpy(),
@@ -99,7 +99,7 @@ class WindowlateIterableDataset(IterableDataset):
     ) -> Iterator[
         tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ]:
-        """处理一个批量数据，yield 单个样本"""
+        """处理一个批量数据，逐个 yield 样本"""
         sample_ids = batch["sample_id"]
         if sample_ids.size == 0:
             return
@@ -127,7 +127,7 @@ class WindowlateIterableDataset(IterableDataset):
             sample_data["group_id"] = batch["group_id"][start:end]
             sample_data["true_label"] = batch["true_label"][start:end]
 
-            yield self._build_sample_tensor_fast(sample_data)
+            yield self._build_single_tensor(sample_data)
 
     def __iter__(self):
         self._init_metadata()
