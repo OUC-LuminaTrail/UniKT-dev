@@ -144,7 +144,6 @@ class DataSource(ABC):
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
             "split_sequence_data_md5": self.compute_md5(split_sequence_path),
-            "windowlate_data_md5": self.compute_md5(windowlate_data_path),
             "num_users": self.sequence_data["user"].n_unique(),
             "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
@@ -154,14 +153,16 @@ class DataSource(ABC):
         if "template" in self.question_data.columns:
             metadata["num_templates"] = self.question_data["template"].n_unique()
 
-        self.update_metadatas(metadata)
-        self.save_metadata()
-
         logger.debug(f"Saved question_data to: {question_data_path}")
         logger.debug(f"Saved sequence_data to: {sequence_data_path}")
         logger.debug(f"Saved split sequences to: {split_sequence_path}")
-        logger.debug(f"Windowlate data already saved to: {windowlate_data_path}")
+        if os.path.exists(windowlate_data_path):
+            metadata["windowlate_data_md5"] = self.compute_md5(windowlate_data_path)
+            logger.debug(f"Windowlate data already saved to: {windowlate_data_path}")
         logger.info(f"Data saved to {self.data_folder}")
+
+        self.update_metadatas(metadata)
+        self.save_metadata()
 
     @staticmethod
     def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
@@ -485,7 +486,6 @@ class DataSource(ABC):
         self._validate_data_integrity(
             split_sequence_data_path, "split_sequence_data_md5"
         )
-        self._validate_data_integrity(windowlate_data_path, "windowlate_data_md5")
 
         # 加载核心数据
         self._load_parquet_files(
@@ -494,9 +494,11 @@ class DataSource(ABC):
             split_sequence_data_path,
         )
 
-        logger.info(f"Loading windowlate data: {windowlate_data_path}")
-        self.windowlate_data = pl.scan_parquet(windowlate_data_path)
-        self.windowlate_data_path = windowlate_data_path
+        if os.path.exists(windowlate_data_path):
+            self._validate_data_integrity(windowlate_data_path, "windowlate_data_md5")
+            logger.info(f"Loading windowlate data: {windowlate_data_path}")
+            self.windowlate_data = pl.scan_parquet(windowlate_data_path)
+            self.windowlate_data_path = windowlate_data_path
 
     def _validate_data_files_exist(self, file_paths: list[str]):
         """Validate that all required data files exist."""

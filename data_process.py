@@ -57,6 +57,9 @@ def build_parser():
     proc = subparsers.add_parser(
         "process", help="Process raw data into standardized format"
     )
+    proc.add_argument(
+        "--extra", type=list, default=["windowslate"], help="Extra processing steps"
+    )
     DataParams.add_args(proc)
     GeneralParams.add_args(proc)
     SamplingParams.add_args(proc)
@@ -111,7 +114,8 @@ def cmd_process(args):
         dp.add_kfold_labels(n_splits=args.kfold)
 
     dp.build_split_sequence_data()
-    dp.build_windowlate_data()
+    if "windowslate" in args.extra:
+        dp.build_windowlate_data()
 
     dp.save_data()
 
