@@ -3,7 +3,7 @@
 from typing import Any
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 from typing_extensions import override
 
 from utils.core import get_logger
@@ -108,17 +108,13 @@ class SimpleKTModelData(SkillModelData):
             raise ValueError("K-fold cross-validation is not enabled.")
 
         # 构建 windowlate 评估数据
-        window_test_data = self.load_windowlate_data(args.max_seq_len)
+        stream_dataset = self.create_windowlate_iterable_dataset(args.max_seq_len)
 
         # 构建模型数据集
         train_dataset = SimpleKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = SimpleKTDataset(val_data[0], val_data[1], val_data[2])
-        test_dataset = SimpleKTDataset(
-            window_test_data[0],
-            window_test_data[1],
-            window_test_data[2],
-            window_test_data[4],  # late_group_ids
-            window_test_data[5],  # true_labels
+        test_dataset = DataLoader(
+            stream_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0
         )
 
         logger.debug(

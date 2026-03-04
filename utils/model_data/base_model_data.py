@@ -49,7 +49,7 @@ class BaseModelData(ABC):
             )
 
         # 加载数据以获取折信息
-        data = self.data_src.get_sequence_data()
+        data = self.data_src.get_sequence_data().to_pandas()
         # 检查是否已添加fold列
         if "fold" not in data.columns:
             raise ValueError(
@@ -249,7 +249,7 @@ class BaseModelData(ABC):
         """
         import tqdm
 
-        data = self.data_src.get_sequence_data()
+        data = self.data_src.get_sequence_data().to_pandas()
 
         # 如果指定了排除的fold，则过滤掉该fold的数据
         if exclude_fold is not None and "fold" in data.columns:
@@ -323,7 +323,7 @@ class BaseModelData(ABC):
         import numpy as np
         from tqdm import tqdm
 
-        data = self.data_src.get_question_data()
+        data = self.data_src.get_question_data().to_pandas()
 
         src_type, _, dst_type = edge_type
 
