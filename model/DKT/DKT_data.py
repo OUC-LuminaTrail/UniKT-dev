@@ -110,7 +110,7 @@ class DKTModelData(SkillModelData):
             raise ValueError("K-fold cross-validation is not enabled.")
 
         # 构建 windowlate 评估数据
-        window_test_data = self.build_windowlate_data(args.max_seq_len)
+        window_test_data = self.load_windowlate_data(args.max_seq_len)
 
         # 构建模型数据集
         train_dataset = DKTDataset(train_data[0], train_data[1], train_data[2])

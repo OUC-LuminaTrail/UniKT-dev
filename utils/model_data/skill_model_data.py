@@ -87,9 +87,9 @@ class SkillModelData(BaseModelData):
 
         return user_sequence, user_response, user_mask, user_id_sequence
 
-    def build_windowlate_data(self, max_seq_len: int):
+    def load_windowlate_data(self, max_seq_len: int):
         r"""
-        构建用于 windowlateauc_mean 评估的样本。
+        加载用于 windowlateauc_mean 评估的样本。
 
         从预处理的 Parquet 文件加载滑动窗口数据，并转换为 numpy 数组。
 
@@ -114,32 +114,52 @@ class SkillModelData(BaseModelData):
                 "No windowlate data available. Please re-run preprocessing with K-fold labels."
             )
 
+        required_cols = [
+            "sample_id",
+            "position",
+            "skill",
+            "response",
+            "mask",
+            "user_id",
+            "group_id",
+            "true_label",
+        ]
+        data = data[required_cols]
+
+        # 转为 numpy 数组
+        sample_ids = data["sample_id"].to_numpy(copy=False)
+        positions = data["position"].to_numpy(copy=False)
+
         # 获取样本数量
-        num_samples = data["sample_id"].n_unique()
+        sample_id_series = data["sample_id"]
+        num_samples = sample_id_series.n_unique()
+        num_samples = int(num_samples)
+
+        # sample_id 直接作为行索引，要求是 [0, num_samples) 连续编号
+        max_sample_id = int(sample_ids.max())
+        if max_sample_id >= num_samples:
+            raise ValueError(
+                "Invalid sample_id values. Expected contiguous sample_id in "
+                f"[0, {num_samples}), but got max(sample_id)={max_sample_id}."
+            )
 
         # 初始化数组
-        user_sequence = np.zeros((num_samples, max_seq_len), dtype=int)
-        user_response = np.zeros((num_samples, max_seq_len), dtype=int)
-        user_mask = np.zeros((num_samples, max_seq_len), dtype=int)
-        user_id_sequence = np.zeros((num_samples, max_seq_len), dtype=int)
+        user_sequence = np.zeros((num_samples, max_seq_len), dtype=np.int32)
+        user_response = np.zeros((num_samples, max_seq_len), dtype=np.int8)
+        user_mask = np.zeros((num_samples, max_seq_len), dtype=np.int8)
+        user_id_sequence = np.zeros((num_samples, max_seq_len), dtype=np.int32)
         late_group_id = np.full((num_samples, max_seq_len), -1, dtype=np.int64)
-        user_true_labels = np.zeros((num_samples, max_seq_len), dtype=int)
+        user_true_labels = np.zeros((num_samples, max_seq_len), dtype=np.int8)
 
-        # 将长格式数据转换为二维数组
-        # 按 sample_id 和 position 排序
-        data = data.sort_values(["sample_id", "position"])
-
-        # 填充数组
-        for sample_id, sample_df in data.groupby("sample_id", sort=False):
-            sample_df = sample_df.sort_values("position")
-            positions = sample_df["position"].values
-
-            user_sequence[sample_id, positions] = sample_df["skill"].values
-            user_response[sample_id, positions] = sample_df["response"].values
-            user_mask[sample_id, positions] = sample_df["mask"].values
-            user_id_sequence[sample_id, positions] = sample_df["user_id"].values
-            late_group_id[sample_id, positions] = sample_df["group_id"].values
-            user_true_labels[sample_id, positions] = sample_df["true_label"].values
+        # 填充数据
+        user_sequence[sample_ids, positions] = data["skill"].to_numpy(copy=False)
+        user_response[sample_ids, positions] = data["response"].to_numpy(copy=False)
+        user_mask[sample_ids, positions] = data["mask"].to_numpy(copy=False)
+        user_id_sequence[sample_ids, positions] = data["user_id"].to_numpy(copy=False)
+        late_group_id[sample_ids, positions] = data["group_id"].to_numpy(copy=False)
+        user_true_labels[sample_ids, positions] = data["true_label"].to_numpy(
+            copy=False
+        )
 
         self.logger.debug(
             f"Loaded windowlate data: samples={num_samples}, max_seq_len={max_seq_len}"

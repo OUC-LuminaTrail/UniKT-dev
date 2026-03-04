@@ -21,9 +21,9 @@ class QuestionModelData(BaseModelData):
         """
         raise NotImplementedError("Subclasses should implement prepare_data method")
 
-    def build_sequence_data(self):
+    def load_sequence_data(self):
         """
-        构建用户答题序列
+        加载用户答题序列
 
         参数:
             max_seq_len: 最大序列长度

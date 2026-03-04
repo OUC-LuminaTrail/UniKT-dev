@@ -40,7 +40,7 @@ class GIKTEdmineModelData(QuestionModelData):
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data()
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
         # 构建问题-技能关联矩阵
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
