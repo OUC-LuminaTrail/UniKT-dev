@@ -760,8 +760,7 @@ class DataSource(ABC):
         )
 
         # 获取配置参数
-        num_workers = getattr(self.args, "windowlate_num_workers", 0)
-        users_per_batch = getattr(self.args, "windowlate_users_per_batch", 8)
+        users_per_batch = getattr(self.args, "windowlate_users_per_batch", 1)
 
         # 构建并直接保存到文件
         WindowlateProcessor.build(
@@ -769,7 +768,6 @@ class DataSource(ABC):
             question_data=self.question_data,
             max_seq_len=max_seq_len,
             output_path=output_path,
-            num_workers=num_workers,
             users_per_batch=users_per_batch,
         )
 
