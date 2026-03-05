@@ -650,7 +650,7 @@ class DataSource(ABC):
     def sample_users(
         self,
         n_samples: int,
-        stratify: bool = True,
+        random_sample: bool = False,
         attempts_bins: list = [20, 100],
         correct_bins: list = [0.4, 0.8],
     ):
@@ -683,17 +683,18 @@ class DataSource(ABC):
 
         original_records = len(self.sequence_data)
 
-        if stratify:
-            sampled_users = self._sample_users_stratified(
-                user_stats, n_samples, attempts_bins, correct_bins
-            )
-        else:
-            logger.info("Performing simple random sampling without stratification.")
+        if random_sample:
+            logger.info("Performing simple random sampling.")
             sampled_users = (
                 user_stats.sample(n=n_samples, seed=self.seed)
                 .select("user")
                 .to_series()
                 .to_list()
+            )
+        else:
+            logger.info("Performing stratified sampling.")
+            sampled_users = self._sample_users_stratified(
+                user_stats, n_samples, attempts_bins, correct_bins
             )
 
         self._apply_sampling_to_data(
