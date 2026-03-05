@@ -1015,7 +1015,7 @@ class DataSource(ABC):
     def sample_users(
         self,
         n_samples: int,
-        random_sample: bool = False,
+        sample_strategy: str = "random",
         attempts_bins: list = [20, 100],
         correct_bins: list = [0.4, 0.8],
     ):
@@ -1025,14 +1025,14 @@ class DataSource(ABC):
 
         Args:
             n_samples: Number of users to sample.
-            stratify: Enable stratified sampling (default: True).
+            sample_strategy: Sampling strategy (default: "random").
             attempts_bins: Attempt count bin edges.
             correct_bins: Correct rate bin edges.
 
         Raises:
             ValueError: If n_samples exceeds total users or data not loaded.
         """
-        logger.info(f"Sampling {n_samples} users from dataset...")
+        logger.info(f"Sampling {n_samples} users from dataset, strategy={sample_strategy}")
 
         user_stats = self.get_user_stats()
         total_users = len(user_stats)
@@ -1048,19 +1048,19 @@ class DataSource(ABC):
 
         original_records = len(self.sequence_data)
 
-        if random_sample:
-            logger.info("Performing simple random sampling.")
+        if sample_strategy == "random":
             sampled_users = (
                 user_stats.sample(n=n_samples, seed=self.seed)
                 .select("user")
                 .to_series()
                 .to_list()
             )
-        else:
-            logger.info("Performing stratified sampling.")
+        elif sample_strategy == "stratified":
             sampled_users = self._sample_users_stratified(
                 user_stats, n_samples, attempts_bins, correct_bins
             )
+        else:
+            raise ValueError(f"Unsupported sample strategy: {sample_strategy}")
 
         self._apply_sampling_to_data(
             sampled_users, n_samples, total_users, original_records

@@ -105,7 +105,7 @@ def cmd_process(args):
     if args.sample_users is not None and args.sample_users > 0:
         dp.sample_users(
             args.sample_users,
-            random_sample=args.random_sample,
+            sample_strategy=args.sample_strategy,
             attempts_bins=args.sample_attempts_bins,
             correct_bins=args.sample_correct_bins,
         )
