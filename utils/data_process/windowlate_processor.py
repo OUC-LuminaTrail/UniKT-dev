@@ -303,7 +303,13 @@ class WindowlateProcessor:
         if num_workers <= 0:
             num_workers = max(1, os.cpu_count() or 1)
 
-        with tempfile.TemporaryDirectory(prefix="windowlate_chunks_") as tmp_dir:
+        # 将中间分块写到输出文件同级目录，避免落在系统临时目录。
+        tmp_base_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+        os.makedirs(tmp_base_dir, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(
+            prefix="windowlate_chunks_", dir=tmp_base_dir
+        ) as tmp_dir:
             # 预处理：提取用户数据并计算偏移
             user_records, global_sample_id, global_group_id = cls._prepare_user_records(
                 sorted_test_data, max_seq_len
