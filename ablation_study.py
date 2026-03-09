@@ -1,7 +1,7 @@
 """Ablation study runner - main entry point.
 
 Run batch ablation experiments using model variants.
-Dataset must be specified via command line argument.
+Dataset and fold must be specified via command line arguments.
 """
 
 import argparse
@@ -32,19 +32,27 @@ def main():
         ],
         help="Dataset name (required)",
     )
+    parser.add_argument(
+        "-f",
+        "--fold",
+        type=int,
+        default=0,
+        help="Fold index for K-Fold cross-validation (default: 0)",
+    )
     args = parser.parse_args()
 
     if not args.config:
         parser.error("--config is required")
 
-    # Load config
-    config = load_config(args.config, dataset=args.dataset)
+    # Load config with required dataset and fold parameters
+    config = load_config(args.config, dataset=args.dataset, fold=args.fold)
 
     # Print study info
     logger.info(f"{'=' * 60}")
     logger.info(f"Ablation Study: {config.study_name}")
     logger.info(f"Base Model: {config.base_model}")
     logger.info(f"Dataset: {config.dataset}")
+    logger.info(f"Fold: {config.fold}")
     logger.info(f"Number of ablations: {len(config.ablations)}")
     logger.info(f"{'=' * 60}")
 

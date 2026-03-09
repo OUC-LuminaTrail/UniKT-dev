@@ -5,7 +5,6 @@
     "epochs": 120,
     "learning_rate": 0.0003,
     "batch_size": 64,
-    "fold": 0,
     "seed": 42,
     "hidden_dim": 250,
     "n_hop": 4,

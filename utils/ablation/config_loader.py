@@ -6,15 +6,18 @@ from pathlib import Path
 from utils.ablation.config import AblationConfig, AblationStudyConfig
 
 
-def load_config(config_path: str, dataset: str) -> AblationStudyConfig:
+def load_config(
+    config_path: str, dataset: str, fold: int = 0
+) -> AblationStudyConfig:
     """Load ablation study config from JSON.
 
-    Dataset must be provided as parameter, not from the config file.
+    Dataset and fold must be provided as parameters, not from the config file.
     Config file should contain study_name, base_model, shared_params, and ablations.
 
     Args:
         config_path: Path to JSON config file
         dataset: Dataset name (must be provided from command line)
+        fold: Fold index for K-Fold cross-validation (default: 0)
 
     Returns:
         AblationStudyConfig instance
@@ -26,9 +29,10 @@ def load_config(config_path: str, dataset: str) -> AblationStudyConfig:
         ValueError: If dataset is not provided
 
     Example:
-        >>> config = load_config("configs/ablation/hgikt_study.json", dataset="assistments09")
+        >>> config = load_config("configs/ablation/hgikt_study.json", dataset="assistments09", fold=0)
         >>> print(config.study_name)
         >>> print(config.dataset)  # returns "assistments09"
+        >>> print(config.fold)  # returns 0
     """
     if not dataset:
         raise ValueError("Dataset must be provided from command line")
@@ -45,6 +49,13 @@ def load_config(config_path: str, dataset: str) -> AblationStudyConfig:
     missing_fields = [f for f in required_fields if f not in data]
     if missing_fields:
         raise KeyError(f"Missing required fields: {missing_fields}")
+
+    # Parse shared params and merge with command line parameters
+    shared_params = data.get("shared_params", {}).copy()
+
+    # Set dataset and fold from command line
+    shared_params["dataset"] = dataset
+    shared_params["fold"] = fold
 
     # Parse ablation configs
     ablations = []
@@ -64,6 +75,7 @@ def load_config(config_path: str, dataset: str) -> AblationStudyConfig:
         study_name=data["study_name"],
         base_model=data["base_model"],
         dataset=dataset,
-        shared_params=data.get("shared_params", {}),
+        fold=fold,
+        shared_params=shared_params,
         ablations=ablations,
     )
