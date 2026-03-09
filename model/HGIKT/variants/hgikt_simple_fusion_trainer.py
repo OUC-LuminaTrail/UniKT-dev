@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_SimpleHypergraph variant."""
+"""Trainer for HGIKT_SimpleFusion variant."""
 
 from typing import Any
 
@@ -11,12 +11,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_SimpleHypergraph")
-class HGIKTSimpleHypergraphModelParams(BaseParamConfig):
-    """HGIKT_SimpleHypergraph model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_SimpleFusion")
+class HGIKTSimpleFusionModelParams(BaseParamConfig):
+    """HGIKT_SimpleFusion model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "HGIKT_SimpleHypergraph Parameters"
+        group_name = "HGIKT_SimpleFusion Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -97,12 +97,11 @@ class HGIKTSimpleHypergraphModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_SimpleHypergraph")
-class HGIKTSimpleHypergraphTrainer(BaseTrainer):
-    """Trainer for HGIKT with simple hypergraph (no difficulty weighting).
+@TRAINERS.register("HGIKT_SimpleFusion")
+class HGIKTSimpleFusionTrainer(BaseTrainer):
+    """Trainer for HGIKT with simple addition fusion.
 
-    Uses custom data preparation (HGIKTSimpleHypergraphData) to build
-    simple hypergraph without difficulty clustering.
+    Uses same data preparation as HGIKT, but variant model without MoE.
     """
 
     def __init__(
@@ -111,11 +110,9 @@ class HGIKTSimpleHypergraphTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        from model.HGIKT.variants.hgikt_simple_hypergraph_data import (
-            HGIKTSimpleHypergraphData,
-        )
+        from model.HGIKT.HGIKT_data import HGIKTModelData
 
-        model_data = HGIKTSimpleHypergraphData(data_src)
+        model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         train_dataset = data_dict["train_dataset"]
@@ -124,10 +121,10 @@ class HGIKTSimpleHypergraphTrainer(BaseTrainer):
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        from model.HGIKT.variants.hgikt_simple_hypergraph import HGIKT_SimpleHypergraph
+        from model.HGIKT.variants.hgikt_simple_fusion import HGIKT_SimpleFusion
 
-        logger.info("Initializing HGIKT_SimpleHypergraph model...")
-        model = HGIKT_SimpleHypergraph(
+        logger.info("Initializing HGIKT_SimpleFusion model...")
+        model = HGIKT_SimpleFusion(
             args, data_src.get_metadata(), self.hetero_graph.metadata()
         )
 
@@ -171,7 +168,7 @@ class HGIKTSimpleHypergraphTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_SimpleHypergraph",
+            model_name="HGIKT_SimpleFusion",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 

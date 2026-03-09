@@ -1,10 +1,11 @@
-"""HGIKT variant with heterogeneous graph branch only (question-skill edges only)."""
+"""HGIKT variant with simple addition fusion."""
 
 from typing import Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from dhg.nn import HGNNConv
 from torch_geometric.nn import HGTConv, Linear
 
 from model.layers import GeneralInteraction, HistoryRecap
@@ -55,12 +56,40 @@ class HeteroGNN(nn.Module):
         return x_dict
 
 
-@register_model("HGIKT_QuestionSkillOnly")
-class HGIKT_QuestionSkillOnly(nn.Module):
-    """HGIKT variant with only heterogeneous graph for knowledge representation.
+class HyperGNN(nn.Module):
+    """Based on HGIKT HyperGNN module."""
 
-    This variant uses only the heterogeneous graph (with question-skill edges only).
-    The hypergraph branch is removed, and MoE fusion is bypassed.
+    def __init__(
+        self,
+        in_ch: int,
+        n_hid: int,
+        n_class: int,
+        dropout: float = 0.0,
+        use_edge_weights: bool = True,
+    ) -> None:
+        super().__init__()
+        self.use_edge_weights = use_edge_weights
+
+        self.hgc1 = HGNNConv(
+            in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False
+        )
+        self.hgc2 = HGNNConv(
+            n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True
+        )
+
+    def forward(self, x: torch.Tensor, hg: Any) -> torch.Tensor:
+        """Forward pass."""
+        x1 = self.hgc1(x, hg)
+        x2 = F.relu(self.hgc2(x1, hg))
+        return x2
+
+
+@register_model("HGIKT_SimpleFusion")
+class HGIKT_SimpleFusion(nn.Module):
+    """HGIKT variant with simple addition fusion.
+
+    This variant replaces MoE fusion with simple element-wise addition.
+    The two graph representations are directly added together.
     """
 
     def __init__(
@@ -90,8 +119,6 @@ class HGIKT_QuestionSkillOnly(nn.Module):
             num_embeddings=data_metadata["num_skills"],
             embedding_dim=self.hidden_dim,
         )
-        # Note: assignment and template embeddings are still included but not used
-        # due to only question-skill edges in hetero graph
         self.assignment_embedding = nn.Embedding(
             num_embeddings=data_metadata["num_assignments"],
             embedding_dim=self.hidden_dim,
@@ -106,7 +133,6 @@ class HGIKT_QuestionSkillOnly(nn.Module):
         )
         self.embedding_dropout = nn.Dropout(p=self.dropout)
 
-        # Hetero graph module (unchanged)
         self.hetero_conv = HeteroGNN(
             embedding_dim=self.hidden_dim,
             n_hop=args.n_hop,
@@ -115,9 +141,14 @@ class HGIKT_QuestionSkillOnly(nn.Module):
             metadata=hetero_metadata,
         )
 
-        # Hypergraph module disabled (no hgnn_conv)
+        self.hgnn_conv = HyperGNN(
+            in_ch=self.hidden_dim,
+            n_hid=self.hidden_dim,
+            n_class=self.hidden_dim,
+            dropout=self.dropout,
+        )
 
-        # Fusion module disabled (no fuse)
+        # Fusion module disabled (use simple addition)
 
         self.fc_exercise = Linear(
             self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
@@ -144,20 +175,22 @@ class HGIKT_QuestionSkillOnly(nn.Module):
         user_response: torch.Tensor,
         user_mask: torch.Tensor,
         hetero_graph: Any,
-        hypergraph: Any,  # Unused in this variant
+        hypergraph: Any,
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass without hypergraph computation.
+        """Forward pass with simple addition fusion.
 
         Key differences from parent HGIKT:
-        1. Skip hgnn_conv computation
-        2. Skip fusion (use only hetero graph features)
+        Replace MoE fusion with simple addition.
         """
         B, _ = user_sequence.size()
 
         answers_embedding = self.answer_embedding(user_response)
 
-        # Hetero graph convolution (with only question-skill edges)
+        question_hyper_conv: torch.Tensor = self.hgnn_conv(
+            self.question_embedding_hyper.weight, hypergraph
+        )
+
         conv = self.hetero_conv(
             {
                 "question": self.question_embedding.weight,
@@ -170,8 +203,8 @@ class HGIKT_QuestionSkillOnly(nn.Module):
         question_hetero_conv = conv["question"]
         skill_hetero_conv = conv["skill"]
 
-        # Use only hetero graph features
-        question_conv_fused = question_hetero_conv
+        # Simple addition fusion
+        question_conv_fused = question_hetero_conv + question_hyper_conv
 
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(

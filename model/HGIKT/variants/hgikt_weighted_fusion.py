@@ -1,4 +1,4 @@
-"""HGIKT variant without MoE fusion module."""
+"""HGIKT variant with learnable weighted addition fusion."""
 
 from typing import Any
 
@@ -84,13 +84,12 @@ class HyperGNN(nn.Module):
         return x2
 
 
-@register_model("HGIKT_NoMoE")
-class HGIKT_NoMoE(nn.Module):
-    """HGIKT variant without MoE fusion module.
+@register_model("HGIKT_WeightedFusion")
+class HGIKT_WeightedFusion(nn.Module):
+    """HGIKT variant with learnable weighted addition fusion.
 
-    This variant replaces the MoE fusion with simple addition.
-    The two graph representations are directly added instead of
-    using the Mixture-of-Experts fusion mechanism.
+    This variant replaces MoE fusion with learnable weighted addition.
+    The two graph representations are fused with learnable weights.
     """
 
     def __init__(
@@ -149,6 +148,10 @@ class HGIKT_NoMoE(nn.Module):
             dropout=self.dropout,
         )
 
+        # Learnable weights for fusion
+        self.hetero_weight = nn.Parameter(torch.tensor(0.5))
+        self.hyper_weight = nn.Parameter(torch.tensor(0.5))
+
         self.fc_exercise = Linear(
             self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
         )
@@ -177,10 +180,10 @@ class HGIKT_NoMoE(nn.Module):
         hypergraph: Any,
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass without MoE fusion.
+        """Forward pass with learnable weighted fusion.
 
         Key differences from parent HGIKT:
-        1. Replace MoE fusion with simple addition (line 355-357 in original)
+        Replace MoE fusion with learnable weighted addition.
         """
         B, _ = user_sequence.size()
 
@@ -202,10 +205,11 @@ class HGIKT_NoMoE(nn.Module):
         question_hetero_conv = conv["question"]
         skill_hetero_conv = conv["skill"]
 
-        # === MODIFIED: Replace MoE fusion with simple addition ===
-        question_conv_fused = (
-            question_hetero_conv + question_hyper_conv
-        )  # [num_questions, embedding_dim]
+        # Learnable weighted fusion
+        # sigmoid ensures weights are in [0, 1] range
+        hetero_w = torch.sigmoid(self.hetero_weight)
+        hyper_w = torch.sigmoid(self.hyper_weight)
+        question_conv_fused = hetero_w * question_hetero_conv + hyper_w * question_hyper_conv
 
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(

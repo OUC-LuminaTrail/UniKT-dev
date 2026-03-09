@@ -1,4 +1,4 @@
-"""HGIKT variant without heterogeneous graph branch."""
+"""HGIKT variant with hypergraph branch only (simple, no difficulty weighting)."""
 
 from typing import Any
 
@@ -40,12 +40,13 @@ class HyperGNN(nn.Module):
         return x2
 
 
-@register_model("HGIKT_NoHeteroGraph")
-class HGIKT_NoHeteroGraph(nn.Module):
-    """HGIKT variant with heterogeneous graph branch disabled.
+@register_model("HGIKT_HyperOnlySimple")
+class HGIKT_HyperOnlySimple(nn.Module):
+    """HGIKT variant with only simple hypergraph for knowledge representation.
 
-    This variant uses only the hypergraph for knowledge representation.
-    The heterogeneous graph convolution is replaced with zeros.
+    This variant uses only the simple hypergraph (no difficulty weighting)
+    for knowledge representation. The heterogeneous graph branch is removed,
+    and MoE fusion is bypassed.
     """
 
     def __init__(
@@ -63,24 +64,9 @@ class HGIKT_NoHeteroGraph(nn.Module):
         self.lstm_layers = args.lstm_layers
         self.dropout = args.dropout
 
-        self.question_embedding = nn.Embedding(
-            num_embeddings=data_metadata["num_questions"],
-            embedding_dim=self.hidden_dim,
-        )
+        # Only keep question_embedding_hyper for hypergraph
         self.question_embedding_hyper = nn.Embedding(
             num_embeddings=data_metadata["num_questions"],
-            embedding_dim=self.hidden_dim,
-        )
-        self.skill_embedding = nn.Embedding(
-            num_embeddings=data_metadata["num_skills"],
-            embedding_dim=self.hidden_dim,
-        )
-        self.assignment_embedding = nn.Embedding(
-            num_embeddings=data_metadata["num_assignments"],
-            embedding_dim=self.hidden_dim,
-        )
-        self.template_embedding = nn.Embedding(
-            num_embeddings=data_metadata["num_templates"],
             embedding_dim=self.hidden_dim,
         )
         self.answer_embedding = nn.Embedding(
@@ -89,7 +75,7 @@ class HGIKT_NoHeteroGraph(nn.Module):
         )
         self.embedding_dropout = nn.Dropout(p=self.dropout)
 
-        # Hetero graph module disabled (no hetero_conv)
+        # Hetero graph module disabled (no hetero_conv, no skill/assignment/template embeddings)
 
         # Hypergraph module (unchanged)
         self.hgnn_conv = HyperGNN(
@@ -125,15 +111,16 @@ class HGIKT_NoHeteroGraph(nn.Module):
         user_sequence: torch.Tensor,
         user_response: torch.Tensor,
         user_mask: torch.Tensor,
-        hetero_graph: Any,
+        hetero_graph: Any,  # Unused
         hypergraph: Any,
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass without heterogeneous graph computation.
+        """Forward pass with only simple hypergraph.
 
         Key differences from parent HGIKT:
         1. Skip hetero_conv computation
         2. Skip fusion (use only hypergraph features)
+        3. Use skill_embedding directly for knowledge_status
         """
         B, _ = user_sequence.size()
 
@@ -144,12 +131,14 @@ class HGIKT_NoHeteroGraph(nn.Module):
             self.question_embedding_hyper.weight, hypergraph
         )
 
-        # === MODIFIED: Skip hetero graph convolution, use hypergraph only ===
+        # Use only hypergraph features
         question_conv_fused = question_hyper_conv
 
-        # Get skill embeddings for knowledge_status (need hetero graph features)
-        # Since we skip hetero_conv, use skill_embedding directly
-        skill_hetero_conv = self.skill_embedding.weight
+        # Since we skip hetero_conv, we need skill embeddings for knowledge_status
+        # Use a dummy skill embedding (zeros) since this is hypergraph-only
+        skill_hetero_conv = torch.zeros(
+            self.data_metadata["num_skills"], self.hidden_dim, device=user_sequence.device
+        )
 
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(
@@ -178,32 +167,27 @@ class HGIKT_NoHeteroGraph(nn.Module):
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )
 
+        # For skill-related knowledge status, use zero padding since hetero graph is disabled
         q_skill_vectors = question_skill_matrix[next_user_sequence]
-        sorted_skill_indices = torch.argsort(q_skill_vectors, dim=-1, descending=True)
         max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
         skill_counts = q_skill_vectors.sum(dim=-1).long()
 
-        related_skill_ids = sorted_skill_indices[..., :max_skills_per_question].clone()
+        related_skill_ids = torch.arange(max_skills_per_question, device=user_sequence.device)
+        related_skill_ids = related_skill_ids.view(1, 1, -1).expand(B, user_sequence.size(1), -1).clone()
 
-        device = next_user_sequence.device
-        pos = torch.arange(max_skills_per_question, device=device).view(1, 1, -1)
-        valid_pos_mask = pos < skill_counts.unsqueeze(-1)
-
-        padding_index = skill_hetero_conv.size(0)
-        padding_ids = torch.full_like(related_skill_ids, padding_index)
-        related_skill_ids = torch.where(valid_pos_mask, related_skill_ids, padding_ids)
-
+        device = user_sequence.device
         skill_conv_padded = torch.cat(
             [
                 skill_hetero_conv,
-                torch.zeros(
-                    1, self.hidden_dim, device=device, dtype=skill_hetero_conv.dtype
-                ),
+                torch.zeros(1, self.hidden_dim, device=device),
             ],
             dim=0,
         )
 
         related_skill_embs = skill_conv_padded[related_skill_ids]
+        related_skill_embs = torch.zeros(
+            B, user_sequence.size(1), max_skills_per_question, self.hidden_dim, device=device
+        )
 
         knowledge_status = torch.cat(
             [next_question_embedding.unsqueeze(2), related_skill_embs], dim=2

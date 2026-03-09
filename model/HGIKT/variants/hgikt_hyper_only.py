@@ -1,66 +1,51 @@
-"""HGIKT variant without hypergraph branch."""
+"""HGIKT variant with hypergraph branch only (difficulty-weighted)."""
 
 from typing import Any
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import HGTConv, Linear
+from dhg.nn import HGNNConv
+from torch_geometric.nn import Linear
 
 from model.layers import GeneralInteraction, HistoryRecap
 from utils.core import register_model
 
 
-class HeteroGNN(nn.Module):
-    """Based on HGIKT HeteroGNN module."""
+class HyperGNN(nn.Module):
+    """Based on HGIKT HyperGNN module."""
 
     def __init__(
         self,
-        embedding_dim: int,
-        n_hop: int,
-        heads: int,
-        dropout: float,
-        metadata: tuple[list[str], list[tuple[str, str, str]]],
+        in_ch: int,
+        n_hid: int,
+        n_class: int,
+        dropout: float = 0.0,
+        use_edge_weights: bool = True,
     ) -> None:
         super().__init__()
-        self.n_hop = n_hop
-        self.heads = heads
-        self.dropout = dropout
-        self.convs = nn.ModuleList()
+        self.use_edge_weights = use_edge_weights
 
-        for _ in range(n_hop):
-            conv = HGTConv(
-                in_channels=embedding_dim,
-                out_channels=embedding_dim,
-                metadata=metadata,
-                heads=heads,
-            )
-            self.convs.append(conv)
+        self.hgc1 = HGNNConv(
+            in_ch, n_hid, bias=True, use_bn=False, drop_rate=dropout, is_last=False
+        )
+        self.hgc2 = HGNNConv(
+            n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True
+        )
 
-    def forward(
-        self,
-        x_dict: dict[str, torch.Tensor],
-        edge_index_dict: dict[tuple[str, str, str], torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
+    def forward(self, x: torch.Tensor, hg: Any) -> torch.Tensor:
         """Forward pass."""
-        for conv in self.convs:
-            x_dict = conv(x_dict, edge_index_dict)
-            new_x_dict = {}
-            for node_type, x in x_dict.items():
-                if x is not None:
-                    x = F.gelu(x)
-                    x = F.dropout(x, p=self.dropout, training=self.training)
-                new_x_dict[node_type] = x
-            x_dict = new_x_dict
-        return x_dict
+        x1 = self.hgc1(x, hg)
+        x2 = F.relu(self.hgc2(x1, hg))
+        return x2
 
 
-@register_model("HGIKT_NoHypergraph")
-class HGIKT_NoHypergraph(nn.Module):
-    """HGIKT variant with hypergraph branch disabled.
+@register_model("HGIKT_HyperOnly")
+class HGIKT_HyperOnly(nn.Module):
+    """HGIKT variant with only hypergraph for knowledge representation.
 
-    This variant uses only the heterogeneous graph for knowledge representation.
-    The hypergraph convolution is replaced with zeros, and the MoE fusion is bypassed.
+    This variant uses only the difficulty-weighted hypergraph for knowledge representation.
+    The heterogeneous graph branch is removed, and MoE fusion is bypassed.
     """
 
     def __init__(
@@ -74,12 +59,10 @@ class HGIKT_NoHypergraph(nn.Module):
         self.args = args
         self.data_metadata = data_metadata
 
-        # Model parameters
         self.hidden_dim = args.hidden_dim
         self.lstm_layers = args.lstm_layers
         self.dropout = args.dropout
 
-        # Embedding layers
         self.question_embedding = nn.Embedding(
             num_embeddings=data_metadata["num_questions"],
             embedding_dim=self.hidden_dim,
@@ -106,25 +89,22 @@ class HGIKT_NoHypergraph(nn.Module):
         )
         self.embedding_dropout = nn.Dropout(p=self.dropout)
 
-        # Hetero graph module (unchanged)
-        self.hetero_conv = HeteroGNN(
-            embedding_dim=self.hidden_dim,
-            n_hop=args.n_hop,
-            heads=args.heads,
+        # Hetero graph module disabled (no hetero_conv)
+
+        # Hypergraph module (unchanged)
+        self.hgnn_conv = HyperGNN(
+            in_ch=self.hidden_dim,
+            n_hid=self.hidden_dim,
+            n_class=self.hidden_dim,
             dropout=self.dropout,
-            metadata=hetero_metadata,
         )
 
-        # Hypergraph module disabled (no hgnn_conv)
+        # Fusion module disabled
 
-        # Fusion module disabled (no fuse)
-
-        # Full connected layer
         self.fc_exercise = Linear(
             self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
         )
 
-        # LSTM layer
         self.lstm = nn.LSTM(
             input_size=self.hidden_dim,
             hidden_size=self.hidden_dim,
@@ -133,13 +113,11 @@ class HGIKT_NoHypergraph(nn.Module):
             dropout=self.dropout,
         )
 
-        # History recap module
         self.history_review = HistoryRecap(
             hist_neighbor_num=args.history_neighbour,
             att_bound=args.att_bound,
         )
 
-        # General interaction module
         self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
     def forward(
@@ -148,41 +126,31 @@ class HGIKT_NoHypergraph(nn.Module):
         user_response: torch.Tensor,
         user_mask: torch.Tensor,
         hetero_graph: Any,
-        hypergraph: Any,  # Unused in this variant
+        hypergraph: Any,
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass without hypergraph computation.
+        """Forward pass without heterogeneous graph computation.
 
         Key differences from parent HGIKT:
-        1. Skip hgnn_conv computation (lines 332-334 in original)
-        2. Skip fusion (lines 355-357 in original)
-        3. Use only hetero graph features
+        1. Skip hetero_conv computation
+        2. Skip fusion (use only hypergraph features)
         """
         B, _ = user_sequence.size()
 
-        # Answers embedding
         answers_embedding = self.answer_embedding(user_response)
 
-        # === MODIFIED: Skip hypergraph convolution, use zeros ===
-        # (not used since we skip fusion, but placeholder for clarity)
-
-        # Hetero graph convolution (unchanged)
-        conv = self.hetero_conv(
-            {
-                "question": self.question_embedding.weight,
-                "skill": self.skill_embedding.weight,
-                "assignment": self.assignment_embedding.weight,
-                "template": self.template_embedding.weight,
-            },
-            hetero_graph.edge_index_dict,
+        # Hypergraph convolution
+        question_hyper_conv: torch.Tensor = self.hgnn_conv(
+            self.question_embedding_hyper.weight, hypergraph
         )
-        question_hetero_conv = conv["question"]
-        skill_hetero_conv = conv["skill"]
 
-        # === MODIFIED: Skip fusion, use only hetero graph ===
-        question_conv_fused = question_hetero_conv
+        # Use only hypergraph features
+        question_conv_fused = question_hyper_conv
 
-        # Rest of forward pass unchanged from HGIKT
+        # Get skill embeddings for knowledge_status (need skill features)
+        # Since we skip hetero_conv, use skill_embedding directly
+        skill_hetero_conv = self.skill_embedding.weight
+
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(
             [question_embedding_sequence, answers_embedding], dim=-1
