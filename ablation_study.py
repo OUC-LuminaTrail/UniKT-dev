@@ -1,6 +1,7 @@
 """Ablation study runner - main entry point.
 
 Run batch ablation experiments using model variants.
+Dataset must be specified via command line argument.
 """
 
 import argparse
@@ -18,14 +19,26 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run ablation studies using model variants"
     )
-    parser.add_argument("--config", help="Path to ablation config JSON")
+    parser.add_argument("--config", help="Path to ablation config JSON (required)")
+    parser.add_argument(
+        "-d",
+        "--dataset",
+        required=True,
+        choices=[
+            "assistments09",
+            "assistments12",
+            "assistments17",
+            "ednet_kt1",
+        ],
+        help="Dataset name (required)",
+    )
     args = parser.parse_args()
 
     if not args.config:
         parser.error("--config is required")
 
     # Load config
-    config = load_config(args.config)
+    config = load_config(args.config, dataset=args.dataset)
 
     # Print study info
     logger.info(f"{'=' * 60}")

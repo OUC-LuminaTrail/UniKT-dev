@@ -170,7 +170,6 @@ class HGIKT_HyperOnlySimple(nn.Module):
         # For skill-related knowledge status, use zero padding since hetero graph is disabled
         q_skill_vectors = question_skill_matrix[next_user_sequence]
         max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
-        skill_counts = q_skill_vectors.sum(dim=-1).long()
 
         related_skill_ids = torch.arange(max_skills_per_question, device=user_sequence.device)
         related_skill_ids = related_skill_ids.view(1, 1, -1).expand(B, user_sequence.size(1), -1).clone()

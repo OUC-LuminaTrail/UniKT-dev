@@ -1,7 +1,6 @@
 {
   "study_name": "hgikt_ablation_study",
   "base_model": "HGIKT",
-  "dataset": "assistments09",
   "shared_params": {
     "epochs": 120,
     "learning_rate": 0.0003,
