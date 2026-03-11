@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from utils.case_analysis.base_analyzer import BaseCaseAnalyzer
 from utils.core import get_logger, register_analyzer
@@ -33,6 +32,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         """
         self.args = args
         self.data_src = data_src
+        self.case_seq_sample_len = getattr(args, "case_seq_sample_len", None)
 
         model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
@@ -50,6 +50,16 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.question_skill_matrix_np = (
             question_skill_matrix.numpy()
         )  # [num_questions, num_skills]
+
+        # Precompute skill->question mapping mask for skill-level probability aggregation.
+        # Shape: [num_skills, num_questions]
+        self.skill_question_mask = question_skill_matrix.T.float()
+
+        # Cache question -> skill IDs for fast per-question prediction.
+        self.question_to_skill_ids = [
+            np.where(self.question_skill_matrix_np[q_id] == 1)[0].tolist()
+            for q_id in range(self.num_questions)
+        ]
 
         model = HGIKT(args, data_src.get_metadata(), hetero_graph.metadata())
 
@@ -108,13 +118,16 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         # Generate binary predictions
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
-        # 计算知识状态
-        knowledge_states = F.cosine_similarity(
-            lstm_output.unsqueeze(2),  # [B, S, 1, H]
-            skill_hetero_conv.unsqueeze(0).unsqueeze(0),  # [1, 1, num_skills, H]
-            dim=-1,
-        )  # [B, S, num_skills]
-        knowledge_states = (knowledge_states + 1) / 2  # 将[-1, 1]映射到[0, 1]
+        # Knowledge state definition for heatmap:
+        # For each timestep and skill, average model-predicted correctness probability
+        # over all questions linked to that skill.
+        knowledge_states = self._compute_skill_average_probabilities(
+            sequence,
+            response,
+            mask,
+            skill_hetero_conv,
+            lstm_output,
+        )
 
         return {
             "y_hat": y_hat,
@@ -123,6 +136,196 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             "y_hat_full": y_hat_full,
             "knowledge_states": knowledge_states,
         }
+
+    def _compute_skill_average_probabilities(
+        self,
+        sequence: torch.Tensor,
+        response: torch.Tensor,
+        mask: torch.Tensor,
+        skill_hetero_conv: torch.Tensor,
+        lstm_output: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute per-skill mean predicted correctness probabilities.
+
+        For each student in batch:
+        1) Extract sequence-relevant skills from finite valid sequence.
+        2) Expand to a related question set from those skills.
+        3) Predict probabilities on that question set at each timestep.
+        4) Average probabilities by skill.
+
+        Returns:
+            Tensor of shape [B, S, num_skills] with values in [0, 1].
+            Non-relevant skills are set to 0.
+        """
+        relevant_skill_mask = self._get_relevant_skills_mask(sequence, mask)  # [B, K]
+        if not relevant_skill_mask.any():
+            B, S = sequence.shape
+            return torch.zeros(
+                B,
+                S,
+                self.num_skills,
+                device=sequence.device,
+                dtype=lstm_output.dtype,
+            )
+
+        skill_question_mask = self.skill_question_mask.to(sequence.device)  # [K, Q]
+        relevant_question_mask = (
+            torch.matmul(relevant_skill_mask.float(), skill_question_mask) > 0
+        )  # [B, Q]
+
+        selected_question_ids = torch.where(relevant_question_mask.any(dim=0))[0]
+
+        question_probs = self._predict_probabilities_for_questions(
+            sequence,
+            response,
+            mask,
+            skill_hetero_conv,
+            lstm_output,
+            selected_question_ids,
+        )  # [B, S, Q_sel]
+
+        skill_question_mask_sel = skill_question_mask[:, selected_question_ids]  # [K, Q_sel]
+
+        weighted_sum = torch.einsum("bsq,kq->bsk", question_probs, skill_question_mask_sel)
+        question_count = skill_question_mask_sel.sum(dim=-1).clamp_min(1.0)
+        knowledge_states = weighted_sum / question_count.view(1, 1, -1)
+
+        return knowledge_states * relevant_skill_mask.unsqueeze(1).float()
+
+    def _predict_probabilities_for_questions(
+        self,
+        sequence: torch.Tensor,
+        response: torch.Tensor,
+        mask: torch.Tensor,
+        skill_hetero_conv: torch.Tensor,
+        lstm_output: torch.Tensor,
+        question_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict correctness probabilities for selected questions at each timestep.
+
+        Returns:
+            Tensor [B, S, len(question_ids)].
+        """
+        if question_ids.numel() == 0:
+            B, S = sequence.shape
+            return torch.zeros(B, S, 0, device=sequence.device, dtype=lstm_output.dtype)
+
+        question_conv_fused, question_embedding_sequence, exercise_emb = (
+            self._build_question_representations(sequence, response)
+        )
+
+        probs_per_question = []
+        for q_id in question_ids.tolist():
+            logits_q = self._predict_logits_for_question(
+                q_id,
+                question_conv_fused,
+                question_embedding_sequence,
+                exercise_emb,
+                skill_hetero_conv,
+                lstm_output,
+                mask,
+            )
+            probs_per_question.append(torch.sigmoid(logits_q).unsqueeze(-1))
+
+        return torch.cat(probs_per_question, dim=-1)
+
+    def _get_relevant_skills_mask(
+        self, sequence: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Extract sequence-relevant skills per student from valid finite sequence.
+
+        Returns:
+            Bool tensor [B, num_skills], True means the skill appears in sequence.
+        """
+        mask_bool = mask.bool()
+        if self.case_seq_sample_len is not None and self.case_seq_sample_len > 0:
+            valid_rank = torch.cumsum(mask_bool.long(), dim=1)
+            mask_bool = mask_bool & (valid_rank <= self.case_seq_sample_len)
+
+        q_skill = self.question_skill_matrix[sequence]  # [B, S, K]
+        return ((q_skill > 0) & mask_bool.unsqueeze(-1)).any(dim=1)
+
+    def _build_question_representations(
+        self, sequence: torch.Tensor, response: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Build fused question representations and exercise embeddings."""
+        answers_embedding = self.model.answer_embedding(response)
+
+        question_hyper_conv = self.model.hgnn_conv(
+            self.model.question_embedding_hyper.weight, self.hypergraph
+        )
+
+        conv = self.model.hetero_conv(
+            {
+                "question": self.model.question_embedding.weight,
+                "skill": self.model.skill_embedding.weight,
+                "assignment": self.model.assignment_embedding.weight,
+                "template": self.model.template_embedding.weight,
+            },
+            self.hetero_graph.edge_index_dict,
+        )
+        question_hetero_conv = conv["question"]
+
+        question_conv_fused = self.model.fuse(question_hetero_conv, question_hyper_conv)
+        question_embedding_sequence = question_conv_fused[sequence]
+
+        exercise_emb = torch.cat([question_embedding_sequence, answers_embedding], dim=-1)
+        exercise_emb = torch.relu(self.model.fc_exercise(exercise_emb))
+        exercise_emb = self.model.embedding_dropout(exercise_emb)
+
+        return question_conv_fused, question_embedding_sequence, exercise_emb
+
+    def _predict_logits_for_question(
+        self,
+        q_id: int,
+        question_conv_fused: torch.Tensor,
+        question_embedding_sequence: torch.Tensor,
+        exercise_emb: torch.Tensor,
+        skill_hetero_conv: torch.Tensor,
+        lstm_output: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict logits when the next question is fixed to q_id at all timesteps."""
+        B, S, _ = lstm_output.shape
+        question_embed = question_conv_fused[q_id].view(1, 1, -1).expand(B, S, -1)
+
+        history_question_neighbors = self.model.history_review(
+            question_embedding_sequence,
+            question_embed,
+            exercise_emb,
+            mask,
+        )
+
+        student_status = torch.cat(
+            [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
+        )
+
+        skill_ids_list = self.question_to_skill_ids[q_id]
+        skill_ids = torch.tensor(skill_ids_list, device=lstm_output.device, dtype=torch.long)
+
+        if skill_ids.numel() == 0:
+            related_skill_embs = torch.zeros(
+                B,
+                S,
+                0,
+                self.model.hidden_dim,
+                device=lstm_output.device,
+                dtype=lstm_output.dtype,
+            )
+        else:
+            related_skill_embs = (
+                skill_hetero_conv[skill_ids]
+                .unsqueeze(0)
+                .unsqueeze(0)
+                .expand(B, S, -1, -1)
+            )
+
+        knowledge_status = torch.cat(
+            [question_embed.unsqueeze(2), related_skill_embs],
+            dim=2,
+        )
+
+        return self.model.general_interaction(student_status, knowledge_status, mask)
 
     def extract_case_data(self, batch_data: Any, outputs: dict) -> dict:
         """Extract case data from batch outputs.

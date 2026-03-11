@@ -118,6 +118,9 @@ def cmd_inference(args):
         hyperparams_path=str(hyperparams_path) if hyperparams_path.exists() else None,
     )
 
+    # Optional case-analysis-only sequence sampling length (for heatmap method).
+    model_args.case_seq_sample_len = args.case_seq_sample_len
+
     logger.info(f"Starting inference for {model_name} on {dataset_name}...")
 
     data_src = get_data_source(dataset_name, model_args)
@@ -284,6 +287,12 @@ Examples:
     )
     parser_inference.add_argument(
         "--data_base_path", default="./data", help="Data base path (default: ./data)"
+    )
+    parser_inference.add_argument(
+        "--case_seq_sample_len",
+        type=int,
+        default=8,
+        help="Finite prefix length used to determine relevant skills in case analysis (default: 8)",
     )
 
     parser_select = subparsers.add_parser(
