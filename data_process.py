@@ -58,7 +58,10 @@ def build_parser():
         "process", help="Process raw data into standardized format"
     )
     proc.add_argument(
-        "--extra", type=list, default=["windowslate"], help="Extra processing steps"
+        "--extra",
+        nargs="*",
+        default=[],
+        help="Extra processing steps",
     )
     DataParams.add_args(proc)
     GeneralParams.add_args(proc)
