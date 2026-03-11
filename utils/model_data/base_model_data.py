@@ -13,7 +13,6 @@ class BaseModelData(ABC):
 
     def __init__(self, data_src: DataSource):
         self.data_src = data_src
-        self.data_src.load_processed_data()
 
     @abstractmethod
     def prepare_data(self, args):

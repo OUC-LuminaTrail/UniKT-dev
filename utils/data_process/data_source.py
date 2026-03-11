@@ -39,11 +39,6 @@ class DataSource(ABC):
         self.metadata_path = os.path.join(self.data_folder, "metadata.json")
         self.raw_data = None
         self.cleaned_raw_data = None  # cleaned raw data
-        self.sequence_data = None
-        self.question_data = None
-        self.split_question_sequence_data = None
-        self.split_skill_sequence_data = None
-        self.windowlate_data_path = None
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
@@ -51,6 +46,16 @@ class DataSource(ABC):
 
         # ID mapping storage
         self._id_mappings: dict = {}
+
+        # 数据缓存
+        self._data_cache: dict[str, pl.DataFrame | pl.LazyFrame] = {}
+        self._data_config: dict[str, dict] = {
+            "sequence": {"lazy": False},
+            "question": {"lazy": False},
+            "split_question_sequence": {"lazy": False},
+            "split_skill_sequence": {"lazy": False},
+            "windowlate": {"lazy": True},
+        }
 
     def set_random_seed(self):
         """Set random seeds for reproducibility."""
@@ -468,62 +473,20 @@ class DataSource(ABC):
         """Load source data. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement load_data method")
 
-    def load_processed_data(self):
-        """Load processed data files with integrity checks.
-
-        Raises:
-            FileNotFoundError: Core data files not found.
-            ValueError: MD5 checksum mismatch.
+    def _validate_saved_data(self, data_name: str) -> str:
         """
-        self.load_metadata()
+        Validate that processed data files exist and have correct integrity.
+        """
+        # 拼接得到路径
+        data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_{data_name}.parquet"
+        )
+        # 检查文件是否存在
+        self._validate_data_files_exist([data_path])
+        # 检查文件一致性
+        self._validate_data_integrity(data_name, data_name + "_md5")
 
-        sequence_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_sequence.parquet"
-        )
-        question_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_question.parquet"
-        )
-        split_question_sequence_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_split_question_sequence.parquet"
-        )
-        split_skill_sequence_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_split_skill_sequence.parquet"
-        )
-        windowlate_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_windowlate.parquet"
-        )
-
-        # 验证核心数据文件必须存在
-        self._validate_data_files_exist(
-            [
-                sequence_data_path,
-                question_data_path,
-                split_question_sequence_data_path,
-                split_skill_sequence_data_path,
-            ]
-        )
-        self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
-        self._validate_data_integrity(question_data_path, "question_data_md5")
-        self._validate_data_integrity(
-            split_question_sequence_data_path, "split_question_sequence_data_md5"
-        )
-        self._validate_data_integrity(
-            split_skill_sequence_data_path, "split_skill_sequence_data_md5"
-        )
-
-        # 加载核心数据
-        self._load_parquet_files(
-            sequence_data_path,
-            question_data_path,
-            split_question_sequence_data_path,
-            split_skill_sequence_data_path,
-        )
-
-        if os.path.exists(windowlate_data_path):
-            self._validate_data_integrity(windowlate_data_path, "windowlate_data_md5")
-            logger.info(f"Loading windowlate data: {windowlate_data_path}")
-            self.windowlate_data = pl.scan_parquet(windowlate_data_path)
-            self.windowlate_data_path = windowlate_data_path
+        return data_path
 
     def _validate_data_files_exist(self, file_paths: list[str]):
         """Validate that all required data files exist."""
@@ -565,34 +528,6 @@ class DataSource(ABC):
                 f"   python data_process.py process -d {self.dataset}"
             )
 
-    def _load_parquet_files(
-        self,
-        sequence_path: str,
-        question_path: str,
-        split_sequence_path: str,
-        split_skill_sequence_path: str,
-    ):
-        """Load parquet files with error handling."""
-        logger.info(f"Loading sequence data: {sequence_path}")
-        self.sequence_data = pl.read_parquet(sequence_path)
-        logger.debug(f"Sequence data shape: {self.sequence_data.shape}")
-
-        logger.info(f"Loading split sequence data: {split_sequence_path}")
-        self.split_question_sequence_data = pl.read_parquet(split_sequence_path)
-        logger.debug(
-            f"Split sequence data shape: {self.split_question_sequence_data.shape}"
-        )
-
-        logger.info(f"Loading split skill sequence data: {split_skill_sequence_path}")
-        self.split_skill_sequence_data = pl.read_parquet(split_skill_sequence_path)
-        logger.debug(
-            f"Split skill sequence data shape: {self.split_skill_sequence_data.shape}"
-        )
-
-        logger.info(f"Loading question data: {question_path}")
-        self.question_data = pl.read_parquet(question_path)
-        logger.debug(f"Question data shape: {self.question_data.shape}")
-
     @abstractmethod
     def transform_data(self):
         """transform cleaned data into standard format. Must be implemented by subclasses."""
@@ -618,29 +553,53 @@ class DataSource(ABC):
 
         return hash_md5.hexdigest()
 
+    def _load_data(self, data_type: str) -> pl.DataFrame | pl.LazyFrame:
+        """加载数据
+
+        Args:
+            data_type: 数据类型，对应配置字典的键名
+
+        Returns:
+            DataFrame 或 LazyFrame
+
+        Raises:
+            ValueError: 当 data_type 不在配置字典中时
+        """
+        if data_type not in self._data_config:
+            raise ValueError(f"Unknown data type: {data_type}")
+
+        # 检查缓存
+        if data_type in self._data_cache:
+            return self._data_cache[data_type]
+
+        config = self._data_config[data_type]
+        data_path = self._validate_saved_data(data_type)
+
+        # 根据配置选择读取方式
+        read_func = pl.scan_parquet if config["lazy"] else pl.read_parquet
+        logger.info(f"Loading {data_type} data: {data_path}")
+        data = read_func(data_path)
+
+        # 缓存数据
+        self._data_cache[data_type] = data
+
+        return data
+
     def get_sequence_data(self) -> pl.DataFrame:
         """Get user sequence data."""
-        if self.sequence_data is None:
-            self.load_processed_data()
-        return self.sequence_data
+        return self._load_data("sequence")
 
     def get_question_data(self) -> pl.DataFrame:
         """Get question metadata."""
-        if self.question_data is None:
-            self.load_processed_data()
-        return self.question_data
+        return self._load_data("question")
 
     def get_split_question_sequence_data(self) -> pl.DataFrame:
         """Get split user sequence data."""
-        if self.split_question_sequence_data is None:
-            self.load_processed_data()
-        return self.split_question_sequence_data
+        return self._load_data("split_question_sequence")
 
     def get_split_skill_sequence_data(self) -> pl.DataFrame:
         """Get split skill sequence data."""
-        if self.split_skill_sequence_data is None:
-            self.load_processed_data()
-        return self.split_skill_sequence_data
+        return self._load_data("split_skill_sequence")
 
     def get_windowlate_data(self) -> pl.LazyFrame:
         """Get windowlate evaluation data.
@@ -649,10 +608,7 @@ class DataSource(ABC):
             Windowlate evaluation samples (long format).
             Columns: sample_id, position, skill, response, mask, user_id, group_id, true_label, fold
         """
-        if self.windowlate_data is None:
-            self.load_processed_data()
-
-        return self.windowlate_data
+        return self._load_data("windowlate")
 
     def update_metadata(self, key: str, value):
         """Update a single metadata entry."""
@@ -1032,7 +988,9 @@ class DataSource(ABC):
         Raises:
             ValueError: If n_samples exceeds total users or data not loaded.
         """
-        logger.info(f"Sampling {n_samples} users from dataset, strategy={sample_strategy}")
+        logger.info(
+            f"Sampling {n_samples} users from dataset, strategy={sample_strategy}"
+        )
 
         user_stats = self.get_user_stats()
         total_users = len(user_stats)
