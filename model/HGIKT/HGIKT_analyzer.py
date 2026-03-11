@@ -33,6 +33,8 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.args = args
         self.data_src = data_src
         self.case_seq_sample_len = getattr(args, "case_seq_sample_len", None)
+        self.case_skill_scope = getattr(args, "case_skill_scope", "relevant_prefix")
+        self.case_non_relevant_fill = getattr(args, "case_non_relevant_fill", "zero")
 
         model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
@@ -148,29 +150,30 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         """Compute per-skill mean predicted correctness probabilities.
 
         For each student in batch:
-        1) Extract sequence-relevant skills from finite valid sequence.
+        1) Select target skills according to configured scope.
         2) Expand to a related question set from those skills.
         3) Predict probabilities on that question set at each timestep.
         4) Average probabilities by skill.
 
         Returns:
             Tensor of shape [B, S, num_skills] with values in [0, 1].
-            Non-relevant skills are set to 0.
+            For relevant_* scopes, non-relevant skills are filled by policy.
         """
-        relevant_skill_mask = self._get_relevant_skills_mask(sequence, mask)  # [B, K]
-        if not relevant_skill_mask.any():
+        target_skill_mask = self._get_target_skills_mask(sequence, mask)  # [B, K]
+        if not target_skill_mask.any():
             B, S = sequence.shape
-            return torch.zeros(
+            empty_states = torch.zeros(
                 B,
                 S,
                 self.num_skills,
                 device=sequence.device,
                 dtype=lstm_output.dtype,
             )
+            return self._apply_non_relevant_fill(empty_states, target_skill_mask)
 
         skill_question_mask = self.skill_question_mask.to(sequence.device)  # [K, Q]
         relevant_question_mask = (
-            torch.matmul(relevant_skill_mask.float(), skill_question_mask) > 0
+            torch.matmul(target_skill_mask.float(), skill_question_mask) > 0
         )  # [B, Q]
 
         selected_question_ids = torch.where(relevant_question_mask.any(dim=0))[0]
@@ -190,7 +193,28 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         question_count = skill_question_mask_sel.sum(dim=-1).clamp_min(1.0)
         knowledge_states = weighted_sum / question_count.view(1, 1, -1)
 
-        return knowledge_states * relevant_skill_mask.unsqueeze(1).float()
+        return self._apply_non_relevant_fill(knowledge_states, target_skill_mask)
+
+    def _apply_non_relevant_fill(
+        self,
+        knowledge_states: torch.Tensor,
+        target_skill_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Apply configured fill policy to non-relevant skills.
+
+        - all scope: keep full predictions unchanged.
+        - relevant_* scope: fill non-relevant with zero or NaN.
+        """
+        if self.case_skill_scope == "all":
+            return knowledge_states
+
+        if self.case_non_relevant_fill == "nan":
+            return knowledge_states.masked_fill(
+                ~target_skill_mask.unsqueeze(1),
+                float("nan"),
+            )
+
+        return knowledge_states * target_skill_mask.unsqueeze(1).float()
 
     def _predict_probabilities_for_questions(
         self,
@@ -229,16 +253,29 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
 
         return torch.cat(probs_per_question, dim=-1)
 
-    def _get_relevant_skills_mask(
+    def _get_target_skills_mask(
         self, sequence: torch.Tensor, mask: torch.Tensor
     ) -> torch.Tensor:
-        """Extract sequence-relevant skills per student from valid finite sequence.
+        """Extract target skill mask according to configured case scope.
 
         Returns:
-            Bool tensor [B, num_skills], True means the skill appears in sequence.
+            Bool tensor [B, num_skills].
         """
+        if self.case_skill_scope == "all":
+            B = sequence.shape[0]
+            return torch.ones(
+                B,
+                self.num_skills,
+                device=sequence.device,
+                dtype=torch.bool,
+            )
+
         mask_bool = mask.bool()
-        if self.case_seq_sample_len is not None and self.case_seq_sample_len > 0:
+        if (
+            self.case_skill_scope == "relevant_prefix"
+            and self.case_seq_sample_len is not None
+            and self.case_seq_sample_len > 0
+        ):
             valid_rank = torch.cumsum(mask_bool.long(), dim=1)
             mask_bool = mask_bool & (valid_rank <= self.case_seq_sample_len)
 
