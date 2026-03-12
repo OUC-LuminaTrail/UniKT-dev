@@ -1,16 +1,12 @@
 from .ABKT.ABKT_model import GMF, K_CMF
 from .ABKT.ABKT_trainer import ABKTTrainer
-
 from .GIKT.GIKT_model import GIKT
 from .GIKT.GIKT_trainer import GIKTTrainer
-
 from .GIKTEdmine.GIKT_edmine_model import GIKTEdmine
 from .GIKTEdmine.GIKT_edmine_trainer import GIKTEdmineTrainer
-
+from .HGIKT import variants  # noqa: F401
 from .HGIKT.HGIKT_model import HGIKT
 from .HGIKT.HGIKT_trainer import HGIKTTrainer
-from .HGIKT import variants  # noqa: F401
-
 from .SGKT.SGKT_model import SGKT
 from .SGKT.SGKT_trainer import SGKTTrainer
 from .SQGKT.SQGKT_model import SQGKT
