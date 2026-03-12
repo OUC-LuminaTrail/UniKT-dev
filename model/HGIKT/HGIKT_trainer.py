@@ -205,8 +205,7 @@ class HGIKTTrainer(BaseTrainer):
             包含 y_hat, y_label, y_predict 的字典
         """
         # 解包数据并移动到设备
-        users, sequence, response, mask = batch_data
-        # users is not used in forward pass but is unpacked for consistency
+        sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
