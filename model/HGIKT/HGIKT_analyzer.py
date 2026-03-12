@@ -190,28 +190,62 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         Returns:
             Tensor [B, S, len(question_ids)].
         """
-        if question_ids.numel() == 0:
-            B, S = sequence.shape
+        B, S = sequence.shape
+        Q = question_ids.numel()
+
+        if Q == 0:
             return torch.zeros(B, S, 0, device=sequence.device, dtype=lstm_output.dtype)
 
+        H = self.model.hidden_dim
+
+        # Build question representations once
         question_conv_fused, question_embedding_sequence, exercise_emb = (
             self._build_question_representations(sequence, response)
         )
 
-        probs_per_question = []
-        for q_id in question_ids.tolist():
-            logits_q = self._predict_logits_for_question(
-                q_id,
-                question_conv_fused,
+        # Pre-allocate output tensor to avoid list.append + torch.cat overhead
+        output = torch.empty(B, S, Q, device=sequence.device, dtype=lstm_output.dtype)
+
+        # Process each question sequentially to avoid memory explosion
+        for i, q_id in enumerate(question_ids.tolist()):
+            # Get question embedding
+            question_embed = question_conv_fused[q_id].view(1, 1, -1).expand(B, S, -1)
+
+            # History review for this question
+            history_question_neighbors = self.model.history_review(
                 question_embedding_sequence,
+                question_embed,
                 exercise_emb,
-                skill_hetero_conv,
-                lstm_output,
                 mask,
             )
-            probs_per_question.append(torch.sigmoid(logits_q).unsqueeze(-1))
 
-        return torch.cat(probs_per_question, dim=-1)
+            # Build student_status: [B, S, 1+M, H]
+            student_status = torch.cat([lstm_output.unsqueeze(2), history_question_neighbors], dim=2)
+
+            # Build knowledge_status for this question
+            skill_ids_list = self.question_to_skill_ids[q_id]
+            if not skill_ids_list:
+                related_skill_embs = torch.zeros(
+                    B, S, 0, H,
+                    device=sequence.device, dtype=lstm_output.dtype
+                )
+            else:
+                skill_ids = torch.tensor(skill_ids_list, device=sequence.device, dtype=torch.long)
+                related_skill_embs = (
+                    skill_hetero_conv[skill_ids]
+                    .unsqueeze(0)
+                    .unsqueeze(0)
+                    .expand(B, S, -1, -1)
+                )
+
+            # knowledge_status: [B, S, 1+num_skills, H]
+            knowledge_status = torch.cat([question_embed.unsqueeze(2), related_skill_embs], dim=2)
+
+            # general_interaction output: [B, S]
+            logits_q = self.model.general_interaction(student_status, knowledge_status, mask)
+            output[:, :, i] = torch.sigmoid(logits_q)
+
+        return output
 
     def _build_question_representations(
         self, sequence: torch.Tensor, response: torch.Tensor
@@ -242,58 +276,6 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         exercise_emb = self.model.embedding_dropout(exercise_emb)
 
         return question_conv_fused, question_embedding_sequence, exercise_emb
-
-    def _predict_logits_for_question(
-        self,
-        q_id: int,
-        question_conv_fused: torch.Tensor,
-        question_embedding_sequence: torch.Tensor,
-        exercise_emb: torch.Tensor,
-        skill_hetero_conv: torch.Tensor,
-        lstm_output: torch.Tensor,
-        mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Predict logits when the next question is fixed to q_id at all timesteps."""
-        B, S, _ = lstm_output.shape
-        question_embed = question_conv_fused[q_id].view(1, 1, -1).expand(B, S, -1)
-
-        history_question_neighbors = self.model.history_review(
-            question_embedding_sequence,
-            question_embed,
-            exercise_emb,
-            mask,
-        )
-
-        student_status = torch.cat(
-            [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
-        )
-
-        skill_ids_list = self.question_to_skill_ids[q_id]
-        skill_ids = torch.tensor(skill_ids_list, device=lstm_output.device, dtype=torch.long)
-
-        if skill_ids.numel() == 0:
-            related_skill_embs = torch.zeros(
-                B,
-                S,
-                0,
-                self.model.hidden_dim,
-                device=lstm_output.device,
-                dtype=lstm_output.dtype,
-            )
-        else:
-            related_skill_embs = (
-                skill_hetero_conv[skill_ids]
-                .unsqueeze(0)
-                .unsqueeze(0)
-                .expand(B, S, -1, -1)
-            )
-
-        knowledge_status = torch.cat(
-            [question_embed.unsqueeze(2), related_skill_embs],
-            dim=2,
-        )
-
-        return self.model.general_interaction(student_status, knowledge_status, mask)
 
     def extract_case_data(self, batch_data: Any, outputs: dict) -> dict:
         """Extract case data from batch outputs.
