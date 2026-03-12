@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_NoTemplateEdges variant."""
+"""Trainer for HGIKT_ConcatFusion variant."""
 
 from typing import Any
 
@@ -11,13 +11,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_NoTemplateEdges")
-class HGIKTNoTemplateEdgesModelParams(BaseParamConfig):
-    """HGIKT_NoTemplateEdges model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_ConcatFusion")
+class HGIKTConcatFusionModelParams(BaseParamConfig):
+    """HGIKT_ConcatFusion model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        # Same parameters as HGIKT
-        group_name = "HGIKT_NoTemplateEdges Parameters"
+        group_name = "HGIKT_ConcatFusion Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -98,12 +97,11 @@ class HGIKTNoTemplateEdgesModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_NoTemplateEdges")
-class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
-    """Trainer for HGIKT without template edges.
+@TRAINERS.register("HGIKT_ConcatFusion")
+class HGIKTConcatFusionTrainer(BaseTrainer):
+    """Trainer for HGIKT with concatenation fusion.
 
-    Uses custom data preparation (HGIKTNoTemplateEdgesData) to build
-    hetero_graph without question-template edges.
+    Uses same data preparation as HGIKT, but variant model.
     """
 
     def __init__(
@@ -112,12 +110,9 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 1. Prepare data using custom data class
-        from model.HGIKT.variants.hgikt_no_template_edges_data import (
-            HGIKTNoTemplateEdgesData,
-        )
+        from model.HGIKT.HGIKT_data import HGIKTModelData
 
-        model_data = HGIKTNoTemplateEdgesData(data_src)
+        model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         train_dataset = data_dict["train_dataset"]
@@ -127,31 +122,26 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        # 2. Initialize variant model
-        from model.HGIKT.variants.hgikt_no_template_edges import HGIKT_NoTemplateEdges
+        from model.HGIKT.variants.hgikt_concat_fusion import HGIKT_ConcatFusion
 
-        logger.info("Initializing HGIKT_NoTemplateEdges model...")
-        model = HGIKT_NoTemplateEdges(
+        logger.info("Initializing HGIKT_ConcatFusion model...")
+        model = HGIKT_ConcatFusion(
             args, data_src.get_metadata(), self.hetero_graph.metadata()
         )
 
-        # 3. Call parent constructor
         super().__init__(model)
 
-        # 4. Create optimizer and loss function
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
 
-        # 5. Create learning rate scheduler
         lr_scheduler = None
         if args.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer, gamma=args.lr_decay
             )
 
-        # 6. Build early stopping config
         early_stopping_cfg = None
         es_patience = getattr(args, "es_patience", None)
         if es_patience is not None:
@@ -162,7 +152,6 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
                 min_delta=getattr(args, "es_min_delta", 0.0),
             )
 
-        # 7. Configure trainer
         self.with_training(
             epochs=args.epochs,
             seed=args.seed,
@@ -181,11 +170,10 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_NoTemplateEdges",
+            model_name="HGIKT_ConcatFusion",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
-        # 8. Move static data to device
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)

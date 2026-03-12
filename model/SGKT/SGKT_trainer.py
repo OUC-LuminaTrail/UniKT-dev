@@ -251,7 +251,7 @@ class SGKTTrainer(BaseTrainer):
         # Move to device
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
-        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
+        mask = self._move_tensor_to_device(mask)
 
         # Move hist_neighbor_index to device if provided
         if hist_neighbor_index is not None:

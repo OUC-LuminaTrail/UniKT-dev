@@ -10,13 +10,15 @@ logger = get_logger(__name__)
 
 
 class GIKTDataset(Dataset):
-    def __init__(self, sequences, responses, masks):
+    def __init__(self, users, sequences, responses, masks):
+        self.users = users
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
 
     def __getitem__(self, index):
         return (
+            torch.tensor(self.users[index], dtype=torch.long),
             torch.tensor(self.sequences[index], dtype=torch.long),
             torch.tensor(self.responses[index], dtype=torch.long),
             torch.tensor(self.masks[index], dtype=torch.long),

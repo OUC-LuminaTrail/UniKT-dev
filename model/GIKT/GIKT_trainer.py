@@ -188,18 +188,19 @@ class GIKTTrainer(BaseTrainer):
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
         """GIKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成。
 
         Args:
-            batch_data: 包含 (sequence, response, mask) 的元组
+            batch_data: 包含 (users, sequence, response, mask) 的元组
 
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
         # 解包数据并移动到设备
-        sequence, response, mask = batch_data
+        users, sequence, response, mask = batch_data
+        users = self._move_tensor_to_device(users)
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)

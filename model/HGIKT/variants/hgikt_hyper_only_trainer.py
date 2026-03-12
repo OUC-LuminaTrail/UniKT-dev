@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_NoSkillAssignment variant."""
+"""Trainer for HGIKT_HyperOnly variant."""
 
 from typing import Any
 
@@ -11,12 +11,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_NoSkillAssignment")
-class HGIKTNoSkillAssignmentModelParams(BaseParamConfig):
-    """HGIKT_NoSkillAssignment model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_HyperOnly")
+class HGIKTHyperOnlyModelParams(BaseParamConfig):
+    """HGIKT_HyperOnly model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "HGIKT_NoSkillAssignment Parameters"
+        group_name = "HGIKT_HyperOnly Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -97,12 +97,11 @@ class HGIKTNoSkillAssignmentModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_NoSkillAssignment")
-class HGIKTNoSkillAssignmentTrainer(BaseTrainer):
-    """Trainer for HGIKT without skill-assignment edges.
+@TRAINERS.register("HGIKT_HyperOnly")
+class HGIKTHyperOnlyTrainer(BaseTrainer):
+    """Trainer for HGIKT with hypergraph only.
 
-    Uses custom data preparation (HGIKTNoSkillAssignmentData) to build
-    hetero_graph without skill-assignment edges.
+    Uses same data preparation as HGIKT, but variant model.
     """
 
     def __init__(
@@ -111,26 +110,21 @@ class HGIKTNoSkillAssignmentTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        from model.HGIKT.variants.hgikt_no_skill_assignment_data import (
-            HGIKTNoSkillAssignmentData,
-        )
+        from model.HGIKT.HGIKT_data import HGIKTModelData
 
-        model_data = HGIKTNoSkillAssignmentData(data_src)
+        model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         train_dataset = data_dict["train_dataset"]
         val_dataset = data_dict["val_dataset"]
-        test_dataset = data_dict.get("test_dataset")
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        from model.HGIKT.variants.hgikt_no_skill_assignment import (
-            HGIKT_NoSkillAssignment,
-        )
+        from model.HGIKT.variants.hgikt_hyper_only import HGIKT_HyperOnly
 
-        logger.info("Initializing HGIKT_NoSkillAssignment model...")
-        model = HGIKT_NoSkillAssignment(
+        logger.info("Initializing HGIKT_HyperOnly model...")
+        model = HGIKT_HyperOnly(
             args, data_src.get_metadata(), self.hetero_graph.metadata()
         )
 
@@ -165,7 +159,6 @@ class HGIKTNoSkillAssignmentTrainer(BaseTrainer):
         ).with_data(
             train_data=train_dataset,
             val_data=val_dataset,
-            test_data=test_dataset,
             batch_size=args.batch_size,
         ).with_optimization(
             optimizer=optimizer,
@@ -175,7 +168,7 @@ class HGIKTNoSkillAssignmentTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_NoSkillAssignment",
+            model_name="HGIKT_HyperOnly",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 

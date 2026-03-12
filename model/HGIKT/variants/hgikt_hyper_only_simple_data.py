@@ -1,6 +1,6 @@
-"""Data preparation for HGIKT_NoTemplateEdges variant.
+"""Data preparation for HGIKT_HyperOnlySimple variant.
 
-Removes question-template edges from the heterogeneous graph.
+Uses simple hypergraph without difficulty weighting.
 """
 
 from typing_extensions import override
@@ -11,55 +11,47 @@ from utils.core import get_logger
 logger = get_logger(__name__)
 
 
-class HGIKTNoTemplateEdgesData(HGIKTModelData):
-    """Data preparation without question-template edges.
+class HGIKTHyperOnlySimpleData(HGIKTModelData):
+    """Data preparation with simple hypergraph (no difficulty weighting).
 
-    Builds the heterogeneous graph without the ("question", "belongs_to", "template")
-    edge type, effectively removing the template component from HGIKT.
+    Builds hypergraph without difficulty clustering and edge weights,
+    using the direct question-skill relationships.
     """
 
     @override
     def prepare_data(self, args):
-        """Prepare HGIKT data without template edges.
+        """Prepare HGIKT data with simple hypergraph.
 
-        The hetero_graph is built without the question-template edges.
-        All other components remain the same.
+        The hypergraph is built without difficulty weighting.
+        All other components remain same.
         """
         fold_idx = args.fold if args.fold >= 0 else None
-        kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
-        # Build user sequence data
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-        # Build question-skill relationship matrix
         import torch
 
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
         ).float()
 
-        # === MODIFIED: Build hetero graph WITHOUT template edges ===
         hetero_graph = self.build_hetero_graph(
             [
                 ("question", "has", "skill"),
                 ("skill", "related_to", "assignment"),
-                # SKIPPED: ("question", "belongs_to", "template")
+                ("question", "belongs_to", "template"),
             ]
         )
 
+        # Build simple hypergraph (no difficulty weighting)
+        skill_hypergraph = self.build_hyper_graph(("question", "has", "skill"))
+
         logger.info(
-            f"Hetero graph built without template edges. "
-            f"Node types: {hetero_graph.node_types}, "
-            f"Edge types: {hetero_graph.edge_types}"
+            f"Simple hypergraph built (no difficulty weighting). "
+            f"Vertices: {skill_hypergraph.num_v}, "
+            f"Hyperedges: {skill_hypergraph.num_e}"
         )
 
-        # Hypergraph unchanged
-        skill_hypergraph = self.build_difficulty_weighted_hypergraph(
-            ("question", "has", "skill"),
-            num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),
-        )
-
-        # Split data
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -74,14 +66,12 @@ class HGIKTNoTemplateEdgesData(HGIKTModelData):
             )
         else:
             raise ValueError(
-                "K-fold cross-validation is required for HGIKT_NoTemplateEdges variant."
+                "K-fold cross-validation fold index must be specified (args.fold >= 0)"
             )
 
-        # Create datasets
         train_dataset = HGIKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = HGIKTDataset(val_data[0], val_data[1], val_data[2])
         test_dataset = HGIKTDataset(test_data[0], test_data[1], test_data[2])
-
         return {
             "train_dataset": train_dataset,
             "val_dataset": val_dataset,
