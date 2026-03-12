@@ -110,9 +110,6 @@ COMPONENTS = UniversalRegistry("components", namespace="kt")
 # 参数配置注册表
 PARAM_CONFIGS = UniversalRegistry("param_configs", namespace="kt")
 
-# 消融策略注册表
-ABLATION_STRATEGIES = UniversalRegistry("strategies", namespace="ablation")
-
 # 案例分析器注册表
 ANALYZERS = UniversalRegistry("analyzers", namespace="kt")
 
