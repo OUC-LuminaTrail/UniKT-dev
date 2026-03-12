@@ -410,7 +410,13 @@ class SGKT(nn.Module):
         self.general_interaction = GeneralInteraction(self.hidden_dim)
 
     def forward(
-        self, user_sequence, user_response, user_mask, hrg_data, hist_neighbor_index
+        self,
+        user_sequence,
+        user_response,
+        user_mask,
+        hrg_data,
+        hist_neighbor_index,
+        return_states=False,
     ):
         question_indices = user_sequence[:, :-1] + self.num_skills
         next_question_indices = user_sequence[:, 1:] + self.num_skills
@@ -479,4 +485,9 @@ class SGKT(nn.Module):
         logits = self.general_interaction(
             student_status, knowledge_status, user_mask[:, :-1]
         )
+
+        if return_states:
+            # Extract skill embeddings: feature_embedding.weight[:num_skills]
+            skill_embeddings = self.feature_embedding.weight[: self.num_skills]
+            return logits, skill_embeddings, output_series
         return logits

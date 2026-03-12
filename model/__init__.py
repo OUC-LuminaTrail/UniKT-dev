@@ -1,11 +1,9 @@
 from .ABKT.ABKT_model import GMF, K_CMF
 from .ABKT.ABKT_trainer import ABKTTrainer
-from .GIKT.GIKT_edmine_model import GIKTEdmine
-from .GIKT.GIKT_edmine_trainer import GIKTEdmineTrainer
 from .GIKT.GIKT_model import GIKT
 from .GIKT.GIKT_trainer import GIKTTrainer
-
-# Import HGIKT variants to trigger registration
+from .GIKTEdmine.GIKT_edmine_model import GIKTEdmine
+from .GIKTEdmine.GIKT_edmine_trainer import GIKTEdmineTrainer
 from .HGIKT import variants  # noqa: F401
 from .HGIKT.HGIKT_model import HGIKT
 from .HGIKT.HGIKT_trainer import HGIKTTrainer

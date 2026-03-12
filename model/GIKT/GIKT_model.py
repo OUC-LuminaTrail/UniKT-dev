@@ -171,7 +171,8 @@ class GIKT(nn.Module):
         user_mask: torch.Tensor,  # [B, S]
         graph: Any,
         question_skill_matrix: torch.Tensor,  # [Q, K]
-    ) -> torch.Tensor:  # [B, S]
+        return_states: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """前向传播。
 
         Args:
@@ -180,9 +181,11 @@ class GIKT(nn.Module):
             user_mask: 有效位置掩码 [B, S]
             graph: 问题-技能异构图
             question_skill_matrix: 问题-技能关联矩阵 [Q, K]
+            return_states: 是否额外返回中间状态（用于知识状态可视化）
 
         Returns:
-            预测 logits [B, S]
+            若 return_states=False: 预测 logits [B, S]
+            若 return_states=True: (logits [B, S], skill_conv [num_skills, H], lstm_output [B, S, H])
         """
         # 批量大小
         B, _ = user_sequence.size()
@@ -334,5 +337,8 @@ class GIKT(nn.Module):
         logits = self.general_interaction(
             student_status, knowledge_status, user_mask
         )  # [B, S]
+
+        if return_states:
+            return logits, skill_conv, lstm_output
 
         return logits  # [B, S]

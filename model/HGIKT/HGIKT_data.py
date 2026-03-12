@@ -10,13 +10,19 @@ logger = get_logger(__name__)
 
 
 class HGIKTDataset(Dataset):
-    def __init__(self, sequences, responses, masks):
+    def __init__(self, users, sequences, responses, masks):
+        self.users = torch.as_tensor(users, dtype=torch.long)
         self.sequences = torch.as_tensor(sequences, dtype=torch.long)
         self.responses = torch.as_tensor(responses, dtype=torch.long)
         self.masks = torch.as_tensor(masks, dtype=torch.bool)
 
     def __getitem__(self, index):
-        return self.sequences[index], self.responses[index], self.masks[index]
+        return (
+            self.users[index],
+            self.sequences[index],
+            self.responses[index],
+            self.masks[index],
+        )
 
     def __len__(self):
         return len(self.sequences)
@@ -37,8 +43,8 @@ class HGIKTModelData(GraphModelData):
         min_seq_len = self.data_src.get_metadata("min_seq_len")
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            max_seq_len, min_seq_len
+        user_sequence, user_response, user_mask, user_id_sequence = (
+            self.build_sequence_data(max_seq_len, min_seq_len)
         )
 
         # 构建问题-技能关联矩阵，并转换为torch张量
@@ -91,16 +97,22 @@ class HGIKTModelData(GraphModelData):
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
             train_data, val_data = self.split_kfold_data(
-                user_sequence, user_response, user_mask, fold_idx=fold_idx
+                user_id_sequence,
+                user_sequence,
+                user_response,
+                user_mask,
+                fold_idx=fold_idx,
             )
         else:
             train_data, val_data = self.split_data(
-                user_sequence, user_response, user_mask
+                user_id_sequence, user_sequence, user_response, user_mask
             )
 
         # 构建模型数据集
-        train_dataset = HGIKTDataset(train_data[0], train_data[1], train_data[2])
-        val_dataset = HGIKTDataset(val_data[0], val_data[1], val_data[2])
+        train_dataset = HGIKTDataset(
+            train_data[0], train_data[1], train_data[2], train_data[3]
+        )
+        val_dataset = HGIKTDataset(val_data[0], val_data[1], val_data[2], val_data[3])
 
         # 返回数据
         return_data = {

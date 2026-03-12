@@ -110,6 +110,8 @@ COMPONENTS = UniversalRegistry("components", namespace="kt")
 # 参数配置注册表
 PARAM_CONFIGS = UniversalRegistry("param_configs", namespace="kt")
 
+# 案例分析器注册表
+ANALYZERS = UniversalRegistry("analyzers", namespace="kt")
 
 # ============================================================================
 # 向后兼容的便捷函数
@@ -156,3 +158,17 @@ def register_data_source(name: str | None = None):
         ...     pass
     """
     return DATA_SOURCES.register(name)
+
+
+def register_analyzer(name: str | None = None):
+    """注册案例分析器的便捷函数。
+
+    Args:
+        name: 分析器名称，如果为 None 则使用类名
+
+    Example:
+        >>> @register_analyzer("GIKT")
+        ... class GIKTAnalyzer:
+        ...     pass
+    """
+    return ANALYZERS.register(name)
