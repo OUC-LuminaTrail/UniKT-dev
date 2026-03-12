@@ -32,9 +32,6 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         """
         self.args = args
         self.data_src = data_src
-        self.case_seq_sample_len = getattr(args, "case_seq_sample_len", None)
-        self.case_skill_scope = getattr(args, "case_skill_scope", "relevant_prefix")
-        self.case_non_relevant_fill = getattr(args, "case_non_relevant_fill", "zero")
 
         model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
@@ -149,34 +146,18 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
     ) -> torch.Tensor:
         """Compute per-skill mean predicted correctness probabilities.
 
-        For each student in batch:
-        1) Select target skills according to configured scope.
-        2) Expand to a related question set from those skills.
-        3) Predict probabilities on that question set at each timestep.
-        4) Average probabilities by skill.
+        For each timestep and skill, average model-predicted correctness probability
+        over all questions linked to that skill.
 
         Returns:
             Tensor of shape [B, S, num_skills] with values in [0, 1].
-            For relevant_* scopes, non-relevant skills are filled by policy.
         """
-        target_skill_mask = self._get_target_skills_mask(sequence, mask)  # [B, K]
-        if not target_skill_mask.any():
-            B, S = sequence.shape
-            empty_states = torch.zeros(
-                B,
-                S,
-                self.num_skills,
-                device=sequence.device,
-                dtype=lstm_output.dtype,
-            )
-            return self._apply_non_relevant_fill(empty_states, target_skill_mask)
+        B, S = sequence.shape
 
-        skill_question_mask = self.skill_question_mask.to(sequence.device)  # [K, Q]
-        relevant_question_mask = (
-            torch.matmul(target_skill_mask.float(), skill_question_mask) > 0
-        )  # [B, Q]
-
-        selected_question_ids = torch.where(relevant_question_mask.any(dim=0))[0]
+        # Predict probabilities for all questions at each timestep
+        all_question_ids = torch.arange(
+            self.num_questions, device=sequence.device, dtype=torch.long
+        )
 
         question_probs = self._predict_probabilities_for_questions(
             sequence,
@@ -184,37 +165,16 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             mask,
             skill_hetero_conv,
             lstm_output,
-            selected_question_ids,
-        )  # [B, S, Q_sel]
+            all_question_ids,
+        )  # [B, S, Q]
 
-        skill_question_mask_sel = skill_question_mask[:, selected_question_ids]  # [K, Q_sel]
-
-        weighted_sum = torch.einsum("bsq,kq->bsk", question_probs, skill_question_mask_sel)
-        question_count = skill_question_mask_sel.sum(dim=-1).clamp_min(1.0)
+        # Average probabilities by skill using question-skill mapping
+        skill_question_mask = self.skill_question_mask.to(sequence.device)  # [K, Q]
+        weighted_sum = torch.einsum("bsq,kq->bsk", question_probs, skill_question_mask)
+        question_count = skill_question_mask.sum(dim=-1).clamp_min(1.0)
         knowledge_states = weighted_sum / question_count.view(1, 1, -1)
 
-        return self._apply_non_relevant_fill(knowledge_states, target_skill_mask)
-
-    def _apply_non_relevant_fill(
-        self,
-        knowledge_states: torch.Tensor,
-        target_skill_mask: torch.Tensor,
-    ) -> torch.Tensor:
-        """Apply configured fill policy to non-relevant skills.
-
-        - all scope: keep full predictions unchanged.
-        - relevant_* scope: fill non-relevant with zero or NaN.
-        """
-        if self.case_skill_scope == "all":
-            return knowledge_states
-
-        if self.case_non_relevant_fill == "nan":
-            return knowledge_states.masked_fill(
-                ~target_skill_mask.unsqueeze(1),
-                float("nan"),
-            )
-
-        return knowledge_states * target_skill_mask.unsqueeze(1).float()
+        return knowledge_states
 
     def _predict_probabilities_for_questions(
         self,
@@ -252,35 +212,6 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             probs_per_question.append(torch.sigmoid(logits_q).unsqueeze(-1))
 
         return torch.cat(probs_per_question, dim=-1)
-
-    def _get_target_skills_mask(
-        self, sequence: torch.Tensor, mask: torch.Tensor
-    ) -> torch.Tensor:
-        """Extract target skill mask according to configured case scope.
-
-        Returns:
-            Bool tensor [B, num_skills].
-        """
-        if self.case_skill_scope == "all":
-            B = sequence.shape[0]
-            return torch.ones(
-                B,
-                self.num_skills,
-                device=sequence.device,
-                dtype=torch.bool,
-            )
-
-        mask_bool = mask.bool()
-        if (
-            self.case_skill_scope == "relevant_prefix"
-            and self.case_seq_sample_len is not None
-            and self.case_seq_sample_len > 0
-        ):
-            valid_rank = torch.cumsum(mask_bool.long(), dim=1)
-            mask_bool = mask_bool & (valid_rank <= self.case_seq_sample_len)
-
-        q_skill = self.question_skill_matrix[sequence]  # [B, S, K]
-        return ((q_skill > 0) & mask_bool.unsqueeze(-1)).any(dim=1)
 
     def _build_question_representations(
         self, sequence: torch.Tensor, response: torch.Tensor

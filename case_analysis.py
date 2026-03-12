@@ -118,11 +118,6 @@ def cmd_inference(args):
         hyperparams_path=str(hyperparams_path) if hyperparams_path.exists() else None,
     )
 
-    # Optional case-analysis-only sequence sampling length (for heatmap method).
-    model_args.case_seq_sample_len = args.case_seq_sample_len
-    model_args.case_skill_scope = args.case_skill_scope
-    model_args.case_non_relevant_fill = args.case_non_relevant_fill
-
     logger.info(f"Starting inference for {model_name} on {dataset_name}...")
 
     data_src = get_data_source(dataset_name, model_args)
@@ -289,34 +284,6 @@ Examples:
     )
     parser_inference.add_argument(
         "--data_base_path", default="./data", help="Data base path (default: ./data)"
-    )
-    parser_inference.add_argument(
-        "--case_seq_sample_len",
-        type=int,
-        default=8,
-        help="Finite prefix length used to determine relevant skills in case analysis (default: 8)",
-    )
-    parser_inference.add_argument(
-        "--case_skill_scope",
-        type=str,
-        choices=["relevant_prefix", "relevant_full", "all"],
-        default="relevant_prefix",
-        help=(
-            "Skill scope for knowledge-state inference: "
-            "relevant_prefix (skills in first N valid steps), "
-            "relevant_full (skills in full valid sequence), "
-            "all (all skills in dataset)."
-        ),
-    )
-    parser_inference.add_argument(
-        "--case_non_relevant_fill",
-        type=str,
-        choices=["zero", "nan"],
-        default="zero",
-        help=(
-            "Fill value for non-relevant skills when using relevant_* scope: "
-            "zero (legacy behavior) or nan (recommended for heatmap readability)."
-        ),
     )
 
     parser_select = subparsers.add_parser(
