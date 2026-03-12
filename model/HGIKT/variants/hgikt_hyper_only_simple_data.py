@@ -1,4 +1,4 @@
-"""Data preparation for HGIKT_SimpleHypergraph variant.
+"""Data preparation for HGIKT_HyperOnlySimple variant.
 
 Uses simple hypergraph without difficulty weighting.
 """
@@ -11,10 +11,10 @@ from utils.core import get_logger
 logger = get_logger(__name__)
 
 
-class HGIKTSimpleHypergraphData(HGIKTModelData):
+class HGIKTHyperOnlySimpleData(HGIKTModelData):
     """Data preparation with simple hypergraph (no difficulty weighting).
 
-    Builds the hypergraph without difficulty clustering and edge weights,
+    Builds hypergraph without difficulty clustering and edge weights,
     using the direct question-skill relationships.
     """
 
@@ -23,7 +23,7 @@ class HGIKTSimpleHypergraphData(HGIKTModelData):
         """Prepare HGIKT data with simple hypergraph.
 
         The hypergraph is built without difficulty weighting.
-        All other components remain the same.
+        All other components remain same.
         """
         fold_idx = args.fold if args.fold >= 0 else None
         max_seq_len = self.data_src.get_metadata("max_seq_len")
@@ -47,7 +47,7 @@ class HGIKTSimpleHypergraphData(HGIKTModelData):
             ]
         )
 
-        # === MODIFIED: Build simple hypergraph (no difficulty weighting) ===
+        # Build simple hypergraph (no difficulty weighting)
         skill_hypergraph = self.build_hyper_graph(("question", "has", "skill"))
 
         logger.info(

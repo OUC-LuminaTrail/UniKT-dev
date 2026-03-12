@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_NoHeteroGraph variant."""
+"""Trainer for HGIKT_ConcatFusion variant."""
 
 from typing import Any
 
@@ -11,12 +11,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_NoHeteroGraph")
-class HGIKTNoHeteroGraphModelParams(BaseParamConfig):
-    """HGIKT_NoHeteroGraph model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_ConcatFusion")
+class HGIKTConcatFusionModelParams(BaseParamConfig):
+    """HGIKT_ConcatFusion model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "HGIKT_NoHeteroGraph Parameters"
+        group_name = "HGIKT_ConcatFusion Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -97,9 +97,9 @@ class HGIKTNoHeteroGraphModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_NoHeteroGraph")
-class HGIKTNoHeteroGraphTrainer(BaseTrainer):
-    """Trainer for HGIKT without heterogeneous graph.
+@TRAINERS.register("HGIKT_ConcatFusion")
+class HGIKTConcatFusionTrainer(BaseTrainer):
+    """Trainer for HGIKT with concatenation fusion.
 
     Uses same data preparation as HGIKT, but variant model.
     """
@@ -121,10 +121,10 @@ class HGIKTNoHeteroGraphTrainer(BaseTrainer):
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        from model.HGIKT.variants.hgikt_no_hetero_graph import HGIKT_NoHeteroGraph
+        from model.HGIKT.variants.hgikt_concat_fusion import HGIKT_ConcatFusion
 
-        logger.info("Initializing HGIKT_NoHeteroGraph model...")
-        model = HGIKT_NoHeteroGraph(
+        logger.info("Initializing HGIKT_ConcatFusion model...")
+        model = HGIKT_ConcatFusion(
             args, data_src.get_metadata(), self.hetero_graph.metadata()
         )
 
@@ -168,7 +168,7 @@ class HGIKTNoHeteroGraphTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_NoHeteroGraph",
+            model_name="HGIKT_ConcatFusion",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 

@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_NoHypergraph variant."""
+"""Trainer for HGIKT_WeightedFusion variant."""
 
 from typing import Any
 
@@ -11,13 +11,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_NoHypergraph")
-class HGIKTNoHypergraphModelParams(BaseParamConfig):
-    """HGIKT_NoHypergraph model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_WeightedFusion")
+class HGIKTWeightedFusionModelParams(BaseParamConfig):
+    """HGIKT_WeightedFusion model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        # Same parameters as HGIKT
-        group_name = "HGIKT_NoHypergraph Parameters"
+        group_name = "HGIKT_WeightedFusion Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -98,9 +97,9 @@ class HGIKTNoHypergraphModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_NoHypergraph")
-class HGIKTNoHypergraphTrainer(BaseTrainer):
-    """Trainer for HGIKT without hypergraph.
+@TRAINERS.register("HGIKT_WeightedFusion")
+class HGIKTWeightedFusionTrainer(BaseTrainer):
+    """Trainer for HGIKT with learnable weighted fusion.
 
     Uses same data preparation as HGIKT, but variant model.
     """
@@ -111,7 +110,6 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 1. Prepare data (same as HGIKT)
         from model.HGIKT.HGIKT_data import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
@@ -123,31 +121,28 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        # 2. Initialize variant model
-        from model.HGIKT.variants.hgikt_no_hypergraph import HGIKT_NoHypergraph
+        from model.HGIKT.variants.hgikt_weighted_fusion import (
+            HGIKT_WeightedFusion,
+        )
 
-        logger.info("Initializing HGIKT_NoHypergraph model...")
-        model = HGIKT_NoHypergraph(
+        logger.info("Initializing HGIKT_WeightedFusion model...")
+        model = HGIKT_WeightedFusion(
             args, data_src.get_metadata(), self.hetero_graph.metadata()
         )
 
-        # 3. Call parent constructor
         super().__init__(model)
 
-        # 4. Create optimizer and loss function
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
 
-        # 5. Create learning rate scheduler
         lr_scheduler = None
         if args.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer, gamma=args.lr_decay
             )
 
-        # 6. Build early stopping config
         early_stopping_cfg = None
         es_patience = getattr(args, "es_patience", None)
         if es_patience is not None:
@@ -158,7 +153,6 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
                 min_delta=getattr(args, "es_min_delta", 0.0),
             )
 
-        # 7. Configure trainer
         self.with_training(
             epochs=args.epochs,
             seed=args.seed,
@@ -176,11 +170,10 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_NoHypergraph",
+            model_name="HGIKT_WeightedFusion",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
-        # 8. Move static data to device
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
@@ -199,7 +192,7 @@ class HGIKTNoHypergraphTrainer(BaseTrainer):
             response,
             mask,
             self.hetero_graph,
-            self.hypergraph,  # Unused in this variant but required for interface
+            self.hypergraph,
             self.question_skill_matrix,
         )
 

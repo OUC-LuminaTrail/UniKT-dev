@@ -195,7 +195,7 @@ class HGIKTQuestionSkillOnlyTrainer(BaseTrainer):
             response,
             mask,
             self.hetero_graph,
-            self.hypergraph,
+            self.hypergraph,  # Unused in this variant but required for interface
             self.question_skill_matrix,
         )
 

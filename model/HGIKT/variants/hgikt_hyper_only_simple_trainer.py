@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_NoMoE variant."""
+"""Trainer for HGIKT_HyperOnlySimple variant."""
 
 from typing import Any
 
@@ -11,12 +11,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_NoMoE")
-class HGIKTNoMoEModelParams(BaseParamConfig):
-    """HGIKT_NoMoE model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_HyperOnlySimple")
+class HGIKTHyperOnlySimpleModelParams(BaseParamConfig):
+    """HGIKT_HyperOnlySimple model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "HGIKT_NoMoE Parameters"
+        group_name = "HGIKT_HyperOnlySimple Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -97,11 +97,12 @@ class HGIKTNoMoEModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_NoMoE")
-class HGIKTNoMoETrainer(BaseTrainer):
-    """Trainer for HGIKT without MoE fusion.
+@TRAINERS.register("HGIKT_HyperOnlySimple")
+class HGIKTHyperOnlySimpleTrainer(BaseTrainer):
+    """Trainer for HGIKT with simple hypergraph only (no difficulty weighting).
 
-    Uses same data preparation as HGIKT, but variant model without MoE.
+    Uses custom data preparation (HGIKTHyperOnlySimpleData) to build
+    simple hypergraph without difficulty clustering.
     """
 
     def __init__(
@@ -110,9 +111,11 @@ class HGIKTNoMoETrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        from model.HGIKT.HGIKT_data import HGIKTModelData
+        from model.HGIKT.variants.hgikt_hyper_only_simple_data import (
+            HGIKTHyperOnlySimpleData,
+        )
 
-        model_data = HGIKTModelData(data_src)
+        model_data = HGIKTHyperOnlySimpleData(data_src)
         data_dict = model_data.prepare_data(args)
 
         train_dataset = data_dict["train_dataset"]
@@ -121,10 +124,12 @@ class HGIKTNoMoETrainer(BaseTrainer):
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
-        from model.HGIKT.variants.hgikt_no_moe import HGIKT_NoMoE
+        from model.HGIKT.variants.hgikt_hyper_only_simple import HGIKT_HyperOnlySimple
 
-        logger.info("Initializing HGIKT_NoMoE model...")
-        model = HGIKT_NoMoE(args, data_src.get_metadata(), self.hetero_graph.metadata())
+        logger.info("Initializing HGIKT_HyperOnlySimple model...")
+        model = HGIKT_HyperOnlySimple(
+            args, data_src.get_metadata(), self.hetero_graph.metadata()
+        )
 
         super().__init__(model)
 
@@ -166,7 +171,7 @@ class HGIKTNoMoETrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_NoMoE",
+            model_name="HGIKT_HyperOnlySimple",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 

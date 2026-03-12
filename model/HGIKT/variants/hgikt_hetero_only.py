@@ -1,4 +1,4 @@
-"""HGIKT variant with heterogeneous graph branch only (question-skill edges only)."""
+"""HGIKT variant with heterogeneous graph branch only."""
 
 from typing import Any
 
@@ -55,11 +55,11 @@ class HeteroGNN(nn.Module):
         return x_dict
 
 
-@register_model("HGIKT_QuestionSkillOnly")
-class HGIKT_QuestionSkillOnly(nn.Module):
+@register_model("HGIKT_HeteroOnly")
+class HGIKT_HeteroOnly(nn.Module):
     """HGIKT variant with only heterogeneous graph for knowledge representation.
 
-    This variant uses only the heterogeneous graph (with question-skill edges only).
+    This variant uses only the complete heterogeneous graph (all node types and edges).
     The hypergraph branch is removed, and MoE fusion is bypassed.
     """
 
@@ -74,10 +74,12 @@ class HGIKT_QuestionSkillOnly(nn.Module):
         self.args = args
         self.data_metadata = data_metadata
 
+        # Model parameters
         self.hidden_dim = args.hidden_dim
         self.lstm_layers = args.lstm_layers
         self.dropout = args.dropout
 
+        # Embedding layers
         self.question_embedding = nn.Embedding(
             num_embeddings=data_metadata["num_questions"],
             embedding_dim=self.hidden_dim,
@@ -90,8 +92,6 @@ class HGIKT_QuestionSkillOnly(nn.Module):
             num_embeddings=data_metadata["num_skills"],
             embedding_dim=self.hidden_dim,
         )
-        # Note: assignment and template embeddings are still included but not used
-        # due to only question-skill edges in hetero graph
         self.assignment_embedding = nn.Embedding(
             num_embeddings=data_metadata["num_assignments"],
             embedding_dim=self.hidden_dim,
@@ -119,10 +119,12 @@ class HGIKT_QuestionSkillOnly(nn.Module):
 
         # Fusion module disabled (no fuse)
 
+        # Full connected layer
         self.fc_exercise = Linear(
             self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
         )
 
+        # LSTM layer
         self.lstm = nn.LSTM(
             input_size=self.hidden_dim,
             hidden_size=self.hidden_dim,
@@ -131,11 +133,13 @@ class HGIKT_QuestionSkillOnly(nn.Module):
             dropout=self.dropout,
         )
 
+        # History recap module
         self.history_review = HistoryRecap(
             hist_neighbor_num=args.history_neighbour,
             att_bound=args.att_bound,
         )
 
+        # General interaction module
         self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
     def forward(
@@ -155,9 +159,10 @@ class HGIKT_QuestionSkillOnly(nn.Module):
         """
         B, _ = user_sequence.size()
 
+        # Answers embedding
         answers_embedding = self.answer_embedding(user_response)
 
-        # Hetero graph convolution (with only question-skill edges)
+        # Hetero graph convolution (unchanged)
         conv = self.hetero_conv(
             {
                 "question": self.question_embedding.weight,
@@ -173,6 +178,7 @@ class HGIKT_QuestionSkillOnly(nn.Module):
         # Use only hetero graph features
         question_conv_fused = question_hetero_conv
 
+        # Rest of forward pass unchanged from HGIKT
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(
             [question_embedding_sequence, answers_embedding], dim=-1

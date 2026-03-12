@@ -1,4 +1,4 @@
-"""Trainer for HGIKT_NoTemplateEdges variant."""
+"""Trainer for HGIKT_HeteroOnly variant."""
 
 from typing import Any
 
@@ -11,13 +11,13 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT_NoTemplateEdges")
-class HGIKTNoTemplateEdgesModelParams(BaseParamConfig):
-    """HGIKT_NoTemplateEdges model parameters - inherits from HGIKT."""
+@register_model_params("HGIKT_HeteroOnly")
+class HGIKTHeteroOnlyModelParams(BaseParamConfig):
+    """HGIKT_HeteroOnly model parameters - inherits from HGIKT."""
 
     def define_params(self) -> tuple[str, dict]:
         # Same parameters as HGIKT
-        group_name = "HGIKT_NoTemplateEdges Parameters"
+        group_name = "HGIKT_HeteroOnly Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -98,12 +98,11 @@ class HGIKTNoTemplateEdgesModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_NoTemplateEdges")
-class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
-    """Trainer for HGIKT without template edges.
+@TRAINERS.register("HGIKT_HeteroOnly")
+class HGIKTHeteroOnlyTrainer(BaseTrainer):
+    """Trainer for HGIKT with heterogeneous graph only.
 
-    Uses custom data preparation (HGIKTNoTemplateEdgesData) to build
-    hetero_graph without question-template edges.
+    Uses same data preparation as HGIKT, but variant model.
     """
 
     def __init__(
@@ -112,12 +111,10 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 1. Prepare data using custom data class
-        from model.HGIKT.variants.hgikt_no_template_edges_data import (
-            HGIKTNoTemplateEdgesData,
-        )
+        # 1. Prepare data (same as HGIKT)
+        from model.HGIKT.HGIKT_data import HGIKTModelData
 
-        model_data = HGIKTNoTemplateEdgesData(data_src)
+        model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         train_dataset = data_dict["train_dataset"]
@@ -127,10 +124,10 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
         # 2. Initialize variant model
-        from model.HGIKT.variants.hgikt_no_template_edges import HGIKT_NoTemplateEdges
+        from model.HGIKT.variants.hgikt_hetero_only import HGIKT_HeteroOnly
 
-        logger.info("Initializing HGIKT_NoTemplateEdges model...")
-        model = HGIKT_NoTemplateEdges(
+        logger.info("Initializing HGIKT_HeteroOnly model...")
+        model = HGIKT_HeteroOnly(
             args, data_src.get_metadata(), self.hetero_graph.metadata()
         )
 
@@ -179,7 +176,7 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT_NoTemplateEdges",
+            model_name="HGIKT_HeteroOnly",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
@@ -202,7 +199,7 @@ class HGIKTNoTemplateEdgesTrainer(BaseTrainer):
             response,
             mask,
             self.hetero_graph,
-            self.hypergraph,
+            self.hypergraph,  # Unused in this variant but required for interface
             self.question_skill_matrix,
         )
 

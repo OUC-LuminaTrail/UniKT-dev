@@ -279,10 +279,11 @@ class SamplingParams(BaseParamConfig):
                 "default": None,
                 "help": "Number of users to sample (None to disable sampling)",
             },
-            "sample_stratify": {
-                "type": bool,
-                "default": True,
-                "help": "Enable stratified sampling by user statistics",
+            "sample_strategy": {
+                "type": str,
+                "default": "random",
+                "choices": ["random", "stratified"],
+                "help": "Sampling strategy (default: random, choices: random, stratified)",
             },
             "sample_attempts_bins": {
                 "type": int,

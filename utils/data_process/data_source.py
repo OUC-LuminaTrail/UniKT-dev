@@ -133,8 +133,8 @@ class DataSource(ABC):
             "random_seed": self.seed,
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
-            "num_users": self._get_mapped_count("user"),
-            "num_questions": self._get_mapped_count("question"),
+            "num_users": self.sequence_data["user"].n_unique(),
+            "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
             "num_assignments": self.question_data["assignment"].n_unique(),
         }
@@ -169,15 +169,8 @@ class DataSource(ABC):
             "label",
             "attempt_count",
             "hint_count",
+            "timestamp",
         }
-
-        # Optional time/order columns (different datasets use different names)
-        optional_time_cols = {"order_id", "start_time", "startTime", "timestamp"}
-        actual_time_cols = optional_time_cols.intersection(set(sequence_data.columns))
-
-        # Allow any one time column if present
-        if actual_time_cols:
-            expected_sequence_cols.add(actual_time_cols.pop())
 
         actual_sequence_cols = set(sequence_data.columns)
 
@@ -657,7 +650,7 @@ class DataSource(ABC):
     def sample_users(
         self,
         n_samples: int,
-        stratify: bool = True,
+        sample_strategy: str = "random",
         attempts_bins: list = [20, 100],
         correct_bins: list = [0.4, 0.8],
     ):
@@ -667,14 +660,14 @@ class DataSource(ABC):
 
         Args:
             n_samples: Number of users to sample.
-            stratify: Enable stratified sampling (default: True).
+            sample_strategy: Sampling strategy (default: "random").
             attempts_bins: Attempt count bin edges.
             correct_bins: Correct rate bin edges.
 
         Raises:
             ValueError: If n_samples exceeds total users or data not loaded.
         """
-        logger.info(f"Sampling {n_samples} users from dataset...")
+        logger.info(f"Sampling {n_samples} users from dataset, strategy={sample_strategy}")
 
         user_stats = self.get_user_stats()
         total_users = len(user_stats)
@@ -690,18 +683,19 @@ class DataSource(ABC):
 
         original_records = len(self.sequence_data)
 
-        if stratify:
-            sampled_users = self._sample_users_stratified(
-                user_stats, n_samples, attempts_bins, correct_bins
-            )
-        else:
-            logger.info("Performing simple random sampling without stratification.")
+        if sample_strategy == "random":
             sampled_users = (
                 user_stats.sample(n=n_samples, seed=self.seed)
                 .select("user")
                 .to_series()
                 .to_list()
             )
+        elif sample_strategy == "stratified":
+            sampled_users = self._sample_users_stratified(
+                user_stats, n_samples, attempts_bins, correct_bins
+            )
+        else:
+            raise ValueError(f"Unsupported sample strategy: {sample_strategy}")
 
         self._apply_sampling_to_data(
             sampled_users, n_samples, total_users, original_records
@@ -933,31 +927,16 @@ def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
 
 def _truncate_long_sequences(data, max_seq_len: int):
     """Truncate sequences longer than max_seq_len to last max_seq_len records."""
-    time_col = _find_time_column(data)
 
-    if time_col:
-        data = data.sort(["user", time_col])
-        data = data.with_columns(
-            pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
-        )
-        data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
-        data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
-        data = data.drop(["row_num", "total"])
-    else:
-        data = data.group_by("user").map_groups(
-            lambda df: df.slice(-max_seq_len, max_seq_len),
-            schema=data.schema,
-        )
+    data = data.sort(["user", "timestamp"])
+    data = data.with_columns(
+        pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
+    )
+    data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
+    data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
+    data = data.drop(["row_num", "total"])
 
     return data
-
-
-def _find_time_column(data) -> str | None:
-    """Find a suitable time column for sorting sequences."""
-    for col in ["timestamp", "order_id", "start_time", "startTime"]:
-        if col in data.columns:
-            return col
-    return None
 
 
 __all__ = [

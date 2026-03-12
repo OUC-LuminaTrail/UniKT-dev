@@ -1,12 +1,10 @@
 {
   "study_name": "hgikt_ablation_study",
   "base_model": "HGIKT",
-  "dataset": "assistments09",
   "shared_params": {
     "epochs": 120,
     "learning_rate": 0.0003,
     "batch_size": 64,
-    "fold": 0,
     "seed": 42,
     "hidden_dim": 250,
     "n_hop": 4,
@@ -28,42 +26,42 @@
     {
       "name": "baseline",
       "variant": "HGIKT",
-      "description": "Full model (no ablation)"
+      "description": "完整模型（无消融）"
     },
     {
-      "name": "no_hypergraph",
-      "variant": "HGIKT_NoHypergraph",
-      "description": "Disable hypergraph branch - use only heterogeneous graph"
+      "name": "hetero_only",
+      "variant": "HGIKT_HeteroOnly",
+      "description": "只保留完整的异质图分支"
     },
     {
-      "name": "no_template_edges",
-      "variant": "HGIKT_NoTemplateEdges",
-      "description": "Remove question-template edges from heterogeneous graph"
+      "name": "hyper_only",
+      "variant": "HGIKT_HyperOnly",
+      "description": "只保留完整的超图分支（难度加权）"
     },
     {
-      "name": "no_hetero_graph",
-      "variant": "HGIKT_NoHeteroGraph",
-      "description": "Disable heterogeneous graph branch - use only hypergraph"
+      "name": "hyper_only_simple",
+      "variant": "HGIKT_HyperOnlySimple",
+      "description": "只保留超图分支（简单超图，无难度加权）"
     },
     {
       "name": "question_skill_only",
       "variant": "HGIKT_QuestionSkillOnly",
-      "description": "Keep only question-skill edges in heterogeneous graph"
+      "description": "只保留异质图分支，且异质图中只保留问题-技能边"
     },
     {
-      "name": "no_skill_assignment",
-      "variant": "HGIKT_NoSkillAssignment",
-      "description": "Remove skill-assignment edges from heterogeneous graph"
+      "name": "simple_fusion",
+      "variant": "HGIKT_SimpleFusion",
+      "description": "保留双图，使用简单相加融合"
     },
     {
-      "name": "simple_hypergraph",
-      "variant": "HGIKT_SimpleHypergraph",
-      "description": "Use simple hypergraph without difficulty weighting"
+      "name": "weighted_fusion",
+      "variant": "HGIKT_WeightedFusion",
+      "description": "保留双图，使用加权相加融合"
     },
     {
-      "name": "no_moe",
-      "variant": "HGIKT_NoMoE",
-      "description": "Remove MoE fusion module - use simple addition"
+      "name": "concat_fusion",
+      "variant": "HGIKT_ConcatFusion",
+      "description": "保留双图，使用 concat + 线性层融合"
     }
   ]
 }

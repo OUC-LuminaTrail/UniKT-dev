@@ -1,4 +1,4 @@
-"""HGIKT variant without heterogeneous graph branch."""
+"""HGIKT variant with learnable weighted addition fusion."""
 
 from typing import Any
 
@@ -6,10 +6,54 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dhg.nn import HGNNConv
-from torch_geometric.nn import Linear
+from torch_geometric.nn import HGTConv, Linear
 
 from model.layers import GeneralInteraction, HistoryRecap
 from utils.core import register_model
+
+
+class HeteroGNN(nn.Module):
+    """Based on HGIKT HeteroGNN module."""
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        n_hop: int,
+        heads: int,
+        dropout: float,
+        metadata: tuple[list[str], list[tuple[str, str, str]]],
+    ) -> None:
+        super().__init__()
+        self.n_hop = n_hop
+        self.heads = heads
+        self.dropout = dropout
+        self.convs = nn.ModuleList()
+
+        for _ in range(n_hop):
+            conv = HGTConv(
+                in_channels=embedding_dim,
+                out_channels=embedding_dim,
+                metadata=metadata,
+                heads=heads,
+            )
+            self.convs.append(conv)
+
+    def forward(
+        self,
+        x_dict: dict[str, torch.Tensor],
+        edge_index_dict: dict[tuple[str, str, str], torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Forward pass."""
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
+            new_x_dict = {}
+            for node_type, x in x_dict.items():
+                if x is not None:
+                    x = F.gelu(x)
+                    x = F.dropout(x, p=self.dropout, training=self.training)
+                new_x_dict[node_type] = x
+            x_dict = new_x_dict
+        return x_dict
 
 
 class HyperGNN(nn.Module):
@@ -40,12 +84,12 @@ class HyperGNN(nn.Module):
         return x2
 
 
-@register_model("HGIKT_NoHeteroGraph")
-class HGIKT_NoHeteroGraph(nn.Module):
-    """HGIKT variant with heterogeneous graph branch disabled.
+@register_model("HGIKT_WeightedFusion")
+class HGIKT_WeightedFusion(nn.Module):
+    """HGIKT variant with learnable weighted addition fusion.
 
-    This variant uses only the hypergraph for knowledge representation.
-    The heterogeneous graph convolution is replaced with zeros.
+    This variant replaces MoE fusion with learnable weighted addition.
+    The two graph representations are fused with learnable weights.
     """
 
     def __init__(
@@ -89,9 +133,14 @@ class HGIKT_NoHeteroGraph(nn.Module):
         )
         self.embedding_dropout = nn.Dropout(p=self.dropout)
 
-        # Hetero graph module disabled (no hetero_conv)
+        self.hetero_conv = HeteroGNN(
+            embedding_dim=self.hidden_dim,
+            n_hop=args.n_hop,
+            heads=args.heads,
+            dropout=self.dropout,
+            metadata=hetero_metadata,
+        )
 
-        # Hypergraph module (unchanged)
         self.hgnn_conv = HyperGNN(
             in_ch=self.hidden_dim,
             n_hid=self.hidden_dim,
@@ -99,7 +148,9 @@ class HGIKT_NoHeteroGraph(nn.Module):
             dropout=self.dropout,
         )
 
-        # Fusion module disabled
+        # Learnable weights for fusion
+        self.hetero_weight = nn.Parameter(torch.tensor(0.5))
+        self.hyper_weight = nn.Parameter(torch.tensor(0.5))
 
         self.fc_exercise = Linear(
             self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
@@ -129,27 +180,36 @@ class HGIKT_NoHeteroGraph(nn.Module):
         hypergraph: Any,
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
-        """Forward pass without heterogeneous graph computation.
+        """Forward pass with learnable weighted fusion.
 
         Key differences from parent HGIKT:
-        1. Skip hetero_conv computation
-        2. Skip fusion (use only hypergraph features)
+        Replace MoE fusion with learnable weighted addition.
         """
         B, _ = user_sequence.size()
 
         answers_embedding = self.answer_embedding(user_response)
 
-        # Hypergraph convolution
         question_hyper_conv: torch.Tensor = self.hgnn_conv(
             self.question_embedding_hyper.weight, hypergraph
         )
 
-        # === MODIFIED: Skip hetero graph convolution, use hypergraph only ===
-        question_conv_fused = question_hyper_conv
+        conv = self.hetero_conv(
+            {
+                "question": self.question_embedding.weight,
+                "skill": self.skill_embedding.weight,
+                "assignment": self.assignment_embedding.weight,
+                "template": self.template_embedding.weight,
+            },
+            hetero_graph.edge_index_dict,
+        )
+        question_hetero_conv = conv["question"]
+        skill_hetero_conv = conv["skill"]
 
-        # Get skill embeddings for knowledge_status (need hetero graph features)
-        # Since we skip hetero_conv, use skill_embedding directly
-        skill_hetero_conv = self.skill_embedding.weight
+        # Learnable weighted fusion
+        # sigmoid ensures weights are in [0, 1] range
+        hetero_w = torch.sigmoid(self.hetero_weight)
+        hyper_w = torch.sigmoid(self.hyper_weight)
+        question_conv_fused = hetero_w * question_hetero_conv + hyper_w * question_hyper_conv
 
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(

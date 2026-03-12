@@ -130,7 +130,7 @@ class Assistments2009Data(DataSource):
 
         # Build final sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "order_id"]
+            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
         )
 
         # Build ID mapping for user in sequence_data
@@ -176,6 +176,7 @@ class Assistments2009Data(DataSource):
         )
 
         # Rename columns
+        # Rename columns
         data = data.rename(
             {
                 "correct": "label",
@@ -184,6 +185,7 @@ class Assistments2009Data(DataSource):
                 "assignment_id": "assignment",
                 "skill_id": "skill",
                 "template_id": "template",
+                "order_id": "timestamp",
             }
         )
 
@@ -195,7 +197,7 @@ class Assistments2009Data(DataSource):
         )
 
         data = data.unique().collect()
-        data = data.sort(["user", "order_id"])
+        data = data.sort(["user", "timestamp"])
 
         # Restrict sequence length
         data = restrains_sequence_length(

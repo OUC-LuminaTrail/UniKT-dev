@@ -28,16 +28,20 @@ class AblationConfig:
 class AblationStudyConfig:
     """Batch ablation study configuration.
 
+    Note: dataset and fold must be provided via command line arguments, not from config file.
+
     Attributes:
         study_name: Name of the ablation study
         base_model: Base model name (e.g., "HGIKT")
-        dataset: Dataset name (e.g., "assistments09")
+        dataset: Dataset name (e.g., "assistments09"), provided from command line
+        fold: Fold index for K-Fold cross-validation, provided from command line
         shared_params: Parameters shared across all ablations
         ablations: List of ablation configurations to run
     """
 
     study_name: str
     base_model: str
-    dataset: str
+    dataset: str  # Provided from command line, not from config file
+    fold: int = 0  # Provided from command line, not from config file
     shared_params: dict[str, Any] = field(default_factory=dict)
     ablations: list[AblationConfig] = field(default_factory=list)
