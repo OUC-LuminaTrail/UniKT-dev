@@ -4,10 +4,9 @@ from .AKT.AKT_model import AKT
 from .AKT.AKT_trainer import AKTTrainer
 from .DKT.DKT_model import DKT
 from .DKT.DKT_trainer import DKTTrainer
-from .GIKTEdmine import GIKTEdmine
-from .GIKTEdmine import GIKTEdmineTrainer
 from .GIKT.GIKT_model import GIKT
 from .GIKT.GIKT_trainer import GIKTTrainer
+from .GIKTEdmine import GIKTEdmine, GIKTEdmineTrainer
 from .GKT.GKT_model import GKT
 from .GKT.GKT_trainer import GKTTrainer
 from .HGIKT import variants  # noqa: F401
