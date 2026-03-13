@@ -6,9 +6,7 @@ from pathlib import Path
 from utils.ablation.config import AblationConfig, AblationStudyConfig
 
 
-def load_config(
-    config_path: str, dataset: str, fold: int = 0
-) -> AblationStudyConfig:
+def load_config(config_path: str, dataset: str, fold: int = 0) -> AblationStudyConfig:
     """Load ablation study config from JSON.
 
     Dataset and fold must be provided as parameters, not from the config file.

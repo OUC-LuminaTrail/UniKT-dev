@@ -207,7 +207,9 @@ class HGIKT_ConcatFusion(nn.Module):
 
         # Concatenation + linear fusion
         question_concat = torch.cat([question_hetero_conv, question_hyper_conv], dim=-1)
-        question_conv_fused = self.fusion_norm(F.gelu(self.fusion_layer(question_concat)))
+        question_conv_fused = self.fusion_norm(
+            F.gelu(self.fusion_layer(question_concat))
+        )
 
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(

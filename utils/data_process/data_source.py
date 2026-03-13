@@ -667,7 +667,9 @@ class DataSource(ABC):
         Raises:
             ValueError: If n_samples exceeds total users or data not loaded.
         """
-        logger.info(f"Sampling {n_samples} users from dataset, strategy={sample_strategy}")
+        logger.info(
+            f"Sampling {n_samples} users from dataset, strategy={sample_strategy}"
+        )
 
         user_stats = self.get_user_stats()
         total_users = len(user_stats)

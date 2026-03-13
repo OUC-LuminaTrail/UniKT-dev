@@ -78,19 +78,18 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
         """HGIKT forward pass for inference.
 
         Args:
-            batch_data: Tuple of (users, sequence, response, mask)
+            batch_data: Tuple of (sequence, response, mask)
 
         Returns:
             Dictionary with y_hat (flattened), y_label (flattened), y_predict,
             full_y_hat (unflattened), and knowledge_states (for visualization)
         """
-        users, sequence, response, mask = batch_data
-        users = self._move_tensor_to_device(users)
+        sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
@@ -220,17 +219,20 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             )
 
             # Build student_status: [B, S, 1+M, H]
-            student_status = torch.cat([lstm_output.unsqueeze(2), history_question_neighbors], dim=2)
+            student_status = torch.cat(
+                [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
+            )
 
             # Build knowledge_status for this question
             skill_ids_list = self.question_to_skill_ids[q_id]
             if not skill_ids_list:
                 related_skill_embs = torch.zeros(
-                    B, S, 0, H,
-                    device=sequence.device, dtype=lstm_output.dtype
+                    B, S, 0, H, device=sequence.device, dtype=lstm_output.dtype
                 )
             else:
-                skill_ids = torch.tensor(skill_ids_list, device=sequence.device, dtype=torch.long)
+                skill_ids = torch.tensor(
+                    skill_ids_list, device=sequence.device, dtype=torch.long
+                )
                 related_skill_embs = (
                     skill_hetero_conv[skill_ids]
                     .unsqueeze(0)
@@ -239,10 +241,14 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
                 )
 
             # knowledge_status: [B, S, 1+num_skills, H]
-            knowledge_status = torch.cat([question_embed.unsqueeze(2), related_skill_embs], dim=2)
+            knowledge_status = torch.cat(
+                [question_embed.unsqueeze(2), related_skill_embs], dim=2
+            )
 
             # general_interaction output: [B, S]
-            logits_q = self.model.general_interaction(student_status, knowledge_status, mask)
+            logits_q = self.model.general_interaction(
+                student_status, knowledge_status, mask
+            )
             output[:, :, i] = torch.sigmoid(logits_q)
 
         return output
@@ -271,7 +277,9 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         question_conv_fused = self.model.fuse(question_hetero_conv, question_hyper_conv)
         question_embedding_sequence = question_conv_fused[sequence]
 
-        exercise_emb = torch.cat([question_embedding_sequence, answers_embedding], dim=-1)
+        exercise_emb = torch.cat(
+            [question_embedding_sequence, answers_embedding], dim=-1
+        )
         exercise_emb = torch.relu(self.model.fc_exercise(exercise_emb))
         exercise_emb = self.model.embedding_dropout(exercise_emb)
 
