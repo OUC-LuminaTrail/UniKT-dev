@@ -17,12 +17,13 @@ logger = get_logger(__name__)
 
 
 class WindowlateProcessor:
-    """封装 windowlate 数据构建的所有逻辑。
+    """构建 windowlate 数据。
 
-    设计原则:
-    1. 单一职责: 每个方法只做一件事
-    2. 可测试性: 核心算法可独立测试
-    3. 可读性: 清晰的代码结构和命名
+
+    - 短序列 (seq_len <= max_seq_len): 全部位置mask=1
+    - 长序列 (seq_len > max_seq_len):
+        * 第一个窗口: 全部位置mask=1
+        * 后续窗口: 只有最后一位mask=1
     """
 
     # ===== 类常量：数据结构定义 =====
@@ -61,9 +62,6 @@ class WindowlateProcessor:
         sample_count = 0
         for inter_idx, q_skills in enumerate(skills_list):
             history_end = inter_boundaries[inter_idx]
-            if history_end == 0:
-                continue
-
             seq_len = history_end + 1
             n_skills = len(q_skills)
             if seq_len <= max_seq_len:
@@ -118,10 +116,6 @@ class WindowlateProcessor:
         for inter_idx in range(num_interactions):
             n_skills = len(skills_list[inter_idx])
             history_end = inter_boundaries[inter_idx]
-
-            if history_end == 0:
-                continue
-
             for skill_offset in range(n_skills):
                 current_skill_pos = inter_boundaries[inter_idx] + skill_offset
                 current_skill = expanded_skills[current_skill_pos]
@@ -137,14 +131,14 @@ class WindowlateProcessor:
                 seq_len = len(pred_skills)
 
                 if seq_len <= max_seq_len:
-                    # 短序列：单个样本，只预测最后一位
+                    # 短序列：单个样本，全部位置mask=1
                     for pos in range(seq_len):
                         yield (
                             sample_id,
                             pos,
                             pred_skills[pos],
                             pred_labels[pos],
-                            1 if pos == seq_len - 1 else 0,
+                            1,  # 全部位置mask=1
                             user_id,
                             pred_group_ids[pos],
                             pred_true_labels[pos],
@@ -155,20 +149,35 @@ class WindowlateProcessor:
                     num_windows = seq_len - max_seq_len + 1
                     for win_idx in range(num_windows):
                         win_start = win_idx
-                        mask_value = 1 if (win_start + max_seq_len == seq_len) else 0
 
-                        for pos in range(max_seq_len):
-                            yield (
-                                sample_id,
-                                pos,
-                                pred_skills[win_start + pos],
-                                pred_labels[win_start + pos],
-                                mask_value if pos == max_seq_len - 1 else 0,
-                                user_id,
-                                pred_group_ids[win_start + pos],
-                                pred_true_labels[win_start + pos],
-                            )
-                        sample_id += 1
+                        if win_idx == 0:
+                            # 第一个窗口：全部位置mask=1
+                            for pos in range(max_seq_len):
+                                yield (
+                                    sample_id,
+                                    pos,
+                                    pred_skills[win_start + pos],
+                                    pred_labels[win_start + pos],
+                                    1,  # 第一个窗口全部mask=1
+                                    user_id,
+                                    pred_group_ids[win_start + pos],
+                                    pred_true_labels[win_start + pos],
+                                )
+                            sample_id += 1
+                        else:
+                            # 后续窗口：只有最后一位mask=1
+                            for pos in range(max_seq_len):
+                                yield (
+                                    sample_id,
+                                    pos,
+                                    pred_skills[win_start + pos],
+                                    pred_labels[win_start + pos],
+                                    1 if pos == max_seq_len - 1 else 0,
+                                    user_id,
+                                    pred_group_ids[win_start + pos],
+                                    pred_true_labels[win_start + pos],
+                                )
+                            sample_id += 1
 
     # ===== 批量处理 =====
 

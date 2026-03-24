@@ -137,7 +137,9 @@ class HGIKT_HyperOnlySimple(nn.Module):
         # Since we skip hetero_conv, we need skill embeddings for knowledge_status
         # Use a dummy skill embedding (zeros) since this is hypergraph-only
         skill_hetero_conv = torch.zeros(
-            self.data_metadata["num_skills"], self.hidden_dim, device=user_sequence.device
+            self.data_metadata["num_skills"],
+            self.hidden_dim,
+            device=user_sequence.device,
         )
 
         question_embedding_sequence = question_conv_fused[user_sequence]
@@ -171,8 +173,14 @@ class HGIKT_HyperOnlySimple(nn.Module):
         q_skill_vectors = question_skill_matrix[next_user_sequence]
         max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
 
-        related_skill_ids = torch.arange(max_skills_per_question, device=user_sequence.device)
-        related_skill_ids = related_skill_ids.view(1, 1, -1).expand(B, user_sequence.size(1), -1).clone()
+        related_skill_ids = torch.arange(
+            max_skills_per_question, device=user_sequence.device
+        )
+        related_skill_ids = (
+            related_skill_ids.view(1, 1, -1)
+            .expand(B, user_sequence.size(1), -1)
+            .clone()
+        )
 
         device = user_sequence.device
         skill_conv_padded = torch.cat(
@@ -185,7 +193,11 @@ class HGIKT_HyperOnlySimple(nn.Module):
 
         related_skill_embs = skill_conv_padded[related_skill_ids]
         related_skill_embs = torch.zeros(
-            B, user_sequence.size(1), max_skills_per_question, self.hidden_dim, device=device
+            B,
+            user_sequence.size(1),
+            max_skills_per_question,
+            self.hidden_dim,
+            device=device,
         )
 
         knowledge_status = torch.cat(

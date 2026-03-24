@@ -209,7 +209,9 @@ class HGIKT_WeightedFusion(nn.Module):
         # sigmoid ensures weights are in [0, 1] range
         hetero_w = torch.sigmoid(self.hetero_weight)
         hyper_w = torch.sigmoid(self.hyper_weight)
-        question_conv_fused = hetero_w * question_hetero_conv + hyper_w * question_hyper_conv
+        question_conv_fused = (
+            hetero_w * question_hetero_conv + hyper_w * question_hyper_conv
+        )
 
         question_embedding_sequence = question_conv_fused[user_sequence]
         exercise_emb = torch.cat(
