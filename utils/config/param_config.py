@@ -167,6 +167,11 @@ class DataParams(BaseParamConfig):
                 "default": 5,
                 "help": "Number of folds for K-Fold cross-validation (>=2 to enable, default: 5)",
             },
+            "test_ratio": {
+                "type": float,
+                "default": 0.2,
+                "help": "Ratio for test set (default: 0.2)",
+            },
             "min_seq_len": {
                 "type": int,
                 "default": 3,

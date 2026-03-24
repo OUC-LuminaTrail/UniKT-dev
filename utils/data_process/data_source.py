@@ -892,6 +892,9 @@ class DataSource(ABC):
         Raises:
             ValueError: If sequence_data is not loaded.
         """
+        if test_ratio > 1 or test_ratio < 0:
+            raise ValueError("Test ratio should within 0~1.")
+
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."

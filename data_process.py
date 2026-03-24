@@ -114,7 +114,7 @@ def cmd_process(args):
         )
 
     if args.kfold and args.kfold > 1:
-        dp.add_kfold_labels(n_splits=args.kfold)
+        dp.add_kfold_labels(n_splits=args.kfold, test_ratio=args.test_ratio)
 
     dp.build_split_question_sequence_data()
     dp.build_split_skill_sequence_data()
