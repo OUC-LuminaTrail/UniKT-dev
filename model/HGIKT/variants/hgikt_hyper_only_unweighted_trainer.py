@@ -94,7 +94,11 @@ class HGIKTHyperOnlyUnweightedTrainer(BaseTrainer):
     def forward_pass(self, batch_data) -> dict[str, torch.Tensor]:
         sequence, response, mask = batch_data
         sequence, response, mask = self._move_tensor_to_device(sequence), self._move_tensor_to_device(response), self._move_tensor_to_device(mask)
-        y_hat = self.model(sequence, response, mask, self.hetero_graph, self.hypergraph, self.question_skill_matrix)
+        y_hat_full = self.model(sequence, response, mask, self.hetero_graph, self.hypergraph, self.question_skill_matrix)
+        
+        # HGIKT specific sampling/alignment
+        y_hat = y_hat_full[:, :-1]
         target = response[:, 1:].float()
         mask_flat = mask[:, 1:]
+        
         return {"loss": self.loss(y_hat[mask_flat], target[mask_flat]), "y_gold": target[mask_flat], "y_pred": torch.sigmoid(y_hat[mask_flat])}
