@@ -105,6 +105,7 @@ class HGIKTHyperOnlyUnweightedTrainer(BaseTrainer):
             "loss": self.loss(y_hat[mask_flat], target[mask_flat]),
             "y_hat": y_hat[mask_flat],
             "y_label": target[mask_flat],
-            "y_gold": target[mask_flat],
-            "y_pred": torch.sigmoid(y_hat[mask_flat]),
+            "y_predict": torch.sigmoid(y_hat[mask_flat]),
+            "y_score": torch.sigmoid(y_hat[mask_flat]),
+            "y_prob": torch.sigmoid(y_hat[mask_flat]),
         }
