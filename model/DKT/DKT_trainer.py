@@ -233,18 +233,14 @@ class DKTTrainer(BaseTrainer):
         y_hat = torch.masked_select(y_hat_aligned, mask_aligned)
         y_label = torch.masked_select(
             true_labels_aligned, mask_aligned
-        )  # 使用 true_labels！
+        ).float()  # 使用 true_labels！
         group_ids = torch.masked_select(group_id_aligned, mask_aligned)
 
-        # 按 group_id 聚合
-        results = self._aggregate_by_group(
-            y_hat, y_label, group_ids, mask=None, fusion_type="mean"
-        )
-
         return {
-            "y_hat": results["y_hat"],
-            "y_label": results["y_label"],
-            "y_predict": results["y_predict"],
-            "y_score": results["y_hat"],
-            "y_prob": results["y_hat"],
+            "y_hat": y_hat,
+            "y_label": y_label,
+            "y_predict": self._generate_binary_predictions(y_hat, threshold=0.5),
+            "y_score": y_hat,
+            "y_prob": y_hat,
+            "group_id": group_ids,
         }

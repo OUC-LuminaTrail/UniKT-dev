@@ -274,18 +274,14 @@ class AKTTrainer(BaseTrainer):
         # y_hat[:, t] 直接预测 response[t]，无需额外对齐
         # 使用 mask 筛选需要预测的位置（只有 mask=1 的位置）
         y_hat = torch.masked_select(y_hat_full, mask)
-        y_label = torch.masked_select(true_labels, mask)
+        y_label = torch.masked_select(true_labels, mask).float()
         group_ids = torch.masked_select(late_group_id, mask)
 
-        # 按 group_id 聚合
-        results = self._aggregate_by_group(
-            y_hat, y_label, group_ids, mask=None, fusion_type="mean"
-        )
-
         return {
-            "y_hat": results["y_hat"],
-            "y_label": results["y_label"],
-            "y_predict": results["y_predict"],
-            "y_score": results["y_hat"],
-            "y_prob": results["y_hat"],
+            "y_hat": y_hat,
+            "y_label": y_label,
+            "y_predict": self._generate_binary_predictions(y_hat, threshold=0.5),
+            "y_score": y_hat,
+            "y_prob": y_hat,
+            "group_id": group_ids,
         }

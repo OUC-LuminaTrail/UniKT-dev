@@ -19,11 +19,10 @@ logger = get_logger(__name__)
 class WindowlateProcessor:
     """构建 windowlate 数据。
 
-
-    - 短序列 (seq_len <= max_seq_len): 全部位置mask=1
-    - 长序列 (seq_len > max_seq_len):
-        * 第一个窗口: 全部位置mask=1
-        * 后续窗口: 只有最后一位mask=1
+    - 每个目标 KC 仅生成一个可评估窗口（窗口末位是目标 KC）
+    - 历史位置仅作为上下文，不参与评估（mask=0）
+    - 目标位置参与评估（mask=1）
+    - 当序列长度超过 max_seq_len 时，仅保留“以目标位置结尾”的最后一个窗口
     """
 
     # ===== 类常量：数据结构定义 =====
@@ -55,21 +54,8 @@ class WindowlateProcessor:
         Returns:
             该用户将生成的样本数量
         """
-        inter_boundaries = [0]
-        for q_skills in skills_list:
-            inter_boundaries.append(inter_boundaries[-1] + len(q_skills))
-
-        sample_count = 0
-        for inter_idx, q_skills in enumerate(skills_list):
-            history_end = inter_boundaries[inter_idx]
-            seq_len = history_end + 1
-            n_skills = len(q_skills)
-            if seq_len <= max_seq_len:
-                sample_count += n_skills
-            else:
-                sample_count += n_skills * (seq_len - max_seq_len + 1)
-
-        return sample_count
+        _ = max_seq_len  # 接口保持兼容，计数与窗口长度无关
+        return sum(len(q_skills) for q_skills in skills_list)
 
     @classmethod
     def generate_user_samples(
@@ -122,62 +108,37 @@ class WindowlateProcessor:
                 current_label = expanded_labels[current_skill_pos]
                 current_group_id = expanded_group_ids[current_skill_pos]
 
-                # 统一构建预测序列：历史 + 当前技能
-                pred_skills = expanded_skills[:history_end] + [current_skill]
-                pred_labels = expanded_labels[:history_end] + [0]  # 预测位置置 0
-                pred_group_ids = expanded_group_ids[:history_end] + [current_group_id]
-                pred_true_labels = expanded_labels[:history_end] + [current_label]
+                # 统一构建预测序列：历史 + 当前技能（目标位 response 置 0 防泄漏）
+                full_skills = expanded_skills[:history_end] + [current_skill]
+                full_labels = expanded_labels[:history_end] + [0]
+                full_group_ids = expanded_group_ids[:history_end] + [current_group_id]
+                full_true_labels = expanded_labels[:history_end] + [current_label]
 
-                seq_len = len(pred_skills)
-
-                if seq_len <= max_seq_len:
-                    # 短序列：单个样本，全部位置mask=1
-                    for pos in range(seq_len):
-                        yield (
-                            sample_id,
-                            pos,
-                            pred_skills[pos],
-                            pred_labels[pos],
-                            1,  # 全部位置mask=1
-                            user_id,
-                            pred_group_ids[pos],
-                            pred_true_labels[pos],
-                        )
-                    sample_id += 1
+                # 仅保留“以目标位结尾”的窗口
+                if len(full_skills) > max_seq_len:
+                    win_skills = full_skills[-max_seq_len:]
+                    win_labels = full_labels[-max_seq_len:]
+                    win_group_ids = full_group_ids[-max_seq_len:]
+                    win_true_labels = full_true_labels[-max_seq_len:]
                 else:
-                    # 长序列：滑动窗口
-                    num_windows = seq_len - max_seq_len + 1
-                    for win_idx in range(num_windows):
-                        win_start = win_idx
+                    win_skills = full_skills
+                    win_labels = full_labels
+                    win_group_ids = full_group_ids
+                    win_true_labels = full_true_labels
 
-                        if win_idx == 0:
-                            # 第一个窗口：全部位置mask=1
-                            for pos in range(max_seq_len):
-                                yield (
-                                    sample_id,
-                                    pos,
-                                    pred_skills[win_start + pos],
-                                    pred_labels[win_start + pos],
-                                    1,  # 第一个窗口全部mask=1
-                                    user_id,
-                                    pred_group_ids[win_start + pos],
-                                    pred_true_labels[win_start + pos],
-                                )
-                            sample_id += 1
-                        else:
-                            # 后续窗口：只有最后一位mask=1
-                            for pos in range(max_seq_len):
-                                yield (
-                                    sample_id,
-                                    pos,
-                                    pred_skills[win_start + pos],
-                                    pred_labels[win_start + pos],
-                                    1 if pos == max_seq_len - 1 else 0,
-                                    user_id,
-                                    pred_group_ids[win_start + pos],
-                                    pred_true_labels[win_start + pos],
-                                )
-                            sample_id += 1
+                target_pos = len(win_skills) - 1
+                for pos in range(len(win_skills)):
+                    yield (
+                        sample_id,
+                        pos,
+                        win_skills[pos],
+                        win_labels[pos],
+                        1 if pos == target_pos else 0,
+                        user_id,
+                        win_group_ids[pos],
+                        win_true_labels[pos],
+                    )
+                sample_id += 1
 
     # ===== 批量处理 =====
 
