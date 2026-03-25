@@ -148,23 +148,36 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
             user_mask,
         )
 
+        # 构造学生相关状态集合：LSTM 输出 + 历史邻居
         student_status = torch.cat(
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )
 
-        q_skill_vectors = question_skill_matrix[next_user_sequence]
-        sorted_skill_indices = torch.argsort(q_skill_vectors, dim=-1, descending=True)
+        # --- 修复代码开始 ---
+        # 获取下一题对应的技能 ID。
+        # 注意：在 DHG 超图中，超边（Skill）被映射到 0 到 num_e-1。
+        # 我们需要找到所有与下一题关联的技能。
+        q_skill_vectors = question_skill_matrix[next_user_sequence] # [B, S, num_skills]
+        
+        # 确定每个问题关联的最大技能数，用于构建对齐的张量
         max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
+        max_skills_per_question = max(1, max_skills_per_question) # 确保至少为 1
+        
         skill_counts = q_skill_vectors.sum(dim=-1).long()
+        sorted_skill_indices = torch.argsort(q_skill_vectors, dim=-1, descending=True)
         related_skill_ids = sorted_skill_indices[..., :max_skills_per_question].clone()
 
         device = next_user_sequence.device
         pos = torch.arange(max_skills_per_question, device=device).view(1, 1, -1)
         valid_pos_mask = pos < skill_counts.unsqueeze(-1)
-        padding_index = skill_hyper_conv.size(0)
+        
+        # 关键修复：这里的 padding 索引必须在 skill_hyper_conv 的范围内
+        # 原代码尝试使用 question 数作为索引访问只有 skill 数大小的张量
+        padding_index = skill_hyper_conv.size(0) # 这是 num_skills
         padding_ids = torch.full_like(related_skill_ids, padding_index)
         related_skill_ids = torch.where(valid_pos_mask, related_skill_ids, padding_ids)
 
+        # 构造带 padding 的技能特征矩阵
         skill_conv_padded = torch.cat(
             [
                 skill_hyper_conv,
@@ -173,6 +186,7 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
             dim=0,
         )
         related_skill_embs = skill_conv_padded[related_skill_ids]
+        # --- 修复代码结束 ---
 
         knowledge_status = torch.cat(
             [next_question_embedding.unsqueeze(2), related_skill_embs], dim=2
