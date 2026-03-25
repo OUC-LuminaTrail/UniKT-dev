@@ -139,8 +139,16 @@ class AKTTrainer(BaseTrainer):
 
         logger.info("Initializing AKT model...")
         metadata = data_src.get_metadata()
+        n_pid = metadata.get("num_questions", 0)  # 获取题目数量作为n_pid
+
+        if n_pid > 0:
+            logger.info(f"AKT: Using Problem ID (Rasch model) with {n_pid} questions")
+        else:
+            logger.info("AKT: Problem ID not available, using skill-only model")
+
         model = AKT(
             num_c=metadata["num_skills"],
+            n_pid=n_pid,
             d_model=args.d_model,
             n_blocks=args.n_blocks,
             dropout=args.dropout,
@@ -223,8 +231,18 @@ class AKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
+        # 检查模型是否使用Problem ID
+        use_pid = self.model.n_pid > 0
+
+        # 如果使用Problem ID，需要从sequence中获取problem_id
+        # 注意：当前数据集中sequence是skill_id，需要额外传递problem_id
+        # 如果数据集没有problem_id，传入None
+        pid_data = sequence if use_pid else None
+
         # 模型前向传播
-        y_hat_full = self.model(sequence, response, mask)  # [B, S]
+        y_hat_full, c_reg_loss = self.model(
+            sequence, response, mask, pid_data
+        )  # [B, S]
 
         # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
@@ -237,13 +255,19 @@ class AKTTrainer(BaseTrainer):
         # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
-        return {
+        result = {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
             "y_score": y_hat,
             "y_prob": y_hat,
         }
+
+        # 如果使用Rasch模型，添加正则化损失
+        if use_pid:
+            result["c_reg_loss"] = c_reg_loss
+
+        return result
 
     def test_forward_pass(self, batch_data):
         """测试前向传播，支持 windowlateauc_mean 评估。
@@ -267,8 +291,12 @@ class AKTTrainer(BaseTrainer):
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
 
+        # 检查模型是否使用Problem ID
+        use_pid = self.model.n_pid > 0
+        pid_data = sequence if use_pid else None
+
         # 模型前向传播
-        y_hat_full = self.model(sequence, response, mask)  # [B, S]
+        y_hat_full, _ = self.model(sequence, response, mask, pid_data)  # [B, S]
 
         # AKT 预测对齐
         # y_hat[:, t] 直接预测 response[t]，无需额外对齐
@@ -285,3 +313,15 @@ class AKTTrainer(BaseTrainer):
             "y_prob": y_hat,
             "group_id": group_ids,
         }
+
+    def _compute_loss(self, outputs: dict) -> torch.Tensor:
+        """计算损失，包含BCE损失和Rasch正则化损失（如果使用Problem ID）"""
+        y_hat = outputs["y_hat"]
+        y_label = outputs["y_label"]
+        bce_loss = self.loss(y_hat, y_label)
+
+        # 添加Rasch模型正则化损失
+        if "c_reg_loss" in outputs and self.model.n_pid > 0:
+            return bce_loss + outputs["c_reg_loss"]
+
+        return bce_loss

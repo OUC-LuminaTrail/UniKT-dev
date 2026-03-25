@@ -310,6 +310,7 @@ class AKT(nn.Module):
 
     Args:
         num_c: 概念（技能）数量
+        n_pid: Problem ID数量（题目数量），0表示不使用Problem ID
         d_model: 模型隐藏维度
         n_blocks: Transformer块数量
         dropout: Dropout概率
@@ -318,13 +319,14 @@ class AKT(nn.Module):
         final_fc_dim: 最终全连接层维度
         num_attn_heads: 注意力头数量
         separate_qa: 是否使用独立的QA嵌入
-        l2: L2正则化系数
+        l2: L2正则化系数（用于Rasch模型）
         emb_type: 嵌入类型
     """
 
     def __init__(
         self,
         num_c: int,
+        n_pid: int = 0,
         d_model: int = 256,
         n_blocks: int = 2,
         dropout: float = 0.2,
@@ -339,6 +341,7 @@ class AKT(nn.Module):
         super().__init__()
         self.model_name = "akt"
         self.num_c = num_c
+        self.n_pid = n_pid
         self.dropout = dropout
         self.kq_same = kq_same
         self.l2 = l2
@@ -346,6 +349,16 @@ class AKT(nn.Module):
         self.separate_qa = separate_qa
         self.emb_type = emb_type
         embed_l = d_model
+
+        # Problem ID相关嵌入（Rasch模型）
+        if self.n_pid > 0:
+            self.difficult_param = nn.Embedding(self.n_pid + 1, 1)  # 题目难度
+            self.q_embed_diff = nn.Embedding(
+                self.num_c + 1, embed_l
+            )  # question差异向量
+            self.qa_embed_diff = nn.Embedding(
+                2 * self.num_c + 1, embed_l
+            )  # interaction差异向量
 
         # 概念嵌入层
         self.q_embed = nn.Embedding(self.num_c, embed_l)
@@ -379,8 +392,28 @@ class AKT(nn.Module):
             nn.Linear(256, 1),
         )
 
-    def base_emb(self, q_data, target):
-        """计算基础嵌入"""
+        # 初始化Rasch模型参数
+        self.reset()
+
+    def reset(self):
+        """初始化Rasch模型参数为0"""
+        if self.n_pid > 0:
+            for p in self.parameters():
+                if p.size(0) == self.n_pid + 1:
+                    torch.nn.init.constant_(p, 0.0)
+
+    def base_emb(self, q_data, target, pid_data=None):
+        """计算基础嵌入
+
+        Args:
+            q_data: 问题ID（技能ID）序列
+            target: 响应序列
+            pid_data: Problem ID序列（可选）
+
+        Returns:
+            q_embed_data: 问题嵌入
+            qa_embed_data: 问题-响应交互嵌入
+        """
         q_embed_data = self.q_embed(q_data)
         if self.separate_qa:
             qa_data = q_data + self.num_c * target
@@ -394,23 +427,52 @@ class AKT(nn.Module):
         sequence: torch.Tensor,
         response: torch.Tensor,
         mask: torch.Tensor = None,
-    ) -> torch.Tensor:
+        pid_data: torch.Tensor = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """前向传播
 
         Args:
             sequence: 概念ID序列，形状为 [batch_size, sequence_length]
             response: 响应序列，形状为 [batch_size, sequence_length]
             mask: 有效位置掩码，形状为 [batch_size, sequence_length]
+            pid_data: Problem ID序列，形状为 [batch_size, sequence_length]
 
         Returns:
-            预测结果，形状为 [batch_size, sequence_length]
-            在时刻 t 的输出预测的是 t+1 的标签
+            preds: 预测结果，形状为 [batch_size, sequence_length]
+            c_reg_loss: Rasch模型正则化损失
         """
-        # 获取嵌入
-        q_embed_data, qa_embed_data = self.base_emb(sequence, response)
+        # 获取基础嵌入
+        q_embed_data, qa_embed_data = self.base_emb(sequence, response, pid_data)
+
+        # 处理Problem ID和Rasch模型
+        pid_embed_data = None
+        c_reg_loss = torch.tensor(0.0, device=sequence.device)
+
+        if self.n_pid > 0 and pid_data is not None:
+            # 计算问题差异向量嵌入
+            q_embed_diff_data = self.q_embed_diff(sequence)  # d_ct
+            pid_embed_data = self.difficult_param(pid_data)  # uq (题目难度)
+
+            # question encoder: uq * d_ct + c_ct
+            q_embed_data = q_embed_data + pid_embed_data * q_embed_diff_data
+
+            # 计算交互差异向量嵌入
+            qa_embed_diff_data = self.qa_embed_diff(response)  # h_rt
+
+            if self.separate_qa:
+                # uq * f_(ct,rt) + e_(ct,rt)
+                qa_embed_data = qa_embed_data + pid_embed_data * qa_embed_diff_data
+            else:
+                # uq * (h_rt + d_ct)
+                qa_embed_data = qa_embed_data + pid_embed_data * (
+                    qa_embed_diff_data + q_embed_diff_data
+                )
+
+            # Rasch模型正则化损失
+            c_reg_loss = (pid_embed_data**2).sum() * self.l2
 
         # 通过双流Transformer架构
-        d_output = self.model(q_embed_data, qa_embed_data, pid_embed_data=None)
+        d_output = self.model(q_embed_data, qa_embed_data, pid_embed_data)
 
         # 拼接输出和问题嵌入
         concat_q = torch.cat([d_output, q_embed_data], dim=-1)
@@ -423,4 +485,4 @@ class AKT(nn.Module):
         # AKT的第二个流（blocks_2）第一层可以"peek current question"
         # 因此 preds[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
 
-        return preds
+        return preds, c_reg_loss
