@@ -42,7 +42,7 @@ class AKTModelParams(BaseParamConfig):
             },
             "n_blocks": {
                 "type": int,
-                "default": 1,
+                "default": 4,
                 "help": "Number of transformer blocks",
             },
             "num_attn_heads": {
@@ -52,12 +52,12 @@ class AKTModelParams(BaseParamConfig):
             },
             "dropout": {
                 "type": float,
-                "default": 0.05,
+                "default": 0.2,
                 "help": "Dropout probability",
             },
             "d_ff": {
                 "type": int,
-                "default": 256,
+                "default": 512,
                 "help": "Feed-forward network dimension",
             },
             "final_fc_dim": {
@@ -88,7 +88,7 @@ class AKTModelParams(BaseParamConfig):
             },
             "learning_rate": {
                 "type": float,
-                "default": 1e-5,
+                "default": 1e-4,
                 "short": "lr",
                 "help": "Learning rate for optimizer",
             },
@@ -99,7 +99,7 @@ class AKTModelParams(BaseParamConfig):
             },
             "weight_decay": {
                 "type": float,
-                "default": 0.0001,
+                "default": 0.0,
                 "short": "wd",
                 "help": "Weight decay (L2 regularization) for optimizer",
             },
