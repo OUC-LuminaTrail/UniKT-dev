@@ -119,9 +119,14 @@ class ABKTModelData(QuestionModelData):
         """
         将框架数据转换为 ABKT 所需的序列格式
 
+        框架标准 K-Fold 划分:
+        - 训练集: fold != fold_idx 且 fold != -1
+        - 验证集: fold == fold_idx
+        - 测试集: fold == -1
+
         ABKT 的数据格式:
         - train_sequences: {user_id: [[item_ids], [corrects]]}
-            每个用户的训练序列（去掉最后一题）
+            每个训练用户的训练序列（去掉最后一题）
         - test_triplets: [[user, item, correct], ...]
             测试集三元组（每个测试用户的最后一题）
 
@@ -133,18 +138,26 @@ class ABKTModelData(QuestionModelData):
             test_triplets: list
             train_users: list (训练序列中的用户ID列表)
             test_users: list (测试三元组中的用户ID列表)
-            num_records: int (总记录数)
+            num_records: int (训练集总记录数)
         """
         data = self.data_src.get_sequence_data()
 
-        # 确定测试用户集合
+        # 确定用户集合
         if fold_idx is not None and "fold" in data.columns:
-            # K-Fold 模式：指定 fold 的用户作为测试集
-            test_user_set = set(data[data["fold"] == fold_idx]["user"].unique())
-            self.logger.info(f"Using K-Fold mode: fold {fold_idx} as test set")
+            # K-Fold 模式
+            test_user_set = set(data[data["fold"] == -1]["user"].unique())
+            # 训练集：排除验证集和测试集
+            train_user_set = set(
+                data[(data["fold"] != fold_idx) & (data["fold"] != -1)]["user"].unique()
+            )
+            self.logger.info(
+                f"Using K-Fold mode: train={len(train_user_set)}, val (fold={fold_idx}), "
+                f"test (fold=-1)={len(test_user_set)}"
+            )
         else:
             # 非 K-Fold 模式：所有用户都参与训练，最后一题作为测试
             test_user_set = set(data["user"].unique())
+            train_user_set = test_user_set.copy()
             self.logger.info("Using non-K-Fold mode: all users' last item as test")
 
         # 按用户聚合数据
@@ -177,16 +190,17 @@ class ABKTModelData(QuestionModelData):
             items = seq_data["items"]
             corrects = seq_data["corrects"]
             seq_len = len(items)
-            num_records += seq_len
 
-            # 训练序列：去掉最后一题
-            train_len = seq_len - 1
-            if train_len > 0:
-                train_sequences[user_id] = [
-                    [items[:train_len]],
-                    [corrects[:train_len]],
-                ]
-                train_users.append(user_id)
+            # 训练序列：仅训练用户，去掉最后一题
+            if user_id in train_user_set:
+                train_len = seq_len - 1
+                if train_len > 0:
+                    train_sequences[user_id] = [
+                        [items[:train_len]],
+                        [corrects[:train_len]],
+                    ]
+                    train_users.append(user_id)
+                    num_records += seq_len
 
             # 测试三元组：仅测试用户的最后一题
             if user_id in test_user_set:
