@@ -106,7 +106,7 @@ class HGIKTQSSAOnlyTrainer(BaseTrainer):
             "loss": self.loss(y_hat[mask_flat], target[mask_flat]),
             "y_hat": y_hat[mask_flat],
             "y_label": target[mask_flat],
-            "y_predict": torch.sigmoid(y_hat[mask_flat]),
+            "y_predict": (torch.sigmoid(y_hat[mask_flat]) > 0.5).long(),
             "y_score": torch.sigmoid(y_hat[mask_flat]),
             "y_prob": torch.sigmoid(y_hat[mask_flat]),
         }
