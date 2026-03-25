@@ -20,22 +20,28 @@ class DKTModelParams(BaseParamConfig):
     """
 
     def define_params(self) -> tuple[str, dict]:
-        """定义模型参数"""
+        """定义模型参数
+
+        默认值对齐 pyKT 框架：
+        - emb_size: 200 (pyKT default)
+        - dropout: 0.2 (pyKT default)
+        - learning_rate: 1e-3 (pyKT default)
+        """
         group_name = "DKT Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
-                "default": 100,
-                "help": "Hidden dimension of the model",
+                "default": 200,
+                "help": "Hidden dimension of the model (alias for emb_size)",
             },
             "embedding_dim": {
                 "type": int,
-                "default": 100,
+                "default": 200,
                 "help": "Embedding dimension of the model",
             },
             "dropout": {
                 "type": float,
-                "default": 0.1,
+                "default": 0.2,
                 "help": "Dropout probability",
             },
             "epochs": {
@@ -46,7 +52,7 @@ class DKTModelParams(BaseParamConfig):
             },
             "learning_rate": {
                 "type": float,
-                "default": 0.001,
+                "default": 1e-3,
                 "short": "lr",
                 "help": "Learning rate for optimizer",
             },
@@ -57,7 +63,7 @@ class DKTModelParams(BaseParamConfig):
             },
             "weight_decay": {
                 "type": float,
-                "default": 0.0001,
+                "default": 0.0,
                 "short": "wd",
                 "help": "Weight decay (L2 regularization) for optimizer",
             },
