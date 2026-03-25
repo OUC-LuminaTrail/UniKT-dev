@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 
+import numpy as np
+import polars as pl
+
 from utils.data_process import DataSource
 
 
@@ -13,6 +16,68 @@ class BaseModelData(ABC):
 
     def __init__(self, data_src: DataSource):
         self.data_src = data_src
+
+    def _get_kfold_data(self):
+        r"""
+        获取当前模型数据对应的 K-fold 标签数据源。
+
+        子类应重写此方法以返回其使用的实际序列数据（如 split_skill_sequence 或 split_question_sequence）。
+
+        返回:
+            polars.LazyFrame: 包含 user 和 fold 列的数据
+        """
+        return self.data_src.get_sequence_data()
+
+    def _build_user_folds(self, num_users: int) -> np.ndarray:
+        r"""
+        从 K-fold 数据构建 user->fold 映射数组。
+
+        参数:
+            num_users: 用户数量
+
+        返回:
+            np.ndarray: user_folds[user_idx] = fold_label
+
+        异常:
+            ValueError: 如果 fold 列不存在或用户数不匹配
+        """
+        data = self._get_kfold_data()
+
+        if "fold" not in data.columns:
+            raise ValueError(
+                "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
+            )
+
+        # 每个 user 的 fold 必须唯一
+        inconsistent = (
+            data.group_by("user")
+            .agg(pl.col("fold").n_unique().alias("fold_nunique"))
+            .filter(pl.col("fold_nunique") > 1)
+        )
+        if inconsistent.height > 0:
+            raise ValueError("Found users with inconsistent fold labels")
+
+        user_fold = data.select(["user", "fold"]).unique(subset=["user"], keep="first")
+
+        if user_fold.height != num_users:
+            raise ValueError(
+                f"User count mismatch: fold data has {user_fold.height} users, "
+                f"but model data has {num_users} users. "
+                f"Ensure K-fold labels are added to the correct data source."
+            )
+
+        user_idx = user_fold["user"].to_numpy()
+        fold_label = user_fold["fold"].to_numpy()
+
+        if user_idx.min() < 0 or user_idx.max() >= num_users:
+            raise ValueError(
+                f"User index out of range: min={int(user_idx.min())}, max={int(user_idx.max())}, "
+                f"num_users={num_users}"
+            )
+
+        user_folds = np.full(num_users, -1, dtype=np.int32)
+        user_folds[user_idx] = fold_label
+        return user_folds
 
     @abstractmethod
     def prepare_data(self, args):
@@ -39,20 +104,11 @@ class BaseModelData(ABC):
             - 需要数据源中有用户到行索引的映射信息
         """
         import numpy as np
-        from tqdm import tqdm
 
         # 校验输入参数
         if len(arrays) == 0:
             raise ValueError(
                 "get_kfold_split_data requires at least one input array/tensor"
-            )
-
-        # 加载数据以获取折信息
-        data = self.data_src.get_sequence_data().to_pandas()
-        # 检查是否已添加fold列
-        if "fold" not in data.columns:
-            raise ValueError(
-                "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
             )
 
         # 获取有效的用户索引
@@ -65,16 +121,7 @@ class BaseModelData(ABC):
                 )
 
         # 创建用户fold信息映射
-        user_folds = np.ones(num_users, dtype=int) * -1
-        for row in tqdm(
-            data.itertuples(),
-            total=data.shape[0],
-            desc=f"Mapping users to fold {fold_idx}",
-        ):
-            user_idx = row.user
-            fold_label = row.fold
-            if user_idx < num_users:
-                user_folds[user_idx] = fold_label
+        user_folds = self._build_user_folds(num_users)
 
         # 根据fold标签分割用户数据
         # 验证集：fold == fold_idx

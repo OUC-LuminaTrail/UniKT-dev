@@ -160,6 +160,10 @@ class SkillModelData(BaseModelData):
         super().__init__(data_src)
         self.logger = get_logger(__name__)
 
+    def _get_kfold_data(self):
+        r"""重写：从技能序列数据获取 K-fold 标签。"""
+        return self.data_src.get_split_skill_sequence_data()
+
     def build_sequence_data(self):
         r"""
         从切分后的技能序列数据加载用户技能序列

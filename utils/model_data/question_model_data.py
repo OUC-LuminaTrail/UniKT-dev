@@ -14,6 +14,10 @@ class QuestionModelData(BaseModelData):
         super().__init__(data_src)
         self.logger = get_logger(__name__)
 
+    def _get_kfold_data(self):
+        r"""重写：从问题序列数据获取 K-fold 标签。"""
+        return self.data_src.get_split_question_sequence_data()
+
     @abstractmethod
     def prepare_data(self, args):
         """

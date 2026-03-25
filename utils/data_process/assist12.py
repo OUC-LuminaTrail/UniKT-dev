@@ -175,11 +175,13 @@ class Assistments2012Data(DataSource):
         data = data.collect()
 
         # Parse timestamp as datetime and convert to Unix milliseconds
-        data = data.with_columns([
-            pl.col("timestamp")
-            .str.strptime(pl.Datetime, strict=False)
-            .dt.epoch("ms")  # Convert to Unix milliseconds (int64)
-        ])
+        data = data.with_columns(
+            [
+                pl.col("timestamp")
+                .str.strptime(pl.Datetime, strict=False)
+                .dt.epoch("ms")  # Convert to Unix milliseconds (int64)
+            ]
+        )
 
         data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])

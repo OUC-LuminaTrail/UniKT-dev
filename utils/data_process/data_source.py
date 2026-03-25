@@ -706,19 +706,21 @@ class DataSource(ABC):
         data = data.join(valid_splits, on=["user", "split_idx"], how="inner")
 
         # 更新用户ID和位置
+        select_cols = [
+            pl.col("user"),
+            pl.col("question"),
+            pl.col("label"),
+            pl.col("relative_pos").alias("seq_pos"),
+        ]
+        if "fold" in data.columns:
+            select_cols.append(pl.col("fold"))
+
         data = data.with_columns(
             [
                 pl.col("new_user_id").cast(pl.Int32).alias("user"),
                 (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
             ]
-        ).select(
-            [
-                pl.col("user"),
-                pl.col("question"),
-                pl.col("label"),
-                pl.col("relative_pos").alias("seq_pos"),
-            ]
-        )
+        ).select(select_cols)
 
         # 统计切分信息
         final_num_users = data["user"].n_unique()
@@ -762,14 +764,15 @@ class DataSource(ABC):
             question_skills, on="question", how="inner"
         ).explode("skills")
 
-        # 重命名并选择需要的列
-        expanded_data = expanded_data.select(
-            [
-                pl.col("user"),
-                pl.col("skills").alias("skill"),
-                pl.col("label"),
-            ]
-        )
+        # 重命名并选择需要的列（保留 fold 以便后续按 split-user 正确划分）
+        select_cols = [
+            pl.col("user"),
+            pl.col("skills").alias("skill"),
+            pl.col("label"),
+        ]
+        if "fold" in expanded_data.columns:
+            select_cols.append(pl.col("fold"))
+        expanded_data = expanded_data.select(select_cols)
 
         # Step 2: 添加序列位置列，并计算每个用户的技能序列长度
         expanded_data = expanded_data.with_columns(
@@ -808,19 +811,21 @@ class DataSource(ABC):
         )
 
         # Step 7: 更新用户ID和位置
+        final_cols = [
+            pl.col("user"),
+            pl.col("skill"),
+            pl.col("label"),
+            pl.col("relative_pos").alias("seq_pos"),
+        ]
+        if "fold" in expanded_data.columns:
+            final_cols.append(pl.col("fold"))
+
         expanded_data = expanded_data.with_columns(
             [
                 pl.col("new_user_id").cast(pl.Int32).alias("user"),
                 (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
             ]
-        ).select(
-            [
-                pl.col("user"),
-                pl.col("skill"),
-                pl.col("label"),
-                pl.col("relative_pos").alias("seq_pos"),
-            ]
-        )
+        ).select(final_cols)
 
         # 统计切分信息
         final_num_users = expanded_data["user"].n_unique()
