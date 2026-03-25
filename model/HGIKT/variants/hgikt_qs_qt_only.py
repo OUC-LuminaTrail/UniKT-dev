@@ -205,4 +205,6 @@ class HGIKT_QS_QT_Only(nn.Module):
             [next_question_embedding.unsqueeze(2), related_skill_embs], dim=2
         )
 
-        return self.general_interaction(student_status, knowledge_status, user_mask)
+        return self.general_interaction(
+            student_status[:, :-1], knowledge_status[:, :-1], user_mask[:, 1:]
+        )
