@@ -22,6 +22,18 @@ class HGIKTQSQTOnlyData(HGIKTModelData):
             max_seq_len, min_seq_len
         )
 
+        # Apply sampling for ednet and assistments12 datasets
+        dataset_name = getattr(args, "dataset", "").lower()
+        if "ednet" in dataset_name or "assistments12" in dataset_name:
+            sample_size = 5000
+            if len(user_sequence) > sample_size:
+                logger.info(f"Sampling {sample_size} users for {dataset_name} dataset")
+                import numpy as np
+                indices = np.random.choice(len(user_sequence), sample_size, replace=False)
+                user_sequence = user_sequence[indices]
+                user_response = user_response[indices]
+                user_mask = user_mask[indices]
+
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
         ).float()
