@@ -32,8 +32,8 @@ class HyperGNN(nn.Module):
 
     def forward(self, x: torch.Tensor, hg: Any) -> torch.Tensor:
         """Forward pass. Note: DHG's HGNNConv handles unweighted hypergraphs if no weights provided."""
-        x1 = self.hgc1(x, hg)
-        x2 = F.relu(self.hgc2(x1, hg))
+        x1 = F.relu(self.hgc1(x, hg))
+        x2 = self.hgc2(x1, hg)
         return x2
 
 
@@ -120,7 +120,10 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         # Use only hypergraph features
         # DHG: When hypergraph is unweighted, it's just a regular hypergraph
         question_hyper_conv = self.hgnn_conv(self.question_embedding.weight, hypergraph)
-        skill_hyper_conv = self.hgnn_conv(self.skill_embedding.weight, hypergraph)
+        
+        # Skill features are aggregated from question features via hypergraph structure
+        # In DHG, hypergraph.v2e is a projection from vertices to hyperedges
+        skill_hyper_conv = hypergraph.v2e(question_hyper_conv, aggr="mean")
 
         question_embedding_sequence = question_hyper_conv[user_sequence]
         exercise_emb = torch.cat(
