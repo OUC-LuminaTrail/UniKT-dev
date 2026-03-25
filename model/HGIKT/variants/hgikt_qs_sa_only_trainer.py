@@ -98,4 +98,4 @@ class HGIKTQSSAOnlyTrainer(BaseTrainer):
         y_hat = self.model(sequence, response, mask, self.hetero_graph, self.hypergraph, self.question_skill_matrix)
         target = response[:, 1:].float()
         mask_flat = mask[:, 1:]
-        return {"loss": self.loss_fn(y_hat[mask_flat], target[mask_flat]), "y_gold": target[mask_flat], "y_pred": torch.sigmoid(y_hat[mask_flat])}
+        return {"loss": self.loss(y_hat[mask_flat], target[mask_flat]), "y_gold": target[mask_flat], "y_pred": torch.sigmoid(y_hat[mask_flat])}
