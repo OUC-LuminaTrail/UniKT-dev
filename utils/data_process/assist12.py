@@ -126,8 +126,10 @@ class Assistments2012Data(DataSource):
         if self.raw_data is None:
             self.load_src_data()
 
+        data = self.raw_data.with_row_index("tmp_index")
+
         # Drop unnecessary columns
-        data = self.raw_data.drop(
+        data = data.drop(
             [
                 "problem_log_id",
                 "skill",
@@ -137,7 +139,6 @@ class Assistments2012Data(DataSource):
                 "original",
                 "bottom_hint",
                 "actions",
-                "ms_first_response",
                 "tutor_mode",
                 "sequence_id",
                 "student_class_id",
@@ -171,23 +172,44 @@ class Assistments2012Data(DataSource):
             }
         )
 
-        data = data.unique()
+        # pyKT 对齐：保留原始行顺序索引用于同时间戳稳定排序，
+        # 并在清洗阶段要求关键字段非空（含 ms_first_response）。
+        data = data.filter(
+            pl.col("user").is_not_null()
+            & pl.col("question").is_not_null()
+            & pl.col("skill").is_not_null()
+            & pl.col("timestamp").is_not_null()
+            & pl.col("label").is_not_null()
+            & pl.col("ms_first_response").is_not_null()
+        ).with_columns(pl.col("label").cast(pl.Int32))
+
+        data = data.filter(pl.col("label").is_in([0, 1]))
         data = data.collect()
 
-        # Parse timestamp as datetime and convert to Unix milliseconds
+        # pyKT change2timestamp 等价：按是否含小数秒分别解析时间字符串
         data = data.with_columns(
             [
-                pl.col("timestamp")
-                .str.strptime(pl.Datetime, strict=False)
-                .dt.epoch("ms")  # Convert to Unix milliseconds (int64)
+                pl.when(pl.col("timestamp").str.contains(r"\."))
+                .then(
+                    pl.col("timestamp").str.strptime(
+                        pl.Datetime, format="%Y-%m-%d %H:%M:%S%.f", strict=False
+                    )
+                )
+                .otherwise(
+                    pl.col("timestamp").str.strptime(
+                        pl.Datetime, format="%Y-%m-%d %H:%M:%S", strict=False
+                    )
+                )
+                .dt.epoch("ms")
+                .alias("timestamp")
             ]
         )
 
-        data = data.sort(["user", "timestamp"])
+        # 与 pyKT 一致：无法解析的时间戳不参与序列构建
+        data = data.filter(pl.col("timestamp").is_not_null())
+        data = data.sort(["user", "timestamp", "tmp_index"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
-        # Filter out rows with null skill early (these questions have no skill info)
-        data = data.filter(pl.col("skill").is_not_null())
-        data = data.filter(pl.col("label").is_in([0, 1]))
+        data = data.drop(["tmp_index", "ms_first_response"])
 
         # Exclude short sequences
         data = exclude_short_sequences(data, self.args.min_seq_len)
