@@ -99,7 +99,7 @@ class HGIKTHyperOnlyUnweightedTrainer(BaseTrainer):
         # HGIKT specific sampling/alignment
         y_hat = y_hat_full[:, :-1]
         target = response[:, 1:].float()
-        mask_flat = mask[:, 1:]
+        mask_flat = mask[:, 1:].bool()
         
         return {
             "loss": self.loss(y_hat[mask_flat], target[mask_flat]),
