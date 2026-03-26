@@ -130,19 +130,18 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         question_hyper_conv = self.hgnn_conv(self.question_embedding.weight, hypergraph)
         
         # 2. 知识点特征构建
-        # DHG: hypergraph.v2e (vertex to edge) 将顶点特征聚合到超边（难度簇）上
-        raw_e_features = hypergraph.v2e(question_hyper_conv, aggr="mean") # [num_hyperedges, hidden_dim]
+        # DHG: hypergraph.v2e (vertex to edge) 将顶点特征聚合到超边上
+        # 注意：由于 Data 类使用了 build_hyper_graph，超边索引直接对应技能
+        skill_hyper_conv = hypergraph.v2e(question_hyper_conv, aggr="mean") # [num_hyperedges, hidden_dim]
         
-        # 将聚类后的超边特征 (Cluster 0,1,2 for Skill 0, ...) 聚合回对应的 Skill ID
-        # 考虑到构建时是按技能顺序添加簇的：E_idx = skill_id * num_clusters + cluster_id
-        if raw_e_features.size(0) > self.num_skills:
-            # 重塑并平均聚合所有簇特征：[num_skills, num_clusters, hidden_dim] -> [num_skills, hidden_dim]
-            skill_hyper_conv = raw_e_features.view(self.num_skills, -1, self.hidden_dim).mean(dim=1)
+        # 确保维度对齐到 num_skills (123)
+        if skill_hyper_conv.size(0) < self.num_skills:
+            padding_rows = torch.zeros(self.num_skills - skill_hyper_conv.size(0), self.hidden_dim, device=device)
+            skill_hyper_conv = torch.cat([skill_hyper_conv, padding_rows], dim=0)
         else:
-            # 如果没有聚类或维度不匹配，尝试直接对齐
-            skill_hyper_conv = raw_e_features[:self.num_skills]
+            skill_hyper_conv = skill_hyper_conv[:self.num_skills]
 
-        # 融合技能原始 Embedding，增强表征稳定性 (参考 HGIKT 设计)
+        # 融合技能原始 Embedding，增强表征稳定性
         skill_hyper_conv = skill_hyper_conv + self.skill_embedding.weight
 
         # 3. 构造练习序列特征
