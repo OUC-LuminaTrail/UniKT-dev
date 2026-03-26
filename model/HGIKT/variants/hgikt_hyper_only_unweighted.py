@@ -59,13 +59,16 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         self.hidden_dim = args.hidden_dim
         self.lstm_layers = args.lstm_layers
         self.dropout = args.dropout
+        self.num_skills = data_metadata["num_skills"]
+        # 获取聚类数量，默认为 3 (与 HGIKT_data.py 一致)
+        self.num_clusters = getattr(args, "num_difficulty_clusters", 3)
 
         self.question_embedding = nn.Embedding(
             num_embeddings=data_metadata["num_questions"],
             embedding_dim=self.hidden_dim,
         )
         self.skill_embedding = nn.Embedding(
-            num_embeddings=data_metadata["num_skills"],
+            num_embeddings=self.num_skills,
             embedding_dim=self.hidden_dim,
         )
         self.answer_embedding = nn.Embedding(
@@ -115,16 +118,34 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
         B, _ = user_sequence.size()
+        device = user_sequence.device
         answers_embedding = self.answer_embedding(user_response)
 
-        # Use only hypergraph features
-        # DHG: When hypergraph is unweighted, it's just a regular hypergraph
+        # 确保超图没有边权重，严格执行无边权消融
+        # 虽然 HGNNConv 在不传递权重时默认不使用，但手动清除可以防止潜在的内部逻辑干扰
+        if hasattr(hypergraph, "edge_weight"):
+            hypergraph.edge_weight = None
+
+        # 1. 题目特征演化 (仅超图分支)
         question_hyper_conv = self.hgnn_conv(self.question_embedding.weight, hypergraph)
         
-        # Skill features are aggregated from question features via hypergraph structure
-        # In DHG, hypergraph.v2e is a projection from vertices to hyperedges
-        skill_hyper_conv = hypergraph.v2e(question_hyper_conv, aggr="mean")
+        # 2. 知识点特征构建
+        # DHG: hypergraph.v2e (vertex to edge) 将顶点特征聚合到超边（难度簇）上
+        raw_e_features = hypergraph.v2e(question_hyper_conv, aggr="mean") # [num_hyperedges, hidden_dim]
+        
+        # 将聚类后的超边特征 (Cluster 0,1,2 for Skill 0, ...) 聚合回对应的 Skill ID
+        # 考虑到构建时是按技能顺序添加簇的：E_idx = skill_id * num_clusters + cluster_id
+        if raw_e_features.size(0) > self.num_skills:
+            # 重塑并平均聚合所有簇特征：[num_skills, num_clusters, hidden_dim] -> [num_skills, hidden_dim]
+            skill_hyper_conv = raw_e_features.view(self.num_skills, -1, self.hidden_dim).mean(dim=1)
+        else:
+            # 如果没有聚类或维度不匹配，尝试直接对齐
+            skill_hyper_conv = raw_e_features[:self.num_skills]
 
+        # 融合技能原始 Embedding，增强表征稳定性 (参考 HGIKT 设计)
+        skill_hyper_conv = skill_hyper_conv + self.skill_embedding.weight
+
+        # 3. 构造练习序列特征
         question_embedding_sequence = question_hyper_conv[user_sequence]
         exercise_emb = torch.cat(
             [question_embedding_sequence, answers_embedding], dim=-1
@@ -132,8 +153,10 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         exercise_emb = F.relu(self.fc_exercise(exercise_emb))
         exercise_emb = self.embedding_dropout(exercise_emb)
 
+        # 4. LSTM 演化
         lstm_output, _ = self.lstm(exercise_emb)
 
+        # 5. 获取下一题和历史邻居
         next_user_sequence = torch.zeros_like(user_sequence)
         if user_sequence.size(1) > 1:
             next_user_sequence[:, :-1] = user_sequence[:, 1:]
@@ -148,36 +171,33 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
             user_mask,
         )
 
-        # 构造学生相关状态集合：LSTM 输出 + 历史邻居
+        # 构造学生状态集合：[B, S, 1 + K, H]
         student_status = torch.cat(
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )
 
-        # --- 修复代码开始 ---
-        # 获取下一题对应的技能 ID。
-        # 注意：在 DHG 超图中，超边（Skill）被映射到 0 到 num_e-1。
-        # 我们需要找到所有与下一题关联的技能。
+        # 6. 构造知识状态集合 (Knowledge Status)
+        # 从 question_skill_matrix 获取下一题对应的技能 IDs
         q_skill_vectors = question_skill_matrix[next_user_sequence] # [B, S, num_skills]
         
-        # 确定每个问题关联的最大技能数，用于构建对齐的张量
+        # 获取最大关联技能数以便 Padding
         max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
-        max_skills_per_question = max(1, max_skills_per_question) # 确保至少为 1
+        max_skills_per_question = max(1, max_skills_per_question)
         
         skill_counts = q_skill_vectors.sum(dim=-1).long()
+        # 找到非零索引 (即关联的技能 ID)
         sorted_skill_indices = torch.argsort(q_skill_vectors, dim=-1, descending=True)
         related_skill_ids = sorted_skill_indices[..., :max_skills_per_question].clone()
 
-        device = next_user_sequence.device
+        # 处理 Padding
         pos = torch.arange(max_skills_per_question, device=device).view(1, 1, -1)
         valid_pos_mask = pos < skill_counts.unsqueeze(-1)
         
-        # 关键修复：这里的 padding 索引必须在 skill_hyper_conv 的范围内
-        # 原代码尝试使用 question 数作为索引访问只有 skill 数大小的张量
-        padding_index = skill_hyper_conv.size(0) # 这是 num_skills
+        padding_index = self.num_skills # 使用总技能数作为 padding 索引
         padding_ids = torch.full_like(related_skill_ids, padding_index)
         related_skill_ids = torch.where(valid_pos_mask, related_skill_ids, padding_ids)
 
-        # 构造带 padding 的技能特征矩阵
+        # 构造带全零 Padding 的特征矩阵
         skill_conv_padded = torch.cat(
             [
                 skill_hyper_conv,
@@ -186,7 +206,6 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
             dim=0,
         )
         related_skill_embs = skill_conv_padded[related_skill_ids]
-        # --- 修复代码结束 ---
 
         knowledge_status = torch.cat(
             [next_question_embedding.unsqueeze(2), related_skill_embs], dim=2
