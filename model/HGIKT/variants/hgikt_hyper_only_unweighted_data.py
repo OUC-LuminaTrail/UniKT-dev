@@ -47,11 +47,15 @@ class HGIKTHyperOnlyUnweightedData(HGIKTModelData):
             ]
         )
 
-        # Build simple hypergraph (no difficulty weighting)
-        skill_hypergraph = self.build_hyper_graph(("question", "has", "skill"))
+        # Build standard difficulty weighted hypergraph (includes clustering)
+        # Note: We use the base class method to ensure clustering logic is identical to full model
+        skill_hypergraph = self.build_difficulty_weighted_hypergraph(
+            ("question", "has", "skill"),
+            num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),
+        )
 
         logger.info(
-            f"Simple hypergraph built for HyperOnlyUnweighted. Vertices: {skill_hypergraph.num_v}, Hyperedges: {skill_hypergraph.num_e}"
+            f"Clustered hypergraph built for HyperOnlyUnweighted. Vertices: {skill_hypergraph.num_v}, Hyperedges: {skill_hypergraph.num_e}"
         )
 
         if fold_idx is not None:

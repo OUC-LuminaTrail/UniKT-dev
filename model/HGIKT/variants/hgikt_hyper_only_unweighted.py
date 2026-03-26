@@ -121,27 +121,30 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         device = user_sequence.device
         answers_embedding = self.answer_embedding(user_response)
 
-        # 确保超图没有边权重，严格执行无边权消融
-        # 虽然 HGNNConv 在不传递权重时默认不使用，但手动清除可以防止潜在的内部逻辑干扰
+        # 【核心消融点1：无边权】强制清除超图边权，确保仅利用聚类结构拓扑
         if hasattr(hypergraph, "edge_weight"):
             hypergraph.edge_weight = None
 
-        # 1. 题目特征演化 (仅超图分支)
+        # 【核心消融点2：超图提供嵌入层】
+        # 使用 HGNN 演化题目特征
         question_hyper_conv = self.hgnn_conv(self.question_embedding.weight, hypergraph)
         
-        # 2. 知识点特征构建
-        # DHG: hypergraph.v2e (vertex to edge) 将顶点特征聚合到超边上
-        # 注意：由于 Data 类使用了 build_hyper_graph，超边索引直接对应技能
-        skill_hyper_conv = hypergraph.v2e(question_hyper_conv, aggr="mean") # [num_hyperedges, hidden_dim]
+        # 使用 v2e 聚合得到技能（难度簇）特征
+        # 注意：此处 raw_e_features 包含 num_skills * num_clusters 个特征
+        raw_e_features = hypergraph.v2e(question_hyper_conv, aggr="mean")
         
-        # 确保维度对齐到 num_skills (123)
-        if skill_hyper_conv.size(0) < self.num_skills:
-            padding_rows = torch.zeros(self.num_skills - skill_hyper_conv.size(0), self.hidden_dim, device=device)
-            skill_hyper_conv = torch.cat([skill_hyper_conv, padding_rows], dim=0)
+        # 将聚类簇特征聚合回原始技能 ID
+        # 映射规律：E_idx = skill_id * num_clusters + cluster_id
+        if raw_e_features.size(0) >= self.num_skills * self.num_clusters:
+            skill_hyper_conv = raw_e_features.view(self.num_skills, self.num_clusters, self.hidden_dim).mean(dim=1)
         else:
-            skill_hyper_conv = skill_hyper_conv[:self.num_skills]
+            # 异常处理：如果不满足聚类倍数，尝试安全对准
+            skill_hyper_conv = torch.zeros(self.num_skills, self.hidden_dim, device=device)
+            min_size = min(self.num_skills, raw_e_features.size(0))
+            skill_hyper_conv[:min_size] = raw_e_features[:min_size]
 
-        # 融合技能原始 Embedding，增强表征稳定性
+        # 【保持一致性】叠加技能原始 Embedding。
+        # 这样确保了在去掉异构图模块后，原本属于技能 ID 的参数化表征依然存在。
         skill_hyper_conv = skill_hyper_conv + self.skill_embedding.weight
 
         # 3. 构造练习序列特征
