@@ -13,7 +13,6 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn import functional as F
 
 from utils.core import register_model
 
@@ -104,45 +103,62 @@ class DYGKT(nn.Module):
         self.data_metadata = data_metadata
         
         # 模型参数（从原始 model_config 获取）
-        dim_emb = getattr(args, 'embedding_dim', 128)
-        dim_time = getattr(args, 'dim_time', 64)
+        self.dim_emb = getattr(args, 'embedding_dim', 128)
+        self.dim_time = getattr(args, 'dim_time', 64)
         
         # 原始实现的所有层（严格复刻 L60-67）
         self.performance_encoder = nn.Linear(1, 64)
-        self.dual_time_encoder = TimeDualDecayEncoder(dim_time)
+        self.dual_time_encoder = TimeDualDecayEncoder(self.dim_time)
         self.multiset_indicator = nn.Linear(1, 64)
-        self.gru_linear4user = nn.Linear(dim_emb, 64)
+        self.gru_linear4user = nn.Linear(self.dim_emb, 64)
         # 注意：原始实现没有 batch_first 参数，默认为 False
-        self.gru4user = nn.GRU(dim_emb, 64)
-        self.gru_linear4que = nn.Linear(dim_emb, 64)
-        self.gru4que = nn.GRU(dim_emb, 64)
+        self.gru4user = nn.GRU(self.dim_emb, 64)
+        self.gru_linear4que = nn.Linear(self.dim_emb, 64)
+        self.gru4que = nn.GRU(self.dim_emb, 64)
         
         # 预测层配置
         predictor_config = {
-            "dim_in": 64 + 64 + dim_time,  # user + que + time
+            "dim_in": 64 + 64 + self.dim_time,  # user + que + time
             "dim_hidden": getattr(args, 'hidden_dim', 128),
-            "dim_out": 1
+            "dim_out": 1,
+            "dropout": getattr(args, 'dropout', 0.3),
         }
         self.predict_layer = self._create_predictor(predictor_config)
-        
-        # 额外的embedding层（用于处理batch数据）
-        num_questions = data_metadata["num_questions"]
-        num_users = data_metadata.get("num_users", 10000)
-        
-        self.question_embedding = nn.Embedding(num_questions, dim_emb)
-        self.user_embedding = nn.Embedding(num_users + num_questions, dim_emb)  # 注意：需要容纳重新编号的用户
-        self.answer_embedding = nn.Embedding(2, dim_emb)
-        
-        self.dropout = nn.Dropout(p=getattr(args, 'dropout', 0.3))
     
     def _create_predictor(self, config):
-        """创建预测层（简化的 PredictorLayer）。"""
+        """创建预测层（与 pyedmine PredictorLayer 的 direct 形式一致）。"""
         return nn.Sequential(
             nn.Linear(config["dim_in"], config["dim_hidden"]),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(config["dim_hidden"], config["dim_out"])
+            nn.Dropout(config["dropout"]),
+            nn.Linear(config["dim_hidden"], config["dim_out"]),
+            nn.Sigmoid(),
         )
+
+    def _get_batch_tensor(self, batch: dict, keys: list[str]) -> torch.Tensor:
+        for key in keys:
+            if key in batch:
+                return batch[key]
+        raise KeyError(f"Missing required batch keys: {keys}")
+
+    def _fit_to_dim_emb(self, x: torch.Tensor) -> torch.Tensor:
+        """将输入特征调整到 GRU 需要的 dim_emb。"""
+        feat_dim = x.size(-1)
+        if feat_dim == self.dim_emb:
+            return x
+        if feat_dim > self.dim_emb:
+            return x[..., : self.dim_emb]
+        pad_size = self.dim_emb - feat_dim
+        return torch.nn.functional.pad(x, (0, pad_size), value=0.0)
+
+    @staticmethod
+    def _select_last_valid(sequence: torch.Tensor, last_idx: torch.Tensor) -> torch.Tensor:
+        """从 [B, N, D] 中按每个样本的 last_idx 取最后一个有效向量。"""
+        batch_size = sequence.size(0)
+        safe_last = torch.clamp(last_idx.long() - 1, min=0)
+        out = sequence[torch.arange(batch_size, device=sequence.device), safe_last]
+        valid = (last_idx > 0).unsqueeze(-1)
+        return out * valid
     
     def get_user_que_embedding(self, batch):
         """获取用户和问题的嵌入（严格复刻原始 L69-73）。
@@ -154,15 +170,23 @@ class DYGKT(nn.Module):
             X_qt = self.dual_time_encoder(batch["que_history_time_seq"])
         """
         # 历史正确率编码（需要添加维度：[B, N] -> [B, N, 1]）
-        user_his_correctness = batch["user_his_correctness_seq"].unsqueeze(-1).float()
-        que_his_correctness = batch["que_his_correctness_seq"].unsqueeze(-1).float()
+        user_his_correctness = self._get_batch_tensor(
+            batch, ["user_his_correctness_seq", "user_history_correctness_seq"]
+        ).unsqueeze(-1).float()
+        que_his_correctness = self._get_batch_tensor(
+            batch, ["que_his_correctness_seq", "que_history_correctness_seq"]
+        ).unsqueeze(-1).float()
         
         X_se = self.performance_encoder(user_his_correctness)  # [B, N, 64]
         X_qe = self.performance_encoder(que_his_correctness)   # [B, N, 64]
         
         # 时间编码
-        X_st = self.dual_time_encoder(batch["user_his_time_seq"])  # [B, N, dim_time]
-        X_qt = self.dual_time_encoder(batch["que_his_time_seq"])   # [B, N, dim_time]
+        X_st = self.dual_time_encoder(
+            self._get_batch_tensor(batch, ["user_his_time_seq", "user_history_time_seq"]).float()
+        )  # [B, N, dim_time]
+        X_qt = self.dual_time_encoder(
+            self._get_batch_tensor(batch, ["que_his_time_seq", "que_history_time_seq"]).float()
+        )  # [B, N, dim_time]
         
         return X_se, X_qe, X_st, X_qt
     
@@ -181,22 +205,59 @@ class DYGKT(nn.Module):
                 - que_his_time_seq: 问题历史时间 [B, N]
                 
         Returns:
-            logits: 预测 logits [B]
+            score: 预测概率 [B]
         """
         # 获取用户和问题的历史嵌入
         X_se, X_qe, X_st, X_qt = self.get_user_que_embedding(batch)
-        
-        # 用户和问题的特征拼接
-        # 注意：这里应该基于历史邻居的信息进行聚合
-        # 为了简化，我们使用最后一个历史的特征（或平均）
-        user_feat = X_se.mean(dim=1)  # [B, 64]
-        que_feat = X_qe.mean(dim=1)   # [B, 64]
-        time_feat = (X_st.mean(dim=1) + X_qt.mean(dim=1)) / 2  # [B, dim_time]
+
+        user_last_idx = self._get_batch_tensor(
+            batch, ["user_his_last_idx", "user_history_last_idx"]
+        )
+        que_last_idx = self._get_batch_tensor(
+            batch, ["que_his_last_idx", "que_history_last_idx"]
+        )
+
+        # 组合成 GRU 输入，并匹配 dim_emb
+        user_gru_input = self._fit_to_dim_emb(torch.cat([X_se, X_st], dim=-1))
+        que_gru_input = self._fit_to_dim_emb(torch.cat([X_qe, X_qt], dim=-1))
+
+        # 原始实现 GRU 为 batch_first=False，先转置到 [N, B, D]
+        user_gru_out, _ = self.gru4user(user_gru_input.transpose(0, 1))
+        que_gru_out, _ = self.gru4que(que_gru_input.transpose(0, 1))
+
+        user_gru_out = user_gru_out.transpose(0, 1)
+        que_gru_out = que_gru_out.transpose(0, 1)
+
+        # 取最后有效状态并叠加线性映射分支
+        user_state = self._select_last_valid(user_gru_out, user_last_idx) + self.gru_linear4user(
+            self._select_last_valid(user_gru_input, user_last_idx)
+        )
+        que_state = self._select_last_valid(que_gru_out, que_last_idx) + self.gru_linear4que(
+            self._select_last_valid(que_gru_input, que_last_idx)
+        )
+
+        # 使用 multiset 指示器增强状态（保留 pyedmine 的层定义语义）
+        same_question = self._get_batch_tensor(
+            batch, ["user_his_snq_seq", "user_his_snd_seq", "user_history_snq_seq"]
+        ).float()
+        same_knowledge = self._get_batch_tensor(
+            batch, ["user_his_snk_seq", "user_history_snk_seq"]
+        ).float()
+        indicator = ((same_question > 0) | (same_knowledge > 0)).float().unsqueeze(-1)
+        multiset_feat = self.multiset_indicator(indicator).mean(dim=1)
+        user_state = user_state + multiset_feat
+        que_state = que_state + multiset_feat
+
+        # 时间上下文使用用户/问题最后有效时间编码平均
+        time_feat = (
+            self._select_last_valid(X_st, user_last_idx)
+            + self._select_last_valid(X_qt, que_last_idx)
+        ) / 2.0
         
         # 拼接所有特征
-        combined = torch.cat([user_feat, que_feat, time_feat], dim=-1)  # [B, 64+64+dim_time]
+        combined = torch.cat([user_state, que_state, time_feat], dim=-1)  # [B, 64+64+dim_time]
         
         # 预测
-        logits = self.predict_layer(combined).squeeze(-1)  # [B]
+        score = self.predict_layer(combined).squeeze(-1)  # [B]
         
-        return logits
+        return score

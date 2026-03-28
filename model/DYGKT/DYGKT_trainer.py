@@ -115,7 +115,8 @@ class DYGKTTrainer(BaseTrainer):
         train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
 
         # 3. 创建优化器和损失函数
-        loss_fn = torch.nn.BCEWithLogitsLoss()
+        # DYGKT 在 pyedmine 中预测层输出概率（Sigmoid 后），对应 BCELoss。
+        loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
@@ -184,19 +185,19 @@ class DYGKTTrainer(BaseTrainer):
             else:
                 batch[key] = value
         
-        # 模型前向传播（接受 batch 字典）
-        y_hat = self.model(batch)  # [B]
+        # 模型前向传播（接受 batch 字典，返回概率）
+        y_hat = self.model(batch).float()  # [B]
         
         # 标签是 correctness
         y_label = batch["correctness"].float()
         
         # 生成二分类预测
-        y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
+        y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
         return {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
             "y_score": y_hat,
-            "y_prob": torch.sigmoid(y_hat),
+            "y_prob": y_hat,
         }

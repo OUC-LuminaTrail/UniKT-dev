@@ -8,6 +8,8 @@ DYGKT 数据处理模块（严格按照原始 pyedmine 实现）
 4. 用户ID重新编号：user_id = num_question + original_user_id
 """
 
+from typing import Any
+
 import numpy as np
 import torch
 from torch.utils.data.dataset import Dataset
@@ -23,7 +25,12 @@ logger = get_logger(__name__)
 class DYGKTDataset(Dataset):
     """DYGKT 数据集类（严格复刻原始实现）。"""
     
-    def __init__(self, dataset_config, data_all, q_table, device='cpu'):
+    def __init__(
+        self,
+        dataset_config: dict[str, Any],
+        data_all: list[dict[str, Any]],
+        q_table: np.ndarray,
+    ):
         """
         Args:
             dataset_config: 配置字典，包含 num_question, num_neighbor
@@ -31,11 +38,10 @@ class DYGKTDataset(Dataset):
             q_table: 问题-知识点矩阵 [num_question, num_concept]
             device: 设备
         """
-        super(DYGKTDataset, self).__init__()
+        super().__init__()
         self.dataset_config = dataset_config
         self.data_all = data_all
         self.q_table = q_table
-        self.device = device
         
         # 原始格式数据（与 pyedmine 完全一致）
         self.dataset_converted = {
@@ -46,6 +52,9 @@ class DYGKTDataset(Dataset):
             "time": [],
             "correctness": [],
             "user_his_seq": [],
+            # pyedmine 原始代码初始化为 snq，但后续写入使用 snd。
+            # 这里同时保留两个键，确保兼容严格复现和当前框架测试。
+            "user_his_snq_seq": [],
             "user_his_snd_seq": [],
             "user_his_snk_seq": [],
             "que_his_seq": [],
@@ -68,10 +77,10 @@ class DYGKTDataset(Dataset):
                 # 历史序列：padding + 索引对应的时间和正确率
                 key_data = self.dataset_converted[key][index]
                 padding = [0] * (num_neighbor - len(key_data))
-                neighbor_idx = torch.tensor(key_data + padding).long().to(self.device)
+                neighbor_idx = torch.tensor(key_data + padding, dtype=torch.long)
                 neighbor_time = self.dataset["time"][neighbor_idx]
                 neighbor_edge = self.dataset["correctness"][neighbor_idx]
-                neighbor_last_idx = torch.tensor(len(key_data)).long().to(self.device)
+                neighbor_last_idx = torch.tensor(len(key_data), dtype=torch.long)
                 
                 if key == "user_his_seq":
                     result["user_his_time_seq"] = neighbor_time
@@ -82,10 +91,15 @@ class DYGKTDataset(Dataset):
                     result["que_his_correctness_seq"] = neighbor_edge
                     result["que_his_last_idx"] = neighbor_last_idx
                     
-            elif key in ["user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
+            elif key in [
+                "user_his_snq_seq",
+                "user_his_snd_seq",
+                "user_his_snk_seq",
+                "que_his_qn_seq",
+            ]:
                 key_data = self.dataset_converted[key][index]
                 padding = [0] * (num_neighbor - len(key_data))
-                result[key] = torch.tensor(key_data + padding).long().to(self.device)
+                result[key] = torch.tensor(key_data + padding, dtype=torch.long)
             else:
                 result[key] = self.dataset[key][index]
                 
@@ -140,6 +154,7 @@ class DYGKTDataset(Dataset):
                 
                 # 相同问题指示器（严格复刻 L104）
                 user_his_snd_seq = list(map(lambda q: int(q == q_id), question_seq_))
+                self.dataset_converted["user_his_snq_seq"].append(user_his_snd_seq)
                 self.dataset_converted["user_his_snd_seq"].append(user_his_snd_seq)
                 
                 # 相似知识点指示器（严格复刻 L105）
@@ -178,8 +193,16 @@ class DYGKTDataset(Dataset):
         """转换为 Tensor（严格复刻 L126-130）。"""
         self.dataset = {}
         for k in self.dataset_converted.keys():
-            if k not in ["user_his_seq", "que_his_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
-                self.dataset[k] = torch.tensor(self.dataset_converted[k]).long().to(self.device)
+            # 这些键长度可变，保留在 dataset_converted 里按样本动态 padding。
+            if k not in [
+                "user_his_seq",
+                "que_his_seq",
+                "user_his_snq_seq",
+                "user_his_snd_seq",
+                "user_his_snk_seq",
+                "que_his_qn_seq",
+            ]:
+                self.dataset[k] = torch.tensor(self.dataset_converted[k], dtype=torch.long)
 
 
 class DYGKTModelData(QuestionModelData):
@@ -193,23 +216,25 @@ class DYGKTModelData(QuestionModelData):
         """准备 DYGKT 数据。"""
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
-        num_questions = self.data_src.get_metadata("num_questions")
         num_neighbor = getattr(args, 'num_neighbor', 50)
-        device = getattr(args, 'device', 'cpu')
         
-        # 获取 Q-table
-        q_table = self.data_src.get_q_table()
-        if q_table is None:
-            raise ValueError("DYGKT requires Q-table. Please ensure data source provides get_q_table()")
+        # 使用框架底层关系矩阵机制构建 Q-table（question-skill）
+        q_table = self.build_relationship_matrix(("question", "has", "skill"))
+        if q_table is None or q_table.size == 0:
+            raise ValueError("DYGKT requires a non-empty Q-table.")
+
+        num_questions = int(q_table.shape[0])
         
         dataset_config = {
             "num_question": num_questions,
             "num_neighbor": num_neighbor,
-            "device": device
         }
         
-        # 加载用户序列数据
-        data_all = self._load_user_sequences()
+        # 加载序列数据并按框架 K-fold 标签划分
+        question_sequences, user_responses, user_masks, user_id_sequences = (
+            self.load_sequence_data()
+        )
+        time_sequences = self._load_time_sequences(question_sequences.shape)
         
         # K-fold 划分
         if fold_idx is not None:
@@ -217,71 +242,95 @@ class DYGKTModelData(QuestionModelData):
                 raise ValueError(f"fold_idx {fold_idx} out of range [0, {kfold_n_splits})")
             
             logger.info(f"K-fold: fold {fold_idx + 1}/{kfold_n_splits}")
-            
-            train_users, val_users, test_users = self._split_users_kfold(
-                len(data_all), fold_idx, kfold_n_splits
+            train_data, val_data, test_data = self.split_kfold_data(
+                question_sequences,
+                user_responses,
+                user_masks,
+                time_sequences,
+                user_id_sequences,
+                fold_idx=fold_idx,
             )
-            
-            train_data = [data_all[i] for i in train_users]
-            val_data = [data_all[i] for i in val_users]
-            test_data = [data_all[i] for i in test_users]
         else:
             raise ValueError("fold_idx must be specified")
 
+        train_records = self._build_interaction_records(*train_data)
+        val_records = self._build_interaction_records(*val_data)
+        test_records = self._build_interaction_records(*test_data)
+
         # 构建数据集
-        train_dataset = DYGKTDataset(dataset_config, train_data, q_table, device)
-        val_dataset = DYGKTDataset(dataset_config, val_data, q_table, device)
-        test_dataset = DYGKTDataset(dataset_config, test_data, q_table, device)
+        train_dataset = DYGKTDataset(dataset_config, train_records, q_table)
+        val_dataset = DYGKTDataset(dataset_config, val_records, q_table)
+        test_dataset = DYGKTDataset(dataset_config, test_records, q_table)
 
         logger.info(f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}")
 
         return train_dataset, val_dataset, test_dataset
     
-    def _load_user_sequences(self):
-        """加载用户序列数据（转换为原始格式）。"""
-        question_sequences, user_responses, user_masks, user_ids = self.load_sequence_data()
-        
-        # 获取或生成时间序列
-        if hasattr(self.data_src, 'get_time_sequences'):
-            time_sequences = self.data_src.get_time_sequences()
-        else:
-            logger.warning("No timestamps, generating simulated ones")
-            time_sequences = []
-            for seq in question_sequences:
-                time_seq = np.arange(len(seq), dtype=np.float32) * 3600.0
-                time_seq += np.random.uniform(0, 1800, size=len(seq))
-                time_sequences.append(time_seq.tolist())
-        
-        # 转换为原始格式
-        data_all = []
-        for i, (q_seq, r_seq, mask, time_seq) in enumerate(zip(
-            question_sequences, user_responses, user_masks, time_sequences
-        )):
-            user_id = user_ids[i] if user_ids is not None else i
-            seq_len = int(mask.sum()) if hasattr(mask, 'sum') else len(q_seq)
-            
-            data_all.append({
-                "user_id": user_id,
-                "seq_len": seq_len,
-                "question_seq": q_seq[:seq_len] if isinstance(q_seq, list) else q_seq[:seq_len].tolist(),
-                "correctness_seq": r_seq[:seq_len] if isinstance(r_seq, list) else r_seq[:seq_len].tolist(),
-                "time_seq": time_seq[:seq_len] if isinstance(time_seq, list) else time_seq[:seq_len].tolist()
-            })
-        
-        return data_all
-    
-    def _split_users_kfold(self, num_users, fold_idx, kfold_n_splits):
-        """K-fold 用户划分。"""
-        from sklearn.model_selection import KFold
-        
-        kf = KFold(n_splits=kfold_n_splits, shuffle=True, random_state=42)
-        user_indices = list(range(num_users))
-        
-        for i, (train_val_idx, test_idx) in enumerate(kf.split(user_indices)):
-            if i == fold_idx:
-                val_size = max(1, len(train_val_idx) // 10)
-                train_idx = train_val_idx[:-val_size]
-                val_idx = train_val_idx[-val_size:]
-                return train_idx.tolist(), val_idx.tolist(), test_idx.tolist()
-        
-        raise ValueError(f"fold_idx {fold_idx} not found")
+    def _load_time_sequences(self, target_shape: tuple[int, int]) -> np.ndarray:
+        """从 split_question_sequence 加载时间序列。"""
+        num_users, max_seq_len = target_shape
+        timestamps = np.zeros((num_users, max_seq_len), dtype=np.float32)
+
+        split_data = self.data_src.get_split_question_sequence_data().to_pandas()
+        if "timestamp" not in split_data.columns:
+            logger.warning("No timestamp column found, using synthetic timestamps.")
+            for u in range(num_users):
+                timestamps[u, :] = np.arange(max_seq_len, dtype=np.float32) * 3600.0
+            return timestamps
+
+        users = split_data["user"].to_numpy(dtype=np.int64)
+        seq_pos = split_data["seq_pos"].to_numpy(dtype=np.int64)
+        ts = split_data["timestamp"].to_numpy(dtype=np.float32)
+
+        valid = (
+            (users >= 0)
+            & (users < num_users)
+            & (seq_pos >= 0)
+            & (seq_pos < max_seq_len)
+        )
+        timestamps[users[valid], seq_pos[valid]] = ts[valid]
+        return timestamps
+
+    def _build_interaction_records(
+        self,
+        question_sequences: np.ndarray,
+        user_responses: np.ndarray,
+        user_masks: np.ndarray,
+        time_sequences: np.ndarray,
+        user_id_sequences: np.ndarray,
+    ) -> list[dict[str, Any]]:
+        """将框架序列数据转换为 pyedmine DyGKT 所需记录格式。"""
+        records: list[dict[str, Any]] = []
+
+        for idx, (q_seq, r_seq, mask_seq, t_seq, uid_seq) in enumerate(
+            zip(
+                question_sequences,
+                user_responses,
+                user_masks,
+                time_sequences,
+                user_id_sequences,
+            )
+        ):
+            seq_len = int(np.asarray(mask_seq).sum())
+            if seq_len <= 0:
+                continue
+
+            valid_uid = np.asarray(uid_seq)[:seq_len]
+            if valid_uid.size > 0:
+                user_id = int(valid_uid[0])
+            else:
+                user_id = idx
+
+            records.append(
+                {
+                    "user_id": user_id,
+                    "seq_len": seq_len,
+                    "question_seq": np.asarray(q_seq)[:seq_len].astype(np.int64).tolist(),
+                    "correctness_seq": np.asarray(r_seq)[:seq_len]
+                    .astype(np.int64)
+                    .tolist(),
+                    "time_seq": np.asarray(t_seq)[:seq_len].astype(np.float32).tolist(),
+                }
+            )
+
+        return records
