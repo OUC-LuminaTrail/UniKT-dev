@@ -292,18 +292,45 @@ class DYGKTModelData(QuestionModelData):
     def _load_time_sequences(self, target_shape: tuple[int, int]) -> np.ndarray:
         """从 split_question_sequence 加载时间序列。"""
         num_users, max_seq_len = target_shape
-        timestamps = np.zeros((num_users, max_seq_len), dtype=np.float32)
+        timestamps = np.zeros((num_users, max_seq_len), dtype=np.int64)
 
         split_data = self.data_src.get_split_question_sequence_data().to_pandas()
-        if "timestamp" not in split_data.columns:
-            logger.warning("No timestamp column found, using synthetic timestamps.")
+        time_col = None
+        for candidate in ["timestamp", "startTime", "start_time", "time"]:
+            if candidate in split_data.columns:
+                time_col = candidate
+                break
+
+        if time_col is None:
+            logger.warning("No time column found, using synthetic timestamps.")
             for u in range(num_users):
-                timestamps[u, :] = np.arange(max_seq_len, dtype=np.float32) * 3600.0
+                timestamps[u, :] = np.arange(max_seq_len, dtype=np.int64) * 3600
             return timestamps
 
         users = split_data["user"].to_numpy(dtype=np.int64)
         seq_pos = split_data["seq_pos"].to_numpy(dtype=np.int64)
-        ts = split_data["timestamp"].to_numpy(dtype=np.float32)
+
+        # 保持与 pyedmine 一致的秒级整数时间戳语义，避免 float32 精度损失。
+        ts_series = split_data[time_col]
+        if np.issubdtype(ts_series.dtype, np.datetime64):
+            ts = (ts_series.astype("int64") // 10**9).to_numpy(dtype=np.int64)
+        else:
+            # 兼容字符串/浮点/整数类型时间列。
+            import pandas as pd
+
+            ts_numeric = pd.to_numeric(ts_series, errors="coerce")
+            nan_count = int(ts_numeric.isna().sum())
+            if nan_count > 0:
+                logger.warning(
+                    f"Time column '{time_col}' has {nan_count} invalid values; filling with 0."
+                )
+                ts_numeric = ts_numeric.fillna(0)
+            ts = ts_numeric.to_numpy(dtype=np.int64)
+
+        if ts.size > 0:
+            logger.info(
+                f"DYGKT time source: {time_col}, min={int(ts.min())}, max={int(ts.max())}"
+            )
 
         valid = (
             (users >= 0)
@@ -352,7 +379,7 @@ class DYGKTModelData(QuestionModelData):
                     "correctness_seq": np.asarray(r_seq)[:seq_len]
                     .astype(np.int64)
                     .tolist(),
-                    "time_seq": np.asarray(t_seq)[:seq_len].astype(np.float32).tolist(),
+                    "time_seq": np.asarray(t_seq)[:seq_len].astype(np.int64).tolist(),
                 }
             )
 
