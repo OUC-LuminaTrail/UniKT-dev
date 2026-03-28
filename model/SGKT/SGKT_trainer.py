@@ -156,6 +156,7 @@ class SGKTTrainer(BaseTrainer):
         (
             train_dataset,
             val_dataset,
+            test_dataset,
             self.hrg_data,
             self.num_skills,
             self.num_questions,
@@ -205,6 +206,7 @@ class SGKTTrainer(BaseTrainer):
         ).with_data(
             train_data=train_dataset,
             val_data=val_dataset,
+            test_data=test_dataset,
             batch_size=args.batch_size,
             collate_fn=train_collate_fn,
             val_collate_fn=val_collate_fn,
