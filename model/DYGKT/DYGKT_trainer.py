@@ -29,6 +29,16 @@ class DYGKTModelParams(BaseParamConfig):
                 "short": "hd",
                 "help": "Hidden layer dimension (default: 128)",
             },
+            "num_predict_layer": {
+                "type": int,
+                "default": 2,
+                "help": "Number of predictor layers (default: 2)",
+            },
+            "activate_type": {
+                "type": str,
+                "default": "relu",
+                "help": "Activation type for predictor (default: relu)",
+            },
             "embedding_dim": {
                 "type": int,
                 "default": 128,

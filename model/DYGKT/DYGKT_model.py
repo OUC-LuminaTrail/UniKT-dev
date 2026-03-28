@@ -116,24 +116,50 @@ class DYGKT(nn.Module):
         self.gru_linear4que = nn.Linear(self.dim_emb, 64)
         self.gru4que = nn.GRU(self.dim_emb, 64)
         
-        # 预测层配置
+        # 预测层配置（严格对齐 pyedmine PredictorLayer）
         predictor_config = {
-            "dim_in": 64 + 64 + self.dim_time,  # user + que + time
-            "dim_hidden": getattr(args, 'hidden_dim', 128),
-            "dim_out": 1,
+            "type": "direct",
+            "dim_predict_in": 64 + 64 + self.dim_time,  # user + que + time
+            "dim_predict_mid": getattr(args, 'hidden_dim', 128),
+            "dim_predict_out": 1,
             "dropout": getattr(args, 'dropout', 0.3),
+            "num_predict_layer": getattr(args, 'num_predict_layer', 2),
+            "activate_type": getattr(args, 'activate_type', "relu"),
         }
         self.predict_layer = self._create_predictor(predictor_config)
     
     def _create_predictor(self, config):
-        """创建预测层（与 pyedmine PredictorLayer 的 direct 形式一致）。"""
-        return nn.Sequential(
-            nn.Linear(config["dim_in"], config["dim_hidden"]),
-            nn.ReLU(),
-            nn.Dropout(config["dropout"]),
-            nn.Linear(config["dim_hidden"], config["dim_out"]),
-            nn.Sigmoid(),
-        )
+        """创建预测层（严格复刻 pyedmine PredictorLayer 逻辑）。"""
+        dropout = config["dropout"]
+        num_predict_layer = config["num_predict_layer"]
+        dim_predict_in = config["dim_predict_in"]
+        dim_predict_mid = config["dim_predict_mid"]
+        activate_type = config["activate_type"]
+
+        if activate_type == "tanh":
+            act_func = nn.Tanh
+        elif activate_type == "relu":
+            act_func = nn.ReLU
+        else:
+            act_func = nn.Sigmoid
+
+        dim_predict_out = config["dim_predict_out"]
+        layers = []
+        if num_predict_layer == 1:
+            layers.append(nn.Dropout(dropout))
+            layers.append(nn.Linear(dim_predict_in, dim_predict_out))
+            layers.append(nn.Sigmoid())
+        else:
+            layers.append(nn.Linear(dim_predict_in, dim_predict_mid))
+            for _ in range(num_predict_layer - 1):
+                layers.append(act_func())
+                layers.append(nn.Dropout(dropout))
+                layers.append(nn.Linear(dim_predict_mid, dim_predict_mid))
+            layers.append(nn.Dropout(dropout))
+            layers.append(nn.Linear(dim_predict_mid, dim_predict_out))
+            layers.append(nn.Sigmoid())
+        
+        return nn.Sequential(*layers)
 
     def _get_batch_tensor(self, batch: dict, keys: list[str]) -> torch.Tensor:
         for key in keys:
