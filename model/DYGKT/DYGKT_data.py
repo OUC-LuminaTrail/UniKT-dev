@@ -117,6 +117,8 @@ class DYGKTDataset(Dataset):
         
         num_question = self.dataset_config["num_question"]
         num_neighbor = self.dataset_config["num_neighbor"]
+
+        logger.info("DYGKT: building interaction records and user histories...")
         
         # 全局交互计数器（关键！）
         n = 0
@@ -166,28 +168,49 @@ class DYGKTDataset(Dataset):
                 self.dataset_converted["que_his_qn_seq"].append(None)
                 
                 n += 1
-        
-        # 第二遍遍历：填充问题历史序列（严格复刻 L112-123）
-        for i in range(n):
-            q_id = self.dataset_converted["question"][i]
-            t = self.dataset_converted["time"][i]
-            
-            que_his_seq = list(map(
-                lambda x: x[0],
-                sorted(
-                    list(filter(
-                        lambda y: y[1] < t,
-                        que_his_seqs[q_id]
-                    )),
-                    key=lambda z: z[1]
+
+        logger.info("DYGKT: building question histories (optimized, strict time ordering)...")
+        # 第二遍遍历：填充问题历史序列
+        # 原始实现为：对每个交互 i，筛选同题中满足 time < t 的全部历史并排序。
+        # 这里按题目分组并按时间增量维护历史，语义等价，复杂度从 O(N^2) 显著下降。
+        for q_id, events in que_his_seqs.items():
+            # events: list[(global_idx, timestamp)]
+            # 先按时间排序；同时间按索引排序保证稳定性
+            sorted_events = sorted(events, key=lambda x: (x[1], x[0]))
+
+            # 只保留“严格更早时间”的历史，因此同一时间组内不互相可见
+            history_indices: list[int] = []
+            pos = 0
+            total = len(sorted_events)
+            while pos < total:
+                current_t = sorted_events[pos][1]
+                group_end = pos
+                while group_end < total and sorted_events[group_end][1] == current_t:
+                    group_end += 1
+
+                # 当前时间组的每个交互都共享同一批“更早时间”历史
+                recent_history = (
+                    history_indices
+                    if len(history_indices) < num_neighbor
+                    else history_indices[-num_neighbor:]
                 )
-            ))
-            
-            self.dataset_converted["que_his_seq"][i] = \
-                que_his_seq if len(que_his_seq) < num_neighbor else que_his_seq[-num_neighbor:]
-            
-            # que_his_qn_seq 暂时设为空列表（原始实现中未使用）
-            self.dataset_converted["que_his_qn_seq"][i] = []
+                for k in range(pos, group_end):
+                    idx_k = sorted_events[k][0]
+                    self.dataset_converted["que_his_seq"][idx_k] = list(recent_history)
+                    self.dataset_converted["que_his_qn_seq"][idx_k] = []
+
+                # 将当前时间组加入历史，供后续更晚时间使用
+                history_indices.extend(sorted_events[k][0] for k in range(pos, group_end))
+                pos = group_end
+
+        # 兜底：若某些交互未被填充（理论上不会发生），置为空序列
+        for i in range(n):
+            if self.dataset_converted["que_his_seq"][i] is None:
+                self.dataset_converted["que_his_seq"][i] = []
+            if self.dataset_converted["que_his_qn_seq"][i] is None:
+                self.dataset_converted["que_his_qn_seq"][i] = []
+
+        logger.info("DYGKT: question history construction finished.")
     
     def dataset2tensor(self):
         """转换为 Tensor（严格复刻 L126-130）。"""
