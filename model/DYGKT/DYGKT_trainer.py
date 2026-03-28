@@ -41,6 +41,12 @@ class DYGKTModelParams(BaseParamConfig):
                 "short": "dt",
                 "help": "Time encoding dimension (default: 64)",
             },
+            "num_neighbor": {
+                "type": int,
+                "default": 50,
+                "short": "nn",
+                "help": "Number of neighbors for history (default: 50)",
+            },
             "dropout": {
                 "type": float,
                 "default": 0.3,
@@ -159,38 +165,31 @@ class DYGKTTrainer(BaseTrainer):
         ).build()
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, ...]
+        self, batch_data: dict
     ) -> dict[str, torch.Tensor]:
-        """DYGKT 前向传播。
+        """DYGKT 前向传播（接受 batch 字典）。
 
         Args:
-            batch_data: 包含 (user_seq, question_seq, response, time_seq, mask) 的元组
+            batch_data: 字典，包含所有交互信息和历史邻居
 
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
-        # 解包数据并移动到设备
-        user_seq, question_seq, response, time_seq, mask = batch_data
-        user_seq = self._move_tensor_to_device(user_seq)
-        question_seq = self._move_tensor_to_device(question_seq)
-        response = self._move_tensor_to_device(response)
-        time_seq = self._move_tensor_to_device(time_seq)
-        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
-
-        # 模型前向传播
-        # 模型在时刻 t 的输出预测的是 t+1 的标签
-        y_hat_full = self.model(
-            user_seq, response, mask, question_seq, time_seq
-        )  # [B, S]
-
-        # 提取有效位置的预测和标签
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=True
-        )
-
-        # 处理空批次
-        y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
-
+        # batch_data 已经是字典格式（由 DYGKTDataset.__getitem__ 返回）
+        # 移动所有张量到设备
+        batch = {}
+        for key, value in batch_data.items():
+            if isinstance(value, torch.Tensor):
+                batch[key] = self._move_tensor_to_device(value)
+            else:
+                batch[key] = value
+        
+        # 模型前向传播（接受 batch 字典）
+        y_hat = self.model(batch)  # [B]
+        
+        # 标签是 correctness
+        y_label = batch["correctness"].float()
+        
         # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
