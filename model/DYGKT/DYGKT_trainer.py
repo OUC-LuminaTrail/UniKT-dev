@@ -91,6 +91,11 @@ class DYGKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
+        # 自动检测 GPU
+        if not hasattr(args, 'device') or args.device is None or args.device == 'auto':
+            args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            logger.info(f"Auto-detected device: {args.device}")
+        
         # 1. 初始化模型
         from model.DYGKT.DYGKT_model import DYGKT
 

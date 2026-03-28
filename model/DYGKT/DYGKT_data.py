@@ -17,19 +17,25 @@ class DYGKTDataset(Dataset):
     """
     
     def __init__(self, user_sequences, question_sequences, responses, time_sequences, masks):
-        self.user_sequences = user_sequences
-        self.question_sequences = question_sequences
-        self.responses = responses
-        self.time_sequences = time_sequences
-        self.masks = masks
+        # 预先转换为 numpy 数组以提高性能
+        self.user_sequences = [np.array(seq) if not isinstance(seq, np.ndarray) else seq 
+                                for seq in user_sequences]
+        self.question_sequences = [np.array(seq) if not isinstance(seq, np.ndarray) else seq 
+                                    for seq in question_sequences]
+        self.responses = [np.array(seq) if not isinstance(seq, np.ndarray) else seq 
+                          for seq in responses]
+        self.time_sequences = [np.array(seq) if not isinstance(seq, np.ndarray) else seq 
+                               for seq in time_sequences]
+        self.masks = [np.array(seq) if not isinstance(seq, np.ndarray) else seq 
+                      for seq in masks]
 
     def __getitem__(self, index):
         return (
-            torch.tensor(self.user_sequences[index], dtype=torch.long),
-            torch.tensor(self.question_sequences[index], dtype=torch.long),
-            torch.tensor(self.responses[index], dtype=torch.long),
-            torch.tensor(self.time_sequences[index], dtype=torch.float),
-            torch.tensor(self.masks[index], dtype=torch.long),
+            torch.from_numpy(self.user_sequences[index]).long(),
+            torch.from_numpy(self.question_sequences[index]).long(),
+            torch.from_numpy(self.responses[index]).long(),
+            torch.from_numpy(self.time_sequences[index]).float(),
+            torch.from_numpy(self.masks[index]).long(),
         )
 
     def __len__(self):
@@ -103,6 +109,7 @@ class DYGKTModelData(QuestionModelData):
         """生成时间戳序列。
         
         如果数据源包含真实时间戳，使用真实值；否则使用序列位置模拟。
+        返回 numpy 数组列表以提高性能。
         """
         # 尝试从数据源获取时间戳
         if hasattr(self.data_src, 'get_time_sequences'):
@@ -112,9 +119,9 @@ class DYGKTModelData(QuestionModelData):
         time_sequences = []
         for seq in question_sequences:
             # 从 0 开始，每步增加 3600 秒（1小时）
-            time_seq = [i * 3600.0 for i in range(len(seq))]
+            time_seq = np.arange(len(seq), dtype=np.float32) * 3600.0
             # 添加一些随机扰动，使时间更真实
-            time_seq = [t + np.random.uniform(0, 1800) for t in time_seq]
+            time_seq += np.random.uniform(0, 1800, size=len(seq))
             time_sequences.append(time_seq)
         
         return time_sequences
@@ -123,11 +130,12 @@ class DYGKTModelData(QuestionModelData):
         """生成用户 ID 序列。
         
         每个序列对应一个用户，生成相同长度的用户 ID 序列。
+        返回 numpy 数组列表以提高性能。
         """
         user_sequences = []
         for idx, seq in enumerate(question_sequences):
             user_id = user_ids[idx] if user_ids is not None else idx
-            user_seq = [user_id] * len(seq)
+            user_seq = np.full(len(seq), user_id, dtype=np.int64)
             user_sequences.append(user_seq)
         
         return user_sequences

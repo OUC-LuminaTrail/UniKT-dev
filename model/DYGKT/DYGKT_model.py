@@ -210,7 +210,7 @@ class DYGKT(nn.Module):
         """获取用户和问题的动态嵌入表示。
         
         Args:
-            user_seq: 用户 ID 序列 [B, S]
+            user_seq: 用户 ID 序列 [B, S] 或 [B, S, ...]
             question_seq: 问题 ID 序列 [B, S]
             response_seq: 回答正确性序列 [B, S]
             time_seq: 时间戳序列 [B, S]
@@ -220,6 +220,41 @@ class DYGKT(nn.Module):
             que_emb: 问题嵌入 [B, S, 64]
             time_emb: 时间编码 [B, S, dim_time]
         """
+        # 智能处理维度：保留前两个维度 [B, S]
+        def normalize_dim(tensor):
+            """将输入张量规范化为 [B, S] 形状"""
+            if tensor.dim() == 1:
+                # [S] -> [1, S]
+                return tensor.unsqueeze(0)
+            elif tensor.dim() == 2:
+                # [B, S] - 已经正确
+                return tensor
+            elif tensor.dim() == 3:
+                # [1, B, S] or [B, S, 1] -> [B, S]
+                # 检查哪个维度是1
+                if tensor.size(0) == 1:
+                    return tensor.squeeze(0)  # [1, B, S] -> [B, S]
+                elif tensor.size(2) == 1:
+                    return tensor.squeeze(2)  # [B, S, 1] -> [B, S]
+                else:
+                    # 假设是 [B, S, ?]，取前两维
+                    return tensor[:, :, 0]
+            else:
+                # 对于更高维度，尽量保留前两维
+                while tensor.dim() > 2:
+                    if tensor.size(-1) == 1:
+                        tensor = tensor.squeeze(-1)
+                    elif tensor.size(0) == 1:
+                        tensor = tensor.squeeze(0)
+                    else:
+                        break
+                return tensor
+        
+        user_seq = normalize_dim(user_seq)
+        question_seq = normalize_dim(question_seq)
+        response_seq = normalize_dim(response_seq)
+        time_seq = normalize_dim(time_seq)
+            
         B, S = user_seq.size()
         
         # 获取基础嵌入
@@ -265,12 +300,13 @@ class DYGKT(nn.Module):
             若 return_states=False: 预测 logits [B, S]
             若 return_states=True: (logits, user_emb, que_emb)
         """
-        B, S = question_sequence.size()
-        
-        # 获取用户、问题和时间的嵌入
+        # 获取用户、问题和时间的嵌入（内部会处理维度）
         user_emb, que_emb, time_emb = self.get_user_que_embedding(
             user_sequence, question_sequence, user_response, time_sequence
         )  # [B, S, 64], [B, S, 64], [B, S, dim_time]
+        
+        # 从嵌入结果获取批次大小和序列长度
+        B, S = user_emb.size()[:2]
         
         # 拼接所有特征
         combined_features = torch.cat([user_emb, que_emb, time_emb], dim=-1)  # [B, S, 64+64+dim_time]
