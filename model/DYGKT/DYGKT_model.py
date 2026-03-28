@@ -1,12 +1,10 @@
-"""
-DYGKT 模型（严格复刻原始实现）
+"""DYGKT model migrated from the original DyGKT implementation.
 
-关键改动：
-1. GRU 不使用 batch_first（与原始一致）
-2. 接受 batch 字典输入（包含历史序列）
-3. 使用 performance_encoder 编码历史正确率
-4. 用户和问题使用各自独立的历史序列
+This version keeps the original graph-style embedding update logic while adapting
+inputs to kt-exp-graph batch dictionaries.
 """
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -17,273 +15,296 @@ import torch.nn as nn
 from utils.core import register_model
 
 
-class TimeDualDecayEncoder(nn.Module):
-    """时间双衰减编码器（与原始完全相同）。"""
-    
-    def __init__(self, dim_time: int, parameter_requires_grad: bool = True) -> None:
+class TimeEncoder(nn.Module):
+    """Original cosine time encoder."""
+
+    def __init__(self, time_dim: int, parameter_requires_grad: bool = True) -> None:
         super().__init__()
-        self.time_dim = dim_time
-        
-        # 短期时间衰减权重
-        self.w_short = nn.Linear(1, dim_time)
+        self.time_dim = time_dim
+        self.w = nn.Linear(1, time_dim)
+        self.w.weight = nn.Parameter(
+            torch.from_numpy(1 / 10 ** np.linspace(0, 9, time_dim, dtype=np.float32)).reshape(time_dim, -1)
+        )
+        self.w.bias = nn.Parameter(torch.zeros(time_dim))
+
+        if not parameter_requires_grad:
+            self.w.weight.requires_grad = False
+            self.w.bias.requires_grad = False
+
+    def forward(self, timestamps: torch.Tensor) -> torch.Tensor:
+        timestamps = timestamps.unsqueeze(dim=2)
+        return torch.cos(self.w(timestamps))
+
+
+class TimeDualDecayEncoder(nn.Module):
+    """Original dual-decay time encoder."""
+
+    def __init__(self, time_dim: int, parameter_requires_grad: bool = True) -> None:
+        super().__init__()
+        self.time_dim = time_dim
+
+        self.w_short = nn.Linear(1, time_dim)
+        self.w_long = nn.Linear(1, time_dim)
         self.w_short.weight = nn.Parameter(
-            torch.from_numpy(1 / 10 ** np.linspace(0, 9, dim_time, dtype=np.float32)).reshape(dim_time, -1)
+            torch.from_numpy(1 / 10 ** np.linspace(0, 9, time_dim, dtype=np.float32)).reshape(time_dim, -1)
         )
-        self.w_short.bias = nn.Parameter(torch.zeros(dim_time))
-        
-        # 长期时间衰减权重
-        self.w_long = nn.Linear(1, dim_time)
+        self.w_short.bias = nn.Parameter(torch.zeros(time_dim))
         self.w_long.weight = nn.Parameter(
-            torch.from_numpy(1 / 10 ** np.linspace(0, 9, dim_time, dtype=np.float32)).reshape(dim_time, -1)
+            torch.from_numpy(1 / 10 ** np.linspace(0, 9, time_dim, dtype=np.float32)).reshape(time_dim, -1)
         )
-        self.w_long.bias = nn.Parameter(torch.zeros(dim_time))
-        
-        # 输出投影层
-        self.w_o = nn.Linear(dim_time, dim_time)
+        self.w_long.bias = nn.Parameter(torch.zeros(time_dim))
+
+        self.w_o = nn.Linear(time_dim, time_dim)
         self.w_o.weight = nn.Parameter(
-            torch.from_numpy(1 / 10 ** np.linspace(0, 9, dim_time * dim_time, dtype=np.float32)).reshape(dim_time, -1)
+            torch.from_numpy(1 / 10 ** np.linspace(0, 9, time_dim * time_dim, dtype=np.float32)).reshape(
+                time_dim, -1
+            )
         )
-        self.w_o.bias = nn.Parameter(torch.zeros(dim_time))
-        
+        self.w_o.bias = nn.Parameter(torch.zeros(time_dim))
+
         self.f = nn.ReLU()
-        
+
         if not parameter_requires_grad:
             self.w_short.weight.requires_grad = False
             self.w_short.bias.requires_grad = False
             self.w_long.weight.requires_grad = False
             self.w_long.bias.requires_grad = False
-    
+
     def forward(self, timestamps: torch.Tensor) -> torch.Tensor:
-        """前向传播（与原始完全相同）。"""
-        timestamps = timestamps.unsqueeze(dim=2)  # [B, S, 1]
-        
+        timestamps = timestamps.unsqueeze(dim=2)
+
         timestamps_right = timestamps.clone()
-        timestamps_right = torch.cat(
-            [timestamps_right[:, 1:, :], timestamps_right[:, -1, :].unsqueeze(1)],
-            dim=1
-        )
+        timestamps_right = torch.cat([timestamps_right[:, 1:, :], timestamps_right[:, -1, :].unsqueeze(1)], dim=1)
         timestamps_diff = timestamps_right - timestamps
-        
+
         timestamps_mask = (timestamps_diff > 3600 * 24).float()
-        
+
         timestamps_short = self.f(self.w_short(timestamps_diff * timestamps_mask))
         timestamps_long = self.f(self.w_long(timestamps_diff * (1 - timestamps_mask)))
-        
         output = self.w_o(timestamps_short + timestamps_long)
-        
+
         return output
 
 
-class DyKT_Seq(nn.Module):
-    """动态序列更新模块（与原始完全相同）。"""
-    
+class MergeLayer(nn.Module):
+    """Original link predictor used in DyGKT training."""
+
+    def __init__(self, input_dim1: int, input_dim2: int, hidden_dim: int, output_dim: int) -> None:
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim1 + input_dim2, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.act = nn.ReLU()
+
+    def forward(self, input_1: torch.Tensor, input_2: torch.Tensor) -> torch.Tensor:
+        x = torch.cat([input_1, input_2], dim=1)
+        return self.fc2(self.act(self.fc1(x)))
+
+
+class DyKTSeq(nn.Module):
+    """GRU updater block from original DyGKT."""
+
     def __init__(self, edge_dim: int, node_dim: int) -> None:
         super().__init__()
         self.patch_enc_layer = nn.Linear(edge_dim, node_dim)
-        # 注意：batch_first=True 与原始相同
-        self.hid_node_updater = nn.GRU(
-            input_size=edge_dim,
-            hidden_size=node_dim,
-            batch_first=True
-        )
-    
+        self.hid_node_updater = nn.GRU(input_size=edge_dim, hidden_size=node_dim, batch_first=True)
+
     def update(self, x: torch.Tensor) -> torch.Tensor:
-        """更新节点状态。"""
-        outputs, _ = self.hid_node_updater(x)
-        return torch.squeeze(outputs, dim=0)
+        _, hidden = self.hid_node_updater(x)
+        return torch.squeeze(hidden, dim=0)
 
 
 @register_model("DYGKT")
 class DYGKT(nn.Module):
-    """DYGKT 模型（严格复刻原始实现）。"""
-    
+    """DYGKT migrated model.
+
+    The model consumes per-interaction neighborhood tensors produced by
+    ``model/DYGKT/DYGKT_data.py`` and follows the original DyGKT embedding update
+    equations.
+    """
+
     def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
         super().__init__(**kwargs)
+
         self.args = args
         self.data_metadata = data_metadata
-        
-        # 模型参数（从原始 model_config 获取）
-        self.dim_emb = getattr(args, 'embedding_dim', 128)
-        self.dim_time = getattr(args, 'dim_time', 64)
-        
-        # 原始实现的所有层（严格复刻 L60-67）
-        self.performance_encoder = nn.Linear(1, 64)
-        self.dual_time_encoder = TimeDualDecayEncoder(self.dim_time)
-        self.multiset_indicator = nn.Linear(1, 64)
-        self.gru_linear4user = nn.Linear(self.dim_emb, 64)
-        # 注意：原始实现没有 batch_first 参数，默认为 False
-        self.gru4user = nn.GRU(self.dim_emb, 64)
-        self.gru_linear4que = nn.Linear(self.dim_emb, 64)
-        self.gru4que = nn.GRU(self.dim_emb, 64)
-        
-        # 预测层配置（严格对齐 pyedmine PredictorLayer）
-        predictor_config = {
-            "type": "direct",
-            "dim_predict_in": 64 + 64 + self.dim_time,  # user + que + time
-            "dim_predict_mid": getattr(args, 'hidden_dim', 128),
-            "dim_predict_out": 1,
-            "dropout": getattr(args, 'dropout', 0.3),
-            "num_predict_layer": getattr(args, 'num_predict_layer', 2),
-            "activate_type": getattr(args, 'activate_type', "relu"),
-        }
-        self.predict_layer = self._create_predictor(predictor_config)
-    
-    def _create_predictor(self, config):
-        """创建预测层（严格复刻 pyedmine PredictorLayer 逻辑）。"""
-        dropout = config["dropout"]
-        num_predict_layer = config["num_predict_layer"]
-        dim_predict_in = config["dim_predict_in"]
-        dim_predict_mid = config["dim_predict_mid"]
-        activate_type = config["activate_type"]
 
-        if activate_type == "tanh":
-            act_func = nn.Tanh
-        elif activate_type == "relu":
-            act_func = nn.ReLU
+        self.num_neighbors = int(getattr(args, "num_neighbor", data_metadata.get("num_neighbor", 50)))
+        self.ablation = str(getattr(args, "ablation", "-1"))
+        self.time_dim = int(getattr(args, "dim_time", 16))
+
+        self.edge_dim = 64
+        self.node_dim = 64
+
+        num_questions = int(data_metadata["num_questions"])
+        num_users = int(data_metadata["num_users"])
+        self.num_nodes = num_questions + num_users
+
+        question_skill_ids = data_metadata.get("question_skill_ids")
+        if question_skill_ids is None:
+            question_skill_ids = np.zeros(num_questions, dtype=np.int64)
+        question_skill_ids = np.asarray(question_skill_ids, dtype=np.int64)
+        if len(question_skill_ids) != num_questions:
+            raise ValueError(
+                f"question_skill_ids length mismatch: expected {num_questions}, got {len(question_skill_ids)}"
+            )
+
+        node_raw_features = np.zeros((self.num_nodes, 1), dtype=np.float32)
+        node_raw_features[:num_questions, 0] = question_skill_ids.astype(np.float32)
+
+        self.num_skills = int(question_skill_ids.max()) + 1 if question_skill_ids.size > 0 else 1
+
+        self.register_buffer("node_raw_features", torch.from_numpy(node_raw_features), persistent=False)
+
+        self.projection_layer = nn.ModuleDict(
+            {
+                "feature_Linear": nn.Linear(in_features=1, out_features=self.node_dim, bias=True),
+                "feature_Embed": nn.Embedding(self.num_skills, self.node_dim),
+                "node": nn.Embedding(self.num_nodes, self.node_dim),
+                "edge": nn.Linear(in_features=1, out_features=self.node_dim, bias=True),
+                "time": nn.Linear(in_features=self.time_dim, out_features=self.node_dim, bias=True),
+                "struct": nn.Linear(in_features=1, out_features=self.node_dim, bias=True),
+            }
+        )
+
+        self.output_layer = nn.Linear(in_features=self.node_dim, out_features=self.node_dim, bias=True)
+        self.dropout_layer = nn.Dropout(float(getattr(args, "dropout", 0.3)))
+
+        self.src_node_updater = DyKTSeq(edge_dim=self.edge_dim, node_dim=self.node_dim)
+        self.dst_node_updater = DyKTSeq(edge_dim=self.edge_dim, node_dim=self.node_dim)
+
+        if self.ablation == "dual":
+            self.time_encoder = TimeEncoder(time_dim=self.time_dim)
         else:
-            act_func = nn.Sigmoid
+            self.time_encoder = TimeDualDecayEncoder(time_dim=self.time_dim)
 
-        dim_predict_out = config["dim_predict_out"]
-        layers = []
-        if num_predict_layer == 1:
-            layers.append(nn.Dropout(dropout))
-            layers.append(nn.Linear(dim_predict_in, dim_predict_out))
-            layers.append(nn.Sigmoid())
+        self.link_predictor = MergeLayer(input_dim1=64, input_dim2=64, hidden_dim=64, output_dim=1)
+
+    def set_neighbor_sampler(self, neighbor_sampler: Any) -> None:
+        # Kept for compatibility with the original API. The migrated version
+        # uses precomputed neighborhoods from the dataset.
+        self.neighbor_sampler = neighbor_sampler
+
+    def get_features(
+        self,
+        nodes_neighbor_ids: torch.Tensor,
+        nodes_edge_features: torch.Tensor,
+        nodes_neighbor_times: torch.Tensor,
+        node_interact_times: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        if self.ablation in ["embed", "q_kid"]:
+            skill_ids = self.node_raw_features[nodes_neighbor_ids][:, :, 0].long()
+            nodes_neighbor_node_raw_features = self.projection_layer["feature_Embed"](skill_ids)
+        elif self.ablation == "q_qid":
+            nodes_neighbor_node_raw_features = self.projection_layer["node"](nodes_neighbor_ids)
         else:
-            layers.append(nn.Linear(dim_predict_in, dim_predict_mid))
-            for _ in range(num_predict_layer - 1):
-                layers.append(act_func())
-                layers.append(nn.Dropout(dropout))
-                layers.append(nn.Linear(dim_predict_mid, dim_predict_mid))
-            layers.append(nn.Dropout(dropout))
-            layers.append(nn.Linear(dim_predict_mid, dim_predict_out))
-            layers.append(nn.Sigmoid())
-        
-        return nn.Sequential(*layers)
+            raw = self.node_raw_features[nodes_neighbor_ids].float()
+            nodes_neighbor_node_raw_features = self.projection_layer["feature_Linear"](raw)
 
-    def _get_batch_tensor(self, batch: dict, keys: list[str]) -> torch.Tensor:
-        for key in keys:
-            if key in batch:
-                return batch[key]
-        raise KeyError(f"Missing required batch keys: {keys}")
+        if self.ablation == "dual":
+            rel_time = node_interact_times.unsqueeze(1) - nodes_neighbor_times
+            nodes_neighbor_time_features = self.time_encoder(rel_time)
+        else:
+            nodes_neighbor_time_features = self.time_encoder(nodes_neighbor_times)
 
-    def _fit_to_dim_emb(self, x: torch.Tensor) -> torch.Tensor:
-        """将输入特征调整到 GRU 需要的 dim_emb。"""
-        feat_dim = x.size(-1)
-        if feat_dim == self.dim_emb:
-            return x
-        if feat_dim > self.dim_emb:
-            return x[..., : self.dim_emb]
-        pad_size = self.dim_emb - feat_dim
-        return torch.nn.functional.pad(x, (0, pad_size), value=0.0)
+        nodes_neighbor_time_features = self.projection_layer["time"](nodes_neighbor_time_features)
+        nodes_edge_raw_features = self.projection_layer["edge"](nodes_edge_features)
 
-    @staticmethod
-    def _select_last_valid(sequence: torch.Tensor, last_idx: torch.Tensor) -> torch.Tensor:
-        """从 [B, N, D] 中按每个样本的 last_idx 取最后一个有效向量。"""
-        batch_size = sequence.size(0)
-        safe_last = torch.clamp(last_idx.long() - 1, min=0)
-        out = sequence[torch.arange(batch_size, device=sequence.device), safe_last]
-        valid = (last_idx > 0).unsqueeze(-1)
-        return out * valid
-    
-    def get_user_que_embedding(self, batch):
-        """获取用户和问题的嵌入（严格复刻原始 L69-73）。
-        
-        原始实现：
-            X_se = self.performance_encoder(batch["user_history_correctness_seq"])
-            X_qe = self.performance_encoder(batch["que_history_correctness_seq"])
-            X_st = self.dual_time_encoder(batch["user_history_time_seq"])
-            X_qt = self.dual_time_encoder(batch["que_history_time_seq"])
-        """
-        # 历史正确率编码（需要添加维度：[B, N] -> [B, N, 1]）
-        user_his_correctness = self._get_batch_tensor(
-            batch, ["user_his_correctness_seq", "user_history_correctness_seq"]
+        if self.ablation == "time":
+            nodes_neighbor_time_features = nodes_neighbor_time_features * 0
+        elif self.ablation == "skill":
+            nodes_neighbor_node_raw_features = nodes_neighbor_node_raw_features * 0
+
+        return nodes_neighbor_node_raw_features, nodes_edge_raw_features, nodes_neighbor_time_features
+
+    def compute_src_dst_node_temporal_embeddings(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:
+        src_node_ids = batch["user"].long()
+        dst_node_ids = batch["question"].long()
+        node_interact_times = batch["time"].float()
+
+        src_neighbor_node_ids = batch["src_neighbor_node_ids"].long()
+        dst_neighbor_node_ids = batch["dst_neighbor_node_ids"].long()
+
+        src_neighbor_times = batch["src_neighbor_times"].float()
+        dst_neighbor_times = batch["dst_neighbor_times"].float()
+
+        src_neighbor_edge_feats = batch["src_neighbor_edge_feats"].float().unsqueeze(-1)
+        dst_neighbor_edge_feats = batch["dst_neighbor_edge_feats"].float().unsqueeze(-1)
+
+        batch_size = src_node_ids.shape[0]
+        device = src_node_ids.device
+
+        # Append current node/time as the (num_neighbors + 1)-th element.
+        src_neighbor_node_ids = torch.cat([src_neighbor_node_ids, src_node_ids.unsqueeze(1)], dim=1)
+        dst_neighbor_node_ids = torch.cat([dst_neighbor_node_ids, dst_node_ids.unsqueeze(1)], dim=1)
+
+        src_neighbor_times = torch.cat([src_neighbor_times, node_interact_times.unsqueeze(1)], dim=1)
+        dst_neighbor_times = torch.cat([dst_neighbor_times, node_interact_times.unsqueeze(1)], dim=1)
+
+        zero_edge = torch.zeros(batch_size, 1, 1, device=device)
+        src_neighbor_edge_feats = torch.cat([src_neighbor_edge_feats, zero_edge], dim=1)
+        dst_neighbor_edge_feats = torch.cat([dst_neighbor_edge_feats, zero_edge], dim=1)
+
+        src_nodes_neighbor_co_occurrence_features = (
+            batch["src_neighbor_node_ids"].long() == dst_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
         ).unsqueeze(-1).float()
-        que_his_correctness = self._get_batch_tensor(
-            batch, ["que_his_correctness_seq", "que_history_correctness_seq"]
+        dst_nodes_neighbor_co_occurrence_features = (
+            batch["dst_neighbor_node_ids"].long() == src_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
         ).unsqueeze(-1).float()
-        
-        X_se = self.performance_encoder(user_his_correctness)  # [B, N, 64]
-        X_qe = self.performance_encoder(que_his_correctness)   # [B, N, 64]
-        
-        # 时间编码
-        X_st = self.dual_time_encoder(
-            self._get_batch_tensor(batch, ["user_his_time_seq", "user_history_time_seq"]).float()
-        )  # [B, N, dim_time]
-        X_qt = self.dual_time_encoder(
-            self._get_batch_tensor(batch, ["que_his_time_seq", "que_history_time_seq"]).float()
-        )  # [B, N, dim_time]
-        
-        return X_se, X_qe, X_st, X_qt
-    
-    def forward(self, batch: dict) -> torch.Tensor:
-        """前向传播（接受 batch 字典）。
-        
-        Args:
-            batch: 包含以下字段的字典
-                - user: 用户ID [B]
-                - question: 问题ID [B]
-                - correctness: 正确性 [B]
-                - time: 时间戳 [B]
-                - user_his_correctness_seq: 用户历史正确率 [B, N]
-                - que_his_correctness_seq: 问题历史正确率 [B, N]
-                - user_his_time_seq: 用户历史时间 [B, N]
-                - que_his_time_seq: 问题历史时间 [B, N]
-                
-        Returns:
-            score: 预测概率 [B]
-        """
-        # 获取用户和问题的历史嵌入
-        X_se, X_qe, X_st, X_qt = self.get_user_que_embedding(batch)
 
-        user_last_idx = self._get_batch_tensor(
-            batch, ["user_his_last_idx", "user_history_last_idx"]
+        src_node_skill = self.node_raw_features[src_neighbor_node_ids][:, :-1, 0].long()
+        dst_node_skill = (
+            self.node_raw_features[dst_neighbor_node_ids][:, -1, 0].long().unsqueeze(1).repeat(1, self.num_neighbors)
         )
-        que_last_idx = self._get_batch_tensor(
-            batch, ["que_his_last_idx", "que_history_last_idx"]
+        src_nodes_neighbor_skill_features = (src_node_skill == dst_node_skill).unsqueeze(-1).float()
+
+        a = 0.0 if self.ablation == "counter" else 1.0
+
+        src_nodes_neighbor_struct_features = self.projection_layer["struct"](a * src_nodes_neighbor_co_occurrence_features)
+        dst_nodes_neighbor_struct_features = self.projection_layer["struct"](a * dst_nodes_neighbor_co_occurrence_features)
+        src_nodes_neighbor_skill_struct_features = self.projection_layer["struct"](a * src_nodes_neighbor_skill_features)
+
+        src_nodes_neighbor_node_raw_features, src_nodes_edge_raw_features, src_nodes_neighbor_time_features = self.get_features(
+            nodes_neighbor_ids=src_neighbor_node_ids,
+            nodes_edge_features=src_neighbor_edge_feats,
+            nodes_neighbor_times=src_neighbor_times,
+            node_interact_times=node_interact_times,
+        )
+        dst_nodes_neighbor_node_raw_features, dst_nodes_edge_raw_features, dst_nodes_neighbor_time_features = self.get_features(
+            nodes_neighbor_ids=dst_neighbor_node_ids,
+            nodes_edge_features=dst_neighbor_edge_feats,
+            nodes_neighbor_times=dst_neighbor_times,
+            node_interact_times=node_interact_times,
         )
 
-        # 组合成 GRU 输入，并匹配 dim_emb
-        user_gru_input = self._fit_to_dim_emb(torch.cat([X_se, X_st], dim=-1))
-        que_gru_input = self._fit_to_dim_emb(torch.cat([X_qe, X_qt], dim=-1))
-
-        # 原始实现 GRU 为 batch_first=False，先转置到 [N, B, D]
-        user_gru_out, _ = self.gru4user(user_gru_input.transpose(0, 1))
-        que_gru_out, _ = self.gru4que(que_gru_input.transpose(0, 1))
-
-        user_gru_out = user_gru_out.transpose(0, 1)
-        que_gru_out = que_gru_out.transpose(0, 1)
-
-        # 取最后有效状态并叠加线性映射分支
-        user_state = self._select_last_valid(user_gru_out, user_last_idx) + self.gru_linear4user(
-            self._select_last_valid(user_gru_input, user_last_idx)
+        src_nodes_features = (
+            src_nodes_neighbor_node_raw_features + src_nodes_edge_raw_features + src_nodes_neighbor_time_features
         )
-        que_state = self._select_last_valid(que_gru_out, que_last_idx) + self.gru_linear4que(
-            self._select_last_valid(que_gru_input, que_last_idx)
+        dst_nodes_features = (
+            dst_nodes_neighbor_node_raw_features + dst_nodes_edge_raw_features + dst_nodes_neighbor_time_features
         )
 
-        # 使用 multiset 指示器增强状态（保留 pyedmine 的层定义语义）
-        same_question = self._get_batch_tensor(
-            batch, ["user_his_snq_seq", "user_his_snd_seq", "user_history_snq_seq"]
-        ).float()
-        same_knowledge = self._get_batch_tensor(
-            batch, ["user_his_snk_seq", "user_history_snk_seq"]
-        ).float()
-        indicator = ((same_question > 0) | (same_knowledge > 0)).float().unsqueeze(-1)
-        multiset_feat = self.multiset_indicator(indicator).mean(dim=1)
-        user_state = user_state + multiset_feat
-        que_state = que_state + multiset_feat
+        src_node_embeddings = self.src_node_updater.update(
+            src_nodes_features[:, :-1, :] + src_nodes_neighbor_skill_struct_features + src_nodes_neighbor_struct_features
+        ) + (src_nodes_edge_raw_features + src_nodes_neighbor_time_features)[:, -1, :]
 
-        # 时间上下文使用用户/问题最后有效时间编码平均
-        time_feat = (
-            self._select_last_valid(X_st, user_last_idx)
-            + self._select_last_valid(X_qt, que_last_idx)
-        ) / 2.0
-        
-        # 拼接所有特征
-        combined = torch.cat([user_state, que_state, time_feat], dim=-1)  # [B, 64+64+dim_time]
-        
-        # 预测
-        score = self.predict_layer(combined).squeeze(-1)  # [B]
-        
-        return score
+        if self.ablation in ["q_qid", "q_kid"]:
+            dst_node_embeddings = dst_nodes_neighbor_node_raw_features[:, -1, :]
+        else:
+            dst_node_embeddings = self.dst_node_updater.update(
+                (dst_nodes_edge_raw_features + dst_nodes_neighbor_time_features)[:, :-1, :]
+                + dst_nodes_neighbor_struct_features
+            ) + dst_nodes_features[:, -1, :]
+
+        src_node_embeddings = self.output_layer(src_node_embeddings)
+        dst_node_embeddings = self.output_layer(dst_node_embeddings)
+
+        return src_node_embeddings, dst_node_embeddings
+
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        src_node_embeddings, dst_node_embeddings = self.compute_src_dst_node_temporal_embeddings(batch)
+
+        src_node_embeddings = self.dropout_layer(src_node_embeddings)
+        dst_node_embeddings = self.dropout_layer(dst_node_embeddings)
+
+        logits = self.link_predictor(src_node_embeddings, dst_node_embeddings).squeeze(dim=-1)
+        return torch.sigmoid(logits)

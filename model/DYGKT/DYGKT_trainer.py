@@ -47,9 +47,14 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "dim_time": {
                 "type": int,
-                "default": 64,
+                "default": 16,
                 "short": "dt",
-                "help": "Time encoding dimension (default: 64)",
+                "help": "Time encoding dimension (default: 16)",
+            },
+            "ablation": {
+                "type": str,
+                "default": "-1",
+                "help": "Ablation mode from original DyGKT (-1, counter, dual, q_qid, q_kid, embed, skill, time)",
             },
             "num_neighbor": {
                 "type": int,
@@ -112,17 +117,17 @@ class DYGKTTrainer(BaseTrainer):
             args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
             logger.info(f"Auto-detected device: {args.device}")
         
-        # 1. 初始化模型
-        from model.DYGKT.DYGKT_model import DYGKT
-
-        logger.info("Initializing DYGKT model...")
-        model = DYGKT(args, data_src.get_metadata())
-
-        # 2. 准备数据
+        # 1. 准备数据
         from model.DYGKT import DYGKTModelData
 
         model_data = DYGKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset, model_metadata = model_data.prepare_data(args)
+
+        # 2. 初始化模型
+        from model.DYGKT.DYGKT_model import DYGKT
+
+        logger.info("Initializing DYGKT model...")
+        model = DYGKT(args, model_metadata)
 
         # 3. 创建优化器和损失函数
         # DYGKT 在 pyedmine 中预测层输出概率（Sigmoid 后），对应 BCELoss。

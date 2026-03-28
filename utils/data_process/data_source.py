@@ -712,6 +712,8 @@ class DataSource(ABC):
             pl.col("label"),
             pl.col("relative_pos").alias("seq_pos"),
         ]
+        if "timestamp" in data.columns:
+            select_cols.append(pl.col("timestamp"))
         if "fold" in data.columns:
             select_cols.append(pl.col("fold"))
 
