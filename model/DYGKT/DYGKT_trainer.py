@@ -64,9 +64,9 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "dropout": {
                 "type": float,
-                "default": 0.3,
+                "default": 0.1,
                 "short": "dp",
-                "help": "Dropout rate (default: 0.3)",
+                "help": "Dropout rate (default: 0.1)",
             },
             "epochs": {
                 "type": int,
@@ -76,9 +76,9 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "learning_rate": {
                 "type": float,
-                "default": 0.001,
+                "default": 0.0005,
                 "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.001)",
+                "help": "Learning rate for optimizer (default: 0.0005)",
             },
             "lr_decay": {
                 "type": float,

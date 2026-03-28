@@ -139,6 +139,7 @@ class DYGKT(nn.Module):
         num_users = int(data_metadata["num_users"])
         self.num_nodes = num_questions + num_users
 
+        question_features = data_metadata.get("question_features")
         question_skill_ids = data_metadata.get("question_skill_ids")
         if question_skill_ids is None:
             question_skill_ids = np.zeros(num_questions, dtype=np.int64)
@@ -148,16 +149,30 @@ class DYGKT(nn.Module):
                 f"question_skill_ids length mismatch: expected {num_questions}, got {len(question_skill_ids)}"
             )
 
-        node_raw_features = np.zeros((self.num_nodes, 1), dtype=np.float32)
-        node_raw_features[:num_questions, 0] = question_skill_ids.astype(np.float32)
+        if question_features is None:
+            question_features = question_skill_ids.astype(np.float32)[:, np.newaxis]
+        question_features = np.asarray(question_features, dtype=np.float32)
+        if question_features.shape[0] != num_questions:
+            raise ValueError(
+                "question_features row mismatch: "
+                f"expected {num_questions}, got {question_features.shape[0]}"
+            )
+
+        node_feature_dim = int(question_features.shape[1])
+        node_raw_features = np.zeros((self.num_nodes, node_feature_dim), dtype=np.float32)
+        node_raw_features[:num_questions, :] = question_features
+
+        node_skill_ids = np.zeros(self.num_nodes, dtype=np.int64)
+        node_skill_ids[:num_questions] = question_skill_ids
 
         self.num_skills = int(question_skill_ids.max()) + 1 if question_skill_ids.size > 0 else 1
 
         self.register_buffer("node_raw_features", torch.from_numpy(node_raw_features), persistent=False)
+        self.register_buffer("node_skill_ids", torch.from_numpy(node_skill_ids), persistent=False)
 
         self.projection_layer = nn.ModuleDict(
             {
-                "feature_Linear": nn.Linear(in_features=1, out_features=self.node_dim, bias=True),
+                "feature_Linear": nn.Linear(in_features=node_feature_dim, out_features=self.node_dim, bias=True),
                 "feature_Embed": nn.Embedding(self.num_skills, self.node_dim),
                 "node": nn.Embedding(self.num_nodes, self.node_dim),
                 "edge": nn.Linear(in_features=1, out_features=self.node_dim, bias=True),
@@ -192,7 +207,7 @@ class DYGKT(nn.Module):
         node_interact_times: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         if self.ablation in ["embed", "q_kid"]:
-            skill_ids = self.node_raw_features[nodes_neighbor_ids][:, :, 0].long()
+            skill_ids = self.node_skill_ids[nodes_neighbor_ids].long()
             nodes_neighbor_node_raw_features = self.projection_layer["feature_Embed"](skill_ids)
         elif self.ablation == "q_qid":
             nodes_neighbor_node_raw_features = self.projection_layer["node"](nodes_neighbor_ids)
@@ -251,9 +266,9 @@ class DYGKT(nn.Module):
             batch["dst_neighbor_node_ids"].long() == src_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
         ).unsqueeze(-1).float()
 
-        src_node_skill = self.node_raw_features[src_neighbor_node_ids][:, :-1, 0].long()
+        src_node_skill = self.node_skill_ids[src_neighbor_node_ids][:, :-1].long()
         dst_node_skill = (
-            self.node_raw_features[dst_neighbor_node_ids][:, -1, 0].long().unsqueeze(1).repeat(1, self.num_neighbors)
+            self.node_skill_ids[dst_neighbor_node_ids][:, -1].long().unsqueeze(1).repeat(1, self.num_neighbors)
         )
         src_nodes_neighbor_skill_features = (src_node_skill == dst_node_skill).unsqueeze(-1).float()
 

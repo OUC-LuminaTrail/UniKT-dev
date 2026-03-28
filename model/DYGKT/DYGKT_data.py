@@ -6,7 +6,6 @@ original DyGKT implementation semantics while keeping kt-exp-graph interfaces.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -19,15 +18,6 @@ from utils.data_process import DataSource
 from utils.model_data import QuestionModelData
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class _InteractionRecord:
-    user_id: int
-    seq_len: int
-    question_seq: list[int]
-    correctness_seq: list[int]
-    time_seq: list[int]
 
 
 class DYGKTDataset(Dataset):
@@ -46,12 +36,14 @@ class DYGKTDataset(Dataset):
         dataset_config: dict[str, Any],
         data_all: list[dict[str, Any]],
         q_table: np.ndarray,
+        target_user_ids: set[int] | None = None,
         device: str | None = None,
     ) -> None:
         super().__init__()
         self.dataset_config = dataset_config
         self.data_all = data_all
         self.q_table = q_table
+        self.target_user_ids = target_user_ids
         self.device = device
 
         self.num_neighbor = int(self.dataset_config["num_neighbor"])
@@ -73,13 +65,15 @@ class DYGKTDataset(Dataset):
 
         self.base_tensors: dict[str, torch.Tensor] = {}
         self.lookup_tensors: dict[str, torch.Tensor] = {}
+        self.target_positions: list[int] = []
 
         self.process_dataset()
 
     def __len__(self) -> int:
-        return len(self.dataset_converted["idx"])
+        return len(self.target_positions)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
+        index = self.target_positions[index]
         result: dict[str, torch.Tensor] = {}
 
         # Base scalar fields for the current interaction.
@@ -210,6 +204,21 @@ class DYGKTDataset(Dataset):
 
             self.dataset_converted["que_his_seq"][i] = que_his_seq
 
+        if self.target_user_ids is None:
+            self.target_positions = list(range(len(self.dataset_converted["idx"])))
+        else:
+            self.target_positions = [
+                i
+                for i, user_id in enumerate(self.dataset_converted["user"])
+                if user_id in self.target_user_ids
+            ]
+
+        logger.info(
+            "DYGKT dataset built: total interactions=%s, target interactions=%s",
+            len(self.dataset_converted["idx"]),
+            len(self.target_positions),
+        )
+
     def dataset2tensor(self) -> None:
         self.base_tensors = {
             "idx": torch.tensor(self.dataset_converted["idx"], dtype=torch.long),
@@ -283,8 +292,24 @@ class DYGKTModelData(QuestionModelData):
         test_records = self._build_interaction_records(*test_data)
 
         train_dataset = DYGKTDataset(dataset_config, train_records, q_table)
-        val_dataset = DYGKTDataset(dataset_config, val_records, q_table)
-        test_dataset = DYGKTDataset(dataset_config, test_records, q_table)
+
+        val_history_records = train_records + val_records
+        val_target_user_ids = self._extract_user_ids(val_records, num_questions)
+        val_dataset = DYGKTDataset(
+            dataset_config,
+            val_history_records,
+            q_table,
+            target_user_ids=val_target_user_ids,
+        )
+
+        test_history_records = train_records + val_records + test_records
+        test_target_user_ids = self._extract_user_ids(test_records, num_questions)
+        test_dataset = DYGKTDataset(
+            dataset_config,
+            test_history_records,
+            q_table,
+            target_user_ids=test_target_user_ids,
+        )
 
         logger.info(
             "Train: %s, Val: %s, Test: %s",
@@ -300,6 +325,7 @@ class DYGKTModelData(QuestionModelData):
             "num_questions": num_questions,
             "num_users": num_users,
             "question_skill_ids": question_skill_ids,
+            "question_features": q_table.astype(np.float32),
             "num_neighbor": num_neighbor,
         }
 
@@ -314,6 +340,12 @@ class DYGKTModelData(QuestionModelData):
         no_skill_mask = has_skill.sum(axis=1) == 0
         first_skill[no_skill_mask] = 0
         return first_skill
+
+    def _extract_user_ids(self, records: list[dict[str, Any]], num_questions: int) -> set[int]:
+        """Extract encoded user ids for selecting target interactions."""
+        if not records:
+            return set()
+        return {num_questions + int(record["user_id"]) for record in records}
 
     def _load_time_sequences(self, target_shape: tuple[int, int]) -> np.ndarray:
         """Load timestamp matrix aligned with split sequences."""
