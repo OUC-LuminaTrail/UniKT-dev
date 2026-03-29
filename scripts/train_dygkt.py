@@ -13,12 +13,25 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from utils.config import get_args_parser
+import argparse
+
+from utils.config import DataParams, EarlyStoppingParams, GeneralParams, get_model_params
 from utils.core import ExperimentManager, ExperimentType
 from utils.data_process import get_data_source
 
 from model.DYGKT import DYGKTTrainer
 
+def get_args_parser():
+    parser = argparse.ArgumentParser(description="DYGKT Training Script")
+    GeneralParams.add_args(parser)
+    DataParams.add_args(parser)
+    EarlyStoppingParams.add_args(parser)
+    
+    model_params_cls = get_model_params("DYGKT")
+    if model_params_cls:
+        model_params_cls.add_args(parser)
+        
+    return parser
 
 def main():
     """主函数：训练 DYGKT 模型"""
