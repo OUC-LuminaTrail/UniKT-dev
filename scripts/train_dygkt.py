@@ -16,7 +16,7 @@ sys.path.insert(0, str(project_root))
 import argparse
 
 from utils.config import DataParams, EarlyStoppingParams, GeneralParams, get_model_params
-from utils.core import ExperimentManager, ExperimentType
+from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.data_process import get_data_source
 
 from model.DYGKT import DYGKTTrainer
