@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 from utils.config import (
@@ -83,6 +84,27 @@ class DYGKTModelParams(BaseParamConfig):
                 "short": "nn",
                 "help": "Number of neighbors for history (default: 50)",
             },
+            "neighbor_sampling_strategy": {
+                "type": str,
+                "default": "time_decay",
+                "choices": ["recent", "time_decay"],
+                "help": "Neighbor sampling strategy in DYGKT data layer: recent truncation or time-decay weighted sampling (default: time_decay).",
+            },
+            "time_decay_factor": {
+                "type": float,
+                "default": 1e-5,
+                "help": "Time decay factor for time_decay neighbor sampling (weight=exp(-factor*delta_t), default: 1e-5).",
+            },
+            "neighbor_candidate_pool": {
+                "type": int,
+                "default": 200,
+                "help": "Candidate pool size before sampling neighbors; <=0 means full history (default: 200).",
+            },
+            "neighbor_sampling_seed": {
+                "type": int,
+                "default": 2020,
+                "help": "Random seed for time-decay neighbor sampling (default: 2020).",
+            },
             "dygkt_split_protocol": {
                 "type": str,
                 "default": "kfold",
@@ -123,6 +145,26 @@ class DYGKTModelParams(BaseParamConfig):
                 "type": int,
                 "default": 2,
                 "help": "Manual cache version to invalidate stale DYGKT cache entries (default: 2)",
+            },
+            "graph_neg_sampling": {
+                "type": bool,
+                "default": True,
+                "help": "Enable graph-style in-batch negative sampling auxiliary loss (default: True).",
+            },
+            "graph_neg_num_samples": {
+                "type": int,
+                "default": 2,
+                "help": "Number of in-batch negative samples per interaction for auxiliary contrastive loss (default: 2).",
+            },
+            "graph_neg_temperature": {
+                "type": float,
+                "default": 0.2,
+                "help": "Temperature for graph negative sampling contrastive logits (default: 0.2).",
+            },
+            "graph_neg_loss_weight": {
+                "type": float,
+                "default": 0.05,
+                "help": "Weight of graph negative sampling auxiliary loss (default: 0.05).",
             },
             "profile_batches": {
                 "type": int,
@@ -215,6 +257,10 @@ class DYGKTTrainer(BaseTrainer):
             logger.info(f"Auto-detected device: {args.device}")
 
         self.profile_batches = max(0, int(getattr(args, "profile_batches", 0)))
+        self.graph_neg_sampling = bool(getattr(args, "graph_neg_sampling", True))
+        self.graph_neg_num_samples = max(1, int(getattr(args, "graph_neg_num_samples", 2)))
+        self.graph_neg_temperature = max(1e-6, float(getattr(args, "graph_neg_temperature", 0.2)))
+        self.graph_neg_loss_weight = max(0.0, float(getattr(args, "graph_neg_loss_weight", 0.05)))
         self._profile_batch_count = 0
         self._profile_last_batch_end: float | None = None
         self._profile_sums: dict[str, float] = {
@@ -426,6 +472,52 @@ class DYGKTTrainer(BaseTrainer):
 
         return loss.item()
 
+    def _compute_loss(self, outputs: dict) -> torch.Tensor:
+        """Compute total loss = BCE + optional graph negative-sampling auxiliary loss."""
+        base_loss = super()._compute_loss(outputs)
+        if not self.graph_neg_sampling or self.graph_neg_loss_weight <= 0.0:
+            return base_loss
+
+        neg_loss = self._compute_graph_negative_loss(outputs)
+        return base_loss + self.graph_neg_loss_weight * neg_loss
+
+    def _compute_graph_negative_loss(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
+        """In-batch graph negative sampling via contrastive objective on node embeddings."""
+        src_embeddings = outputs.get("src_embeddings")
+        dst_embeddings = outputs.get("dst_embeddings")
+        dst_node_ids = outputs.get("dst_node_ids")
+
+        if src_embeddings is None or dst_embeddings is None or dst_node_ids is None:
+            return outputs["y_hat"].new_zeros(())
+
+        batch_size = src_embeddings.shape[0]
+        if batch_size < 2:
+            return outputs["y_hat"].new_zeros(())
+
+        pos_logits = (src_embeddings * dst_embeddings).sum(dim=-1) / self.graph_neg_temperature
+        neg_logits_list: list[torch.Tensor] = []
+
+        base_index = torch.arange(batch_size, device=src_embeddings.device)
+        for _ in range(self.graph_neg_num_samples):
+            perm = torch.randperm(batch_size, device=src_embeddings.device)
+            if torch.all(perm == base_index):
+                perm = torch.roll(perm, shifts=1)
+
+            neg_dst_embeddings = dst_embeddings[perm]
+            neg_dst_ids = dst_node_ids[perm]
+            neg_logits = (src_embeddings * neg_dst_embeddings).sum(dim=-1) / self.graph_neg_temperature
+            same_target_mask = neg_dst_ids == dst_node_ids
+            neg_logits = neg_logits.masked_fill(same_target_mask, -1e9)
+            neg_logits_list.append(neg_logits)
+
+        logits = torch.stack([pos_logits] + neg_logits_list, dim=1)
+        valid_rows = torch.isfinite(logits[:, 1:]).any(dim=1)
+        if not bool(valid_rows.any()):
+            return outputs["y_hat"].new_zeros(())
+
+        labels = torch.zeros(int(valid_rows.sum().item()), dtype=torch.long, device=logits.device)
+        return F.cross_entropy(logits[valid_rows], labels)
+
     def _move_tensor_to_device(
         self, tensor: torch.Tensor, dtype: torch.dtype = None
     ) -> torch.Tensor:
@@ -476,8 +568,12 @@ class DYGKTTrainer(BaseTrainer):
             else:
                 batch[key] = value
         
+        src_embeddings, dst_embeddings = self.model.compute_src_dst_node_temporal_embeddings(batch)
+        src_embeddings = self.model.dropout_layer(src_embeddings)
+        dst_embeddings = self.model.dropout_layer(dst_embeddings)
+
         # 模型前向传播，返回 logits
-        y_hat = self.model(batch).float()  # [B]
+        y_hat = self.model.link_predictor(src_embeddings, dst_embeddings).squeeze(dim=-1).float()  # [B]
         
         # 标签是 correctness
         y_label = batch["correctness"].float()
@@ -492,4 +588,7 @@ class DYGKTTrainer(BaseTrainer):
             "y_predict": y_predict,
             "y_score": y_prob,
             "y_prob": y_prob,
+            "src_embeddings": src_embeddings,
+            "dst_embeddings": dst_embeddings,
+            "dst_node_ids": batch["question"].long(),
         }

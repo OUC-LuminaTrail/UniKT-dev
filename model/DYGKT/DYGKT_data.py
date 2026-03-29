@@ -55,6 +55,26 @@ class DYGKTDataset(Dataset):
         self.num_neighbor = int(self.dataset_config["num_neighbor"])
         # Compatibility fields are expensive and not used by current DYGKT model/trainer.
         self.compat_fields = bool(self.dataset_config.get("compat_fields", False))
+        self.neighbor_sampling_strategy = str(
+            self.dataset_config.get("neighbor_sampling_strategy", "time_decay")
+        ).lower()
+        self.time_decay_factor = float(self.dataset_config.get("time_decay_factor", 1e-5))
+        self.neighbor_candidate_pool = int(self.dataset_config.get("neighbor_candidate_pool", 200))
+        self.neighbor_sampling_seed = int(self.dataset_config.get("neighbor_sampling_seed", 2020))
+        self.rng = np.random.default_rng(self.neighbor_sampling_seed)
+
+        if self.neighbor_sampling_strategy not in {"recent", "time_decay"}:
+            raise ValueError(
+                "neighbor_sampling_strategy must be one of {'recent', 'time_decay'}, "
+                f"got {self.neighbor_sampling_strategy}"
+            )
+
+        if self.neighbor_sampling_strategy == "recent":
+            self.history_keep_limit = self.num_neighbor
+        elif self.neighbor_candidate_pool > 0:
+            self.history_keep_limit = max(self.num_neighbor, self.neighbor_candidate_pool)
+        else:
+            self.history_keep_limit = 0
 
         self.dataset_converted: dict[str, list[Any]] = {
             "idx": [],
@@ -159,6 +179,51 @@ class DYGKTDataset(Dataset):
         self.convert_dataset()
         self.dataset2tensor()
 
+    def _sample_history_indices(
+        self,
+        history_indices: list[int],
+        history_times: list[int],
+        current_time: int,
+    ) -> list[int]:
+        """Sample history neighbors with either recent truncation or time-decay weighting."""
+        if not history_indices:
+            return []
+
+        if self.neighbor_sampling_strategy == "recent":
+            return history_indices[-self.num_neighbor :]
+
+        if len(history_indices) <= self.num_neighbor:
+            return list(history_indices)
+
+        candidate_indices = history_indices
+        candidate_times = history_times
+        if self.neighbor_candidate_pool > 0 and len(history_indices) > self.neighbor_candidate_pool:
+            candidate_indices = history_indices[-self.neighbor_candidate_pool :]
+            candidate_times = history_times[-self.neighbor_candidate_pool :]
+
+        candidate_times_np = np.asarray(candidate_times, dtype=np.float64)
+        deltas = np.maximum(0.0, float(current_time) - candidate_times_np)
+        log_weights = -self.time_decay_factor * deltas
+        if log_weights.size > 0:
+            log_weights -= float(log_weights.max())
+        weights = np.exp(log_weights)
+        weight_sum = float(weights.sum())
+
+        if weight_sum <= 0.0 or not np.isfinite(weight_sum):
+            probs = None
+        else:
+            probs = weights / weight_sum
+
+        selected_pos = self.rng.choice(
+            len(candidate_indices),
+            size=self.num_neighbor,
+            replace=False,
+            p=probs,
+        )
+
+        selected_pos_sorted = np.sort(selected_pos)
+        return [candidate_indices[int(p)] for p in selected_pos_sorted]
+
     def convert_dataset(self) -> None:
         """Convert per-user sequences into per-interaction records.
         
@@ -177,7 +242,12 @@ class DYGKTDataset(Dataset):
         num_question = int(self.dataset_config["num_question"])
         num_neighbor = int(self.dataset_config["num_neighbor"])
 
-        logger.info("DYGKT: building interaction records (optimized)...")
+        logger.info(
+            "DYGKT: building interaction records (strategy=%s, decay=%.2e, pool=%s)...",
+            self.neighbor_sampling_strategy,
+            self.time_decay_factor,
+            self.neighbor_candidate_pool,
+        )
 
         # Reserve 0 as pad index.
         n = 1
@@ -204,6 +274,9 @@ class DYGKTDataset(Dataset):
                 else None
             )
 
+            user_history_indices: list[int] = []
+            user_history_times: list[int] = []
+
             for i in range(seq_len):
                 q_id = int(question_seq_np[i])
                 t = int(time_seq_np[i])
@@ -223,9 +296,11 @@ class DYGKTDataset(Dataset):
                 self.dataset_converted["time"].append(t)
                 self.dataset_converted["correctness"].append(c)
 
-                # 🚀 Optimization: Pre-compute range boundaries
-                start_idx = max(1, n - min(i, num_neighbor))
-                user_his_seq = list(range(start_idx, n))
+                user_his_seq = self._sample_history_indices(
+                    user_history_indices,
+                    user_history_times,
+                    t,
+                )
                 self.dataset_converted["user_his_seq"].append(user_his_seq)
 
                 # 🚀 Optimization: Vectorized operations for similarity calculations
@@ -256,20 +331,26 @@ class DYGKTDataset(Dataset):
                 if self.compat_fields:
                     self.dataset_converted["que_his_qn_seq"].append([])
 
+                user_history_indices.append(n)
+                user_history_times.append(t)
+                if self.history_keep_limit > 0 and len(user_history_indices) > self.history_keep_limit:
+                    user_history_indices = user_history_indices[-self.history_keep_limit :]
+                    user_history_times = user_history_times[-self.history_keep_limit :]
+
                 n += 1
 
-        logger.info("DYGKT: building question histories (optimized)...")
+        logger.info("DYGKT: building question histories with temporal sampling...")
 
-        # Build question histories in O(total_interactions) after per-question sorting.
-        # For equal timestamps, keep strict < t behavior by assigning histories before
-        # inserting the current same-time group into history.
-        total_interactions = len(self.dataset_converted["idx"])
+        # Build question histories after per-question sorting.
+        # For equal timestamps, keep strict < t behavior by assigning sampled
+        # histories before inserting the current same-time group.
         histories_by_interaction_idx: list[list[int]] = [[] for _ in range(n)]
         for seq_list in que_his_seqs.values():
             if not seq_list:
                 continue
             seq_sorted = sorted(seq_list, key=lambda x: x[1])
-            recent_hist: list[int] = []
+            question_history_indices: list[int] = []
+            question_history_times: list[int] = []
             i = 0
             seq_len = len(seq_sorted)
             while i < seq_len:
@@ -278,14 +359,22 @@ class DYGKTDataset(Dataset):
                 while j < seq_len and seq_sorted[j][1] == t:
                     j += 1
 
-                shared_hist = list(recent_hist)
+                sampled_hist = self._sample_history_indices(
+                    question_history_indices,
+                    question_history_times,
+                    t,
+                )
                 for k in range(i, j):
                     interaction_idx = seq_sorted[k][0]
-                    histories_by_interaction_idx[interaction_idx] = shared_hist
+                    histories_by_interaction_idx[interaction_idx] = sampled_hist
 
-                recent_hist.extend(seq_sorted[k][0] for k in range(i, j))
-                if len(recent_hist) > num_neighbor:
-                    recent_hist = recent_hist[-num_neighbor:]
+                for k in range(i, j):
+                    question_history_indices.append(seq_sorted[k][0])
+                    question_history_times.append(seq_sorted[k][1])
+
+                if self.history_keep_limit > 0 and len(question_history_indices) > self.history_keep_limit:
+                    question_history_indices = question_history_indices[-self.history_keep_limit :]
+                    question_history_times = question_history_times[-self.history_keep_limit :]
                 i = j
 
         for i, interaction_idx in enumerate(self.dataset_converted["idx"]):
@@ -415,6 +504,12 @@ class DYGKTModelData(QuestionModelData):
             "num_question": num_questions,
             "num_neighbor": num_neighbor,
             "compat_fields": bool(getattr(args, "compat_fields", False)),
+            "neighbor_sampling_strategy": str(
+                getattr(args, "neighbor_sampling_strategy", "time_decay")
+            ).lower(),
+            "time_decay_factor": float(getattr(args, "time_decay_factor", 1e-5)),
+            "neighbor_candidate_pool": int(getattr(args, "neighbor_candidate_pool", 200)),
+            "neighbor_sampling_seed": int(getattr(args, "neighbor_sampling_seed", 2020)),
         }
 
         question_sequences, user_responses, user_masks, user_id_sequences = self.load_sequence_data()

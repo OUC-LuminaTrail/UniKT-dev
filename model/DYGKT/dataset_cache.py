@@ -26,7 +26,7 @@ def get_cache_key(args: Any, fold_idx: int | None) -> str:
         Cache key string (MD5 hash)
     """
     # Internal schema marker for cache compatibility across preprocessing changes.
-    cache_schema = "schema2_time64"
+    cache_schema = "schema3_time_decay_sampling"
 
     key_parts = [
         cache_schema,
@@ -37,6 +37,10 @@ def get_cache_key(args: Any, fold_idx: int | None) -> str:
         str(getattr(args, "dygkt_val_ratio", 0.1)),
         str(getattr(args, "dygkt_test_ratio", 0.1)),
         str(getattr(args, "num_neighbor", 50)),
+        str(getattr(args, "neighbor_sampling_strategy", "time_decay")),
+        str(getattr(args, "time_decay_factor", 1e-5)),
+        str(getattr(args, "neighbor_candidate_pool", 200)),
+        str(getattr(args, "neighbor_sampling_seed", 2020)),
         str(getattr(args, "max_similarity_matrix_questions", 12000)),
         str(getattr(args, "compat_fields", False)),
     ]
