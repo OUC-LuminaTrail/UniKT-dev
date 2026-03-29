@@ -49,6 +49,8 @@ class DYGKTDataset(Dataset):
         self.que_sim_matrix = que_sim_matrix  # Pre-computed similarity matrix
 
         self.num_neighbor = int(self.dataset_config["num_neighbor"])
+        # Compatibility fields are expensive and not used by current DYGKT model/trainer.
+        self.compat_fields = bool(self.dataset_config.get("compat_fields", False))
 
         self.dataset_converted: dict[str, list[Any]] = {
             "idx": [],
@@ -59,12 +61,17 @@ class DYGKTDataset(Dataset):
             "time": [],
             "correctness": [],
             "user_his_seq": [],
-            "user_his_snq_seq": [],
-            "user_his_snd_seq": [],
-            "user_his_snk_seq": [],
             "que_his_seq": [],
-            "que_his_qn_seq": [],
         }
+        if self.compat_fields:
+            self.dataset_converted.update(
+                {
+                    "user_his_snq_seq": [],
+                    "user_his_snd_seq": [],
+                    "user_his_snk_seq": [],
+                    "que_his_qn_seq": [],
+                }
+            )
 
         self.base_tensors: dict[str, torch.Tensor] = {}
         self.lookup_tensors: dict[str, torch.Tensor] = {}
@@ -103,8 +110,9 @@ class DYGKTDataset(Dataset):
         result["que_his_correctness_seq"] = self.lookup_tensors["correctness"][que_his_idx_t].float()
         result["que_his_last_idx"] = que_his_last_idx
 
-        for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
-            result[key] = self.history_feature_tensors[key][index]
+        if self.compat_fields:
+            for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
+                result[key] = self.history_feature_tensors[key][index]
 
         # DyGKT-native fields.
         # Source=user, so user history neighbors are question nodes.
@@ -186,69 +194,67 @@ class DYGKTDataset(Dataset):
                 self.dataset_converted["user_his_seq"].append(user_his_seq)
 
                 # 🚀 Optimization: Vectorized operations for similarity calculations
-                if i == 0:
-                    # Empty history
-                    user_his_snd_seq = []
-                    user_his_snk_seq = []
-                else:
-                    start_pos = max(0, i - num_neighbor)
-                    question_window = question_seq_np[start_pos:i]
-                    
-                    # Vectorized comparison (10-50x faster than list comprehension)
-                    user_his_snd_seq = (question_window == q_id).astype(np.int8).tolist()
-                    if use_precomputed_similarity:
-                        user_his_snk_seq = que_sim_by_concept[question_window, q_id].tolist()
+                if self.compat_fields:
+                    if i == 0:
+                        # Empty history
+                        user_his_snd_seq = []
+                        user_his_snk_seq = []
                     else:
-                        # Local concept overlap: similar iff shared concept exists.
-                        window_concepts = q_table_binary[question_window]
-                        current_concepts = q_table_binary[q_id]
-                        user_his_snk_seq = ((window_concepts @ current_concepts) > 0).astype(np.int8).tolist()
+                        start_pos = max(0, i - num_neighbor)
+                        question_window = question_seq_np[start_pos:i]
 
-                self.dataset_converted["user_his_snq_seq"].append(user_his_snd_seq)
-                self.dataset_converted["user_his_snd_seq"].append(user_his_snd_seq)
-                self.dataset_converted["user_his_snk_seq"].append(user_his_snk_seq)
+                        # Vectorized comparison (10-50x faster than list comprehension)
+                        user_his_snd_seq = (question_window == q_id).astype(np.int8).tolist()
+                        if use_precomputed_similarity:
+                            user_his_snk_seq = que_sim_by_concept[question_window, q_id].tolist()
+                        else:
+                            # Local concept overlap: similar iff shared concept exists.
+                            window_concepts = q_table_binary[question_window]
+                            current_concepts = q_table_binary[q_id]
+                            user_his_snk_seq = ((window_concepts @ current_concepts) > 0).astype(np.int8).tolist()
+
+                    self.dataset_converted["user_his_snq_seq"].append(user_his_snd_seq)
+                    self.dataset_converted["user_his_snd_seq"].append(user_his_snd_seq)
+                    self.dataset_converted["user_his_snk_seq"].append(user_his_snk_seq)
 
                 self.dataset_converted["que_his_seq"].append([])
-                self.dataset_converted["que_his_qn_seq"].append([])
+                if self.compat_fields:
+                    self.dataset_converted["que_his_qn_seq"].append([])
 
                 n += 1
 
         logger.info("DYGKT: building question histories (optimized)...")
 
-        # 🚀 Optimization: Convert que_his_seqs to sorted numpy structured arrays
-        que_his_arrays = {}
-        for q_id, seq_list in que_his_seqs.items():
-            if seq_list:
-                # Convert to numpy array and sort by time
-                arr = np.array(seq_list, dtype=[('idx', 'i4'), ('time', 'i4')])
-                # Sort by time field to enable binary search
-                que_his_arrays[q_id] = np.sort(arr, order='time')
-
-        # 🚀 Optimization: Vectorized batch processing
+        # Build question histories in O(total_interactions) after per-question sorting.
+        # For equal timestamps, keep strict < t behavior by assigning histories before
+        # inserting the current same-time group into history.
         total_interactions = len(self.dataset_converted["idx"])
-        questions = np.array(self.dataset_converted["question_raw"], dtype=np.int32)
-        times = np.array(self.dataset_converted["time"], dtype=np.int32)
-        
-        # Process in batches for better cache locality
-        for i in range(total_interactions):
-            q_id = int(questions[i])
-            t = int(times[i])
-            
-            if q_id in que_his_arrays:
-                arr = que_his_arrays[q_id]
-                # 🚀 Binary search to find cutoff position (O(log n) instead of O(n))
-                # Find position where time >= t starts
-                pos = np.searchsorted(arr['time'], t, side='left')
-                # Get all indices before this position (they're sorted by time)
-                que_his_seq = arr[:pos]['idx'].tolist()
-                
-                # Limit to num_neighbor most recent
-                if len(que_his_seq) >= num_neighbor:
-                    que_his_seq = que_his_seq[-num_neighbor:]
-            else:
-                que_his_seq = []
-            
-            self.dataset_converted["que_his_seq"][i] = que_his_seq
+        histories_by_interaction_idx: list[list[int]] = [[] for _ in range(n)]
+        for seq_list in que_his_seqs.values():
+            if not seq_list:
+                continue
+            seq_sorted = sorted(seq_list, key=lambda x: x[1])
+            recent_hist: list[int] = []
+            i = 0
+            seq_len = len(seq_sorted)
+            while i < seq_len:
+                t = seq_sorted[i][1]
+                j = i
+                while j < seq_len and seq_sorted[j][1] == t:
+                    j += 1
+
+                shared_hist = list(recent_hist)
+                for k in range(i, j):
+                    interaction_idx = seq_sorted[k][0]
+                    histories_by_interaction_idx[interaction_idx] = shared_hist
+
+                recent_hist.extend(seq_sorted[k][0] for k in range(i, j))
+                if len(recent_hist) > num_neighbor:
+                    recent_hist = recent_hist[-num_neighbor:]
+                i = j
+
+        for i, interaction_idx in enumerate(self.dataset_converted["idx"]):
+            self.dataset_converted["que_his_seq"][i] = histories_by_interaction_idx[interaction_idx]
 
         if self.target_user_ids is None:
             self.target_positions = list(range(len(self.dataset_converted["idx"])))
@@ -314,9 +320,10 @@ class DYGKTDataset(Dataset):
             "que_his_seq": que_his_len,
         }
 
-        for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
-            padded, _ = _pad_sequences(self.dataset_converted[key])
-            self.history_feature_tensors[key] = padded
+        if self.compat_fields:
+            for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
+                padded, _ = _pad_sequences(self.dataset_converted[key])
+                self.history_feature_tensors[key] = padded
 
 
 class DYGKTModelData(QuestionModelData):
@@ -331,6 +338,21 @@ class DYGKTModelData(QuestionModelData):
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         num_neighbor = int(getattr(args, "num_neighbor", 50))
 
+        # 🚀 OPTIMIZATION: Try to load from cache first
+        use_cache = not bool(getattr(args, "no_cache", False))
+        cache_dir = getattr(args, "cache_dir", None)
+        if use_cache:
+            from .dataset_cache import get_cache_key, load_cached_dataset
+
+            cache_key = get_cache_key(args, fold_idx)
+            cached_data = load_cached_dataset(cache_key, cache_dir=cache_dir)
+            if cached_data is not None:
+                logger.info("✅ Using cached dataset (skip preprocessing)")
+                return cached_data
+            logger.info("Cache miss, building dataset from scratch...")
+        else:
+            logger.info("DYGKT dataset cache disabled (--no_cache)")
+
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
         if q_table is None or q_table.size == 0:
             raise ValueError("DYGKT requires a non-empty question-skill matrix.")
@@ -340,6 +362,7 @@ class DYGKTModelData(QuestionModelData):
         dataset_config = {
             "num_question": num_questions,
             "num_neighbor": num_neighbor,
+            "compat_fields": bool(getattr(args, "compat_fields", False)),
         }
 
         question_sequences, user_responses, user_masks, user_id_sequences = self.load_sequence_data()
@@ -378,11 +401,25 @@ class DYGKTModelData(QuestionModelData):
             import time
 
             start_time = time.time()
-            que_sim_matrix = ((q_table @ q_table.T) > 0).astype(np.int8)
-            logger.info(
-                "Similarity matrix computed in %.2fs",
-                time.time() - start_time,
-            )
+            
+            # 🚀 OPTIMIZATION: Use sparse matrix for 5-10x speedup
+            try:
+                from scipy.sparse import csr_matrix
+                q_table_sparse = csr_matrix(q_table > 0, dtype=np.int8)
+                que_sim_sparse = q_table_sparse @ q_table_sparse.T
+                que_sim_matrix = (que_sim_sparse > 0).astype(np.int8).toarray()
+                logger.info(
+                    "Similarity matrix computed (sparse) in %.2fs",
+                    time.time() - start_time,
+                )
+            except ImportError:
+                # Fallback to dense computation if scipy not available
+                logger.warning("scipy not available, using dense matrix computation")
+                que_sim_matrix = ((q_table @ q_table.T) > 0).astype(np.int8)
+                logger.info(
+                    "Similarity matrix computed (dense) in %.2fs",
+                    time.time() - start_time,
+                )
         else:
             logger.info(
                 "Skip full similarity matrix: num_questions=%s > threshold=%s. "
@@ -432,6 +469,13 @@ class DYGKTModelData(QuestionModelData):
             "question_features": q_table.astype(np.float32),
             "num_neighbor": num_neighbor,
         }
+
+        # 🚀 OPTIMIZATION: Save to cache for future runs
+        if use_cache:
+            from .dataset_cache import save_cached_dataset
+
+            dataset_tuple = (train_dataset, val_dataset, test_dataset, model_metadata)
+            save_cached_dataset(cache_key, dataset_tuple, cache_dir=cache_dir)
 
         return train_dataset, val_dataset, test_dataset, model_metadata
 

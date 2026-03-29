@@ -74,6 +74,22 @@ python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --device cuda
 CUDA_VISIBLE_DEVICES=0 python train.py -m DYGKT --dataset ASSISTments12 --fold 0
 ```
 
+### 4. 性能分析与缓存
+
+```bash
+# 训练时对前 50 个 batch 做瓶颈分析（日志会输出 wait/compute 比例）
+python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --profile_batches 50
+
+# 禁用数据缓存（强制重建预处理）
+python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --no_cache
+
+# 指定缓存目录
+python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --cache_dir ./cache/dygkt_assist12
+
+# 使用专用 profiling 脚本
+python scripts/profile_dygkt.py --dataset ASSISTments12 --fold 0 --profile_batches 50
+```
+
 ## 超参数说明
 
 | 参数 | 默认值 | 说明 |
@@ -87,6 +103,10 @@ CUDA_VISIBLE_DEVICES=0 python train.py -m DYGKT --dataset ASSISTments12 --fold 0
 | `learning_rate` | 0.001 | 学习率 |
 | `weight_decay` | 1e-4 | 权重衰减（L2正则化） |
 | `lr_decay` | None | 学习率衰减因子 |
+| `no_cache` | False | 禁用 DYGKT 数据缓存 |
+| `cache_dir` | ./cache/dygkt | DYGKT 缓存目录（默认） |
+| `cache_version` | 1 | 缓存版本号，用于手动失效旧缓存 |
+| `profile_batches` | 0 | 对前 N 个训练 batch 做计时分析 |
 
 ## 数据格式
 

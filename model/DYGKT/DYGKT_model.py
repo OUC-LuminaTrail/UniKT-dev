@@ -77,13 +77,41 @@ class TimeDualDecayEncoder(nn.Module):
         timestamps_right = torch.cat([timestamps_right[:, 1:, :], timestamps_right[:, -1, :].unsqueeze(1)], dim=1)
         timestamps_diff = timestamps_right - timestamps
 
-        timestamps_mask = (timestamps_diff > 3600 * 24).float()
+        # Keep strict behavior parity with the original masked formulation:
+        # short branch uses diff when diff > 24h, long branch uses diff when diff <= 24h.
+        threshold = 3600 * 24
+        use_short_branch = timestamps_diff > threshold  # [B, L, 1]
+        use_short_branch_flat = use_short_branch.squeeze(-1)  # [B, L]
 
-        timestamps_short = self.f(self.w_short(timestamps_diff * timestamps_mask))
-        timestamps_long = self.f(self.w_long(timestamps_diff * (1 - timestamps_mask)))
-        output = self.w_o(timestamps_short + timestamps_long)
+        batch_size, seq_len = use_short_branch_flat.shape
+        target_shape = (batch_size, seq_len, self.time_dim)
 
-        return output
+        # Baseline contributions for inactive branch inputs (x=0).
+        zero_input = timestamps_diff.new_zeros((1, 1))
+        short_zero = self.f(self.w_short(zero_input)).view(1, 1, self.time_dim)
+        long_zero = self.f(self.w_long(zero_input)).view(1, 1, self.time_dim)
+
+        timestamps_short = short_zero.expand(target_shape).clone()
+        timestamps_long = long_zero.expand(target_shape).clone()
+
+        if use_short_branch_flat.any():
+            short_input = timestamps_diff[use_short_branch_flat]
+            short_active = self.f(self.w_short(short_input))
+            timestamps_short = timestamps_short.masked_scatter(
+                use_short_branch.expand(-1, -1, self.time_dim),
+                short_active.reshape(-1),
+            )
+
+        use_long_branch = ~use_short_branch_flat
+        if use_long_branch.any():
+            long_input = timestamps_diff[use_long_branch]
+            long_active = self.f(self.w_long(long_input))
+            timestamps_long = timestamps_long.masked_scatter(
+                use_long_branch.unsqueeze(-1).expand(-1, -1, self.time_dim),
+                long_active.reshape(-1),
+            )
+
+        return self.w_o(timestamps_short + timestamps_long)
 
 
 class MergeLayer(nn.Module):
