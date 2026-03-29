@@ -38,6 +38,7 @@ class DYGKTDataset(Dataset):
         q_table: np.ndarray,
         target_user_ids: set[int] | None = None,
         device: str | None = None,
+        que_sim_matrix: np.ndarray | None = None,
     ) -> None:
         super().__init__()
         self.dataset_config = dataset_config
@@ -45,6 +46,7 @@ class DYGKTDataset(Dataset):
         self.q_table = q_table
         self.target_user_ids = target_user_ids
         self.device = device
+        self.que_sim_matrix = que_sim_matrix  # Pre-computed similarity matrix
 
         self.num_neighbor = int(self.dataset_config["num_neighbor"])
 
@@ -132,8 +134,12 @@ class DYGKTDataset(Dataset):
         
         Optimized version with vectorized operations for better performance.
         """
-        # 🚀 Optimization: Pre-compute question similarity matrix
-        que_sim_by_concept = ((self.q_table @ self.q_table.T) > 0).astype(np.int8)
+        # 🚀 Optimization: Use pre-computed similarity matrix if available
+        if self.que_sim_matrix is not None:
+            que_sim_by_concept = self.que_sim_matrix
+        else:
+            # Fallback: compute on-the-fly (slower)
+            que_sim_by_concept = ((self.q_table @ self.q_table.T) > 0).astype(np.int8)
 
         num_question = int(self.dataset_config["num_question"])
         num_neighbor = int(self.dataset_config["num_neighbor"])
@@ -323,7 +329,14 @@ class DYGKTModelData(QuestionModelData):
         val_records = self._build_interaction_records(*val_data)
         test_records = self._build_interaction_records(*test_data)
 
-        train_dataset = DYGKTDataset(dataset_config, train_records, q_table)
+        # 🚀 Optimization: Pre-compute question similarity matrix once for all datasets
+        logger.info("Pre-computing question similarity matrix...")
+        import time
+        start_time = time.time()
+        que_sim_matrix = ((q_table @ q_table.T) > 0).astype(np.int8)
+        logger.info(f"Similarity matrix computed in {time.time() - start_time:.2f}s")
+
+        train_dataset = DYGKTDataset(dataset_config, train_records, q_table, que_sim_matrix=que_sim_matrix)
 
         val_history_records = train_records + val_records
         val_target_user_ids = self._extract_user_ids(val_records, num_questions)
@@ -332,6 +345,7 @@ class DYGKTModelData(QuestionModelData):
             val_history_records,
             q_table,
             target_user_ids=val_target_user_ids,
+            que_sim_matrix=que_sim_matrix,
         )
 
         test_history_records = train_records + val_records + test_records
@@ -341,6 +355,7 @@ class DYGKTModelData(QuestionModelData):
             test_history_records,
             q_table,
             target_user_ids=test_target_user_ids,
+            que_sim_matrix=que_sim_matrix,
         )
 
         logger.info(

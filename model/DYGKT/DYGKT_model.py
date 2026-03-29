@@ -158,17 +158,10 @@ class DYGKT(nn.Module):
                 f"expected {num_questions}, got {question_features.shape[0]}"
             )
 
-        # 🔧 FIX: Padding features to 256 dimensions like the original DyGKT implementation
-        # This ensures the model has the same capacity as the paper's version
-        NODE_FEAT_DIM = 256
-        original_feat_dim = int(question_features.shape[1])
-        
-        if original_feat_dim < NODE_FEAT_DIM:
-            # Pad with zeros to match original implementation
-            padding = np.zeros((num_questions, NODE_FEAT_DIM - original_feat_dim), dtype=np.float32)
-            question_features = np.concatenate([question_features, padding], axis=1)
-        
-        node_feature_dim = NODE_FEAT_DIM
+        # ✅ Dynamic feature dimension: matches original DyGKT implementation
+        # The original code uses: self.node_raw_features.shape[-1]
+        # This allows the model to adapt to any feature dimension (sparse or dense)
+        node_feature_dim = int(question_features.shape[1])
         node_raw_features = np.zeros((self.num_nodes, node_feature_dim), dtype=np.float32)
         node_raw_features[:num_questions, :] = question_features
 
