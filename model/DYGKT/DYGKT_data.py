@@ -37,6 +37,7 @@ class DYGKTDataset(Dataset):
         data_all: list[dict[str, Any]],
         q_table: np.ndarray,
         target_user_ids: set[int] | None = None,
+        target_global_ids: set[int] | None = None,
         device: str | None = None,
         que_sim_matrix: np.ndarray | None = None,
     ) -> None:
@@ -45,6 +46,9 @@ class DYGKTDataset(Dataset):
         self.data_all = data_all
         self.q_table = q_table
         self.target_user_ids = target_user_ids
+        self.target_global_ids = (
+            {int(x) for x in target_global_ids} if target_global_ids is not None else None
+        )
         self.device = device
         self.que_sim_matrix = que_sim_matrix  # Pre-computed similarity matrix
 
@@ -54,6 +58,7 @@ class DYGKTDataset(Dataset):
 
         self.dataset_converted: dict[str, list[Any]] = {
             "idx": [],
+            "global_id": [],
             "user": [],
             "question": [],
             "question_raw": [],
@@ -186,23 +191,31 @@ class DYGKTDataset(Dataset):
             question_seq = user_data["question_seq"][:seq_len]
             correctness_seq = user_data["correctness_seq"][:seq_len]
             time_seq = user_data["time_seq"][:seq_len]
+            interaction_id_seq = user_data.get("interaction_id_seq")
 
             # 🚀 Optimization: Convert to numpy arrays once per user
             question_seq_np = np.array(question_seq, dtype=np.int32)
             correctness_seq_np = np.array(correctness_seq, dtype=np.int8)
             # Keep 64-bit timestamps to avoid overflow on epoch-millisecond data.
             time_seq_np = np.array(time_seq, dtype=np.int64)
+            interaction_id_seq_np = (
+                np.array(interaction_id_seq[:seq_len], dtype=np.int64)
+                if interaction_id_seq is not None
+                else None
+            )
 
             for i in range(seq_len):
                 q_id = int(question_seq_np[i])
                 t = int(time_seq_np[i])
                 c = int(correctness_seq_np[i])
+                global_id = int(interaction_id_seq_np[i]) if interaction_id_seq_np is not None else int(n)
 
                 if q_id not in que_his_seqs:
                     que_his_seqs[q_id] = []
                 que_his_seqs[q_id].append((n, t))
 
                 self.dataset_converted["idx"].append(n)
+                self.dataset_converted["global_id"].append(global_id)
                 self.dataset_converted["user"].append(user_id)
                 self.dataset_converted["question"].append(q_id + 1)
                 self.dataset_converted["question_raw"].append(q_id)
@@ -278,7 +291,13 @@ class DYGKTDataset(Dataset):
         for i, interaction_idx in enumerate(self.dataset_converted["idx"]):
             self.dataset_converted["que_his_seq"][i] = histories_by_interaction_idx[interaction_idx]
 
-        if self.target_user_ids is None:
+        if self.target_global_ids is not None:
+            self.target_positions = [
+                i
+                for i, global_id in enumerate(self.dataset_converted["global_id"])
+                if global_id in self.target_global_ids
+            ]
+        elif self.target_user_ids is None:
             self.target_positions = list(range(len(self.dataset_converted["idx"])))
         else:
             self.target_positions = [
@@ -369,6 +388,7 @@ class DYGKTModelData(QuestionModelData):
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         num_neighbor = int(getattr(args, "num_neighbor", 50))
+        split_protocol = str(getattr(args, "dygkt_split_protocol", "kfold")).lower()
 
         # 🚀 OPTIMIZATION: Try to load from cache first
         use_cache = not bool(getattr(args, "no_cache", False))
@@ -399,8 +419,34 @@ class DYGKTModelData(QuestionModelData):
 
         question_sequences, user_responses, user_masks, user_id_sequences = self.load_sequence_data()
         time_sequences = self._load_time_sequences(question_sequences.shape)
+        time_sequences = self._normalize_timestamps_to_seconds(time_sequences)
 
-        if fold_idx is not None:
+        if split_protocol == "time_quantile":
+            val_ratio = float(getattr(args, "dygkt_val_ratio", 0.1))
+            test_ratio = float(getattr(args, "dygkt_test_ratio", 0.1))
+
+            interaction_rows = self._build_interaction_rows(
+                question_sequences,
+                user_responses,
+                user_masks,
+                time_sequences,
+                user_id_sequences,
+            )
+            train_rows, val_rows, test_rows = self._time_quantile_split_rows(
+                interaction_rows,
+                val_ratio=val_ratio,
+                test_ratio=test_ratio,
+            )
+
+            train_records = self._rows_to_user_records(train_rows)
+            val_records = self._rows_to_user_records(val_rows)
+            test_records = self._rows_to_user_records(test_rows)
+
+            val_target_global_ids = {int(row["global_id"]) for row in val_rows}
+            test_target_global_ids = {int(row["global_id"]) for row in test_rows}
+            val_target_user_ids = None
+            test_target_user_ids = None
+        elif fold_idx is not None:
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
                 raise ValueError(f"fold_idx {fold_idx} out of range [0, {kfold_n_splits})")
 
@@ -413,12 +459,20 @@ class DYGKTModelData(QuestionModelData):
                 user_id_sequences,
                 fold_idx=fold_idx,
             )
-        else:
-            raise ValueError("fold_idx must be specified")
 
-        train_records = self._build_interaction_records(*train_data)
-        val_records = self._build_interaction_records(*val_data)
-        test_records = self._build_interaction_records(*test_data)
+            train_records = self._build_interaction_records(*train_data)
+            val_records = self._build_interaction_records(*val_data)
+            test_records = self._build_interaction_records(*test_data)
+
+            val_target_global_ids = None
+            test_target_global_ids = None
+            val_target_user_ids = self._extract_user_ids(val_records, num_questions)
+            test_target_user_ids = self._extract_user_ids(test_records, num_questions)
+        else:
+            raise ValueError(
+                "Invalid split configuration for DYGKT. "
+                "Use --dygkt_split_protocol kfold with valid --fold, or --dygkt_split_protocol time_quantile."
+            )
 
         # For large question vocab, full NxN similarity is too expensive.
         max_similarity_matrix_questions = int(
@@ -463,24 +517,40 @@ class DYGKTModelData(QuestionModelData):
         train_dataset = DYGKTDataset(dataset_config, train_records, q_table, que_sim_matrix=que_sim_matrix)
 
         val_history_records = train_records + val_records
-        val_target_user_ids = self._extract_user_ids(val_records, num_questions)
-        val_dataset = DYGKTDataset(
-            dataset_config,
-            val_history_records,
-            q_table,
-            target_user_ids=val_target_user_ids,
-            que_sim_matrix=que_sim_matrix,
-        )
+        if split_protocol == "time_quantile":
+            val_dataset = DYGKTDataset(
+                dataset_config,
+                val_history_records,
+                q_table,
+                target_global_ids=val_target_global_ids,
+                que_sim_matrix=que_sim_matrix,
+            )
+        else:
+            val_dataset = DYGKTDataset(
+                dataset_config,
+                val_history_records,
+                q_table,
+                target_user_ids=val_target_user_ids,
+                que_sim_matrix=que_sim_matrix,
+            )
 
         test_history_records = train_records + val_records + test_records
-        test_target_user_ids = self._extract_user_ids(test_records, num_questions)
-        test_dataset = DYGKTDataset(
-            dataset_config,
-            test_history_records,
-            q_table,
-            target_user_ids=test_target_user_ids,
-            que_sim_matrix=que_sim_matrix,
-        )
+        if split_protocol == "time_quantile":
+            test_dataset = DYGKTDataset(
+                dataset_config,
+                test_history_records,
+                q_table,
+                target_global_ids=test_target_global_ids,
+                que_sim_matrix=que_sim_matrix,
+            )
+        else:
+            test_dataset = DYGKTDataset(
+                dataset_config,
+                test_history_records,
+                q_table,
+                target_user_ids=test_target_user_ids,
+                que_sim_matrix=que_sim_matrix,
+            )
 
         logger.info(
             "Train: %s, Val: %s, Test: %s",
@@ -526,6 +596,154 @@ class DYGKTModelData(QuestionModelData):
         if not records:
             return set()
         return {num_questions + 1 + int(record["user_id"]) for record in records}
+
+    def _normalize_timestamps_to_seconds(self, timestamps: np.ndarray) -> np.ndarray:
+        """Normalize timestamps to seconds when timestamps are stored in ms/ns."""
+        ts = np.asarray(timestamps, dtype=np.int64).copy()
+        if ts.size == 0:
+            return ts
+
+        valid = ts != 0
+        if not valid.any():
+            return ts
+
+        abs_valid = np.abs(ts[valid])
+        median_abs = int(np.median(abs_valid))
+
+        scale = 1
+        detected_unit = "seconds"
+        if median_abs > 10**14:
+            scale = 10**9
+            detected_unit = "nanoseconds"
+        elif median_abs > 10**11:
+            scale = 10**3
+            detected_unit = "milliseconds"
+
+        if scale > 1:
+            logger.warning(
+                "DYGKT detected %s timestamps (median=%s); normalizing to seconds by /%s.",
+                detected_unit,
+                median_abs,
+                scale,
+            )
+            ts[valid] = ts[valid] // scale
+
+        return ts
+
+    def _build_interaction_rows(
+        self,
+        question_sequences: np.ndarray,
+        user_responses: np.ndarray,
+        user_masks: np.ndarray,
+        time_sequences: np.ndarray,
+        user_id_sequences: np.ndarray,
+    ) -> list[dict[str, int]]:
+        """Flatten split-user sequences into interaction rows with global ids."""
+        rows: list[dict[str, int]] = []
+        global_id = 1
+
+        for idx, (q_seq, r_seq, mask_seq, t_seq, uid_seq) in enumerate(
+            zip(
+                question_sequences,
+                user_responses,
+                user_masks,
+                time_sequences,
+                user_id_sequences,
+            )
+        ):
+            seq_len = int(np.asarray(mask_seq).sum())
+            if seq_len <= 0:
+                continue
+
+            valid_uid = np.asarray(uid_seq)[:seq_len]
+            user_id = int(valid_uid[0]) if valid_uid.size > 0 else int(idx)
+
+            q_arr = np.asarray(q_seq)[:seq_len].astype(np.int64)
+            r_arr = np.asarray(r_seq)[:seq_len].astype(np.int64)
+            t_arr = np.asarray(t_seq)[:seq_len].astype(np.int64)
+
+            for seq_pos, (q_id, correctness, t) in enumerate(zip(q_arr, r_arr, t_arr)):
+                rows.append(
+                    {
+                        "global_id": int(global_id),
+                        "user_id": user_id,
+                        "seq_pos": int(seq_pos),
+                        "question": int(q_id),
+                        "correctness": int(correctness),
+                        "time": int(t),
+                    }
+                )
+                global_id += 1
+
+        return rows
+
+    def _time_quantile_split_rows(
+        self,
+        interaction_rows: list[dict[str, int]],
+        val_ratio: float,
+        test_ratio: float,
+    ) -> tuple[list[dict[str, int]], list[dict[str, int]], list[dict[str, int]]]:
+        """Split interactions by timestamp quantiles to match original DyGKT protocol."""
+        if not interaction_rows:
+            return [], [], []
+
+        if val_ratio <= 0 or test_ratio <= 0 or val_ratio + test_ratio >= 1.0:
+            raise ValueError(
+                "For dygkt_split_protocol=time_quantile, require 0 < val_ratio, test_ratio and val_ratio+test_ratio < 1."
+            )
+
+        times = np.asarray([row["time"] for row in interaction_rows], dtype=np.int64)
+        val_time, test_time = np.quantile(
+            times.astype(np.float64),
+            [1.0 - val_ratio - test_ratio, 1.0 - test_ratio],
+        )
+
+        train_rows: list[dict[str, int]] = []
+        val_rows: list[dict[str, int]] = []
+        test_rows: list[dict[str, int]] = []
+
+        for row in interaction_rows:
+            t = float(row["time"])
+            if t <= val_time:
+                train_rows.append(row)
+            elif t <= test_time:
+                val_rows.append(row)
+            else:
+                test_rows.append(row)
+
+        logger.info(
+            "DYGKT time-quantile split: train=%s, val=%s, test=%s, val_time=%.3f, test_time=%.3f",
+            len(train_rows),
+            len(val_rows),
+            len(test_rows),
+            float(val_time),
+            float(test_time),
+        )
+        return train_rows, val_rows, test_rows
+
+    def _rows_to_user_records(self, rows: list[dict[str, int]]) -> list[dict[str, Any]]:
+        """Convert interaction rows back into per-user sequence records."""
+        by_user: dict[int, list[dict[str, int]]] = {}
+        for row in rows:
+            by_user.setdefault(int(row["user_id"]), []).append(row)
+
+        records: list[dict[str, Any]] = []
+        for user_id in sorted(by_user.keys()):
+            user_rows = by_user[user_id]
+            user_rows.sort(key=lambda x: (x["time"], x["seq_pos"], x["global_id"]))
+
+            records.append(
+                {
+                    "user_id": int(user_id),
+                    "seq_len": len(user_rows),
+                    "question_seq": [int(r["question"]) for r in user_rows],
+                    "correctness_seq": [int(r["correctness"]) for r in user_rows],
+                    "time_seq": [int(r["time"]) for r in user_rows],
+                    "interaction_id_seq": [int(r["global_id"]) for r in user_rows],
+                }
+            )
+
+        return records
 
     def _load_time_sequences(self, target_shape: tuple[int, int]) -> np.ndarray:
         """Load timestamp matrix aligned with split sequences."""

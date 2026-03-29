@@ -83,6 +83,22 @@ class DYGKTModelParams(BaseParamConfig):
                 "short": "nn",
                 "help": "Number of neighbors for history (default: 50)",
             },
+            "dygkt_split_protocol": {
+                "type": str,
+                "default": "kfold",
+                "choices": ["kfold", "time_quantile"],
+                "help": "Data split protocol for DYGKT: kfold (project default) or time_quantile (original DyGKT-like).",
+            },
+            "dygkt_val_ratio": {
+                "type": float,
+                "default": 0.1,
+                "help": "Validation ratio when dygkt_split_protocol=time_quantile (default: 0.1).",
+            },
+            "dygkt_test_ratio": {
+                "type": float,
+                "default": 0.1,
+                "help": "Test ratio when dygkt_split_protocol=time_quantile (default: 0.1).",
+            },
             "max_similarity_matrix_questions": {
                 "type": int,
                 "default": 12000,
