@@ -130,12 +130,15 @@ class DYGKTDataset(Dataset):
         
         Optimized version with vectorized operations for better performance.
         """
-        # 🚀 Optimization: Use pre-computed similarity matrix if available
-        if self.que_sim_matrix is not None:
+        # Use precomputed similarity matrix when available. For large datasets,
+        # fallback to local on-the-fly similarity to avoid building huge NxN matrices.
+        use_precomputed_similarity = self.que_sim_matrix is not None
+        if use_precomputed_similarity:
             que_sim_by_concept = self.que_sim_matrix
+            q_table_binary = None
         else:
-            # Fallback: compute on-the-fly (slower)
-            que_sim_by_concept = ((self.q_table @ self.q_table.T) > 0).astype(np.int8)
+            que_sim_by_concept = None
+            q_table_binary = (self.q_table > 0).astype(np.int8)
 
         num_question = int(self.dataset_config["num_question"])
         num_neighbor = int(self.dataset_config["num_neighbor"])
@@ -193,7 +196,13 @@ class DYGKTDataset(Dataset):
                     
                     # Vectorized comparison (10-50x faster than list comprehension)
                     user_his_snd_seq = (question_window == q_id).astype(np.int8).tolist()
-                    user_his_snk_seq = que_sim_by_concept[question_window, q_id].tolist()
+                    if use_precomputed_similarity:
+                        user_his_snk_seq = que_sim_by_concept[question_window, q_id].tolist()
+                    else:
+                        # Local concept overlap: similar iff shared concept exists.
+                        window_concepts = q_table_binary[question_window]
+                        current_concepts = q_table_binary[q_id]
+                        user_his_snk_seq = ((window_concepts @ current_concepts) > 0).astype(np.int8).tolist()
 
                 self.dataset_converted["user_his_snq_seq"].append(user_his_snd_seq)
                 self.dataset_converted["user_his_snd_seq"].append(user_his_snd_seq)
@@ -356,12 +365,31 @@ class DYGKTModelData(QuestionModelData):
         val_records = self._build_interaction_records(*val_data)
         test_records = self._build_interaction_records(*test_data)
 
-        # 🚀 Optimization: Pre-compute question similarity matrix once for all datasets
-        logger.info("Pre-computing question similarity matrix...")
-        import time
-        start_time = time.time()
-        que_sim_matrix = ((q_table @ q_table.T) > 0).astype(np.int8)
-        logger.info(f"Similarity matrix computed in {time.time() - start_time:.2f}s")
+        # For large question vocab, full NxN similarity is too expensive.
+        max_similarity_matrix_questions = int(
+            getattr(args, "max_similarity_matrix_questions", 12000)
+        )
+        que_sim_matrix = None
+        if num_questions <= max_similarity_matrix_questions:
+            logger.info(
+                "Pre-computing question similarity matrix (num_questions=%s)...",
+                num_questions,
+            )
+            import time
+
+            start_time = time.time()
+            que_sim_matrix = ((q_table @ q_table.T) > 0).astype(np.int8)
+            logger.info(
+                "Similarity matrix computed in %.2fs",
+                time.time() - start_time,
+            )
+        else:
+            logger.info(
+                "Skip full similarity matrix: num_questions=%s > threshold=%s. "
+                "Use local on-the-fly similarity.",
+                num_questions,
+                max_similarity_matrix_questions,
+            )
 
         train_dataset = DYGKTDataset(dataset_config, train_records, q_table, que_sim_matrix=que_sim_matrix)
 

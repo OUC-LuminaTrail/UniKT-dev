@@ -67,6 +67,11 @@ class DYGKTModelParams(BaseParamConfig):
                 "short": "nn",
                 "help": "Number of neighbors for history (default: 50)",
             },
+            "max_similarity_matrix_questions": {
+                "type": int,
+                "default": 12000,
+                "help": "Max question count to build full question-question similarity matrix; larger datasets use local on-the-fly similarity (default: 12000)",
+            },
             "dropout": {
                 "type": float,
                 "default": 0.1,
