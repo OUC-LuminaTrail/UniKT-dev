@@ -75,10 +75,13 @@ class DYGKTDataset(Dataset):
 
         self.base_tensors: dict[str, torch.Tensor] = {}
         self.lookup_tensors: dict[str, torch.Tensor] = {}
+        self.base_float_tensors: dict[str, torch.Tensor] = {}
+        self.lookup_float_tensors: dict[str, torch.Tensor] = {}
         self.history_index_tensors: dict[str, torch.Tensor] = {}
         self.history_feature_tensors: dict[str, torch.Tensor] = {}
         self.history_len_tensors: dict[str, torch.Tensor] = {}
         self.target_positions: list[int] = []
+        self.target_positions_tensor = torch.empty(0, dtype=torch.long)
 
         self.process_dataset()
 
@@ -86,45 +89,63 @@ class DYGKTDataset(Dataset):
         return len(self.target_positions)
 
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
-        index = self.target_positions[index]
+        batch = self.get_batch(torch.tensor([index], dtype=torch.long))
+        return {k: v[0] for k, v in batch.items()}
+
+    def collate_indices(self, batch_indices: list[int]) -> dict[str, torch.Tensor]:
+        """Collate a batch of dataset positions into one vectorized dictionary batch."""
+        return self.get_batch(batch_indices)
+
+    def get_batch(self, batch_positions: list[int] | torch.Tensor) -> dict[str, torch.Tensor]:
+        """Build one batch from dataset positions using vectorized tensor gather."""
+        if not torch.is_tensor(batch_positions):
+            batch_positions = torch.tensor(batch_positions, dtype=torch.long)
+        else:
+            batch_positions = batch_positions.long()
+
+        data_indices = self.target_positions_tensor[batch_positions]
+        return self._gather_batch_by_data_indices(data_indices)
+
+    def _gather_batch_by_data_indices(self, data_indices: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Gather all required fields for a batch from underlying tensor storages."""
         result: dict[str, torch.Tensor] = {}
 
-        # Base scalar fields for the current interaction.
+        # Base scalar fields for current interactions.
         for key in ["idx", "user", "question", "idx_in_seq"]:
-            result[key] = self.base_tensors[key][index]
-        result["time"] = self.base_tensors["time"][index].float()
-        result["correctness"] = self.base_tensors["correctness"][index].float()
+            result[key] = self.base_tensors[key][data_indices]
+        result["time"] = self.base_float_tensors["time"][data_indices]
+        result["correctness"] = self.base_float_tensors["correctness"][data_indices]
 
-        user_his_idx_t = self.history_index_tensors["user_his_seq"][index]
-        que_his_idx_t = self.history_index_tensors["que_his_seq"][index]
+        user_his_idx_t = self.history_index_tensors["user_his_seq"][data_indices]
+        que_his_idx_t = self.history_index_tensors["que_his_seq"][data_indices]
 
-        user_his_last_idx = self.history_len_tensors["user_his_seq"][index]
-        que_his_last_idx = self.history_len_tensors["que_his_seq"][index]
+        user_his_last_idx = self.history_len_tensors["user_his_seq"][data_indices]
+        que_his_last_idx = self.history_len_tensors["que_his_seq"][data_indices]
 
         # Original compatibility fields.
-        result["user_his_time_seq"] = self.lookup_tensors["time"][user_his_idx_t].float()
-        result["user_his_correctness_seq"] = self.lookup_tensors["correctness"][user_his_idx_t].float()
+        result["user_his_time_seq"] = self.lookup_float_tensors["time"][user_his_idx_t]
+        result["user_his_correctness_seq"] = self.lookup_float_tensors["correctness"][user_his_idx_t]
         result["user_his_last_idx"] = user_his_last_idx
 
-        result["que_his_time_seq"] = self.lookup_tensors["time"][que_his_idx_t].float()
-        result["que_his_correctness_seq"] = self.lookup_tensors["correctness"][que_his_idx_t].float()
+        result["que_his_time_seq"] = self.lookup_float_tensors["time"][que_his_idx_t]
+        result["que_his_correctness_seq"] = self.lookup_float_tensors["correctness"][que_his_idx_t]
         result["que_his_last_idx"] = que_his_last_idx
 
         if self.compat_fields:
             for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
-                result[key] = self.history_feature_tensors[key][index]
+                result[key] = self.history_feature_tensors[key][data_indices]
 
         # DyGKT-native fields.
         # Source=user, so user history neighbors are question nodes.
-        result["src_neighbor_node_ids"] = self.lookup_tensors["question"][user_his_idx_t].long()
-        result["src_neighbor_times"] = self.lookup_tensors["time"][user_his_idx_t].float()
-        result["src_neighbor_edge_feats"] = self.lookup_tensors["correctness"][user_his_idx_t].float()
+        result["src_neighbor_node_ids"] = self.lookup_tensors["question"][user_his_idx_t]
+        result["src_neighbor_times"] = self.lookup_float_tensors["time"][user_his_idx_t]
+        result["src_neighbor_edge_feats"] = self.lookup_float_tensors["correctness"][user_his_idx_t]
         result["src_neighbor_len"] = user_his_last_idx
 
         # Destination=question, so question history neighbors are user nodes.
-        result["dst_neighbor_node_ids"] = self.lookup_tensors["user"][que_his_idx_t].long()
-        result["dst_neighbor_times"] = self.lookup_tensors["time"][que_his_idx_t].float()
-        result["dst_neighbor_edge_feats"] = self.lookup_tensors["correctness"][que_his_idx_t].float()
+        result["dst_neighbor_node_ids"] = self.lookup_tensors["user"][que_his_idx_t]
+        result["dst_neighbor_times"] = self.lookup_float_tensors["time"][que_his_idx_t]
+        result["dst_neighbor_edge_feats"] = self.lookup_float_tensors["correctness"][que_his_idx_t]
         result["dst_neighbor_len"] = que_his_last_idx
 
         return result
@@ -266,6 +287,8 @@ class DYGKTDataset(Dataset):
                 if user_id in self.target_user_ids
             ]
 
+        self.target_positions_tensor = torch.tensor(self.target_positions, dtype=torch.long)
+
         logger.info(
             "DYGKT dataset built: total interactions=%s, target interactions=%s",
             len(self.dataset_converted["idx"]),
@@ -283,6 +306,10 @@ class DYGKTDataset(Dataset):
             "time": torch.tensor(self.dataset_converted["time"], dtype=torch.long),
             "correctness": torch.tensor(self.dataset_converted["correctness"], dtype=torch.long),
         }
+        self.base_float_tensors = {
+            "time": self.base_tensors["time"].float(),
+            "correctness": self.base_tensors["correctness"].float(),
+        }
 
         # Build lookup tensors with index 0 reserved for padding.
         max_idx = int(self.base_tensors["idx"].max().item()) if len(self) > 0 else 0
@@ -298,6 +325,10 @@ class DYGKTDataset(Dataset):
         self.lookup_tensors["question"][idx] = self.base_tensors["question"]
         self.lookup_tensors["time"][idx] = self.base_tensors["time"]
         self.lookup_tensors["correctness"][idx] = self.base_tensors["correctness"]
+        self.lookup_float_tensors = {
+            "time": self.lookup_tensors["time"].float(),
+            "correctness": self.lookup_tensors["correctness"].float(),
+        }
 
         def _pad_sequences(sequences: list[list[int]]) -> tuple[torch.Tensor, torch.Tensor]:
             padded = np.zeros((num_records, self.num_neighbor), dtype=np.int64)

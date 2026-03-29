@@ -89,6 +89,12 @@ python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --cache_dir ./cache/dy
 # 若历史缓存来自旧版本实现，建议首次运行强制失效缓存
 python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --cache_version 2
 
+# 调整 DataLoader 并行度（仅影响吞吐，不改变预测逻辑）
+python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --loader_num_workers 8 --loader_prefetch_factor 4
+
+# 单独加速 VAL/TEST（默认会自动使用 2x train batch 做评估）
+python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --eval_batch_size 4000 --eval_loader_num_workers 8
+
 # 使用专用 profiling 脚本
 python scripts/profile_dygkt.py --dataset ASSISTments12 --fold 0 --profile_batches 50
 ```
@@ -108,8 +114,13 @@ python scripts/profile_dygkt.py --dataset ASSISTments12 --fold 0 --profile_batch
 | `lr_decay` | None | 学习率衰减因子 |
 | `no_cache` | False | 禁用 DYGKT 数据缓存 |
 | `cache_dir` | ./cache/dygkt | DYGKT 缓存目录（默认） |
-| `cache_version` | 1 | 缓存版本号，用于手动失效旧缓存 |
+| `cache_version` | 2 | 缓存版本号，用于手动失效旧缓存 |
 | `profile_batches` | 0 | 对前 N 个训练 batch 做计时分析 |
+| `loader_num_workers` | -1 | DataLoader 进程数（-1 自动） |
+| `loader_prefetch_factor` | 2 | 每个 worker 预取批次数（仅 num_workers>0） |
+| `loader_persistent_workers` | True | 是否复用 DataLoader workers |
+| `eval_batch_size` | 0 | 验证/测试批次大小（0 表示自动=2x训练批次） |
+| `eval_loader_num_workers` | -1 | 验证/测试 DataLoader 进程数（-1 跟随训练） |
 
 ## 数据格式
 

@@ -7,9 +7,11 @@ import time
 from typing import Any
 
 import torch
+from torch.utils.data import Dataset
 
 from utils.config import (
     BaseParamConfig,
+    DataLoaderConfig,
     EarlyStoppingConfig,
     create_optimized_dataloader,
     register_model_params,
@@ -20,6 +22,19 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 __all__ = ["DYGKTTrainer", "DYGKTModelParams"]
+
+
+class _IndexDataset(Dataset):
+    """Dataset that only returns sample indices for vectorized collate."""
+
+    def __init__(self, size: int) -> None:
+        self._size = int(size)
+
+    def __len__(self) -> int:
+        return self._size
+
+    def __getitem__(self, index: int) -> int:
+        return int(index)
 
 
 @register_model_params("DYGKT")
@@ -138,6 +153,31 @@ class DYGKTModelParams(BaseParamConfig):
                 "short": "bs",
                 "help": "Batch size for training (default: 2000)",
             },
+            "loader_num_workers": {
+                "type": int,
+                "default": -1,
+                "help": "DataLoader worker count (-1 means auto)",
+            },
+            "loader_prefetch_factor": {
+                "type": int,
+                "default": 2,
+                "help": "DataLoader prefetch factor when num_workers > 0 (default: 2)",
+            },
+            "loader_persistent_workers": {
+                "type": bool,
+                "default": True,
+                "help": "Enable persistent DataLoader workers when num_workers > 0",
+            },
+            "eval_batch_size": {
+                "type": int,
+                "default": 0,
+                "help": "Validation/test batch size (0 means auto=2*train batch size)",
+            },
+            "eval_loader_num_workers": {
+                "type": int,
+                "default": -1,
+                "help": "Validation/test DataLoader worker count (-1 means use loader_num_workers)",
+            },
         }
 
         return group_name, params
@@ -189,11 +229,60 @@ class DYGKTTrainer(BaseTrainer):
 
         # Keep train batches chronological to match the original DyGKT setup.
         loader_device = args.device if isinstance(args.device, torch.device) else torch.device(args.device)
+        loader_num_workers_arg = int(getattr(args, "loader_num_workers", -1))
+        loader_num_workers: int | str = "auto" if loader_num_workers_arg < 0 else loader_num_workers_arg
+        loader_prefetch_factor = max(1, int(getattr(args, "loader_prefetch_factor", 2)))
+        loader_persistent_workers = bool(getattr(args, "loader_persistent_workers", True))
+        eval_batch_size_arg = int(getattr(args, "eval_batch_size", 0))
+        eval_batch_size = eval_batch_size_arg if eval_batch_size_arg > 0 else max(1, int(args.batch_size) * 2)
+        eval_loader_num_workers_arg = int(getattr(args, "eval_loader_num_workers", -1))
+        if eval_loader_num_workers_arg < 0:
+            eval_loader_num_workers = loader_num_workers
+        else:
+            eval_loader_num_workers = eval_loader_num_workers_arg
+
+        loader_config = DataLoaderConfig(
+            num_workers=loader_num_workers,
+            pin_memory=True,
+            prefetch_factor=loader_prefetch_factor,
+            persistent_workers=loader_persistent_workers,
+        )
+        eval_loader_config = DataLoaderConfig(
+            num_workers=eval_loader_num_workers,
+            pin_memory=True,
+            prefetch_factor=loader_prefetch_factor,
+            persistent_workers=loader_persistent_workers,
+        )
+
+        train_index_dataset = _IndexDataset(len(train_dataset))
+        val_index_dataset = _IndexDataset(len(val_dataset))
+        test_index_dataset = _IndexDataset(len(test_dataset))
+
         train_loader = create_optimized_dataloader(
-            train_dataset,
+            train_index_dataset,
             batch_size=args.batch_size,
             shuffle=False,
             device=loader_device,
+            config=loader_config,
+            collate_fn=train_dataset.collate_indices,
+        )
+
+        val_loader = create_optimized_dataloader(
+            val_index_dataset,
+            batch_size=eval_batch_size,
+            shuffle=False,
+            device=loader_device,
+            config=eval_loader_config,
+            collate_fn=val_dataset.collate_indices,
+        )
+
+        test_loader = create_optimized_dataloader(
+            test_index_dataset,
+            batch_size=eval_batch_size,
+            shuffle=False,
+            device=loader_device,
+            config=eval_loader_config,
+            collate_fn=test_dataset.collate_indices,
         )
 
         # 3. 创建优化器和损失函数
@@ -235,8 +324,8 @@ class DYGKTTrainer(BaseTrainer):
             checkpoint_path=args.checkpoint_path,
         ).with_data(
             train_data=train_loader,
-            val_data=val_dataset,
-            test_data=test_dataset,
+            val_data=val_loader,
+            test_data=test_loader,
             batch_size=args.batch_size,
         ).with_optimization(
             optimizer=optimizer,
@@ -259,7 +348,7 @@ class DYGKTTrainer(BaseTrainer):
             self._profile_sums["wait_data"] += batch_start - self._profile_last_batch_end
 
         t0 = batch_start
-        self.opt.zero_grad()
+        self.opt.zero_grad(set_to_none=True)
         t1 = time.perf_counter()
         output = self.forward_pass(batch_data)
         t2 = time.perf_counter()
@@ -319,6 +408,36 @@ class DYGKTTrainer(BaseTrainer):
         else:
             self._profile_last_batch_end = t6
 
+        return loss.item()
+
+    def _move_tensor_to_device(
+        self, tensor: torch.Tensor, dtype: torch.dtype = None
+    ) -> torch.Tensor:
+        """DYGKT 局部优化：启用 non-blocking CPU->GPU 拷贝。"""
+        non_blocking = (
+            self.device_ is not None
+            and self.device_.type == "cuda"
+            and tensor.device.type == "cpu"
+        )
+        result = tensor.to(self.device_, non_blocking=non_blocking)
+        if dtype is not None:
+            result = result.to(dtype)
+        return result
+
+    @torch.inference_mode()
+    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
+        """DYGKT 局部优化：验证阶段使用 inference_mode。"""
+        output = self.forward_pass(batch_data)
+        loss = self._compute_loss(output)
+        self.metrics_accumulator.update("val", output)
+        return loss.item()
+
+    @torch.inference_mode()
+    def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
+        """DYGKT 局部优化：测试阶段使用 inference_mode。"""
+        output = self.test_forward_pass(batch_data)
+        loss = self._compute_loss(output)
+        self.metrics_accumulator.update("test", output)
         return loss.item()
 
     def forward_pass(
