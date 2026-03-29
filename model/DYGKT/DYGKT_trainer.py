@@ -87,9 +87,14 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "weight_decay": {
                 "type": float,
-                "default": 1e-4,
+                "default": 1e-5,
                 "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer (default: 0.0001)",
+                "help": "Weight decay (L2 regularization) for optimizer (default: 1e-5)",
+            },
+            "max_grad_norm": {
+                "type": float,
+                "default": 10.0,
+                "help": "Maximum norm for gradient clipping (default: 10.0)",
             },
             "batch_size": {
                 "type": int,
@@ -130,11 +135,14 @@ class DYGKTTrainer(BaseTrainer):
         model = DYGKT(args, model_metadata)
 
         # 3. 创建优化器和损失函数
-        # DYGKT 在 pyedmine 中预测层输出概率（Sigmoid 后），对应 BCELoss。
-        loss_fn = torch.nn.BCELoss()
+        # DYGKT 模型现在返回 logits，对应 BCEWithLogitsLoss。
+        loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
+
+        # 保存 max_grad_norm 以备后用
+        self.max_grad_norm = getattr(args, "max_grad_norm", 10.0)
 
         # 4. 创建学习率调度器
         lr_scheduler = None
@@ -180,6 +188,23 @@ class DYGKTTrainer(BaseTrainer):
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
+    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
+        """执行一个训练批次，包含梯度裁剪。"""
+        self.opt.zero_grad()
+        output = self.forward_pass(batch_data)
+        loss = self._compute_loss(output)
+        loss.backward()
+        
+        # 梯度裁剪
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.max_grad_norm)
+        
+        self.opt.step()
+
+        # 累积预测
+        self.metrics_accumulator.update("train", output)
+
+        return loss.item()
+
     def forward_pass(
         self, batch_data: dict
     ) -> dict[str, torch.Tensor]:
@@ -189,7 +214,7 @@ class DYGKTTrainer(BaseTrainer):
             batch_data: 字典，包含所有交互信息和历史邻居
 
         Returns:
-            包含 y_hat, y_label, y_predict 的字典
+            包含 y_hat, y_label, y_predict 等的字典
         """
         # batch_data 已经是字典格式（由 DYGKTDataset.__getitem__ 返回）
         # 移动所有张量到设备
@@ -200,19 +225,20 @@ class DYGKTTrainer(BaseTrainer):
             else:
                 batch[key] = value
         
-        # 模型前向传播（接受 batch 字典，返回概率）
+        # 模型前向传播，返回 logits
         y_hat = self.model(batch).float()  # [B]
         
         # 标签是 correctness
         y_label = batch["correctness"].float()
         
-        # 生成二分类预测
-        y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
+        # 生成概率和二分类预测
+        y_prob = torch.sigmoid(y_hat)
+        y_predict = self._generate_binary_predictions(y_prob, threshold=0.5)
 
         return {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
-            "y_score": y_hat,
-            "y_prob": y_hat,
+            "y_score": y_prob,
+            "y_prob": y_prob,
         }

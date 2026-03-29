@@ -322,4 +322,4 @@ class DYGKT(nn.Module):
         dst_node_embeddings = self.dropout_layer(dst_node_embeddings)
 
         logits = self.link_predictor(src_node_embeddings, dst_node_embeddings).squeeze(dim=-1)
-        return torch.sigmoid(logits)
+        return logits
