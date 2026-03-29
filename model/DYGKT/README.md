@@ -49,12 +49,12 @@ python train.py -m DYGKT \
   --dataset ASSISTments12 \
   --fold 0 \
   --epochs 100 \
-  --batch_size 64 \
-  --learning_rate 0.001 \
+  --batch_size 2000 \
+  --learning_rate 0.0005 \
   --embedding_dim 128 \
   --hidden_dim 128 \
-  --dim_time 64 \
-  --dropout 0.3
+  --dim_time 16 \
+  --dropout 0.1
 ```
 
 ### 2. 使用专用脚本
@@ -86,6 +86,9 @@ python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --no_cache
 # 指定缓存目录
 python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --cache_dir ./cache/dygkt_assist12
 
+# 若历史缓存来自旧版本实现，建议首次运行强制失效缓存
+python train.py -m DYGKT --dataset ASSISTments12 --fold 0 --cache_version 2
+
 # 使用专用 profiling 脚本
 python scripts/profile_dygkt.py --dataset ASSISTments12 --fold 0 --profile_batches 50
 ```
@@ -96,11 +99,11 @@ python scripts/profile_dygkt.py --dataset ASSISTments12 --fold 0 --profile_batch
 |------|--------|------|
 | `embedding_dim` | 128 | 嵌入维度 |
 | `hidden_dim` | 128 | 隐藏层维度 |
-| `dim_time` | 64 | 时间编码维度 |
-| `dropout` | 0.3 | Dropout 概率 |
+| `dim_time` | 16 | 时间编码维度 |
+| `dropout` | 0.1 | Dropout 概率 |
 | `epochs` | 100 | 训练轮数 |
-| `batch_size` | 64 | 批次大小 |
-| `learning_rate` | 0.001 | 学习率 |
+| `batch_size` | 2000 | 批次大小 |
+| `learning_rate` | 0.0005 | 学习率 |
 | `weight_decay` | 1e-4 | 权重衰减（L2正则化） |
 | `lr_decay` | None | 学习率衰减因子 |
 | `no_cache` | False | 禁用 DYGKT 数据缓存 |

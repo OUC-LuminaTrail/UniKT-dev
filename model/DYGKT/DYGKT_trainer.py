@@ -90,8 +90,8 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "cache_version": {
                 "type": int,
-                "default": 1,
-                "help": "Manual cache version to invalidate stale DYGKT cache entries",
+                "default": 2,
+                "help": "Manual cache version to invalidate stale DYGKT cache entries (default: 2)",
             },
             "profile_batches": {
                 "type": int,

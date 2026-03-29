@@ -25,7 +25,11 @@ def get_cache_key(args: Any, fold_idx: int | None) -> str:
     Returns:
         Cache key string (MD5 hash)
     """
+    # Internal schema marker for cache compatibility across preprocessing changes.
+    cache_schema = "schema2_time64"
+
     key_parts = [
+        cache_schema,
         f"v{getattr(args, 'cache_version', 1)}",
         str(args.dataset),
         str(fold_idx),

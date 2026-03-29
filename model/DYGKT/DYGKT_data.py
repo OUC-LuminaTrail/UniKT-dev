@@ -169,7 +169,8 @@ class DYGKTDataset(Dataset):
             # 🚀 Optimization: Convert to numpy arrays once per user
             question_seq_np = np.array(question_seq, dtype=np.int32)
             correctness_seq_np = np.array(correctness_seq, dtype=np.int8)
-            time_seq_np = np.array(time_seq, dtype=np.int32)
+            # Keep 64-bit timestamps to avoid overflow on epoch-millisecond data.
+            time_seq_np = np.array(time_seq, dtype=np.int64)
 
             for i in range(seq_len):
                 q_id = int(question_seq_np[i])
