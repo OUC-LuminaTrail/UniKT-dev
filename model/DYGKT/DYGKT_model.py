@@ -137,7 +137,9 @@ class DYGKT(nn.Module):
 
         num_questions = int(data_metadata["num_questions"])
         num_users = int(data_metadata["num_users"])
-        self.num_nodes = num_questions + num_users
+        self.question_id_offset = int(data_metadata.get("question_id_offset", 1))
+        self.user_id_offset = int(data_metadata.get("user_id_offset", num_questions + self.question_id_offset))
+        self.num_nodes = self.user_id_offset + num_users
 
         question_features = data_metadata.get("question_features")
         question_skill_ids = data_metadata.get("question_skill_ids")
@@ -163,10 +165,14 @@ class DYGKT(nn.Module):
         # This allows the model to adapt to any feature dimension (sparse or dense)
         node_feature_dim = int(question_features.shape[1])
         node_raw_features = np.zeros((self.num_nodes, node_feature_dim), dtype=np.float32)
-        node_raw_features[:num_questions, :] = question_features
+        node_raw_features[
+            self.question_id_offset : self.question_id_offset + num_questions, :
+        ] = question_features
 
         node_skill_ids = np.zeros(self.num_nodes, dtype=np.int64)
-        node_skill_ids[:num_questions] = question_skill_ids
+        node_skill_ids[
+            self.question_id_offset : self.question_id_offset + num_questions
+        ] = question_skill_ids
 
         self.num_skills = int(question_skill_ids.max()) + 1 if question_skill_ids.size > 0 else 1
 
@@ -262,11 +268,13 @@ class DYGKT(nn.Module):
         src_neighbor_edge_feats = torch.cat([src_neighbor_edge_feats, zero_edge], dim=1)
         dst_neighbor_edge_feats = torch.cat([dst_neighbor_edge_feats, zero_edge], dim=1)
 
+        # 🔧 FIX: Use ORIGINAL neighbor IDs (before appending current node) for co-occurrence
+        # This matches line 78-79 in original DyGKT.py implementation
         src_nodes_neighbor_co_occurrence_features = (
-            batch["src_neighbor_node_ids"].long() == dst_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
+            src_neighbor_node_ids[:, :-1] == dst_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
         ).unsqueeze(-1).float()
         dst_nodes_neighbor_co_occurrence_features = (
-            batch["dst_neighbor_node_ids"].long() == src_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
+            dst_neighbor_node_ids[:, :-1] == src_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
         ).unsqueeze(-1).float()
 
         src_node_skill = self.node_skill_ids[src_neighbor_node_ids][:, :-1].long()

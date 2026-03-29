@@ -7,7 +7,12 @@ from typing import Any
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
+from utils.config import (
+    BaseParamConfig,
+    EarlyStoppingConfig,
+    create_optimized_dataloader,
+    register_model_params,
+)
 from utils.core import TRAINERS, get_logger
 from utils.training import BaseTrainer
 
@@ -87,9 +92,9 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "weight_decay": {
                 "type": float,
-                "default": 1e-5,
+                "default": 1e-4,
                 "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer (default: 1e-5)",
+                "help": "Weight decay (L2 regularization) for optimizer (default: 1e-4)",
             },
             "max_grad_norm": {
                 "type": float,
@@ -98,9 +103,9 @@ class DYGKTModelParams(BaseParamConfig):
             },
             "batch_size": {
                 "type": int,
-                "default": 64,
+                "default": 2000,
                 "short": "bs",
-                "help": "Batch size for training (default: 64)",
+                "help": "Batch size for training (default: 2000)",
             },
         }
 
@@ -133,6 +138,15 @@ class DYGKTTrainer(BaseTrainer):
 
         logger.info("Initializing DYGKT model...")
         model = DYGKT(args, model_metadata)
+
+        # Keep train batches chronological to match the original DyGKT setup.
+        loader_device = args.device if isinstance(args.device, torch.device) else torch.device(args.device)
+        train_loader = create_optimized_dataloader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            device=loader_device,
+        )
 
         # 3. 创建优化器和损失函数
         # DYGKT 模型现在返回 logits，对应 BCEWithLogitsLoss。
@@ -172,7 +186,7 @@ class DYGKTTrainer(BaseTrainer):
             device=args.device,
             checkpoint_path=args.checkpoint_path,
         ).with_data(
-            train_data=train_dataset,
+            train_data=train_loader,
             val_data=val_dataset,
             test_data=test_dataset,
             batch_size=args.batch_size,

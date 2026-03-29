@@ -54,6 +54,7 @@ class DYGKTDataset(Dataset):
             "idx": [],
             "user": [],
             "question": [],
+            "question_raw": [],
             "idx_in_seq": [],
             "time": [],
             "correctness": [],
@@ -67,6 +68,9 @@ class DYGKTDataset(Dataset):
 
         self.base_tensors: dict[str, torch.Tensor] = {}
         self.lookup_tensors: dict[str, torch.Tensor] = {}
+        self.history_index_tensors: dict[str, torch.Tensor] = {}
+        self.history_feature_tensors: dict[str, torch.Tensor] = {}
+        self.history_len_tensors: dict[str, torch.Tensor] = {}
         self.target_positions: list[int] = []
 
         self.process_dataset()
@@ -84,17 +88,11 @@ class DYGKTDataset(Dataset):
         result["time"] = self.base_tensors["time"][index].float()
         result["correctness"] = self.base_tensors["correctness"][index].float()
 
-        user_his_idx = self.dataset_converted["user_his_seq"][index]
-        que_his_idx = self.dataset_converted["que_his_seq"][index]
+        user_his_idx_t = self.history_index_tensors["user_his_seq"][index]
+        que_his_idx_t = self.history_index_tensors["que_his_seq"][index]
 
-        user_pad = user_his_idx + [0] * (self.num_neighbor - len(user_his_idx))
-        que_pad = que_his_idx + [0] * (self.num_neighbor - len(que_his_idx))
-
-        user_his_idx_t = torch.tensor(user_pad, dtype=torch.long)
-        que_his_idx_t = torch.tensor(que_pad, dtype=torch.long)
-
-        user_his_last_idx = torch.tensor(len(user_his_idx), dtype=torch.long)
-        que_his_last_idx = torch.tensor(len(que_his_idx), dtype=torch.long)
+        user_his_last_idx = self.history_len_tensors["user_his_seq"][index]
+        que_his_last_idx = self.history_len_tensors["que_his_seq"][index]
 
         # Original compatibility fields.
         result["user_his_time_seq"] = self.lookup_tensors["time"][user_his_idx_t].float()
@@ -106,9 +104,7 @@ class DYGKTDataset(Dataset):
         result["que_his_last_idx"] = que_his_last_idx
 
         for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
-            key_data = self.dataset_converted[key][index]
-            padded = key_data + [0] * (self.num_neighbor - len(key_data))
-            result[key] = torch.tensor(padded, dtype=torch.long)
+            result[key] = self.history_feature_tensors[key][index]
 
         # DyGKT-native fields.
         # Source=user, so user history neighbors are question nodes.
@@ -151,7 +147,9 @@ class DYGKTDataset(Dataset):
         que_his_seqs: dict[int, list[tuple[int, int]]] = {}
 
         for user_data in self.data_all:
-            user_id = num_question + int(user_data["user_id"])
+            # Reserve node id 0 as a global padding id.
+            # Question ids are shifted by +1 and user ids start from num_question + 1.
+            user_id = num_question + 1 + int(user_data["user_id"])
             seq_len = int(user_data["seq_len"])
             question_seq = user_data["question_seq"][:seq_len]
             correctness_seq = user_data["correctness_seq"][:seq_len]
@@ -173,7 +171,8 @@ class DYGKTDataset(Dataset):
 
                 self.dataset_converted["idx"].append(n)
                 self.dataset_converted["user"].append(user_id)
-                self.dataset_converted["question"].append(q_id)
+                self.dataset_converted["question"].append(q_id + 1)
+                self.dataset_converted["question_raw"].append(q_id)
                 self.dataset_converted["idx_in_seq"].append(i)
                 self.dataset_converted["time"].append(t)
                 self.dataset_converted["correctness"].append(c)
@@ -218,7 +217,7 @@ class DYGKTDataset(Dataset):
 
         # 🚀 Optimization: Vectorized batch processing
         total_interactions = len(self.dataset_converted["idx"])
-        questions = np.array(self.dataset_converted["question"], dtype=np.int32)
+        questions = np.array(self.dataset_converted["question_raw"], dtype=np.int32)
         times = np.array(self.dataset_converted["time"], dtype=np.int32)
         
         # Process in batches for better cache locality
@@ -258,6 +257,8 @@ class DYGKTDataset(Dataset):
         )
 
     def dataset2tensor(self) -> None:
+        num_records = len(self.dataset_converted["idx"])
+
         self.base_tensors = {
             "idx": torch.tensor(self.dataset_converted["idx"], dtype=torch.long),
             "user": torch.tensor(self.dataset_converted["user"], dtype=torch.long),
@@ -281,6 +282,32 @@ class DYGKTDataset(Dataset):
         self.lookup_tensors["question"][idx] = self.base_tensors["question"]
         self.lookup_tensors["time"][idx] = self.base_tensors["time"]
         self.lookup_tensors["correctness"][idx] = self.base_tensors["correctness"]
+
+        def _pad_sequences(sequences: list[list[int]]) -> tuple[torch.Tensor, torch.Tensor]:
+            padded = np.zeros((num_records, self.num_neighbor), dtype=np.int64)
+            lengths = np.zeros(num_records, dtype=np.int64)
+            for i, seq in enumerate(sequences):
+                seq_clip = seq[-self.num_neighbor :]
+                seq_len = len(seq_clip)
+                lengths[i] = seq_len
+                if seq_len > 0:
+                    padded[i, :seq_len] = seq_clip
+            return torch.from_numpy(padded), torch.from_numpy(lengths)
+
+        user_his_padded, user_his_len = _pad_sequences(self.dataset_converted["user_his_seq"])
+        que_his_padded, que_his_len = _pad_sequences(self.dataset_converted["que_his_seq"])
+        self.history_index_tensors = {
+            "user_his_seq": user_his_padded,
+            "que_his_seq": que_his_padded,
+        }
+        self.history_len_tensors = {
+            "user_his_seq": user_his_len,
+            "que_his_seq": que_his_len,
+        }
+
+        for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
+            padded, _ = _pad_sequences(self.dataset_converted[key])
+            self.history_feature_tensors[key] = padded
 
 
 class DYGKTModelData(QuestionModelData):
@@ -371,6 +398,8 @@ class DYGKTModelData(QuestionModelData):
         model_metadata = {
             "num_questions": num_questions,
             "num_users": num_users,
+            "question_id_offset": 1,
+            "user_id_offset": num_questions + 1,
             "question_skill_ids": question_skill_ids,
             "question_features": q_table.astype(np.float32),
             "num_neighbor": num_neighbor,
@@ -392,7 +421,7 @@ class DYGKTModelData(QuestionModelData):
         """Extract encoded user ids for selecting target interactions."""
         if not records:
             return set()
-        return {num_questions + int(record["user_id"]) for record in records}
+        return {num_questions + 1 + int(record["user_id"]) for record in records}
 
     def _load_time_sequences(self, target_shape: tuple[int, int]) -> np.ndarray:
         """Load timestamp matrix aligned with split sequences."""
