@@ -1,8 +1,4 @@
-"""DYGKT model migrated from the original DyGKT implementation.
-
-This version keeps the original graph-style embedding update logic while adapting
-inputs to kt-exp-graph batch dictionaries.
-"""
+"""DYGKT model implementation."""
 
 from __future__ import annotations
 
@@ -16,7 +12,7 @@ from utils.core import register_model
 
 
 class TimeEncoder(nn.Module):
-    """Original cosine time encoder."""
+    """Cosine time encoder."""
 
     def __init__(self, time_dim: int, parameter_requires_grad: bool = True) -> None:
         super().__init__()
@@ -37,7 +33,7 @@ class TimeEncoder(nn.Module):
 
 
 class TimeDualDecayEncoder(nn.Module):
-    """Original dual-decay time encoder."""
+    """Dual-decay time encoder."""
 
     def __init__(self, time_dim: int, parameter_requires_grad: bool = True) -> None:
         super().__init__()
@@ -72,21 +68,17 @@ class TimeDualDecayEncoder(nn.Module):
 
     def forward(self, timestamps: torch.Tensor) -> torch.Tensor:
         timestamps = timestamps.unsqueeze(dim=2)
-
         timestamps_right = timestamps.clone()
         timestamps_right = torch.cat([timestamps_right[:, 1:, :], timestamps_right[:, -1, :].unsqueeze(1)], dim=1)
         timestamps_diff = timestamps_right - timestamps
 
-        # Keep strict behavior parity with the original masked formulation:
-        # short branch uses diff when diff > 24h, long branch uses diff when diff <= 24h.
         threshold = 3600 * 24
-        use_short_branch = timestamps_diff > threshold  # [B, L, 1]
-        use_short_branch_flat = use_short_branch.squeeze(-1)  # [B, L]
+        use_short_branch = timestamps_diff > threshold
+        use_short_branch_flat = use_short_branch.squeeze(-1)
 
         batch_size, seq_len = use_short_branch_flat.shape
         target_shape = (batch_size, seq_len, self.time_dim)
 
-        # Baseline contributions for inactive branch inputs (x=0).
         zero_input = timestamps_diff.new_zeros((1, 1))
         short_zero = self.f(self.w_short(zero_input)).view(1, 1, self.time_dim)
         long_zero = self.f(self.w_long(zero_input)).view(1, 1, self.time_dim)
@@ -115,7 +107,7 @@ class TimeDualDecayEncoder(nn.Module):
 
 
 class MergeLayer(nn.Module):
-    """Original link predictor used in DyGKT training."""
+    """Link predictor for DYGKT."""
 
     def __init__(self, input_dim1: int, input_dim2: int, hidden_dim: int, output_dim: int) -> None:
         super().__init__()
@@ -129,7 +121,7 @@ class MergeLayer(nn.Module):
 
 
 class DyKTSeq(nn.Module):
-    """GRU updater block from original DyGKT."""
+    """GRU updater block for DYGKT."""
 
     def __init__(self, edge_dim: int, node_dim: int) -> None:
         super().__init__()
@@ -143,12 +135,7 @@ class DyKTSeq(nn.Module):
 
 @register_model("DYGKT")
 class DYGKT(nn.Module):
-    """DYGKT migrated model.
-
-    The model consumes per-interaction neighborhood tensors produced by
-    ``model/DYGKT/DYGKT_data.py`` and follows the original DyGKT embedding update
-    equations.
-    """
+    """Dynamic Graph-based Knowledge Tracing model."""
 
     def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -174,23 +161,11 @@ class DYGKT(nn.Module):
         if question_skill_ids is None:
             question_skill_ids = np.zeros(num_questions, dtype=np.int64)
         question_skill_ids = np.asarray(question_skill_ids, dtype=np.int64)
-        if len(question_skill_ids) != num_questions:
-            raise ValueError(
-                f"question_skill_ids length mismatch: expected {num_questions}, got {len(question_skill_ids)}"
-            )
 
         if question_features is None:
             question_features = question_skill_ids.astype(np.float32)[:, np.newaxis]
         question_features = np.asarray(question_features, dtype=np.float32)
-        if question_features.shape[0] != num_questions:
-            raise ValueError(
-                "question_features row mismatch: "
-                f"expected {num_questions}, got {question_features.shape[0]}"
-            )
 
-        # ✅ Dynamic feature dimension: matches original DyGKT implementation
-        # The original code uses: self.node_raw_features.shape[-1]
-        # This allows the model to adapt to any feature dimension (sparse or dense)
         node_feature_dim = int(question_features.shape[1])
         node_raw_features = np.zeros((self.num_nodes, node_feature_dim), dtype=np.float32)
         node_raw_features[
@@ -232,8 +207,6 @@ class DYGKT(nn.Module):
         self.link_predictor = MergeLayer(input_dim1=64, input_dim2=64, hidden_dim=64, output_dim=1)
 
     def set_neighbor_sampler(self, neighbor_sampler: Any) -> None:
-        # Kept for compatibility with the original API. The migrated version
-        # uses precomputed neighborhoods from the dataset.
         self.neighbor_sampler = neighbor_sampler
 
     def get_features(
@@ -285,7 +258,6 @@ class DYGKT(nn.Module):
         batch_size = src_node_ids.shape[0]
         device = src_node_ids.device
 
-        # Append current node/time as the (num_neighbors + 1)-th element.
         src_neighbor_node_ids = torch.cat([src_neighbor_node_ids, src_node_ids.unsqueeze(1)], dim=1)
         dst_neighbor_node_ids = torch.cat([dst_neighbor_node_ids, dst_node_ids.unsqueeze(1)], dim=1)
 
@@ -296,8 +268,6 @@ class DYGKT(nn.Module):
         src_neighbor_edge_feats = torch.cat([src_neighbor_edge_feats, zero_edge], dim=1)
         dst_neighbor_edge_feats = torch.cat([dst_neighbor_edge_feats, zero_edge], dim=1)
 
-        # 🔧 FIX: Use ORIGINAL neighbor IDs (before appending current node) for co-occurrence
-        # This matches line 78-79 in original DyGKT.py implementation
         src_nodes_neighbor_co_occurrence_features = (
             src_neighbor_node_ids[:, :-1] == dst_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
         ).unsqueeze(-1).float()

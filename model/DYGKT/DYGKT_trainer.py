@@ -1,7 +1,4 @@
-"""DYGKT 模型训练器。
-
-定义 DYGKT 模型特定的训练逻辑。
-"""
+"""DYGKT model trainer."""
 
 import time
 from typing import Any
@@ -40,7 +37,7 @@ class _IndexDataset(Dataset):
 
 @register_model_params("DYGKT")
 class DYGKTModelParams(BaseParamConfig):
-    """DYGKT 模型参数配置。"""
+    """DYGKT model parameters."""
 
     def define_params(self) -> tuple[str, dict]:
         group_name = "DYGKT Parameters"
@@ -402,7 +399,7 @@ class DYGKTTrainer(BaseTrainer):
         ).build()
 
     def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """执行一个训练批次，包含梯度裁剪。"""
+        """Train one batch with gradient clipping."""
         profile_this_batch = self.profile_batches > 0 and not self._profile_logged
         batch_start = time.perf_counter()
 
@@ -521,7 +518,7 @@ class DYGKTTrainer(BaseTrainer):
     def _move_tensor_to_device(
         self, tensor: torch.Tensor, dtype: torch.dtype = None
     ) -> torch.Tensor:
-        """DYGKT 局部优化：启用 non-blocking CPU->GPU 拷贝。"""
+        """Train epoch with non-blocking GPU transfer."""
         non_blocking = (
             self.device_ is not None
             and self.device_.type == "cuda"
@@ -534,7 +531,7 @@ class DYGKTTrainer(BaseTrainer):
 
     @torch.inference_mode()
     def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """DYGKT 局部优化：验证阶段使用 inference_mode。"""
+        """Validate with inference mode."""
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
         self.metrics_accumulator.update("val", output)
@@ -542,7 +539,7 @@ class DYGKTTrainer(BaseTrainer):
 
     @torch.inference_mode()
     def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """DYGKT 局部优化：测试阶段使用 inference_mode。"""
+        """Test with inference mode."""
         output = self.test_forward_pass(batch_data)
         loss = self._compute_loss(output)
         self.metrics_accumulator.update("test", output)

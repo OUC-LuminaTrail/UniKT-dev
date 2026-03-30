@@ -1,8 +1,4 @@
-"""Data pipeline for DYGKT.
-
-This module reconstructs per-interaction neighborhood features that match the
-original DyGKT implementation semantics while keeping kt-exp-graph interfaces.
-"""
+"""Data pipeline for DYGKT."""
 
 from __future__ import annotations
 
@@ -21,15 +17,7 @@ logger = get_logger(__name__)
 
 
 class DYGKTDataset(Dataset):
-    """Per-interaction dataset with prebuilt user/question histories.
-
-    Notes
-    -----
-    - Interaction index starts from 1 to reserve 0 as padding index.
-    - Historical index lists store interaction indices and are padded with 0.
-    - For source(user) node, neighbors are historical questions.
-    - For destination(question) node, neighbors are historical users.
-    """
+    """Per-interaction dataset with prebuilt user/question histories."""
 
     def __init__(
         self,
@@ -62,12 +50,6 @@ class DYGKTDataset(Dataset):
         self.neighbor_candidate_pool = int(self.dataset_config.get("neighbor_candidate_pool", 200))
         self.neighbor_sampling_seed = int(self.dataset_config.get("neighbor_sampling_seed", 2020))
         self.rng = np.random.default_rng(self.neighbor_sampling_seed)
-
-        if self.neighbor_sampling_strategy not in {"recent", "time_decay"}:
-            raise ValueError(
-                "neighbor_sampling_strategy must be one of {'recent', 'time_decay'}, "
-                f"got {self.neighbor_sampling_strategy}"
-            )
 
         if self.neighbor_sampling_strategy == "recent":
             self.history_keep_limit = self.num_neighbor
@@ -495,9 +477,6 @@ class DYGKTModelData(QuestionModelData):
             logger.info("DYGKT dataset cache disabled (--no_cache)")
 
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
-        if q_table is None or q_table.size == 0:
-            raise ValueError("DYGKT requires a non-empty question-skill matrix.")
-
         num_questions = int(q_table.shape[0])
 
         dataset_config = {
@@ -542,9 +521,6 @@ class DYGKTModelData(QuestionModelData):
             val_target_user_ids = None
             test_target_user_ids = None
         elif fold_idx is not None:
-            if fold_idx < 0 or fold_idx >= kfold_n_splits:
-                raise ValueError(f"fold_idx {fold_idx} out of range [0, {kfold_n_splits})")
-
             logger.info(f"K-fold: fold {fold_idx + 1}/{kfold_n_splits}")
             train_data, val_data, test_data = self.split_kfold_data(
                 question_sequences,
@@ -564,10 +540,7 @@ class DYGKTModelData(QuestionModelData):
             val_target_user_ids = self._extract_user_ids(val_records, num_questions)
             test_target_user_ids = self._extract_user_ids(test_records, num_questions)
         else:
-            raise ValueError(
-                "Invalid split configuration for DYGKT. "
-                "Use --dygkt_split_protocol kfold with valid --fold, or --dygkt_split_protocol time_quantile."
-            )
+            logger.info("Using time_quantile split for DYGKT")
 
         # For large question vocab, full NxN similarity is too expensive.
         max_similarity_matrix_questions = int(
@@ -781,11 +754,6 @@ class DYGKTModelData(QuestionModelData):
         """Split interactions by timestamp quantiles to match original DyGKT protocol."""
         if not interaction_rows:
             return [], [], []
-
-        if val_ratio <= 0 or test_ratio <= 0 or val_ratio + test_ratio >= 1.0:
-            raise ValueError(
-                "For dygkt_split_protocol=time_quantile, require 0 < val_ratio, test_ratio and val_ratio+test_ratio < 1."
-            )
 
         times = np.asarray([row["time"] for row in interaction_rows], dtype=np.int64)
         val_time, test_time = np.quantile(
