@@ -4,6 +4,8 @@ from .AKT.AKT_model import AKT
 from .AKT.AKT_trainer import AKTTrainer
 from .DKT.DKT_model import DKT
 from .DKT.DKT_trainer import DKTTrainer
+from .DYGKT.DYGKT_model import DYGKT
+from .DYGKT.DYGKT_trainer import DYGKTTrainer
 from .GIKT.GIKT_model import GIKT
 from .GIKT.GIKT_trainer import GIKTTrainer
 from .GIKTEdmine import GIKTEdmine, GIKTEdmineTrainer
@@ -27,6 +29,8 @@ __all__ = [
     "AKTTrainer",
     "DKT",
     "DKTTrainer",
+    "DYGKT",
+    "DYGKTTrainer",
     "GIKT",
     "GIKTTrainer",
     "GIKTEdmine",
