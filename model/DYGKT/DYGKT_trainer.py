@@ -249,15 +249,21 @@ class DYGKTTrainer(BaseTrainer):
         exp_manager: Any = None,
     ) -> None:
         # 自动检测 GPU
-        if not hasattr(args, 'device') or args.device is None or args.device == 'auto':
-            args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if not hasattr(args, "device") or args.device is None or args.device == "auto":
+            args.device = "cuda" if torch.cuda.is_available() else "cpu"
             logger.info(f"Auto-detected device: {args.device}")
 
         self.profile_batches = max(0, int(getattr(args, "profile_batches", 0)))
         self.graph_neg_sampling = bool(getattr(args, "graph_neg_sampling", True))
-        self.graph_neg_num_samples = max(1, int(getattr(args, "graph_neg_num_samples", 2)))
-        self.graph_neg_temperature = max(1e-6, float(getattr(args, "graph_neg_temperature", 0.2)))
-        self.graph_neg_loss_weight = max(0.0, float(getattr(args, "graph_neg_loss_weight", 0.05)))
+        self.graph_neg_num_samples = max(
+            1, int(getattr(args, "graph_neg_num_samples", 2))
+        )
+        self.graph_neg_temperature = max(
+            1e-6, float(getattr(args, "graph_neg_temperature", 0.2))
+        )
+        self.graph_neg_loss_weight = max(
+            0.0, float(getattr(args, "graph_neg_loss_weight", 0.05))
+        )
         self._profile_batch_count = 0
         self._profile_last_batch_end: float | None = None
         self._profile_sums: dict[str, float] = {
@@ -272,13 +278,18 @@ class DYGKTTrainer(BaseTrainer):
         }
         self._profile_logged = False
         if self.profile_batches > 0:
-            logger.info("DYGKT profiling enabled for first %s train batches", self.profile_batches)
-        
+            logger.info(
+                "DYGKT profiling enabled for first %s train batches",
+                self.profile_batches,
+            )
+
         # 1. 准备数据
         from model.DYGKT import DYGKTModelData
 
         model_data = DYGKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset, model_metadata = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset, model_metadata = (
+            model_data.prepare_data(args)
+        )
 
         # 2. 初始化模型
         from model.DYGKT.DYGKT_model import DYGKT
@@ -287,13 +298,25 @@ class DYGKTTrainer(BaseTrainer):
         model = DYGKT(args, model_metadata)
 
         # Keep train batches chronological to match the original DyGKT setup.
-        loader_device = args.device if isinstance(args.device, torch.device) else torch.device(args.device)
+        loader_device = (
+            args.device
+            if isinstance(args.device, torch.device)
+            else torch.device(args.device)
+        )
         loader_num_workers_arg = int(getattr(args, "loader_num_workers", -1))
-        loader_num_workers: int | str = "auto" if loader_num_workers_arg < 0 else loader_num_workers_arg
+        loader_num_workers: int | str = (
+            "auto" if loader_num_workers_arg < 0 else loader_num_workers_arg
+        )
         loader_prefetch_factor = max(1, int(getattr(args, "loader_prefetch_factor", 2)))
-        loader_persistent_workers = bool(getattr(args, "loader_persistent_workers", True))
+        loader_persistent_workers = bool(
+            getattr(args, "loader_persistent_workers", True)
+        )
         eval_batch_size_arg = int(getattr(args, "eval_batch_size", 0))
-        eval_batch_size = eval_batch_size_arg if eval_batch_size_arg > 0 else max(1, int(args.batch_size) * 2)
+        eval_batch_size = (
+            eval_batch_size_arg
+            if eval_batch_size_arg > 0
+            else max(1, int(args.batch_size) * 2)
+        )
         eval_loader_num_workers_arg = int(getattr(args, "eval_loader_num_workers", -1))
         if eval_loader_num_workers_arg < 0:
             eval_loader_num_workers = loader_num_workers
@@ -404,7 +427,9 @@ class DYGKTTrainer(BaseTrainer):
         batch_start = time.perf_counter()
 
         if profile_this_batch and self._profile_last_batch_end is not None:
-            self._profile_sums["wait_data"] += batch_start - self._profile_last_batch_end
+            self._profile_sums["wait_data"] += (
+                batch_start - self._profile_last_batch_end
+            )
 
         t0 = batch_start
         self.opt.zero_grad(set_to_none=True)
@@ -415,11 +440,13 @@ class DYGKTTrainer(BaseTrainer):
         t3 = time.perf_counter()
         loss.backward()
         t4 = time.perf_counter()
-        
+
         # 梯度裁剪
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.max_grad_norm)
+        torch.nn.utils.clip_grad_norm_(
+            self.model.parameters(), max_norm=self.max_grad_norm
+        )
         t5 = time.perf_counter()
-        
+
         self.opt.step()
         t6 = time.perf_counter()
 
@@ -438,7 +465,9 @@ class DYGKTTrainer(BaseTrainer):
             self._profile_last_batch_end = t6
 
             if self._profile_batch_count >= self.profile_batches:
-                avg_wait = self._profile_sums["wait_data"] / max(self.profile_batches - 1, 1)
+                avg_wait = self._profile_sums["wait_data"] / max(
+                    self.profile_batches - 1, 1
+                )
                 avg_compute = self._profile_sums["total_compute"] / self.profile_batches
                 ratio = avg_wait / max(avg_compute, 1e-12)
 
@@ -460,9 +489,13 @@ class DYGKTTrainer(BaseTrainer):
                 )
 
                 if ratio > 0.6:
-                    logger.info("Profile hint: data pipeline is likely the bottleneck (consider larger workers/prefetch/cache).")
+                    logger.info(
+                        "Profile hint: data pipeline is likely the bottleneck (consider larger workers/prefetch/cache)."
+                    )
                 else:
-                    logger.info("Profile hint: model compute is likely the bottleneck (consider AMP/torch.compile/larger batch).")
+                    logger.info(
+                        "Profile hint: model compute is likely the bottleneck (consider AMP/torch.compile/larger batch)."
+                    )
                 self._profile_logged = True
         else:
             self._profile_last_batch_end = t6
@@ -478,7 +511,9 @@ class DYGKTTrainer(BaseTrainer):
         neg_loss = self._compute_graph_negative_loss(outputs)
         return base_loss + self.graph_neg_loss_weight * neg_loss
 
-    def _compute_graph_negative_loss(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
+    def _compute_graph_negative_loss(
+        self, outputs: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
         """In-batch graph negative sampling via contrastive objective on node embeddings."""
         src_embeddings = outputs.get("src_embeddings")
         dst_embeddings = outputs.get("dst_embeddings")
@@ -491,7 +526,9 @@ class DYGKTTrainer(BaseTrainer):
         if batch_size < 2:
             return outputs["y_hat"].new_zeros(())
 
-        pos_logits = (src_embeddings * dst_embeddings).sum(dim=-1) / self.graph_neg_temperature
+        pos_logits = (src_embeddings * dst_embeddings).sum(
+            dim=-1
+        ) / self.graph_neg_temperature
         neg_logits_list: list[torch.Tensor] = []
 
         base_index = torch.arange(batch_size, device=src_embeddings.device)
@@ -502,7 +539,9 @@ class DYGKTTrainer(BaseTrainer):
 
             neg_dst_embeddings = dst_embeddings[perm]
             neg_dst_ids = dst_node_ids[perm]
-            neg_logits = (src_embeddings * neg_dst_embeddings).sum(dim=-1) / self.graph_neg_temperature
+            neg_logits = (src_embeddings * neg_dst_embeddings).sum(
+                dim=-1
+            ) / self.graph_neg_temperature
             same_target_mask = neg_dst_ids == dst_node_ids
             neg_logits = neg_logits.masked_fill(same_target_mask, -1e9)
             neg_logits_list.append(neg_logits)
@@ -512,7 +551,9 @@ class DYGKTTrainer(BaseTrainer):
         if not bool(valid_rows.any()):
             return outputs["y_hat"].new_zeros(())
 
-        labels = torch.zeros(int(valid_rows.sum().item()), dtype=torch.long, device=logits.device)
+        labels = torch.zeros(
+            int(valid_rows.sum().item()), dtype=torch.long, device=logits.device
+        )
         return F.cross_entropy(logits[valid_rows], labels)
 
     def _move_tensor_to_device(
@@ -545,9 +586,7 @@ class DYGKTTrainer(BaseTrainer):
         self.metrics_accumulator.update("test", output)
         return loss.item()
 
-    def forward_pass(
-        self, batch_data: dict
-    ) -> dict[str, torch.Tensor]:
+    def forward_pass(self, batch_data: dict) -> dict[str, torch.Tensor]:
         """DYGKT 前向传播（接受 batch 字典）。
 
         Args:
@@ -564,17 +603,23 @@ class DYGKTTrainer(BaseTrainer):
                 batch[key] = self._move_tensor_to_device(value)
             else:
                 batch[key] = value
-        
-        src_embeddings, dst_embeddings = self.model.compute_src_dst_node_temporal_embeddings(batch)
+
+        src_embeddings, dst_embeddings = (
+            self.model.compute_src_dst_node_temporal_embeddings(batch)
+        )
         src_embeddings = self.model.dropout_layer(src_embeddings)
         dst_embeddings = self.model.dropout_layer(dst_embeddings)
 
         # 模型前向传播，返回 logits
-        y_hat = self.model.link_predictor(src_embeddings, dst_embeddings).squeeze(dim=-1).float()  # [B]
-        
+        y_hat = (
+            self.model.link_predictor(src_embeddings, dst_embeddings)
+            .squeeze(dim=-1)
+            .float()
+        )  # [B]
+
         # 标签是 correctness
         y_label = batch["correctness"].float()
-        
+
         # 生成概率和二分类预测
         y_prob = torch.sigmoid(y_hat)
         y_predict = self._generate_binary_predictions(y_prob, threshold=0.5)

@@ -689,18 +689,6 @@ class DataSource(ABC):
             .otherwise(max_seq_len)
             .alias("split_len"),
         )
-        
-        select_cols = [
-            pl.col("user"),
-            pl.col("question"),
-            pl.col("label"),
-            pl.col("relative_pos").alias("seq_pos"),
-        ]
-        if "timestamp" in data.columns:
-            select_cols.append(pl.col("timestamp"))
-        if "fold" in data.columns:1
-            select_cols.append(pl.col("fold"))
-        data = data.select(select_cols)
 
         # 过滤长度不足的切分
         valid_splits = (

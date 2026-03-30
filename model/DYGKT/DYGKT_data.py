@@ -35,7 +35,9 @@ class DYGKTDataset(Dataset):
         self.q_table = q_table
         self.target_user_ids = target_user_ids
         self.target_global_ids = (
-            {int(x) for x in target_global_ids} if target_global_ids is not None else None
+            {int(x) for x in target_global_ids}
+            if target_global_ids is not None
+            else None
         )
         self.device = device
         self.que_sim_matrix = que_sim_matrix  # Pre-computed similarity matrix
@@ -46,15 +48,23 @@ class DYGKTDataset(Dataset):
         self.neighbor_sampling_strategy = str(
             self.dataset_config.get("neighbor_sampling_strategy", "time_decay")
         ).lower()
-        self.time_decay_factor = float(self.dataset_config.get("time_decay_factor", 1e-5))
-        self.neighbor_candidate_pool = int(self.dataset_config.get("neighbor_candidate_pool", 200))
-        self.neighbor_sampling_seed = int(self.dataset_config.get("neighbor_sampling_seed", 2020))
+        self.time_decay_factor = float(
+            self.dataset_config.get("time_decay_factor", 1e-5)
+        )
+        self.neighbor_candidate_pool = int(
+            self.dataset_config.get("neighbor_candidate_pool", 200)
+        )
+        self.neighbor_sampling_seed = int(
+            self.dataset_config.get("neighbor_sampling_seed", 2020)
+        )
         self.rng = np.random.default_rng(self.neighbor_sampling_seed)
 
         if self.neighbor_sampling_strategy == "recent":
             self.history_keep_limit = self.num_neighbor
         elif self.neighbor_candidate_pool > 0:
-            self.history_keep_limit = max(self.num_neighbor, self.neighbor_candidate_pool)
+            self.history_keep_limit = max(
+                self.num_neighbor, self.neighbor_candidate_pool
+            )
         else:
             self.history_keep_limit = 0
 
@@ -103,7 +113,9 @@ class DYGKTDataset(Dataset):
         """Collate a batch of dataset positions into one vectorized dictionary batch."""
         return self.get_batch(batch_indices)
 
-    def get_batch(self, batch_positions: list[int] | torch.Tensor) -> dict[str, torch.Tensor]:
+    def get_batch(
+        self, batch_positions: list[int] | torch.Tensor
+    ) -> dict[str, torch.Tensor]:
         """Build one batch from dataset positions using vectorized tensor gather."""
         if not torch.is_tensor(batch_positions):
             batch_positions = torch.tensor(batch_positions, dtype=torch.long)
@@ -113,7 +125,9 @@ class DYGKTDataset(Dataset):
         data_indices = self.target_positions_tensor[batch_positions]
         return self._gather_batch_by_data_indices(data_indices)
 
-    def _gather_batch_by_data_indices(self, data_indices: torch.Tensor) -> dict[str, torch.Tensor]:
+    def _gather_batch_by_data_indices(
+        self, data_indices: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
         """Gather all required fields for a batch from underlying tensor storages."""
         result: dict[str, torch.Tensor] = {}
 
@@ -131,28 +145,43 @@ class DYGKTDataset(Dataset):
 
         # Original compatibility fields.
         result["user_his_time_seq"] = self.lookup_float_tensors["time"][user_his_idx_t]
-        result["user_his_correctness_seq"] = self.lookup_float_tensors["correctness"][user_his_idx_t]
+        result["user_his_correctness_seq"] = self.lookup_float_tensors["correctness"][
+            user_his_idx_t
+        ]
         result["user_his_last_idx"] = user_his_last_idx
 
         result["que_his_time_seq"] = self.lookup_float_tensors["time"][que_his_idx_t]
-        result["que_his_correctness_seq"] = self.lookup_float_tensors["correctness"][que_his_idx_t]
+        result["que_his_correctness_seq"] = self.lookup_float_tensors["correctness"][
+            que_his_idx_t
+        ]
         result["que_his_last_idx"] = que_his_last_idx
 
         if self.compat_fields:
-            for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
+            for key in [
+                "user_his_snq_seq",
+                "user_his_snd_seq",
+                "user_his_snk_seq",
+                "que_his_qn_seq",
+            ]:
                 result[key] = self.history_feature_tensors[key][data_indices]
 
         # DyGKT-native fields.
         # Source=user, so user history neighbors are question nodes.
-        result["src_neighbor_node_ids"] = self.lookup_tensors["question"][user_his_idx_t]
+        result["src_neighbor_node_ids"] = self.lookup_tensors["question"][
+            user_his_idx_t
+        ]
         result["src_neighbor_times"] = self.lookup_float_tensors["time"][user_his_idx_t]
-        result["src_neighbor_edge_feats"] = self.lookup_float_tensors["correctness"][user_his_idx_t]
+        result["src_neighbor_edge_feats"] = self.lookup_float_tensors["correctness"][
+            user_his_idx_t
+        ]
         result["src_neighbor_len"] = user_his_last_idx
 
         # Destination=question, so question history neighbors are user nodes.
         result["dst_neighbor_node_ids"] = self.lookup_tensors["user"][que_his_idx_t]
         result["dst_neighbor_times"] = self.lookup_float_tensors["time"][que_his_idx_t]
-        result["dst_neighbor_edge_feats"] = self.lookup_float_tensors["correctness"][que_his_idx_t]
+        result["dst_neighbor_edge_feats"] = self.lookup_float_tensors["correctness"][
+            que_his_idx_t
+        ]
         result["dst_neighbor_len"] = que_his_last_idx
 
         return result
@@ -179,7 +208,10 @@ class DYGKTDataset(Dataset):
 
         candidate_indices = history_indices
         candidate_times = history_times
-        if self.neighbor_candidate_pool > 0 and len(history_indices) > self.neighbor_candidate_pool:
+        if (
+            self.neighbor_candidate_pool > 0
+            and len(history_indices) > self.neighbor_candidate_pool
+        ):
             candidate_indices = history_indices[-self.neighbor_candidate_pool :]
             candidate_times = history_times[-self.neighbor_candidate_pool :]
 
@@ -208,7 +240,7 @@ class DYGKTDataset(Dataset):
 
     def convert_dataset(self) -> None:
         """Convert per-user sequences into per-interaction records.
-        
+
         Optimized version with vectorized operations for better performance.
         """
         # Use precomputed similarity matrix when available. For large datasets,
@@ -263,7 +295,11 @@ class DYGKTDataset(Dataset):
                 q_id = int(question_seq_np[i])
                 t = int(time_seq_np[i])
                 c = int(correctness_seq_np[i])
-                global_id = int(interaction_id_seq_np[i]) if interaction_id_seq_np is not None else int(n)
+                global_id = (
+                    int(interaction_id_seq_np[i])
+                    if interaction_id_seq_np is not None
+                    else int(n)
+                )
 
                 if q_id not in que_his_seqs:
                     que_his_seqs[q_id] = []
@@ -296,14 +332,22 @@ class DYGKTDataset(Dataset):
                         question_window = question_seq_np[start_pos:i]
 
                         # Vectorized comparison (10-50x faster than list comprehension)
-                        user_his_snd_seq = (question_window == q_id).astype(np.int8).tolist()
+                        user_his_snd_seq = (
+                            (question_window == q_id).astype(np.int8).tolist()
+                        )
                         if use_precomputed_similarity:
-                            user_his_snk_seq = que_sim_by_concept[question_window, q_id].tolist()
+                            user_his_snk_seq = que_sim_by_concept[
+                                question_window, q_id
+                            ].tolist()
                         else:
                             # Local concept overlap: similar iff shared concept exists.
                             window_concepts = q_table_binary[question_window]
                             current_concepts = q_table_binary[q_id]
-                            user_his_snk_seq = ((window_concepts @ current_concepts) > 0).astype(np.int8).tolist()
+                            user_his_snk_seq = (
+                                ((window_concepts @ current_concepts) > 0)
+                                .astype(np.int8)
+                                .tolist()
+                            )
 
                     self.dataset_converted["user_his_snq_seq"].append(user_his_snd_seq)
                     self.dataset_converted["user_his_snd_seq"].append(user_his_snd_seq)
@@ -315,8 +359,13 @@ class DYGKTDataset(Dataset):
 
                 user_history_indices.append(n)
                 user_history_times.append(t)
-                if self.history_keep_limit > 0 and len(user_history_indices) > self.history_keep_limit:
-                    user_history_indices = user_history_indices[-self.history_keep_limit :]
+                if (
+                    self.history_keep_limit > 0
+                    and len(user_history_indices) > self.history_keep_limit
+                ):
+                    user_history_indices = user_history_indices[
+                        -self.history_keep_limit :
+                    ]
                     user_history_times = user_history_times[-self.history_keep_limit :]
 
                 n += 1
@@ -354,13 +403,22 @@ class DYGKTDataset(Dataset):
                     question_history_indices.append(seq_sorted[k][0])
                     question_history_times.append(seq_sorted[k][1])
 
-                if self.history_keep_limit > 0 and len(question_history_indices) > self.history_keep_limit:
-                    question_history_indices = question_history_indices[-self.history_keep_limit :]
-                    question_history_times = question_history_times[-self.history_keep_limit :]
+                if (
+                    self.history_keep_limit > 0
+                    and len(question_history_indices) > self.history_keep_limit
+                ):
+                    question_history_indices = question_history_indices[
+                        -self.history_keep_limit :
+                    ]
+                    question_history_times = question_history_times[
+                        -self.history_keep_limit :
+                    ]
                 i = j
 
         for i, interaction_idx in enumerate(self.dataset_converted["idx"]):
-            self.dataset_converted["que_his_seq"][i] = histories_by_interaction_idx[interaction_idx]
+            self.dataset_converted["que_his_seq"][i] = histories_by_interaction_idx[
+                interaction_idx
+            ]
 
         if self.target_global_ids is not None:
             self.target_positions = [
@@ -377,7 +435,9 @@ class DYGKTDataset(Dataset):
                 if user_id in self.target_user_ids
             ]
 
-        self.target_positions_tensor = torch.tensor(self.target_positions, dtype=torch.long)
+        self.target_positions_tensor = torch.tensor(
+            self.target_positions, dtype=torch.long
+        )
 
         logger.info(
             "DYGKT dataset built: total interactions=%s, target interactions=%s",
@@ -391,10 +451,16 @@ class DYGKTDataset(Dataset):
         self.base_tensors = {
             "idx": torch.tensor(self.dataset_converted["idx"], dtype=torch.long),
             "user": torch.tensor(self.dataset_converted["user"], dtype=torch.long),
-            "question": torch.tensor(self.dataset_converted["question"], dtype=torch.long),
-            "idx_in_seq": torch.tensor(self.dataset_converted["idx_in_seq"], dtype=torch.long),
+            "question": torch.tensor(
+                self.dataset_converted["question"], dtype=torch.long
+            ),
+            "idx_in_seq": torch.tensor(
+                self.dataset_converted["idx_in_seq"], dtype=torch.long
+            ),
             "time": torch.tensor(self.dataset_converted["time"], dtype=torch.long),
-            "correctness": torch.tensor(self.dataset_converted["correctness"], dtype=torch.long),
+            "correctness": torch.tensor(
+                self.dataset_converted["correctness"], dtype=torch.long
+            ),
         }
         self.base_float_tensors = {
             "time": self.base_tensors["time"].float(),
@@ -420,7 +486,9 @@ class DYGKTDataset(Dataset):
             "correctness": self.lookup_tensors["correctness"].float(),
         }
 
-        def _pad_sequences(sequences: list[list[int]]) -> tuple[torch.Tensor, torch.Tensor]:
+        def _pad_sequences(
+            sequences: list[list[int]],
+        ) -> tuple[torch.Tensor, torch.Tensor]:
             padded = np.zeros((num_records, self.num_neighbor), dtype=np.int64)
             lengths = np.zeros(num_records, dtype=np.int64)
             for i, seq in enumerate(sequences):
@@ -431,8 +499,12 @@ class DYGKTDataset(Dataset):
                     padded[i, :seq_len] = seq_clip
             return torch.from_numpy(padded), torch.from_numpy(lengths)
 
-        user_his_padded, user_his_len = _pad_sequences(self.dataset_converted["user_his_seq"])
-        que_his_padded, que_his_len = _pad_sequences(self.dataset_converted["que_his_seq"])
+        user_his_padded, user_his_len = _pad_sequences(
+            self.dataset_converted["user_his_seq"]
+        )
+        que_his_padded, que_his_len = _pad_sequences(
+            self.dataset_converted["que_his_seq"]
+        )
         self.history_index_tensors = {
             "user_his_seq": user_his_padded,
             "que_his_seq": que_his_padded,
@@ -443,7 +515,12 @@ class DYGKTDataset(Dataset):
         }
 
         if self.compat_fields:
-            for key in ["user_his_snq_seq", "user_his_snd_seq", "user_his_snk_seq", "que_his_qn_seq"]:
+            for key in [
+                "user_his_snq_seq",
+                "user_his_snd_seq",
+                "user_his_snk_seq",
+                "que_his_qn_seq",
+            ]:
                 padded, _ = _pad_sequences(self.dataset_converted[key])
                 self.history_feature_tensors[key] = padded
 
@@ -487,11 +564,17 @@ class DYGKTModelData(QuestionModelData):
                 getattr(args, "neighbor_sampling_strategy", "time_decay")
             ).lower(),
             "time_decay_factor": float(getattr(args, "time_decay_factor", 1e-5)),
-            "neighbor_candidate_pool": int(getattr(args, "neighbor_candidate_pool", 200)),
-            "neighbor_sampling_seed": int(getattr(args, "neighbor_sampling_seed", 2020)),
+            "neighbor_candidate_pool": int(
+                getattr(args, "neighbor_candidate_pool", 200)
+            ),
+            "neighbor_sampling_seed": int(
+                getattr(args, "neighbor_sampling_seed", 2020)
+            ),
         }
 
-        question_sequences, user_responses, user_masks, user_id_sequences = self.load_sequence_data()
+        question_sequences, user_responses, user_masks, user_id_sequences = (
+            self.load_sequence_data()
+        )
         time_sequences = self._load_time_sequences(question_sequences.shape)
         time_sequences = self._normalize_timestamps_to_seconds(time_sequences)
 
@@ -555,10 +638,11 @@ class DYGKTModelData(QuestionModelData):
             import time
 
             start_time = time.time()
-            
+
             # 🚀 OPTIMIZATION: Use sparse matrix for 5-10x speedup
             try:
                 from scipy.sparse import csr_matrix
+
                 q_table_sparse = csr_matrix(q_table > 0, dtype=np.int8)
                 que_sim_sparse = q_table_sparse @ q_table_sparse.T
                 que_sim_matrix = (que_sim_sparse > 0).astype(np.int8).toarray()
@@ -582,7 +666,9 @@ class DYGKTModelData(QuestionModelData):
                 max_similarity_matrix_questions,
             )
 
-        train_dataset = DYGKTDataset(dataset_config, train_records, q_table, que_sim_matrix=que_sim_matrix)
+        train_dataset = DYGKTDataset(
+            dataset_config, train_records, q_table, que_sim_matrix=que_sim_matrix
+        )
 
         val_history_records = train_records + val_records
         if split_protocol == "time_quantile":
@@ -659,7 +745,9 @@ class DYGKTModelData(QuestionModelData):
         first_skill[no_skill_mask] = 0
         return first_skill
 
-    def _extract_user_ids(self, records: list[dict[str, Any]], num_questions: int) -> set[int]:
+    def _extract_user_ids(
+        self, records: list[dict[str, Any]], num_questions: int
+    ) -> set[int]:
         """Extract encoded user ids for selecting target interactions."""
         if not records:
             return set()
@@ -821,12 +909,16 @@ class DYGKTModelData(QuestionModelData):
                 break
 
         if time_col is None:
-            logger.warning("No time column found in split data, rebuilding from sequence data.")
+            logger.warning(
+                "No time column found in split data, rebuilding from sequence data."
+            )
             reconstructed = self._rebuild_split_timestamps_from_sequence(target_shape)
             if reconstructed is not None:
                 return reconstructed
 
-            logger.warning("Timestamp reconstruction failed, using synthetic hourly timestamps.")
+            logger.warning(
+                "Timestamp reconstruction failed, using synthetic hourly timestamps."
+            )
             for u in range(num_users):
                 timestamps[u, :] = np.arange(max_seq_len, dtype=np.int64) * 3600
             return timestamps
@@ -887,7 +979,9 @@ class DYGKTModelData(QuestionModelData):
             how="left",
         )
 
-        data = data.with_columns((pl.col("seq_pos") // max_seq_len).alias("split_idx")).with_columns(
+        data = data.with_columns(
+            (pl.col("seq_pos") // max_seq_len).alias("split_idx")
+        ).with_columns(
             pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
             .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
             .otherwise(max_seq_len)
@@ -954,17 +1048,18 @@ class DYGKTModelData(QuestionModelData):
                 continue
 
             valid_uid = np.asarray(uid_seq)[:seq_len]
-            if valid_uid.size > 0:
-                user_id = int(valid_uid[0])
-            else:
-                user_id = idx
+            user_id = int(valid_uid[0]) if valid_uid.size > 0 else idx
 
             records.append(
                 {
                     "user_id": user_id,
                     "seq_len": seq_len,
-                    "question_seq": np.asarray(q_seq)[:seq_len].astype(np.int64).tolist(),
-                    "correctness_seq": np.asarray(r_seq)[:seq_len].astype(np.int64).tolist(),
+                    "question_seq": np.asarray(q_seq)[:seq_len]
+                    .astype(np.int64)
+                    .tolist(),
+                    "correctness_seq": np.asarray(r_seq)[:seq_len]
+                    .astype(np.int64)
+                    .tolist(),
                     "time_seq": np.asarray(t_seq)[:seq_len].astype(np.int64).tolist(),
                 }
             )
