@@ -195,7 +195,9 @@ class HGIKT_QS_SA_Only(nn.Module):
         skill_conv_padded = torch.cat(
             [
                 skill_hetero_conv,
-                torch.zeros(1, self.hidden_dim, device=device, dtype=skill_hetero_conv.dtype),
+                torch.zeros(
+                    1, self.hidden_dim, device=device, dtype=skill_hetero_conv.dtype
+                ),
             ],
             dim=0,
         )

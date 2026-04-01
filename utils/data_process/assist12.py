@@ -7,7 +7,7 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    restrains_sequence_length,
+    exclude_short_sequences,
 )
 
 logger = get_logger(__name__)
@@ -43,17 +43,16 @@ class Assistments2012Data(DataSource):
         ).lazy()
 
     @override
-    def clear_data(self):
+    def transform_data(self):
         """Clean data and build question_data and sequence_data."""
         logger.info("Processing ASSISTments 2012 data...")
 
-        # Clean raw sequence data
-        cleaned_data = self._clean_raw_data()
-        logger.debug(f"Cleaned data shape: {cleaned_data.shape}")
+        if self.cleaned_raw_data is None:
+            raise ValueError("clean_raw_data must be called before transform_data")
 
         # Build question ID mapping
         question_map_df = (
-            cleaned_data.select("question")
+            self.cleaned_raw_data.select("question")
             .unique()
             .sort("question")
             .with_row_index("question_id")
@@ -71,7 +70,7 @@ class Assistments2012Data(DataSource):
 
         # Apply question mapping
         mapped_data = (
-            cleaned_data.join(question_map_df, on="question", how="left")
+            self.cleaned_raw_data.join(question_map_df, on="question", how="left")
             .with_columns(pl.col("question_id").cast(pl.Int32))
             .drop("question")
             .rename({"question_id": "question"})
@@ -122,7 +121,7 @@ class Assistments2012Data(DataSource):
         self.question_data = question_data
         self.sequence_data = sequence_data
 
-    def _clean_raw_data(self) -> pl.DataFrame:
+    def clean_raw_data(self):
         """Clean raw sequence data."""
         if self.raw_data is None:
             self.load_src_data()
@@ -175,16 +174,25 @@ class Assistments2012Data(DataSource):
         data = data.unique()
         data = data.collect()
 
+        # Parse timestamp as datetime and convert to Unix milliseconds
+        data = data.with_columns(
+            [
+                pl.col("timestamp")
+                .str.strptime(pl.Datetime, strict=False)
+                .dt.epoch("ms")  # Convert to Unix milliseconds (int64)
+            ]
+        )
+
         data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         # Filter out rows with null skill early (these questions have no skill info)
         data = data.filter(pl.col("skill").is_not_null())
         data = data.filter(pl.col("label").is_in([0, 1]))
 
-        # Restrict sequence length
-        return restrains_sequence_length(
-            data, self.args.min_seq_len, self.args.max_seq_len
-        )
+        # Exclude short sequences
+        data = exclude_short_sequences(data, self.args.min_seq_len)
+
+        self.cleaned_raw_data = data
 
 
 __all__ = ["Assistments2012Data"]

@@ -12,7 +12,7 @@ import torch
 from torch.utils.data import Dataset
 
 from utils.core import get_logger
-from utils.net_data import GraphModelData
+from utils.model_data import QuestionModelData
 
 
 def sample_hist_neighbors(
@@ -90,7 +90,7 @@ def sample_hist_neighbors(
     return result
 
 
-class SGKTModelData(GraphModelData):
+class SGKTModelData(QuestionModelData):
     """
     SGKT data preparation class.
 
@@ -119,12 +119,9 @@ class SGKTModelData(GraphModelData):
             num_skills: Number of skills
             num_questions: Number of questions
         """
-        max_seq_len = args.max_seq_len
-        min_seq_len = args.min_seq_len
-
-        # 1. Build sequence data (reuse base class method)
+        # 1. Build sequence data
         user_sequence, user_response, user_mask, user_id_sequence = (
-            self.build_sequence_data(max_seq_len=max_seq_len, min_seq_len=min_seq_len)
+            self.load_sequence_data()
         )
 
         # 2. Build question-skill relationship matrix
@@ -150,29 +147,24 @@ class SGKTModelData(GraphModelData):
         question_neighbors[:num_skills] = skill_neighbors
 
         # 4. Split data into train/val or k-fold
-        if hasattr(args, "fold") and args.fold is not None:
-            # K-fold cross validation
-            train_data, val_data = self.split_kfold_data(
-                user_sequence,
-                user_response,
-                user_mask,
-                user_id_sequence,
-                fold_idx=args.fold,
-            )
-        else:
-            # Simple train/val split
-            train_data, val_data = self.split_data(
-                user_sequence, user_response, user_mask, user_id_sequence, val_ratio=0.2
-            )
+        train_data, val_data, test_data = self.split_kfold_data(
+            user_sequence,
+            user_response,
+            user_mask,
+            user_id_sequence,
+            fold_idx=args.fold,
+        )
 
-        # Unpack train/val data
+        # Unpack train/val/test data
         train_sequence, train_response, train_mask, _ = train_data
         val_sequence, val_response, val_mask, _ = val_data
+        test_sequence, test_response, test_mask, _ = test_data
 
         # 5. Get skill data for hist_neighbor_index computation
         # Extract skills from sequence data
         train_skills = self._extract_skills(train_sequence)
         val_skills = self._extract_skills(val_sequence)
+        test_skills = self._extract_skills(test_sequence)
 
         # 6. Create datasets
         hist_neighbor_num = getattr(args, "hist_neighbor_num", 5)
@@ -183,6 +175,10 @@ class SGKTModelData(GraphModelData):
 
         val_dataset = SGKTDataset(
             val_sequence, val_response, val_mask, val_skills, hist_neighbor_num
+        )
+
+        test_dataset = SGKTDataset(
+            test_sequence, test_response, test_mask, test_skills, hist_neighbor_num
         )
 
         # Create custom collate function with hist_neighbor_num
@@ -202,6 +198,7 @@ class SGKTModelData(GraphModelData):
         return (
             train_dataset,
             val_dataset,
+            test_dataset,
             hrg_context,
             num_skills,
             num_questions,

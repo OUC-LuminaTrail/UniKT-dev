@@ -34,7 +34,14 @@ from rich.text import Text
 
 from ..config import EarlyStopping
 from ..core import get_logger, seed_everything
-from .callbacks import CallbackManager, EarlyStoppingCallback, MemoryCleanupCallback
+from .callbacks import (
+    Callback,
+    CallbackManager,
+    CheckpointCallback,
+    EarlyStoppingCallback,
+    FunctionCallback,
+    MemoryCleanupCallback,
+)
 from .checkpoint import CheckpointManager
 from .metrics import MetricsAccumulator
 
@@ -160,6 +167,8 @@ class MultiTrainer:
         self.checkpoint_manager: CheckpointManager | None = None
         self.callback_manager: CallbackManager | None = None
         self.hyperparam_manager = None
+        self._custom_callbacks: list[Callback] = []
+        self._custom_callback_functions: dict[str, list[Callable]] = {}
 
     def with_experiment(
         self,
@@ -210,6 +219,30 @@ class MultiTrainer:
         """
         self._stage_builders[stage_name] = builder
         return self
+
+    def with_callbacks(
+        self,
+        callbacks: list[Callback] | None = None,
+        functions: dict[str, Callable | list[Callable]] | None = None,
+    ) -> "MultiTrainer":
+        """配置自定义回调。"""
+        if callbacks:
+            self._custom_callbacks.extend(callbacks)
+        if functions:
+            for name, funcs in functions.items():
+                if funcs is None:
+                    continue
+                items = funcs if isinstance(funcs, list) else [funcs]
+                self._custom_callback_functions.setdefault(name, []).extend(items)
+        return self
+
+    def register_callback(self, callback: Callback) -> None:
+        """注册单个回调对象。"""
+        self._custom_callbacks.append(callback)
+
+    def register_callback_fn(self, event: str, func: Callable) -> None:
+        """注册单个回调函数。"""
+        self._custom_callback_functions.setdefault(event, []).append(func)
 
     def build(self) -> "MultiTrainer":
         """构建训练器
@@ -410,9 +443,32 @@ class MultiTrainer:
             self.loss.to(self.device_)
 
         # 初始化回调
-        callbacks = [MemoryCleanupCallback(cleanup_interval=5)]
+        callbacks: list[Callback] = []
+        callbacks.extend(self._custom_callbacks)
+        if self._custom_callback_functions:
+            callbacks.append(FunctionCallback(self._custom_callback_functions))
+        callbacks.append(MemoryCleanupCallback(cleanup_interval=5))
+        stage_prefix = config.name.upper()
         if self.early_stopping is not None:
-            callbacks.append(EarlyStoppingCallback(early_stopping=self.early_stopping))
+            callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping=self.early_stopping,
+                    swanlab_prefix=stage_prefix,
+                )
+            )
+        callbacks.append(
+            CheckpointCallback(
+                checkpoint_manager=self.checkpoint_manager,
+                early_stopping=self.early_stopping,
+                last_filename=f"{config.name}_last_checkpoint.pth",
+                best_filename=(
+                    f"best_{config.name}_model.pth"
+                    if self.early_stopping is not None
+                    else None
+                ),
+                keep_best_state=True,
+            )
+        )
         self.callback_manager = CallbackManager(callbacks)
 
         logger.info(f"Stage '{config.name}' setup complete:")
@@ -433,16 +489,14 @@ class MultiTrainer:
         Returns:
             阶段输出字典
         """
-        # 初始化最佳指标跟踪
-        best_metric = None
-        best_epoch = None
-        best_model_state = None
-
         # SwanLab 阶段前缀
         stage_prefix = stage_name.upper()
+        checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
 
         # 触发训练开始回调
-        self.callback_manager.on_train_begin(self.epochs)
+        self.callback_manager.on_train_begin(
+            self.epochs, trainer=self, stage_name=stage_name
+        )
 
         # 创建进度条
         progress = Progress(
@@ -483,7 +537,9 @@ class MultiTrainer:
                 logger.info(f"[{stage_prefix}] Epoch {epoch + 1}/{self.epochs}")
 
                 # Epoch 开始回调
-                self.callback_manager.on_epoch_begin(epoch)
+                self.callback_manager.on_epoch_begin(
+                    epoch, trainer=self, stage_name=stage_name
+                )
 
                 # 训练阶段
                 progress.update(train_task, visible=True)
@@ -512,84 +568,55 @@ class MultiTrainer:
                     progress.update(val_task, visible=False)
 
                 # Epoch 结束回调
-                self.callback_manager.on_epoch_end(epoch, train_loss, val_loss)
+                self.callback_manager.on_epoch_end(
+                    epoch, train_loss, val_loss, trainer=self, stage_name=stage_name
+                )
 
-                # 早停检查
-                if self.early_stopping is not None and self.val_data is not None:
-                    metrics = self.metrics_accumulator.compute("val")
-                    monitor_value = self._select_monitor_value(metrics, val_loss)
-
-                    if monitor_value is not None:
-                        # 更新早停回调
-                        for cb in self.callback_manager.callbacks:
-                            if isinstance(cb, EarlyStoppingCallback):
-                                cb.step(monitor_value, epoch)
-                                break
-
-                        # 保存最佳模型
-                        is_better = self._is_better_metric(monitor_value, best_metric)
-                        if is_better:
-                            best_metric = monitor_value
-                            best_epoch = epoch
-                            best_model_state = {
-                                k: v.cpu().clone()
-                                for k, v in self.model.state_dict().items()
-                            }
-                            # 保存检查点
-                            self.checkpoint_manager.save_weights(
-                                self.model, f"best_{stage_name}_model.pth"
-                            )
-                            logger.info(
-                                f"[{stage_prefix}] New best {self._monitor_name()}: "
-                                f"{monitor_value:.4f} at epoch {epoch + 1}"
-                            )
-
-                    # 记录早停状态到 SwanLab
-                    if self.use_swanlab:
-                        self._log_early_stopping_state(stage_prefix, epoch)
-
-                    # 更新最佳指标显示
-                    if best_metric_text is not None:
-                        self._update_best_metric_display(
-                            best_metric_text, stage_prefix, best_metric, best_epoch
-                        )
+                # 更新最佳指标显示（回调执行后）
+                if best_metric_text is not None and checkpoint_cb is not None:
+                    self._update_best_metric_display(
+                        best_metric_text,
+                        stage_prefix,
+                        checkpoint_cb.best_metric,
+                        checkpoint_cb.best_epoch,
+                    )
 
                 # 学习率调度器更新
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step()
-
-                # 保存检查点
-                self.checkpoint_manager.save_checkpoint(
-                    epoch,
-                    self.model,
-                    self.opt,
-                    self.lr_scheduler,
-                    early_stopping_state=self._get_early_stopping_state(),
-                    filename=f"{stage_name}_last_checkpoint.pth",
-                )
 
                 # 更新总进度
                 progress.advance(total_task)
                 self._global_step += 1
 
                 # 检查是否应该停止
-                if self.callback_manager.should_stop():
+                if self.callback_manager.should_stop(
+                    trainer=self, stage_name=stage_name
+                ):
                     progress.console.log(
                         f"[bold red][{stage_prefix}] Early stopping triggered at epoch {epoch + 1}"
                     )
                     break
 
+        best_metric = checkpoint_cb.best_metric if checkpoint_cb is not None else None
+        best_epoch = checkpoint_cb.best_epoch if checkpoint_cb is not None else None
+        best_model_state = (
+            checkpoint_cb.best_model_state if checkpoint_cb is not None else None
+        )
+
         best_metric_str = f"{best_metric:.4f}" if best_metric is not None else "N/A"
         best_epoch_str = str(best_epoch + 1) if best_epoch is not None else "N/A"
         logger.info(
             f"[{stage_prefix}] Training complete. "
-            f"Best {self._monitor_name()}: {best_metric_str} "
+            f"Best {self._monitor_name().upper()}: {best_metric_str} "
             f"at epoch {best_epoch_str}"
         )
 
         # 恢复最佳模型
         if best_model_state is not None:
             self.model.load_state_dict(best_model_state)
+
+        self.callback_manager.on_train_end(trainer=self, stage_name=stage_name)
 
         return {
             "best_metric": best_metric,
@@ -624,11 +651,16 @@ class MultiTrainer:
 
         self.metrics_accumulator.reset(phase)
         self.model.train() if is_train else self.model.eval()
+        self.callback_manager.on_phase_begin(
+            epoch, phase, trainer=self, stage_name=stage_name
+        )
 
         total_loss = 0.0
         for batch_idx, batch_data in enumerate(data_loader):
             # Batch 回调
-            self.callback_manager.on_batch_begin(epoch, batch_idx, phase)
+            self.callback_manager.on_batch_begin(
+                epoch, batch_idx, phase, trainer=self, stage_name=stage_name
+            )
 
             # 前向传播
             with torch.set_grad_enabled(is_train):
@@ -644,7 +676,9 @@ class MultiTrainer:
                 progress.advance(task_id)
 
             # Batch 结束回调
-            self.callback_manager.on_batch_end(epoch, batch_idx, phase, loss)
+            self.callback_manager.on_batch_end(
+                epoch, batch_idx, phase, loss, trainer=self, stage_name=stage_name
+            )
 
         # 聚合并记录指标
         metrics = self.metrics_accumulator.compute(phase)
@@ -654,7 +688,14 @@ class MultiTrainer:
             self._log_stage_metrics(stage_prefix, phase, metrics, epoch)
 
         # Phase 结束回调
-        self.callback_manager.on_phase_end(epoch, phase, total_loss, metrics)
+        self.callback_manager.on_phase_end(
+            epoch,
+            phase,
+            total_loss,
+            metrics,
+            trainer=self,
+            stage_name=stage_name,
+        )
 
         return total_loss
 
@@ -700,73 +741,11 @@ class MultiTrainer:
 
     # ==================== 辅助方法 ====================
 
-    def _is_better_metric(self, current: float, best: float | None) -> bool:
-        """判断当前指标是否更好
-
-        Args:
-            current: 当前指标值
-            best: 最佳指标值
-
-        Returns:
-            当前是否更好
-        """
-        if best is None:
-            return True
-
-        mode = "max"
-        if self.early_stopping is not None:
-            mode = self.early_stopping.cfg.mode
-        else:
-            name = self._monitor_name()
-            if name in ["rmse", "loss"]:
-                mode = "min"
-
-        if mode == "max":
-            return current > best
-        else:
-            return current < best
-
     def _monitor_name(self) -> str:
         """获取监控指标名称"""
         if self.early_stopping is None:
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
-
-    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
-        """选择监控指标的值"""
-        name = self._monitor_name()
-
-        value = None
-        if name == "loss":
-            value = float(val_loss) if val_loss is not None else None
-        elif name in metrics:
-            value = metrics[name]
-
-        # 回退策略
-        if value is None:
-            if metrics.get("auc") is not None:
-                value = float(metrics["auc"])
-            elif metrics.get("acc") is not None:
-                value = float(metrics["acc"])
-            elif metrics.get("rmse") is not None:
-                value = float(metrics["rmse"])
-
-        if value is None:
-            if name in ["loss", "rmse"]:
-                return float("inf")
-            return float("-inf")
-
-        return float(value)
-
-    def _get_early_stopping_state(self) -> dict | None:
-        """获取早停状态"""
-        if self.early_stopping is None:
-            return None
-        return {
-            "best_score": self.early_stopping.best_score,
-            "best_epoch": self.early_stopping.best_epoch,
-            "num_bad_epochs": self.early_stopping.num_bad_epochs,
-        }
 
     def _update_best_metric_display(
         self,
@@ -785,7 +764,7 @@ class MultiTrainer:
         epoch_str = str(best_epoch + 1) if best_epoch is not None else "N/A"
 
         text.plain = (
-            f"[{stage_prefix}] Best {self._monitor_name()}: {best_str} "
+            f"[{stage_prefix}] Best {self._monitor_name().upper()}: {best_str} "
             f"(Epoch {epoch_str}, Patience: {remaining}/{patience})"
         )
         text.stylize("bold yellow")
@@ -845,36 +824,6 @@ class MultiTrainer:
                 log_data[f"{stage_prefix}/{phase_prefix}/{metric_name}"] = value
 
         if log_data:
-            swanlab.log(log_data, step=self._global_step)
-
-    def _log_early_stopping_state(self, stage_prefix: str, epoch: int):
-        """记录早停状态到 SwanLab"""
-        import swanlab
-
-        if self.early_stopping is not None:
-            log_data = {
-                f"{stage_prefix}/ES/Best": self.early_stopping.best_score
-                if self.early_stopping.best_score is not None
-                else 0,
-                f"{stage_prefix}/ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
-            }
-
-            # 记录最佳轮次的完整指标
-            if self.early_stopping.best_metrics is not None:
-                log_data.update(
-                    {
-                        f"{stage_prefix}/ES/Best_AUC": self.early_stopping.best_metrics.get(
-                            "auc", 0.0
-                        ),
-                        f"{stage_prefix}/ES/Best_ACC": self.early_stopping.best_metrics.get(
-                            "acc", 0.0
-                        ),
-                        f"{stage_prefix}/ES/Best_RMSE": self.early_stopping.best_metrics.get(
-                            "rmse", 0.0
-                        ),
-                    }
-                )
-
             swanlab.log(log_data, step=self._global_step)
 
     def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):

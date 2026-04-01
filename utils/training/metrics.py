@@ -47,6 +47,7 @@ class MetricsAccumulator:
             "y_pred": [],
             "y_score": [],
             "y_prob": [],
+            "group_id": [],
         }
 
     def update(self, phase: str, outputs: dict[str, torch.Tensor]):
@@ -64,6 +65,9 @@ class MetricsAccumulator:
         accum["y_pred"].append(outputs["y_predict"].detach().cpu())
         accum["y_score"].append(outputs["y_score"].detach().cpu())
         accum["y_prob"].append(outputs["y_prob"].detach().cpu())
+        group_id = outputs.get("group_id")
+        if group_id is not None:
+            accum["group_id"].append(group_id.detach().cpu())
 
     def compute(self, phase: str) -> dict[str, float]:
         """计算 epoch 级别指标。
@@ -77,6 +81,40 @@ class MetricsAccumulator:
         accum = self._accumulators[phase]
         if not accum["y_label"]:
             return {}
+
+        # test 阶段且提供 group_id 时，执行全局 group-level late-mean 聚合
+        if phase == "test" and accum["group_id"]:
+            group_id: np.ndarray = torch.cat(accum["group_id"]).numpy()
+            y_label_raw: np.ndarray = torch.cat(accum["y_label"]).numpy()
+            y_score_raw: np.ndarray = torch.cat(accum["y_score"]).numpy()
+
+            uniq_groups, inverse = np.unique(group_id, return_inverse=True)
+            group_count = np.bincount(inverse).astype(np.float64)
+            group_sum = np.bincount(inverse, weights=y_score_raw).astype(np.float64)
+            group_score = group_sum / np.maximum(group_count, 1.0)
+
+            # 标签取每个 group 首个值；同时校验一致性
+            first_idx = np.full(uniq_groups.shape[0], -1, dtype=np.int64)
+            for idx, gidx in enumerate(inverse):
+                if first_idx[gidx] == -1:
+                    first_idx[gidx] = idx
+            group_label = y_label_raw[first_idx].astype(np.float64)
+
+            if np.any(y_label_raw != group_label[inverse]):
+                raise ValueError(
+                    "Inconsistent labels within the same group_id in test evaluation."
+                )
+
+            group_pred = (group_score >= 0.5).astype(np.float64)
+            metrics = {
+                "acc": float(accuracy_score(group_label, group_pred)),
+                "rmse": float(root_mean_squared_error(group_label, group_score)),
+            }
+            try:
+                metrics["auc"] = float(roc_auc_score(group_label, group_score))
+            except ValueError:
+                metrics["auc"] = 0.0
+            return metrics
 
         y_label: np.ndarray = torch.cat(accum["y_label"]).numpy()
         y_pred: np.ndarray = torch.cat(accum["y_pred"]).numpy()
@@ -104,7 +142,12 @@ class MetricsAccumulator:
         try:
             import swanlab
 
-            prefix = "Train/" if phase == "train" else "Val/"
+            if phase == "train":
+                prefix = "Train/"
+            elif phase == "val":
+                prefix = "Val/"
+            else:
+                prefix = f"{phase.capitalize()}/"
             for name, value in metrics.items():
                 swanlab.log({f"{prefix}{name.upper()}-epoch": value}, step=epoch)
         except ImportError:

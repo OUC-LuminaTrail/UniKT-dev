@@ -10,13 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import polars as pl
 import requests
 import tqdm
 from sklearn.model_selection import KFold
 
 from utils.core import get_logger
+
+from .windowlate_processor import WindowlateProcessor
 
 logger = get_logger(__name__)
 
@@ -37,9 +38,7 @@ class DataSource(ABC):
         self.data_folder = os.path.join(self.data_base_path, self.dataset)
         self.metadata_path = os.path.join(self.data_folder, "metadata.json")
         self.raw_data = None
-        self.cleared_data = None
-        self.sequence_data = None
-        self.question_data = None
+        self.cleaned_raw_data = None  # cleaned raw data
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
@@ -47,6 +46,16 @@ class DataSource(ABC):
 
         # ID mapping storage
         self._id_mappings: dict = {}
+
+        # 数据缓存
+        self._data_cache: dict[str, pl.DataFrame | pl.LazyFrame] = {}
+        self._data_config: dict[str, dict] = {
+            "sequence": {"lazy": False},
+            "question": {"lazy": False},
+            "split_question_sequence": {"lazy": False},
+            "split_skill_sequence": {"lazy": False},
+            "windowlate": {"lazy": True},
+        }
 
     def set_random_seed(self):
         """Set random seeds for reproducibility."""
@@ -122,31 +131,60 @@ class DataSource(ABC):
         sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_sequence.parquet"
         )
+        split_question_sequence_path = os.path.join(
+            self.data_folder, f"{self.dataset}_split_question_sequence.parquet"
+        )
+        split_skill_sequence_path = os.path.join(
+            self.data_folder, f"{self.dataset}_split_skill_sequence.parquet"
+        )
+        windowlate_data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
 
         self.question_data.write_parquet(question_data_path)
         self.sequence_data.write_parquet(sequence_data_path)
+        self.split_question_sequence_data.write_parquet(split_question_sequence_path)
+        self.split_skill_sequence_data.write_parquet(split_skill_sequence_path)
 
         # Save metadata
         metadata = {
-            "max_seq_len": self.args.max_seq_len,
             "min_seq_len": self.args.min_seq_len,
+            "max_seq_len": self.args.max_seq_len,
             "random_seed": self.seed,
             "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
+            "split_question_sequence_data_md5": self.compute_md5(
+                split_question_sequence_path
+            ),
+            "split_skill_sequence_data_md5": self.compute_md5(
+                split_skill_sequence_path
+            ),
             "num_users": self.sequence_data["user"].n_unique(),
             "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.question_data["skill"].n_unique(),
             "num_assignments": self.question_data["assignment"].n_unique(),
+            "num_split_question_users": self.split_question_sequence_data[
+                "user"
+            ].n_unique(),
+            "num_split_skill_users": self.split_skill_sequence_data["user"].n_unique(),
         }
 
         if "template" in self.question_data.columns:
             metadata["num_templates"] = self.question_data["template"].n_unique()
 
-        self.add_metadatas(metadata)
-        self.save_metadata()
+        logger.debug(f"Saved question_data to: {question_data_path}")
+        logger.debug(f"Saved sequence_data to: {sequence_data_path}")
+        logger.debug(
+            f"Saved split question sequences to: {split_question_sequence_path}"
+        )
+        logger.debug(f"Saved split skill sequences to: {split_skill_sequence_path}")
+        if os.path.exists(windowlate_data_path):
+            metadata["windowlate_data_md5"] = self.compute_md5(windowlate_data_path)
+            logger.debug(f"Windowlate data already saved to: {windowlate_data_path}")
+        logger.info(f"Data saved to {self.data_folder}")
 
-        logger.info(f"Saved question_data to: {question_data_path}")
-        logger.info(f"Saved sequence_data to: {sequence_data_path}")
+        self.update_metadatas(metadata)
+        self.save_metadata()
 
     @staticmethod
     def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
@@ -370,8 +408,8 @@ class DataSource(ABC):
             logger.info(f"Dataset already exists, skip downloading: {archive_path}")
 
         archive_md5 = self.compute_md5(archive_path)
-        self.add_metadata("raw_archive_md5", archive_md5)
-        self.add_metadata("raw_archive_filename", file_name)
+        self.update_metadata("raw_archive_md5", archive_md5)
+        self.update_metadata("raw_archive_filename", file_name)
 
         extract_target = os.path.join(self.data_folder, "raw")
         os.makedirs(extract_target, exist_ok=True)
@@ -387,7 +425,7 @@ class DataSource(ABC):
                 f"Raw data directory not empty, skip extraction: {extract_target}"
             )
 
-        self.add_metadata("raw_data_path", extract_target)
+        self.update_metadata("raw_data_path", extract_target)
 
     def _should_extract(self, force_download: bool, extract_target: str) -> bool:
         """Determine whether extraction is needed."""
@@ -435,26 +473,20 @@ class DataSource(ABC):
         """Load source data. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement load_data method")
 
-    def load_processed_data(self):
-        """Load processed data files with integrity checks.
-
-        Raises:
-            FileNotFoundError: Processed data files not found.
-            ValueError: MD5 checksum mismatch.
+    def _validate_saved_data(self, data_name: str) -> str:
         """
-        self.load_metadata()
-
-        sequence_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_sequence.parquet"
+        Validate that processed data files exist and have correct integrity.
+        """
+        # 拼接得到路径
+        data_path = os.path.join(
+            self.data_folder, f"{self.dataset}_{data_name}.parquet"
         )
-        question_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_question.parquet"
-        )
+        # 检查文件是否存在
+        self._validate_data_files_exist([data_path])
+        # 检查文件一致性
+        self._validate_data_integrity(data_name, data_name + "_md5")
 
-        self._validate_data_files_exist([sequence_data_path, question_data_path])
-        self._validate_data_integrity(sequence_data_path, "sequence_data_md5")
-        self._validate_data_integrity(question_data_path, "question_data_md5")
-        self._load_parquet_files(sequence_data_path, question_data_path)
+        return data_path
 
     def _validate_data_files_exist(self, file_paths: list[str]):
         """Validate that all required data files exist."""
@@ -481,7 +513,13 @@ class DataSource(ABC):
         expected_md5 = self.metadata[md5_key]
 
         if actual_md5 != expected_md5:
-            data_type = "sequence" if "sequence" in md5_key else "question"
+            data_type = (
+                "sequence"
+                if "sequence" in md5_key
+                else "question"
+                if "question" in md5_key
+                else "split_sequence"
+            )
             raise ValueError(
                 f"{data_type.capitalize()} data file integrity check failed (MD5 mismatch).\n"
                 f"Expected MD5: {expected_md5}\n"
@@ -490,24 +528,15 @@ class DataSource(ABC):
                 f"   python data_process.py process -d {self.dataset}"
             )
 
-    def _load_parquet_files(self, sequence_path: str, question_path: str):
-        """Load parquet files with error handling."""
-        logger.info(f"Loading sequence data: {sequence_path}")
-        self.sequence_data = pl.read_parquet(sequence_path)
-        logger.info(
-            f"Sequence data loaded successfully: {len(self.sequence_data)} rows"
-        )
-
-        logger.info(f"Loading question data: {question_path}")
-        self.question_data = pl.read_parquet(question_path)
-        logger.info(
-            f"Question data loaded successfully: {len(self.question_data)} rows"
-        )
+    @abstractmethod
+    def transform_data(self):
+        """transform cleaned data into standard format. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses should implement transform_data method")
 
     @abstractmethod
-    def clear_data(self):
-        """Clean and preprocess raw data. Must be implemented by subclasses."""
-        raise NotImplementedError("Subclasses should implement clear_data method")
+    def clean_raw_data(self) -> pl.DataFrame:
+        """Clean raw data. Must be implemented by subclasses."""
+        raise NotImplementedError("Subclasses should implement clean_raw_data method")
 
     def compute_md5(self, file_path: str) -> str:
         """Compute MD5 checksum of a file."""
@@ -524,32 +553,77 @@ class DataSource(ABC):
 
         return hash_md5.hexdigest()
 
-    def get_sequence_data(self) -> pd.DataFrame:
+    def _load_data(self, data_type: str) -> pl.DataFrame | pl.LazyFrame:
+        """加载数据
+
+        Args:
+            data_type: 数据类型，对应配置字典的键名
+
+        Returns:
+            DataFrame 或 LazyFrame
+
+        Raises:
+            ValueError: 当 data_type 不在配置字典中时
+        """
+        if data_type not in self._data_config:
+            raise ValueError(f"Unknown data type: {data_type}")
+
+        # 检查缓存
+        if data_type in self._data_cache:
+            return self._data_cache[data_type]
+
+        config = self._data_config[data_type]
+        data_path = self._validate_saved_data(data_type)
+
+        # 根据配置选择读取方式
+        read_func = pl.scan_parquet if config["lazy"] else pl.read_parquet
+        logger.info(f"Loading {data_type} data: {data_path}")
+        data = read_func(data_path)
+
+        # 缓存数据
+        self._data_cache[data_type] = data
+
+        return data
+
+    def get_sequence_data(self) -> pl.DataFrame:
         """Get user sequence data."""
-        if self.sequence_data is None:
-            self.load_processed_data()
-        return self.sequence_data.to_pandas()
+        return self._load_data("sequence")
 
-    def get_question_data(self) -> pd.DataFrame:
+    def get_question_data(self) -> pl.DataFrame:
         """Get question metadata."""
-        if self.question_data is None:
-            self.load_processed_data()
-        return self.question_data.to_pandas()
+        return self._load_data("question")
 
-    def add_metadata(self, key: str, value):
-        """Add a single metadata entry."""
+    def get_split_question_sequence_data(self) -> pl.DataFrame:
+        """Get split user sequence data."""
+        return self._load_data("split_question_sequence")
+
+    def get_split_skill_sequence_data(self) -> pl.DataFrame:
+        """Get split skill sequence data."""
+        return self._load_data("split_skill_sequence")
+
+    def get_windowlate_data(self) -> pl.LazyFrame:
+        """Get windowlate evaluation data.
+
+        Returns:
+            Windowlate evaluation samples (long format).
+            Columns: sample_id, position, skill, response, mask, user_id, group_id, true_label, fold
+        """
+        return self._load_data("windowlate")
+
+    def update_metadata(self, key: str, value):
+        """Update a single metadata entry."""
         self.metadata[key] = value
-        logger.debug(f"Added {key} = {value} to DataSource metadata")
+        logger.debug(f"Updated {key} = {value} in DataSource metadata")
 
-    def add_metadatas(self, meta_dict: dict):
-        """Add multiple metadata entries."""
+    def update_metadatas(self, meta_dict: dict):
+        """Update multiple metadata entries."""
         for key, value in meta_dict.items():
-            self.add_metadata(key, value)
+            self.update_metadata(key, value)
 
     def save_metadata(self):
         """Save metadata to JSON file."""
-        self.add_metadata("dataset", self.dataset)
-        self.add_metadata("data_base_path", self.data_base_path)
+        self.update_metadata("dataset", self.dataset)
+        self.update_metadata("data_base_path", self.data_base_path)
 
         with open(self.metadata_path, "w") as f:
             json.dump(self.metadata, f, indent=4)
@@ -572,32 +646,273 @@ class DataSource(ABC):
             )
         return self.metadata if key is None else self.metadata[key]
 
-    def add_kfold_labels(self, n_splits: int = 5):
-        """Add K-fold cross-validation labels at user level.
+    def build_split_question_sequence_data(self):
+        """构建切分后的序列数据
 
-        Ensures all data from the same user stays in the same fold
-        to prevent data leakage.
+        参数:
+            max_seq_len: 最大序列长度
+            min_seq_len: 最小序列长度，切分出的子序列长度小于此值将被抛弃
 
-        Args:
-            n_splits: Number of folds (default: 5).
-
-        Returns:
-            DataFrame with added 'fold' column (values: 0 to n_splits-1).
-
-        Raises:
-            ValueError: If sequence_data is not loaded.
+        说明:
+            - 将长度大于 max_seq_len 的用户序列切分成多个子序列
+            - 返回切分后的数据及统计信息
         """
+        max_seq_len = self.args.max_seq_len
+        min_seq_len = self.args.min_seq_len
+
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
-        unique_users = self.sequence_data["user"].unique()
-        fold_assignment = np.zeros(len(unique_users), dtype=np.int32)
+        logger.info(
+            f"Building split question sequences (max_len={max_seq_len}, min_len={min_seq_len})"
+        )
 
+        # 添加序列位置列，并计算每个用户的序列长度
+        data = self.sequence_data.with_columns(
+            pl.int_range(pl.len()).over("user").alias("seq_pos")
+        ).join(
+            self.sequence_data.group_by("user").agg(pl.len().alias("seq_len")),
+            on="user",
+            how="left",
+        )
+
+        # 计算每条记录所属的切分及其长度
+        data = data.with_columns(
+            [
+                (pl.col("seq_pos") // max_seq_len).alias("split_idx"),
+            ]
+        ).with_columns(
+            pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
+            .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
+            .otherwise(max_seq_len)
+            .alias("split_len"),
+        )
+
+        # 过滤长度不足的切分
+        valid_splits = (
+            data.filter(pl.col("split_len") >= min_seq_len)
+            .select(["user", "split_idx"])
+            .unique()
+        )
+
+        # 为每个有效切分分配新的用户ID
+        valid_splits = valid_splits.with_row_index("new_user_id").sort(
+            "user", "split_idx"
+        )
+
+        # 合并回数据，过滤无效切分的记录
+        data = data.join(valid_splits, on=["user", "split_idx"], how="inner")
+
+        # 更新用户ID和位置
+        data = data.with_columns(
+            [
+                pl.col("new_user_id").cast(pl.Int32).alias("user"),
+                (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
+            ]
+        )
+
+        # 保留原始sequence_data中的所有数据列，并添加seq_pos
+        select_cols = [pl.col(c) for c in self.sequence_data.columns]
+        select_cols.append(pl.col("relative_pos").alias("seq_pos"))
+        data = data.select(select_cols)
+
+        # 统计切分信息
+        final_num_users = data["user"].n_unique()
+
+        logger.debug(f"Split into {final_num_users} sub-sequences")
+
+        self.split_question_sequence_data = data
+
+    def build_split_skill_sequence_data(self):
+        """构建切分后的技能序列数据
+
+        1. 先将问题序列展开为技能序列（一个问题可能对应多个技能）
+        2. 然后对展开后的技能序列进行切分
+
+        说明:
+            - 将长度大于 max_seq_len 的用户技能序列切分成多个子序列
+            - 返回切分后的数据及统计信息
+        """
+        max_seq_len = self.args.max_seq_len
+        min_seq_len = self.args.min_seq_len
+
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+        if self.question_data is None:
+            raise ValueError("Question data not available.")
+
+        logger.info(
+            f"Building split skill sequences (max_len={max_seq_len}, min_len={min_seq_len})"
+        )
+
+        # Step 1: 展开问题序列为技能序列
+        # 构建 question -> skills 映射
+        question_skills = self.question_data.group_by("question").agg(
+            pl.col("skill").alias("skills")
+        )
+
+        # 将技能列表展开并与 sequence_data 关联
+        expanded_data = self.sequence_data.join(
+            question_skills, on="question", how="inner"
+        ).explode("skills")
+
+        # 保留原始sequence_data中除question外的所有数据列（question被展开为skill）
+        select_cols = [pl.col(c) for c in self.sequence_data.columns if c != "question"]
+        select_cols.append(pl.col("skills").alias("skill"))
+        expanded_data = expanded_data.select(select_cols)
+
+        # Step 2: 添加序列位置列，并计算每个用户的技能序列长度
+        expanded_data = expanded_data.with_columns(
+            pl.int_range(pl.len()).over("user").alias("seq_pos")
+        ).join(
+            expanded_data.group_by("user").agg(pl.len().alias("seq_len")),
+            on="user",
+            how="left",
+        )
+
+        # Step 3: 计算每条记录所属的切分及其长度
+        expanded_data = expanded_data.with_columns(
+            [(pl.col("seq_pos") // max_seq_len).alias("split_idx")]
+        ).with_columns(
+            pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
+            .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
+            .otherwise(max_seq_len)
+            .alias("split_len"),
+        )
+
+        # Step 4: 过滤长度不足的切分
+        valid_splits = (
+            expanded_data.filter(pl.col("split_len") >= min_seq_len)
+            .select(["user", "split_idx"])
+            .unique()
+        )
+
+        # Step 5: 为每个有效切分分配新的用户ID
+        valid_splits = valid_splits.with_row_index("new_user_id").sort(
+            "user", "split_idx"
+        )
+
+        # Step 6: 合并回数据，过滤无效切分的记录
+        expanded_data = expanded_data.join(
+            valid_splits, on=["user", "split_idx"], how="inner"
+        )
+
+        # Step 7: 更新用户ID和位置
+        expanded_data = expanded_data.with_columns(
+            [
+                pl.col("new_user_id").cast(pl.Int32).alias("user"),
+                (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
+            ]
+        )
+
+        # 数据列 = 原始sequence_data列（除question） + skill
+        data_cols = [c for c in self.sequence_data.columns if c != "question"]
+        data_cols.append("skill")
+        final_cols = [pl.col(c) for c in data_cols]
+        final_cols.append(pl.col("relative_pos").alias("seq_pos"))
+        expanded_data = expanded_data.select(final_cols)
+
+        # 统计切分信息
+        final_num_users = expanded_data["user"].n_unique()
+
+        logger.debug(f"Split into {final_num_users} skill sub-sequences")
+
+        self.split_skill_sequence_data = expanded_data
+
+    def build_windowlate_data(self):
+        """构建用于 windowlate_auc_mean 评估的样本数据。
+
+        数据在此方法中直接流式保存到文件。
+        """
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+        if self.question_data is None:
+            raise ValueError("Question data not available.")
+        if "fold" not in self.sequence_data.columns:
+            raise ValueError(
+                "K-fold labels not found in data. Please call add_kfold_labels() first."
+            )
+
+        # 筛选测试集数据
+        test_data = self.sequence_data.filter(pl.col("fold") == -1)
+        if len(test_data) == 0:
+            raise ValueError("No test-set interactions (fold == -1) found")
+
+        max_seq_len = self.args.max_seq_len
+        logger.info(f"Building windowlate data (max_seq_len={max_seq_len})...")
+
+        # 准备输出路径
+        os.makedirs(self.data_folder, exist_ok=True)
+        output_path = os.path.join(
+            self.data_folder, f"{self.dataset}_windowlate.parquet"
+        )
+
+        # 获取配置参数
+        users_per_batch = getattr(self.args, "windowlate_users_per_batch", 1)
+
+        # 构建并直接保存到文件
+        WindowlateProcessor.build(
+            test_data=test_data,
+            question_data=self.question_data,
+            max_seq_len=max_seq_len,
+            output_path=output_path,
+            users_per_batch=users_per_batch,
+        )
+
+    def add_kfold_labels(self, n_splits: int = 5, test_ratio: float = 0.2):
+        """Add K-fold cross-validation labels with test set separation.
+
+        Ensures all data from the same user stays in the same fold
+        to prevent data leakage.
+
+        The process:
+        1. Split users into test set and non-test set
+        2. Test set users are labeled with -1
+        3. Non-test set users are split into n_splits folds (0 to n_splits-1)
+
+        Args:
+            n_splits: Number of folds for cross-validation (default: 5).
+            test_ratio: Ratio of users to allocate to test set (default: 0.2).
+
+        Returns:
+            DataFrame with added 'fold' column (values: -1 for test set, 0 to n_splits-1 for train/val).
+
+        Raises:
+            ValueError: If sequence_data is not loaded.
+        """
+        if test_ratio > 1 or test_ratio < 0:
+            raise ValueError("Test ratio should within 0~1.")
+
+        if self.sequence_data is None:
+            raise ValueError(
+                "No processed data available. Please call load_processed_data() or clear_data() first."
+            )
+
+        # 获取唯一用户ID
+        unique_users = self.sequence_data["user"].unique()
+        num_users = len(unique_users)
+        num_test_users = int(num_users * test_ratio)
+
+        # 随机打乱用户ID顺序
+        user_indices = np.arange(num_users)
+        np.random.shuffle(user_indices)
+        # 打乱后取非测试集用户的索引
+        non_test_indices = user_indices[num_test_users:]
+        # 初始化折标签
+        fold_assignment = np.full(num_users, -1, dtype=np.int32)
+        # 对非测试集用户进行K折交叉验证
+        logger.debug(
+            f"Splitting {num_users - num_test_users} users into {n_splits} folds..."
+        )
         kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.seed)
-        for fold_idx, (_, test_indices) in enumerate(kfold.split(unique_users)):
-            fold_assignment[test_indices] = fold_idx
+        for fold_idx, (_, val_indices) in enumerate(kfold.split(non_test_indices)):
+            fold_assignment[non_test_indices[val_indices]] = fold_idx
 
         user_fold_map = pl.DataFrame(
             {"user": unique_users, "fold": pl.Series(fold_assignment, dtype=pl.Int32)}
@@ -606,9 +921,12 @@ class DataSource(ABC):
         self.sequence_data = self.sequence_data.join(
             user_fold_map, on="user", how="left"
         )
-        self.add_metadata("kfold_n_splits", n_splits)
+        self.update_metadata("kfold_n_splits", n_splits)
+        self.update_metadata("test_ratio", test_ratio)
 
-        logger.info(f"Added K-fold labels with n_splits={n_splits} to sequence_data")
+        logger.info(
+            f"Added K-fold labels with n_splits={n_splits}, test_ratio={test_ratio}"
+        )
 
     def get_user_stats(self):
         """Compute user statistics: attempts, correct count, skill count, correct rate.
@@ -810,12 +1128,12 @@ class DataSource(ABC):
             "strata_distribution": strata_distribution,
         }
 
-        self.add_metadata("sampled", True)
-        self.add_metadata("sampling_config", sampling_config)
-        self.add_metadata("sampling_stats", sampling_stats)
-        self.add_metadata("num_users", int(num_users))
-        self.add_metadata("num_questions", int(num_questions))
-        self.add_metadata("num_skills", int(num_skills))
+        self.update_metadata("sampled", True)
+        self.update_metadata("sampling_config", sampling_config)
+        self.update_metadata("sampling_stats", sampling_stats)
+        self.update_metadata("num_users", int(num_users))
+        self.update_metadata("num_questions", int(num_questions))
+        self.update_metadata("num_skills", int(num_skills))
 
         logger.info(
             f"Sampling complete: {len(sampled_users)}/{total_users} users, "
@@ -838,13 +1156,14 @@ class DataSource(ABC):
         )
 
     def _remap_question_ids(self):
-        """Filter and remap question IDs to consecutive integers."""
+        """Filter and remap question IDs and skill IDs to consecutive integers."""
         self.question_data = self.question_data.join(
             self.sequence_data.select(pl.col("question").unique()),
             on="question",
             how="semi",
         )
 
+        # Remap question IDs
         question_id_map = (
             self.question_data.select(pl.col("question").unique())
             .sort("question")
@@ -860,6 +1179,19 @@ class DataSource(ABC):
             self.sequence_data.join(question_id_map, on="question", how="left")
             .drop("question")
             .rename({"new_question_id": "question"})
+        )
+
+        # Remap skill IDs
+        skill_id_map = (
+            self.question_data.select(pl.col("skill").unique())
+            .sort("skill")
+            .with_row_index("new_skill_id")
+            .select([pl.col("skill"), pl.col("new_skill_id").cast(pl.Int32)])
+        )
+        self.question_data = (
+            self.question_data.join(skill_id_map, on="skill", how="left")
+            .drop("skill")
+            .rename({"new_skill_id": "skill"})
         )
 
     def _compute_strata_distribution(
@@ -896,13 +1228,12 @@ class DataSource(ABC):
         return strata_distribution
 
 
-def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
-    """Filter sequences to be within min_seq_len and max_seq_len bounds.
+def exclude_short_sequences(data, min_seq_len: int):
+    """Filter out users with sequence length less than min_seq_len.
 
     Args:
         data: Polars DataFrame or LazyFrame.
         min_seq_len: Minimum sequence length.
-        max_seq_len: Maximum sequence length (0 or None means no limit).
 
     Returns:
         DataFrame or LazyFrame of same type as input.
@@ -921,27 +1252,10 @@ def restrains_sequence_length(data, min_seq_len: int, max_seq_len: int = 0):
         )
         data = data.filter(pl.col("user").is_in(valid_users))
 
-    if max_seq_len is not None and max_seq_len > 0:
-        data = _truncate_long_sequences(data, max_seq_len)
-
-    return data
-
-
-def _truncate_long_sequences(data, max_seq_len: int):
-    """Truncate sequences longer than max_seq_len to last max_seq_len records."""
-
-    data = data.sort(["user", "timestamp"])
-    data = data.with_columns(
-        pl.arange(0, pl.count(), dtype=pl.UInt32).over("user").alias("row_num")
-    )
-    data = data.with_columns(pl.col("row_num").max().over("user").alias("total"))
-    data = data.filter((pl.col("total") - pl.col("row_num")) < max_seq_len)
-    data = data.drop(["row_num", "total"])
-
     return data
 
 
 __all__ = [
     "DataSource",
-    "restrains_sequence_length",
+    "exclude_short_sequences",
 ]

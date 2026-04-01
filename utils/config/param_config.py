@@ -64,12 +64,12 @@ class BaseParamConfig(ABC):
             kwargs.setdefault("help", "")
             kwargs.setdefault("required", False)
 
-            if cfg["type"] is bool:
+            if cfg.get("type") is bool:
                 kwargs.setdefault(
                     "action",
                     "store_false" if kwargs.get("default") is True else "store_true",
                 )
-            else:
+            elif "type" in cfg:
                 kwargs["type"] = cfg["type"]
 
             group.add_argument(*arg_names, **kwargs)
@@ -128,7 +128,7 @@ def list_models() -> list[str]:
 
 
 # ============================================================================
-# 预定义的参数配置类（从 params/base.py 迁移）
+# 预定义的参数配置类
 # ============================================================================
 
 
@@ -167,10 +167,15 @@ class DataParams(BaseParamConfig):
                 "default": 5,
                 "help": "Number of folds for K-Fold cross-validation (>=2 to enable, default: 5)",
             },
+            "test_ratio": {
+                "type": float,
+                "default": 0.2,
+                "help": "Ratio for test set (default: 0.2)",
+            },
             "min_seq_len": {
                 "type": int,
-                "default": 10,
-                "help": "Minimum sequence length (default: 10)",
+                "default": 3,
+                "help": "Minimum sequence length (default: 3)",
             },
             "max_seq_len": {
                 "type": int,

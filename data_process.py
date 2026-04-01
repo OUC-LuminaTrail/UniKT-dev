@@ -57,6 +57,12 @@ def build_parser():
     proc = subparsers.add_parser(
         "process", help="Process raw data into standardized format"
     )
+    proc.add_argument(
+        "--extra",
+        nargs="*",
+        default=[],
+        help="Extra processing steps",
+    )
     DataParams.add_args(proc)
     GeneralParams.add_args(proc)
     SamplingParams.add_args(proc)
@@ -96,7 +102,8 @@ def cmd_download(args):
 def cmd_process(args):
     """Handle `process` subcommand."""
     dp = get_data_source(args.dataset, args)
-    dp.clear_data()
+    dp.clean_raw_data()
+    dp.transform_data()
 
     if args.sample_users is not None and args.sample_users > 0:
         dp.sample_users(
@@ -107,7 +114,12 @@ def cmd_process(args):
         )
 
     if args.kfold and args.kfold > 1:
-        dp.add_kfold_labels(n_splits=args.kfold)
+        dp.add_kfold_labels(n_splits=args.kfold, test_ratio=args.test_ratio)
+
+    dp.build_split_question_sequence_data()
+    dp.build_split_skill_sequence_data()
+    if "windowslate" in args.extra:
+        dp.build_windowlate_data()
 
     dp.save_data()
 

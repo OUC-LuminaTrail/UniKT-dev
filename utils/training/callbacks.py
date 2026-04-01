@@ -4,11 +4,16 @@
 """
 
 from abc import ABC
+from collections.abc import Callable
+from typing import TypeVar
 
 from ..config import EarlyStopping
 from ..core import get_logger
+from .checkpoint import CheckpointManager
 
 logger = get_logger(__name__)
+
+TCallback = TypeVar("TCallback", bound="Callback")
 
 
 class Callback(ABC):
@@ -17,41 +22,98 @@ class Callback(ABC):
     定义了训练过程中的回调接口。子类可以实现特定的回调逻辑。
     """
 
-    def on_train_begin(self, epochs: int):
+    def on_train_begin(self, epochs: int, **kwargs):
         """训练开始时调用。"""
         pass
 
-    def on_train_end(self):
+    def on_train_end(self, **kwargs):
         """训练结束时调用。"""
         pass
 
-    def on_epoch_begin(self, epoch: int):
+    def on_epoch_begin(self, epoch: int, **kwargs):
         """Epoch 开始时调用。"""
         pass
 
-    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float):
+    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float, **kwargs):
         """Epoch 结束时调用。"""
         pass
 
-    def on_phase_begin(self, epoch: int, phase: str):
+    def on_phase_begin(self, epoch: int, phase: str, **kwargs):
         """Phase（train/val）开始时调用。"""
         pass
 
-    def on_phase_end(self, epoch: int, phase: str, loss: float, metrics: dict):
+    def on_phase_end(
+        self, epoch: int, phase: str, loss: float, metrics: dict, **kwargs
+    ):
         """Phase（train/val）结束时调用。"""
         pass
 
-    def on_batch_begin(self, epoch: int, batch_idx: int, phase: str):
+    def on_batch_begin(self, epoch: int, batch_idx: int, phase: str, **kwargs):
         """Batch 开始时调用。"""
         pass
 
-    def on_batch_end(self, epoch: int, batch_idx: int, phase: str, loss: float):
+    def on_batch_end(
+        self, epoch: int, batch_idx: int, phase: str, loss: float, **kwargs
+    ):
         """Batch 结束时调用。"""
         pass
 
-    def should_stop(self) -> bool:
+    def should_stop(self, **kwargs) -> bool:
         """检查是否应该停止训练。"""
         return False
+
+
+class FunctionCallback(Callback):
+    """函数式回调包装器。
+
+    使用字典将事件名称映射到函数或函数列表。
+    """
+
+    def __init__(self, handlers: dict[str, Callable | list[Callable]]):
+        self._handlers: dict[str, list[Callable]] = {}
+        for name, funcs in handlers.items():
+            if funcs is None:
+                continue
+            if isinstance(funcs, list):
+                self._handlers[name] = funcs
+            else:
+                self._handlers[name] = [funcs]
+
+    def _call(self, name: str, *args, **kwargs) -> None:
+        for func in self._handlers.get(name, []):
+            func(*args, **kwargs)
+
+    def on_train_begin(self, epochs: int, **kwargs):
+        self._call("on_train_begin", epochs)
+
+    def on_train_end(self, **kwargs):
+        self._call("on_train_end")
+
+    def on_epoch_begin(self, epoch: int, **kwargs):
+        self._call("on_epoch_begin", epoch)
+
+    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float, **kwargs):
+        self._call("on_epoch_end", epoch, train_loss, val_loss)
+
+    def on_phase_begin(self, epoch: int, phase: str, **kwargs):
+        self._call("on_phase_begin", epoch, phase)
+
+    def on_phase_end(
+        self, epoch: int, phase: str, loss: float, metrics: dict, **kwargs
+    ):
+        self._call("on_phase_end", epoch, phase, loss, metrics)
+
+    def on_batch_begin(self, epoch: int, batch_idx: int, phase: str, **kwargs):
+        self._call("on_batch_begin", epoch, batch_idx, phase)
+
+    def on_batch_end(
+        self, epoch: int, batch_idx: int, phase: str, loss: float, **kwargs
+    ):
+        self._call("on_batch_end", epoch, batch_idx, phase, loss)
+
+    def should_stop(self, **kwargs) -> bool:
+        results = [func() for func in self._handlers.get("should_stop", [])]
+        return any(bool(result) for result in results)
 
 
 class CallbackManager:
@@ -60,14 +122,13 @@ class CallbackManager:
     管理多个回调对象，按顺序触发它们的回调方法。
     """
 
-    def __init__(self, callbacks: list):
+    def __init__(self, callbacks: list[Callback]):
         """初始化回调管理器。
 
         Args:
             callbacks: 回调对象列表
         """
-        self.callbacks = callbacks
-        self._stop_training = False
+        self.callbacks = [cb for cb in callbacks if cb is not None]
 
     def trigger(self, method_name: str, *args, **kwargs):
         """触发所有回调的指定方法。
@@ -80,42 +141,57 @@ class CallbackManager:
         for callback in self.callbacks:
             getattr(callback, method_name)(*args, **kwargs)
 
-    def should_stop(self) -> bool:
+    def get_callback(self, callback_type: type[TCallback]) -> TCallback | None:
+        """获取指定类型的第一个回调。"""
+        for cb in self.callbacks:
+            if isinstance(cb, callback_type):
+                return cb
+        return None
+
+    def should_stop(self, **kwargs) -> bool:
         """检查是否应该停止训练。
 
         Returns:
             是否应该停止训练
         """
-        return any(cb.should_stop() for cb in self.callbacks)
+        return any(cb.should_stop(**kwargs) for cb in self.callbacks)
 
     # 便捷方法
-    def on_train_begin(self, epochs: int):
+    def on_train_begin(self, epochs: int, **kwargs):
         """训练开始。"""
-        self.trigger("on_train_begin", epochs)
+        self.trigger("on_train_begin", epochs, **kwargs)
 
-    def on_epoch_begin(self, epoch: int):
+    def on_train_end(self, **kwargs):
+        """训练结束。"""
+        self.trigger("on_train_end", **kwargs)
+
+    def on_epoch_begin(self, epoch: int, **kwargs):
         """Epoch 开始。"""
-        self.trigger("on_epoch_begin", epoch)
+        self.trigger("on_epoch_begin", epoch, **kwargs)
 
-    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float):
+    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float, **kwargs):
         """Epoch 结束。"""
-        self.trigger("on_epoch_end", epoch, train_loss, val_loss)
+        self.trigger("on_epoch_end", epoch, train_loss, val_loss, **kwargs)
 
-    def on_phase_end(self, epoch: int, phase: str, loss: float, metrics: dict):
+    def on_phase_end(
+        self, epoch: int, phase: str, loss: float, metrics: dict, **kwargs
+    ):
         """Phase 结束。"""
-        self.trigger("on_phase_end", epoch, phase, loss, metrics)
+        self.trigger("on_phase_end", epoch, phase, loss, metrics, **kwargs)
 
-    def on_phase_begin(self, epoch: int, phase: str):
+    def on_phase_begin(self, epoch: int, phase: str, **kwargs):
         """Phase 开始。"""
-        self.trigger("on_phase_begin", epoch, phase)
+        self.trigger("on_phase_begin", epoch, phase, **kwargs)
 
-    def on_batch_begin(self, epoch: int, batch_idx: int, phase: str):
+    def on_batch_begin(self, epoch: int, batch_idx: int, phase: str, **kwargs):
         """Batch 开始。"""
-        self.trigger("on_batch_begin", epoch, batch_idx, phase)
+        self.trigger("on_batch_begin", epoch, batch_idx, phase, **kwargs)
 
-    def on_batch_end(self, epoch: int, batch_idx: int, phase: str, loss: float):
+    def on_batch_end(
+        self, epoch: int, batch_idx: int, phase: str, loss: float, **kwargs
+    ):
         """Batch 结束。"""
-        self.trigger("on_batch_end", epoch, batch_idx, phase, loss)
+        self.trigger("on_batch_end", epoch, batch_idx, phase, loss, **kwargs)
 
 
 class EarlyStoppingCallback(Callback):
@@ -125,6 +201,7 @@ class EarlyStoppingCallback(Callback):
         self,
         *,
         early_stopping: EarlyStopping,
+        swanlab_prefix: str = "",
     ):
         """初始化早停回调。
 
@@ -133,14 +210,19 @@ class EarlyStoppingCallback(Callback):
         """
         self.early_stopping = early_stopping
         self.cfg = early_stopping.cfg
+        self.swanlab_prefix = swanlab_prefix
 
         self._stop = False
 
-    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float):
-        """Epoch 结束时检查早停条件。"""
-        # 从 metrics 中选择监控值（需要在调用时传入）
-        # 这里简化处理，假设 val_loss 相关
-        pass
+    def on_phase_end(
+        self, epoch: int, phase: str, loss: float, metrics: dict, **kwargs
+    ):
+        """在验证阶段结束时执行早停检查。"""
+        if phase != "val":
+            return
+        current = self._select_monitor_value(metrics, loss)
+        self.step(current, epoch, metrics)
+        self._log_swanlab_state(epoch, kwargs.get("trainer"))
 
     def step(self, current: float, epoch: int, metrics: dict | None = None) -> bool:
         """执行早停检查。
@@ -156,7 +238,59 @@ class EarlyStoppingCallback(Callback):
         self._stop = self.early_stopping.step(current, epoch, metrics)
         return self._stop
 
-    def should_stop(self) -> bool:
+    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
+        name = (self.cfg.monitor or "auc").lower()
+        value = None
+        if name == "loss":
+            value = float(val_loss) if val_loss is not None else None
+        elif name in metrics:
+            value = metrics[name]
+
+        if value is None:
+            if metrics.get("auc") is not None:
+                value = float(metrics["auc"])
+            elif metrics.get("acc") is not None:
+                value = float(metrics["acc"])
+            elif metrics.get("rmse") is not None:
+                value = float(metrics["rmse"])
+
+        if value is None:
+            if name in ["loss", "rmse"]:
+                return float("inf")
+            return float("-inf")
+        return float(value)
+
+    def _log_swanlab_state(self, epoch: int, trainer):
+        if trainer is None or not getattr(trainer, "use_swanlab", False):
+            return
+        try:
+            import swanlab
+
+            prefix = f"{self.swanlab_prefix}/" if self.swanlab_prefix else ""
+            log_data = {
+                f"{prefix}ES/Best": self.early_stopping.best_score,
+                f"{prefix}ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
+            }
+            if self.early_stopping.best_metrics is not None:
+                log_data.update(
+                    {
+                        f"{prefix}ES/Best_AUC": self.early_stopping.best_metrics.get(
+                            "auc", 0.0
+                        ),
+                        f"{prefix}ES/Best_ACC": self.early_stopping.best_metrics.get(
+                            "acc", 0.0
+                        ),
+                        f"{prefix}ES/Best_RMSE": self.early_stopping.best_metrics.get(
+                            "rmse", 0.0
+                        ),
+                    }
+                )
+            step = getattr(trainer, "_global_step", epoch)
+            swanlab.log(log_data, step=step)
+        except ImportError:
+            logger.warning("SwanLab is not installed. Skipping Early Stopping logging.")
+
+    def should_stop(self, **kwargs) -> bool:
         """检查是否应该停止训练。"""
         return self._stop
 
@@ -164,28 +298,131 @@ class EarlyStoppingCallback(Callback):
 class CheckpointCallback(Callback):
     """检查点保存回调。"""
 
-    def __init__(self, log_dir: str, save_best: bool = True):
+    def __init__(
+        self,
+        checkpoint_manager: CheckpointManager,
+        *,
+        early_stopping: EarlyStopping | None = None,
+        last_filename: str = "last_checkpoint.pth",
+        best_filename: str | None = "best_model.pth",
+        keep_best_state: bool = True,
+    ):
         """初始化检查点回调。
 
         Args:
-            log_dir: 日志目录
-            save_best: 是否保存最佳模型
+            checkpoint_manager: 检查点管理器
+            early_stopping: 早停对象（可选）
+            last_filename: 最后检查点文件名
+            best_filename: 最佳模型文件名（None 表示不保存最佳）
+            keep_best_state: 是否缓存最佳模型 state_dict（多阶段训练可用）
         """
-        self.log_dir = log_dir
-        self.save_best = save_best
+        self.checkpoint_manager = checkpoint_manager
+        self.early_stopping = early_stopping
+        self.last_filename = last_filename
+        self.best_filename = best_filename
+        self.keep_best_state = keep_best_state
+
+        self.best_metric: float | None = None
+        self.best_epoch: int | None = None
+        self.best_model_state: dict | None = None
+
+    def on_train_begin(self, epochs: int, **kwargs):
         self.best_metric = None
-        self.checkpoint_manager = None
+        self.best_epoch = None
+        self.best_model_state = None
 
-    def on_train_begin(self, epochs: int):
-        """训练开始时初始化检查点管理器。"""
-        from .checkpoint import CheckpointManager
+    def on_phase_end(
+        self, epoch: int, phase: str, loss: float, metrics: dict, **kwargs
+    ):
+        """在验证阶段结束时保存最佳模型。"""
+        trainer = kwargs.get("trainer")
+        if trainer is None or phase != "val" or self.best_filename is None:
+            return
 
-        self.checkpoint_manager = CheckpointManager(self.log_dir)
+        current = self._select_monitor_value(metrics, loss)
+        if not self._is_better_metric(current):
+            return
 
-    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float):
-        """Epoch 结束时保存检查点。"""
-        # 这个方法需要在实际使用时与模型和优化器绑定
-        pass
+        self.best_metric = current
+        self.best_epoch = epoch
+        self.checkpoint_manager.save_weights(trainer.model, self.best_filename)
+
+        if self.keep_best_state:
+            self.best_model_state = {
+                key: value.detach().cpu().clone()
+                for key, value in trainer.model.state_dict().items()
+            }
+        else:
+            self.best_model_state = None
+
+        # 与原训练器字段保持兼容，供 UI 展示复用
+        trainer._best_metric = current
+        trainer._best_epoch = epoch
+
+    def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float, **kwargs):
+        """每个 epoch 结束时保存 last checkpoint。"""
+        trainer = kwargs.get("trainer")
+        if trainer is None:
+            return
+        self.checkpoint_manager.save_checkpoint(
+            epoch,
+            trainer.model,
+            trainer.opt,
+            trainer.lr_scheduler,
+            early_stopping_state=self._get_early_stopping_state(),
+            filename=self.last_filename,
+        )
+
+    def _monitor_name(self) -> str:
+        if self.early_stopping is None:
+            return "auc"
+        return (self.early_stopping.cfg.monitor or "auc").lower()
+
+    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
+        name = self._monitor_name()
+        value = None
+        if name == "loss":
+            value = float(val_loss) if val_loss is not None else None
+        elif name in metrics:
+            value = metrics[name]
+
+        if value is None:
+            if metrics.get("auc") is not None:
+                value = float(metrics["auc"])
+            elif metrics.get("acc") is not None:
+                value = float(metrics["acc"])
+            elif metrics.get("rmse") is not None:
+                value = float(metrics["rmse"])
+
+        if value is None:
+            if name in ["loss", "rmse"]:
+                return float("inf")
+            return float("-inf")
+        return float(value)
+
+    def _is_better_metric(self, current: float) -> bool:
+        if self.best_metric is None:
+            return True
+        mode = "max"
+        if self.early_stopping is not None:
+            mode = self.early_stopping.cfg.mode
+        elif self._monitor_name() in ["rmse", "loss"]:
+            mode = "min"
+        return (
+            current > self.best_metric if mode == "max" else current < self.best_metric
+        )
+
+    def _get_early_stopping_state(self) -> dict | None:
+        if self.early_stopping is None:
+            return None
+        state = {
+            "best_score": self.early_stopping.best_score,
+            "best_epoch": self.early_stopping.best_epoch,
+            "num_bad_epochs": self.early_stopping.num_bad_epochs,
+        }
+        if self.early_stopping.best_metrics is not None:
+            state["best_metrics"] = self.early_stopping.best_metrics.copy()
+        return state
 
 
 class MemoryCleanupCallback(Callback):
@@ -199,7 +436,9 @@ class MemoryCleanupCallback(Callback):
         """
         self.cleanup_interval = cleanup_interval
 
-    def on_phase_end(self, epoch: int, phase: str, loss: float, metrics: dict):
+    def on_phase_end(
+        self, epoch: int, phase: str, loss: float, metrics: dict, **kwargs
+    ):
         """Phase 结束时清理内存。"""
         if epoch % self.cleanup_interval == 0:
             self._cleanup_memory(phase)
@@ -217,19 +456,34 @@ class MemoryCleanupCallback(Callback):
                 after = torch.cuda.memory_allocated() / 1024**3
                 if before - after > 0.1:  # 超过100MB
                     logger.debug(
-                        f"[{phase}] GPU内存清理: {before:.2f}GB -> {after:.2f}GB"
+                        f"[{phase}] Cleaned up memory: {before:.2f}GB -> {after:.2f}GB"
                     )
             except Exception as e:
-                logger.warning(f"GPU内存清理失败: {e}")
+                logger.warning(f"Memory cleanup failed: {e}")
 
         # Python垃圾回收
         gc.collect()
 
 
+class TestEvaluationCallback(Callback):
+    """训练结束后执行测试集评估。"""
+
+    def __init__(self, *, use_best_model: bool = True):
+        self.use_best_model = use_best_model
+
+    def on_train_end(self, **kwargs):
+        trainer = kwargs.get("trainer")
+        if trainer is None:
+            return
+        trainer._evaluate_on_test_set(use_best_model=self.use_best_model)
+
+
 __all__ = [
     "Callback",
     "CallbackManager",
+    "FunctionCallback",
     "EarlyStoppingCallback",
     "CheckpointCallback",
     "MemoryCleanupCallback",
+    "TestEvaluationCallback",
 ]

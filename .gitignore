@@ -28,6 +28,9 @@ data/
 *.pt
 *.pth
 .env
+# System files
+.DS_Store
+
 # pixi environments
 .pixi/*
 !.pixi/config.toml

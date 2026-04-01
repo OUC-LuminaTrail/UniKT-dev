@@ -1,29 +1,141 @@
-from .ABKT.ABKT_model import GMF, K_CMF
-from .ABKT.ABKT_trainer import ABKTTrainer
-from .GIKT.GIKT_model import GIKT
-from .GIKT.GIKT_trainer import GIKTTrainer
-from .GIKTEdmine.GIKT_edmine_model import GIKTEdmine
-from .GIKTEdmine.GIKT_edmine_trainer import GIKTEdmineTrainer
-from .HGIKT import variants  # noqa: F401
-from .HGIKT.HGIKT_model import HGIKT
-from .HGIKT.HGIKT_trainer import HGIKTTrainer
-from .SGKT.SGKT_model import SGKT
-from .SGKT.SGKT_trainer import SGKTTrainer
-from .SQGKT.SQGKT_model import SQGKT
-from .SQGKT.SQGKT_trainer import SQGKTTrainer
+"""模型模块，使用延迟注册实现按需加载。
 
-__all__ = [
-    "ABKTTrainer",
-    "K_CMF",
-    "GMF",
-    "GIKT",
-    "GIKTTrainer",
-    "GIKTEdmine",
-    "GIKTEdmineTrainer",
-    "HGIKT",
-    "HGIKTTrainer",
-    "SGKT",
-    "SGKTTrainer",
-    "SQGKT",
-    "SQGKTTrainer",
-]
+导入此模块只会注册模型名称，不会加载实际的模型代码。
+只有在调用 TRAINERS.get() 或 PARAM_CONFIGS.get() 时才会加载对应模型。
+"""
+
+from utils.core import PARAM_CONFIGS, TRAINERS
+
+# =============================================================================
+# 训练器延迟注册
+# =============================================================================
+TRAINERS.register_lazy("ABKT", "model.ABKT.ABKT_trainer", "ABKTTrainer")
+TRAINERS.register_lazy("AKT", "model.AKT.AKT_trainer", "AKTTrainer")
+TRAINERS.register_lazy("DKT", "model.DKT.DKT_trainer", "DKTTrainer")
+TRAINERS.register_lazy("GIKT", "model.GIKT.GIKT_trainer", "GIKTTrainer")
+TRAINERS.register_lazy("GIKTEdmine", "model.GIKTEdmine", "GIKTEdmineTrainer")
+TRAINERS.register_lazy("GKT", "model.GKT.GKT_trainer", "GKTTrainer")
+TRAINERS.register_lazy("HGIKT", "model.HGIKT.HGIKT_trainer", "HGIKTTrainer")
+TRAINERS.register_lazy("SGKT", "model.SGKT.SGKT_trainer", "SGKTTrainer")
+TRAINERS.register_lazy("SimpleKT", "model.SimpleKT.SimpleKT_trainer", "SimpleKTTrainer")
+TRAINERS.register_lazy("SQGKT", "model.SQGKT.SQGKT_trainer", "SQGKTTrainer")
+
+# HGIKT 变体
+TRAINERS.register_lazy(
+    "HGIKT_WeightedFusion",
+    "model.HGIKT.variants.hgikt_weighted_fusion_trainer",
+    "HGIKTWeightedFusionTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_ConcatFusion",
+    "model.HGIKT.variants.hgikt_concat_fusion_trainer",
+    "HGIKTConcatFusionTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_SimpleFusion",
+    "model.HGIKT.variants.hgikt_simple_fusion_trainer",
+    "HGIKTSimpleFusionTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_HyperOnly",
+    "model.HGIKT.variants.hgikt_hyper_only_trainer",
+    "HGIKTHyperOnlyTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_QuestionSkillOnly",
+    "model.HGIKT.variants.hgikt_question_skill_only_trainer",
+    "HGIKTQuestionSkillOnlyTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_HeteroOnly",
+    "model.HGIKT.variants.hgikt_hetero_only_trainer",
+    "HGIKTHeteroOnlyTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_HyperOnlySimple",
+    "model.HGIKT.variants.hgikt_hyper_only_simple_trainer",
+    "HGIKTHyperOnlySimpleTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_Hyper_Only_Unweighted",
+    "model.HGIKT.variants.hgikt_hyper_only_unweighted_trainer",
+    "HGIKTHyperOnlyUnweightedTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_QS_QT_Only",
+    "model.HGIKT.variants.hgikt_qs_qt_only_trainer",
+    "HGIKTQSSAOnlyTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_QS_SA_Only",
+    "model.HGIKT.variants.hgikt_qs_sa_only_trainer",
+    "HGIKTQSSAOnlyTrainer",
+)
+
+# =============================================================================
+# 参数配置延迟注册
+# =============================================================================
+PARAM_CONFIGS.register_lazy("ABKT", "model.ABKT.ABKT_trainer", "ABKTModelParams")
+PARAM_CONFIGS.register_lazy("AKT", "model.AKT.AKT_trainer", "AKTModelParams")
+PARAM_CONFIGS.register_lazy("DKT", "model.DKT.DKT_trainer", "DKTModelParams")
+PARAM_CONFIGS.register_lazy("GIKT", "model.GIKT.GIKT_trainer", "GIKTModelParams")
+PARAM_CONFIGS.register_lazy("GIKTEdmine", "model.GIKTEdmine", "GIKTEdmineModelParams")
+PARAM_CONFIGS.register_lazy("GKT", "model.GKT.GKT_trainer", "GKTModelParams")
+PARAM_CONFIGS.register_lazy("HGIKT", "model.HGIKT.HGIKT_trainer", "HGIKTModelParams")
+PARAM_CONFIGS.register_lazy("SGKT", "model.SGKT.SGKT_trainer", "SGKTModelParams")
+PARAM_CONFIGS.register_lazy(
+    "SimpleKT", "model.SimpleKT.SimpleKT_trainer", "SimpleKTModelParams"
+)
+PARAM_CONFIGS.register_lazy("SQGKT", "model.SQGKT.SQGKT_trainer", "SQGKTModelParams")
+
+# HGIKT 变体参数配置
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_WeightedFusion",
+    "model.HGIKT.variants.hgikt_weighted_fusion_trainer",
+    "HGIKTWeightedFusionModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_ConcatFusion",
+    "model.HGIKT.variants.hgikt_concat_fusion_trainer",
+    "HGIKTConcatFusionModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_SimpleFusion",
+    "model.HGIKT.variants.hgikt_simple_fusion_trainer",
+    "HGIKTSimpleFusionModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_HyperOnly",
+    "model.HGIKT.variants.hgikt_hyper_only_trainer",
+    "HGIKTHyperOnlyModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_QuestionSkillOnly",
+    "model.HGIKT.variants.hgikt_question_skill_only_trainer",
+    "HGIKTQuestionSkillOnlyModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_HeteroOnly",
+    "model.HGIKT.variants.hgikt_hetero_only_trainer",
+    "HGIKTHeteroOnlyModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_HyperOnlySimple",
+    "model.HGIKT.variants.hgikt_hyper_only_simple_trainer",
+    "HGIKTHyperOnlySimpleModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_Hyper_Only_Unweighted",
+    "model.HGIKT.variants.hgikt_hyper_only_unweighted_trainer",
+    "HGIKTHyperOnlyUnweightedModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_QS_QT_Only",
+    "model.HGIKT.variants.hgikt_qs_qt_only_trainer",
+    "HGIKTQSSAOnlyModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_QS_SA_Only",
+    "model.HGIKT.variants.hgikt_qs_sa_only_trainer",
+    "HGIKTQSSAOnlyModelParams",
+)

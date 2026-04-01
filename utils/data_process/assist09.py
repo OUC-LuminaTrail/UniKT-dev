@@ -7,7 +7,7 @@ from utils.core import get_logger, register_data_source
 
 from .data_source import (
     DataSource,
-    restrains_sequence_length,
+    exclude_short_sequences,
 )
 
 logger = get_logger(__name__)
@@ -46,17 +46,16 @@ class Assistments2009Data(DataSource):
         ).lazy()
 
     @override
-    def clear_data(self):
+    def transform_data(self):
         """Clean data and build question_data and sequence_data."""
         logger.info("Processing ASSISTments 2009 data...")
 
-        # Clean raw data
-        cleaned_data = self._clean_raw_data()
-        logger.debug(f"Cleaned data shape: {cleaned_data.shape}")
+        if self.cleaned_raw_data is None:
+            raise ValueError("clean_raw_data must be called before transform_data")
 
         # Build question ID mapping
         question_map_df = (
-            cleaned_data.select("question")
+            self.cleaned_raw_data.select("question")
             .unique()
             .sort("question")
             .with_row_index("question_id")
@@ -74,7 +73,7 @@ class Assistments2009Data(DataSource):
 
         # Apply question mapping to cleaned data
         mapped_data = (
-            cleaned_data.join(question_map_df, on="question", how="left")
+            self.cleaned_raw_data.join(question_map_df, on="question", how="left")
             .with_columns(pl.col("question_id").cast(pl.Int32))
             .drop("question")
             .rename({"question_id": "question"})
@@ -141,8 +140,7 @@ class Assistments2009Data(DataSource):
         self.question_data = question_data
         self.sequence_data = sequence_data
 
-    def _clean_raw_data(self) -> pl.DataFrame:
-        """Clean raw sequence data."""
+    def clean_raw_data(self):
         if self.raw_data is None:
             self.load_src_data()
 
@@ -176,7 +174,6 @@ class Assistments2009Data(DataSource):
         )
 
         # Rename columns
-        # Rename columns
         data = data.rename(
             {
                 "correct": "label",
@@ -199,12 +196,10 @@ class Assistments2009Data(DataSource):
         data = data.unique().collect()
         data = data.sort(["user", "timestamp"])
 
-        # Restrict sequence length
-        data = restrains_sequence_length(
-            data, self.args.min_seq_len, self.args.max_seq_len
-        )
+        # Exclude sequences that are too short
+        data = exclude_short_sequences(data, self.args.min_seq_len)
 
-        return data
+        self.cleaned_raw_data = data
 
 
 __all__ = ["Assistments2009Data"]

@@ -117,29 +117,31 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         hypergraph: Any,
         question_skill_matrix: torch.Tensor,
     ) -> torch.Tensor:
-        B, _ = user_sequence.size()
         device = user_sequence.device
         answers_embedding = self.answer_embedding(user_response)
 
         # 【核心消融点1：无边权】强制清除超图边权，确保仅利用聚类结构拓扑
-        if hasattr(hypergraph, "edge_weight"):
-            hypergraph.edge_weight = None
+        hypergraph.edge_weight = None
 
         # 【核心消融点2：超图提供嵌入层】
         # 使用 HGNN 演化题目特征
         question_hyper_conv = self.hgnn_conv(self.question_embedding.weight, hypergraph)
-        
+
         # 使用 v2e 聚合得到技能（难度簇）特征
         # 注意：此处 raw_e_features 包含 num_skills * num_clusters 个特征
         raw_e_features = hypergraph.v2e(question_hyper_conv, aggr="mean")
-        
+
         # 将聚类簇特征聚合回原始技能 ID
         # 映射规律：E_idx = skill_id * num_clusters + cluster_id
         if raw_e_features.size(0) >= self.num_skills * self.num_clusters:
-            skill_hyper_conv = raw_e_features.view(self.num_skills, self.num_clusters, self.hidden_dim).mean(dim=1)
+            skill_hyper_conv = raw_e_features.view(
+                self.num_skills, self.num_clusters, self.hidden_dim
+            ).mean(dim=1)
         else:
             # 异常处理：如果不满足聚类倍数，尝试安全对准
-            skill_hyper_conv = torch.zeros(self.num_skills, self.hidden_dim, device=device)
+            skill_hyper_conv = torch.zeros(
+                self.num_skills, self.hidden_dim, device=device
+            )
             min_size = min(self.num_skills, raw_e_features.size(0))
             skill_hyper_conv[:min_size] = raw_e_features[:min_size]
 
@@ -180,12 +182,14 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
 
         # 6. 构造知识状态集合 (Knowledge Status)
         # 从 question_skill_matrix 获取下一题对应的技能 IDs
-        q_skill_vectors = question_skill_matrix[next_user_sequence] # [B, S, num_skills]
-        
+        q_skill_vectors = question_skill_matrix[
+            next_user_sequence
+        ]  # [B, S, num_skills]
+
         # 获取最大关联技能数以便 Padding
         max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
         max_skills_per_question = max(1, max_skills_per_question)
-        
+
         skill_counts = q_skill_vectors.sum(dim=-1).long()
         # 找到非零索引 (即关联的技能 ID)
         sorted_skill_indices = torch.argsort(q_skill_vectors, dim=-1, descending=True)
@@ -194,8 +198,8 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         # 处理 Padding
         pos = torch.arange(max_skills_per_question, device=device).view(1, 1, -1)
         valid_pos_mask = pos < skill_counts.unsqueeze(-1)
-        
-        padding_index = self.num_skills # 使用总技能数作为 padding 索引
+
+        padding_index = self.num_skills  # 使用总技能数作为 padding 索引
         padding_ids = torch.full_like(related_skill_ids, padding_index)
         related_skill_ids = torch.where(valid_pos_mask, related_skill_ids, padding_ids)
 
@@ -203,7 +207,9 @@ class HGIKT_Hyper_Only_Unweighted(nn.Module):
         skill_conv_padded = torch.cat(
             [
                 skill_hyper_conv,
-                torch.zeros(1, self.hidden_dim, device=device, dtype=skill_hyper_conv.dtype),
+                torch.zeros(
+                    1, self.hidden_dim, device=device, dtype=skill_hyper_conv.dtype
+                ),
             ],
             dim=0,
         )

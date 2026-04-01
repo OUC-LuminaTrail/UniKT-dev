@@ -3,6 +3,7 @@
 Heterogeneous graph only contains question-skill edges.
 """
 
+import torch
 from typing_extensions import override
 
 from model.HGIKT.HGIKT_data import HGIKTDataset, HGIKTModelData
@@ -26,26 +27,10 @@ class HGIKTQuestionSkillOnlyData(HGIKTModelData):
         All other components remain the same.
         """
         fold_idx = args.fold if args.fold >= 0 else None
-        max_seq_len = self.data_src.get_metadata("max_seq_len")
-        min_seq_len = self.data_src.get_metadata("min_seq_len")
 
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            max_seq_len, min_seq_len
-        )
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-        # Apply sampling for ednet and assistments12 datasets
-        dataset_name = getattr(args, "dataset", "").lower()
-        if "ednet" in dataset_name or "assistments12" in dataset_name:
-            sample_size = 5000
-            if len(user_sequence) > sample_size:
-                logger.info(f"Sampling {sample_size} users for {dataset_name} dataset")
-                import numpy as np
-                indices = np.random.choice(len(user_sequence), sample_size, replace=False)
-                user_sequence = user_sequence[indices]
-                user_response = user_response[indices]
-                user_mask = user_mask[indices]
 
-        import torch
 
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
@@ -78,20 +63,22 @@ class HGIKTQuestionSkillOnlyData(HGIKTModelData):
             logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, test_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
-            train_data, val_data = self.split_data(
-                user_sequence, user_response, user_mask
+            raise ValueError(
+                "K-fold cross-validation fold index must be specified for HGIKTQuestionSkillOnlyData."
             )
 
         train_dataset = HGIKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = HGIKTDataset(val_data[0], val_data[1], val_data[2])
+        test_dataset = HGIKTDataset(test_data[0], test_data[1], test_data[2])
 
         return {
             "train_dataset": train_dataset,
             "val_dataset": val_dataset,
+            "test_dataset": test_dataset,
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
             "question_skill_matrix": question_skill_matrix,

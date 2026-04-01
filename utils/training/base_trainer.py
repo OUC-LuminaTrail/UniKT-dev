@@ -5,6 +5,7 @@
 
 import os
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any
 
 import torch
@@ -32,7 +33,15 @@ from ..config import (
     create_optimized_dataloader,
 )
 from ..core import get_logger, seed_everything
-from .callbacks import CallbackManager, EarlyStoppingCallback, MemoryCleanupCallback
+from .callbacks import (
+    Callback,
+    CallbackManager,
+    CheckpointCallback,
+    EarlyStoppingCallback,
+    FunctionCallback,
+    MemoryCleanupCallback,
+    TestEvaluationCallback,
+)
 from .checkpoint import CheckpointManager
 from .metrics import MetricsAccumulator
 
@@ -88,6 +97,8 @@ class BaseTrainer(ABC):
         self.callback_manager = None
         self.hyperparam_manager = None
         self.use_swanlab = True
+        self._custom_callbacks: list[Callback] = []
+        self._custom_callback_functions: dict[str, list[Callable]] = {}
 
     def with_training(
         self,
@@ -115,13 +126,47 @@ class BaseTrainer(ABC):
         )
         return self
 
+    def with_callbacks(
+        self,
+        callbacks: list[Callback] | None = None,
+        functions: dict[str, Callable | list[Callable]] | None = None,
+    ) -> "BaseTrainer":
+        """配置自定义回调。
+
+        Args:
+            callbacks: 回调对象列表（可选）
+            functions: 事件名 -> 函数或函数列表（可选）
+
+        Returns:
+            Self for method chaining
+        """
+        if callbacks:
+            self._custom_callbacks.extend(callbacks)
+        if functions:
+            for name, funcs in functions.items():
+                if funcs is None:
+                    continue
+                items = funcs if isinstance(funcs, list) else [funcs]
+                self._custom_callback_functions.setdefault(name, []).extend(items)
+        return self
+
+    def register_callback(self, callback: Callback) -> None:
+        """注册单个回调对象。"""
+        self._custom_callbacks.append(callback)
+
+    def register_callback_fn(self, event: str, func: Callable) -> None:
+        """注册单个回调函数。"""
+        self._custom_callback_functions.setdefault(event, []).append(func)
+
     def with_data(
         self,
         train_data,
         batch_size,
         val_data,
+        test_data=None,
         collate_fn=None,
         val_collate_fn=None,
+        test_collate_fn=None,
     ) -> "BaseTrainer":
         """配置数据加载器。
 
@@ -129,8 +174,10 @@ class BaseTrainer(ABC):
             train_data: 训练数据（DataLoader 或 Dataset）
             batch_size: 批次大小
             val_data: 验证数据（DataLoader 或 Dataset）
+            test_data: 测试数据（DataLoader 或 Dataset，可选）
             collate_fn: 自定义 collate 函数（可选）
             val_collate_fn: 自定义验证 collate 函数（可选）
+            test_collate_fn: 自定义测试 collate 函数（可选）
 
         Returns:
             Self for method chaining
@@ -139,8 +186,10 @@ class BaseTrainer(ABC):
             train_data=train_data,
             batch_size=batch_size,
             val_data=val_data,
+            test_data=test_data,
             collate_fn=collate_fn,
             val_collate_fn=collate_fn if val_collate_fn is None else val_collate_fn,
+            test_collate_fn=collate_fn if test_collate_fn is None else test_collate_fn,
         )
         return self
 
@@ -269,9 +318,29 @@ class BaseTrainer(ABC):
         self.checkpoint_manager = CheckpointManager(self.log_dir)
 
         # 9. Initialize callbacks
-        callbacks = [MemoryCleanupCallback(cleanup_interval=5)]
+        callbacks: list[Callback] = []
+        callbacks.extend(self._custom_callbacks)
+        if self._custom_callback_functions:
+            callbacks.append(FunctionCallback(self._custom_callback_functions))
+        callbacks.append(MemoryCleanupCallback(cleanup_interval=5))
         if self.early_stopping is not None:
-            callbacks.append(EarlyStoppingCallback(early_stopping=self.early_stopping))
+            callbacks.append(
+                EarlyStoppingCallback(
+                    early_stopping=self.early_stopping,
+                    swanlab_prefix="",
+                )
+            )
+        callbacks.append(
+            CheckpointCallback(
+                checkpoint_manager=self.checkpoint_manager,
+                early_stopping=self.early_stopping,
+                last_filename="last_checkpoint.pth",
+                best_filename=(
+                    "best_model.pth" if self.early_stopping is not None else None
+                ),
+            )
+        )
+        callbacks.append(TestEvaluationCallback(use_best_model=True))
         self.callback_manager = CallbackManager(callbacks)
 
         # 10. Setup hyperparameters
@@ -294,8 +363,10 @@ class BaseTrainer(ABC):
         """设置数据加载器。"""
         train_data = self._data_config.train_data
         val_data = self._data_config.val_data
+        test_data = self._data_config.test_data
         collate_fn = self._data_config.collate_fn
         val_collate_fn = self._data_config.val_collate_fn
+        test_collate_fn = self._data_config.test_collate_fn
         batch_size = self._data_config.batch_size
 
         def _build_loader(data, shuffle, loader_collate_fn):
@@ -311,6 +382,7 @@ class BaseTrainer(ABC):
 
         self.train_data = _build_loader(train_data, True, collate_fn)
         self.val_data = _build_loader(val_data, False, val_collate_fn)
+        self.test_data = _build_loader(test_data, False, test_collate_fn)
 
     def _setup_early_stopping(self):
         """设置早停。"""
@@ -332,6 +404,17 @@ class BaseTrainer(ABC):
             包含 "y_hat", "y_label", "y_predict" 的字典
         """
         raise NotImplementedError("Subclasses must implement forward_pass method")
+
+    def test_forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
+        """测试集前向传播。
+
+        Args:
+            batch_data: 从 DataLoader 获取的一个批次数据
+
+        Returns:
+            包含 "y_hat", "y_label", "y_predict" 的字典
+        """
+        return self.forward_pass(batch_data)
 
     @staticmethod
     def _try_gpu() -> torch.device:
@@ -429,6 +512,190 @@ class BaseTrainer(ABC):
             二分类预测张量（0 或 1）
         """
         return torch.ge(y_hat, torch.tensor(threshold).to(self.device_)).to(torch.int)
+
+    def _aggregate_by_group(
+        self,
+        y_hat: torch.Tensor,
+        y_label: torch.Tensor,
+        group_id: torch.Tensor,
+        mask: torch.Tensor = None,
+        fusion_type: str = "mean",
+        threshold: float = 0.5,
+    ) -> dict[str, torch.Tensor]:
+        """
+        根据分组 ID 聚合预测和标签（高效向量化实现）。
+
+        参数:
+            y_hat: 预测值 [N]，已通过 mask 筛选
+            y_label: 标签 [N]，已通过 mask 筛选
+            group_id: 分组 ID [N]，已通过 mask 筛选
+            mask: 有效位置掩码（可选，如果已筛选则为 None）
+            fusion_type: 聚合策略，支持 "mean", "vote", "all"
+            threshold: 二分类预测阈值
+
+        返回:
+            包含聚合后的 y_hat, y_label, y_predict 的字典
+        """
+        # 如果提供了 mask，先筛选有效位置
+        if mask is not None:
+            y_hat = torch.masked_select(y_hat, mask)
+            y_label = torch.masked_select(y_label, mask)
+            group_id = torch.masked_select(group_id, mask)
+
+        # 边界条件：空输入
+        if y_hat.numel() == 0:
+            return {
+                "y_hat": torch.empty(0, dtype=torch.float, device=y_hat.device),
+                "y_label": torch.empty(0, dtype=torch.float, device=y_label.device),
+                "y_predict": torch.empty(0, dtype=torch.float, device=y_hat.device),
+            }
+
+        # ==================== 向量化聚合实现 ====================
+
+        # 获取唯一的 group_id 并排序
+        unique_groups, inverse_indices = torch.unique(group_id, return_inverse=True)
+        num_groups = unique_groups.numel()
+
+        # ==================== Mean 策略（默认） ====================
+        if fusion_type == "mean":
+            # 计算每个 group 的预测值总和
+            group_sum = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, y_hat)
+
+            # 计算每个 group 的元素数量
+            group_count = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, torch.ones_like(y_hat))
+
+            # 避免除零
+            group_count = torch.clamp(group_count, min=1.0)
+            group_scores = group_sum / group_count
+
+        # ==================== Vote 策略 ====================
+        elif fusion_type == "vote":
+            # 二值化预测
+            binary_preds = (y_hat >= threshold).float()
+
+            # 计算每个 group 的"正确"预测数
+            correct_sum = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, binary_preds)
+
+            # 计算每个 group 的总数
+            group_count = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, torch.ones_like(y_hat))
+
+            # 计算正确率，决定投票方向
+            correct_ratio = correct_sum / torch.clamp(group_count, min=1.0)
+            majority_correct = correct_ratio >= 0.5
+
+            # 对于每个样本，根据其 group 的投票方向选择预测值
+            # 如果多数正确，取 >= threshold 的预测； 否则取 < threshold 的
+            group_scores = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            )
+
+            for g_idx in range(num_groups):
+                group_mask = inverse_indices == g_idx
+                group_y_hat = y_hat[group_mask]
+
+                if majority_correct[g_idx]:
+                    # 多数预测正确，取 >= threshold 的均值
+                    correct_mask = group_y_hat >= threshold
+                    if correct_mask.any():
+                        group_scores[g_idx] = group_y_hat[correct_mask].mean()
+                    else:
+                        group_scores[g_idx] = group_y_hat.mean()
+                else:
+                    # 多数预测错误，取 < threshold 的均值
+                    incorrect_mask = group_y_hat < threshold
+                    if incorrect_mask.any():
+                        group_scores[g_idx] = group_y_hat[incorrect_mask].mean()
+                    else:
+                        group_scores[g_idx] = group_y_hat.mean()
+
+        # ==================== All 策略 ====================
+        elif fusion_type == "all":
+            # 二值化预测
+            binary_preds = (y_hat >= threshold).float()
+
+            # 计算每个 group 的"正确"预测数和总数
+            correct_sum = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, binary_preds)
+
+            group_count = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, torch.ones_like(y_hat))
+
+            # 判断是否全一致（全部正确或全部错误）
+            all_correct = correct_sum == group_count
+            all_incorrect = correct_sum == 0
+
+            group_scores = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            )
+
+            for g_idx in range(num_groups):
+                group_mask = inverse_indices == g_idx
+                group_y_hat = y_hat[group_mask]
+
+                if all_correct[g_idx]:
+                    # 全部 >= threshold，取均值
+                    group_scores[g_idx] = group_y_hat.mean()
+                elif all_incorrect[g_idx]:
+                    # 全部 < threshold，取均值
+                    group_scores[g_idx] = group_y_hat.mean()
+                else:
+                    # 不一致，按多数处理
+                    correct_ratio = correct_sum[g_idx] / group_count[g_idx]
+                    if correct_ratio >= 0.5:
+                        correct_mask = group_y_hat >= threshold
+                        group_scores[g_idx] = group_y_hat[correct_mask].mean()
+                    else:
+                        incorrect_mask = group_y_hat < threshold
+                        group_scores[g_idx] = group_y_hat[incorrect_mask].mean()
+
+        else:
+            # 默认使用 mean 策略
+            group_sum = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, y_hat)
+
+            group_count = torch.zeros(
+                num_groups, dtype=torch.float, device=y_hat.device
+            ).scatter_add_(0, inverse_indices, torch.ones_like(y_hat))
+
+            group_count = torch.clamp(group_count, min=1.0)
+            group_scores = group_sum / group_count
+
+        # ==================== 标签聚合（取每个 group 的第一个标签） ====================
+        # 按 group_id 排序后取每个 group 的第一个
+        sorted_indices = torch.argsort(group_id)
+        sorted_group_id = group_id[sorted_indices]
+
+        # 找到每个 group 第一次出现的位置（group_id 变化的位置）
+        # 在排序后的数组中，新 group 出现的位置
+        change_mask = torch.cat(
+            [
+                torch.tensor([True], device=group_id.device),
+                sorted_group_id[1:] != sorted_group_id[:-1],
+            ]
+        )
+        first_occurrence_indices = sorted_indices[change_mask]
+
+        group_labels = y_label[first_occurrence_indices].float()
+
+        # ==================== 生成二分类预测 ====================
+        group_preds = (group_scores >= threshold).float()
+
+        return {
+            "y_hat": group_scores,
+            "y_label": group_labels,
+            "y_predict": group_preds,
+        }
 
     def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
         """设置并保存超参数。
@@ -577,7 +844,7 @@ class BaseTrainer(ABC):
         self.loss = self.loss.to(self.device_)
 
         # 触发训练开始回调
-        self.callback_manager.on_train_begin(self.epochs)
+        self.callback_manager.on_train_begin(self.epochs, trainer=self)
 
         # 创建进度条
         progress = Progress(
@@ -595,7 +862,7 @@ class BaseTrainer(ABC):
         renderables = [progress]
         if self.early_stopping is not None:
             best_metric_text = Text(
-                f"Best {self._monitor_name()}: N/A", style="bold yellow"
+                f"Best {self._monitor_name().upper()}: N/A", style="bold yellow"
             )
             renderables.insert(0, best_metric_text)
 
@@ -617,7 +884,7 @@ class BaseTrainer(ABC):
                 logger.info(f"Epoch {epoch + 1}/{self.epochs}")
 
                 # Epoch 开始回调
-                self.callback_manager.on_epoch_begin(epoch)
+                self.callback_manager.on_epoch_begin(epoch, trainer=self)
 
                 # 训练阶段
                 progress.update(train_task, visible=True)
@@ -638,95 +905,47 @@ class BaseTrainer(ABC):
                     progress.update(val_task, visible=False)
 
                 # Epoch 结束回调
-                self.callback_manager.on_epoch_end(epoch, train_loss, val_loss)
+                self.callback_manager.on_epoch_end(
+                    epoch, train_loss, val_loss, trainer=self
+                )
 
-                # 早停检查
-                if self.early_stopping is not None and self.val_data is not None:
-                    metrics = self.metrics_accumulator.compute("val")
-                    monitor_value = self._select_monitor_value(metrics, val_loss)
-                    if monitor_value is not None:
-                        # 更新早停回调
-                        for cb in self.callback_manager.callbacks:
-                            if isinstance(cb, EarlyStoppingCallback):
-                                cb.step(monitor_value, epoch, metrics)
-                                break
+                # 更新最佳指标显示
+                if (
+                    self.early_stopping is not None
+                    and best_metric_text is not None
+                    and self.val_data is not None
+                ):
+                    best_epoch = getattr(self, "_best_epoch", None)
+                    patience = self.early_stopping.cfg.patience
+                    remaining = max(0, patience - self.early_stopping.num_bad_epochs)
+                    if hasattr(self, "_best_metric"):
+                        best_str = f"{self._best_metric:.4f}"
+                    else:
+                        best_str = "N/A"
 
-                    # 记录早停状态到 SwanLab
-                    if self.use_swanlab:
-                        try:
-                            import swanlab
-
-                            log_data = {
-                                "ES/Best": self.early_stopping.best_score,
-                                "ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
-                            }
-
-                            # 记录最佳轮次的完整指标
-                            if self.early_stopping.best_metrics is not None:
-                                log_data.update(
-                                    {
-                                        "ES/Best_AUC": self.early_stopping.best_metrics.get(
-                                            "auc", 0.0
-                                        ),
-                                        "ES/Best_ACC": self.early_stopping.best_metrics.get(
-                                            "acc", 0.0
-                                        ),
-                                        "ES/Best_RMSE": self.early_stopping.best_metrics.get(
-                                            "rmse", 0.0
-                                        ),
-                                    }
-                                )
-
-                            swanlab.log(log_data, step=epoch)
-                        except ImportError:
-                            logger.warning(
-                                "SwanLab is not installed. Skipping Early Stopping logging."
-                            )
-
-                    # 更新最佳指标显示（放在 step 之后，确保 num_bad_epochs 已刷新）
-                    if best_metric_text is not None:
-                        best_epoch = getattr(self, "_best_epoch", None)
-                        patience = self.early_stopping.cfg.patience
-                        remaining = max(
-                            0, patience - self.early_stopping.num_bad_epochs
-                        )
-                        if hasattr(self, "_best_metric"):
-                            best_str = f"{self._best_metric:.4f}"
-                        else:
-                            best_str = "N/A"
-
-                        best_metric_text.plain = (
-                            f"Best {self._monitor_name()}: {best_str} "
-                            f"(Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}, "
-                            f"Patience: {remaining}/{patience})"
-                        )
-                        best_metric_text.stylize("bold yellow")
+                    best_metric_text.plain = (
+                        f"Best {self._monitor_name().upper()}: {best_str} "
+                        f"(Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}, "
+                        f"Patience: {remaining}/{patience})"
+                    )
+                    best_metric_text.stylize("bold yellow")
 
                 # 学习率调度器更新
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step()
 
-                # 保存检查点
-                self.checkpoint_manager.save_checkpoint(
-                    epoch,
-                    self.model,
-                    self.opt,
-                    self.lr_scheduler,
-                    early_stopping_state=self._get_early_stopping_state(),
-                    filename="last_checkpoint.pth",
-                )
-
                 # 更新总进度
                 progress.advance(total_task)
 
                 # 检查是否应该停止
-                if self.callback_manager.should_stop():
+                if self.callback_manager.should_stop(trainer=self):
                     progress.console.log(
                         f"[bold red]Early stopping triggered at epoch {epoch + 1}"
                     )
                     break
 
         logger.info("Training complete")
+        self.callback_manager.on_train_end(trainer=self)
         self._finish()
 
     def _process_epoch(
@@ -748,11 +967,12 @@ class BaseTrainer(ABC):
 
         self.metrics_accumulator.reset(phase)
         self.model.train() if is_train else self.model.eval()
+        self.callback_manager.on_phase_begin(epoch, phase, trainer=self)
 
         total_loss = 0.0
         for batch_idx, batch_data in enumerate(data_loader):
             # Batch 回调
-            self.callback_manager.on_batch_begin(epoch, batch_idx, phase)
+            self.callback_manager.on_batch_begin(epoch, batch_idx, phase, trainer=self)
 
             # 前向传播
             with torch.set_grad_enabled(is_train):
@@ -768,20 +988,18 @@ class BaseTrainer(ABC):
                 progress.advance(task_id)
 
             # Batch 结束回调
-            self.callback_manager.on_batch_end(epoch, batch_idx, phase, loss)
+            self.callback_manager.on_batch_end(
+                epoch, batch_idx, phase, loss, trainer=self
+            )
 
         # 聚合并记录指标
         metrics = self.metrics_accumulator.compute(phase)
         self.metrics_accumulator.log(phase, metrics, epoch)
 
-        # 保存最佳模型检查点（仅在验证阶段）
-        if not is_train and self.early_stopping is not None:
-            monitor_value = self._select_monitor_value(metrics, total_loss)
-            if monitor_value is not None:
-                self._save_best_model_checkpoint(monitor_value, epoch)
-
         # Phase 结束回调
-        self.callback_manager.on_phase_end(epoch, phase, total_loss, metrics)
+        self.callback_manager.on_phase_end(
+            epoch, phase, total_loss, metrics, trainer=self
+        )
 
         return total_loss
 
@@ -809,95 +1027,88 @@ class BaseTrainer(ABC):
 
         return loss.item()
 
+    @torch.no_grad()
+    def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
+        """执行一个测试批次。"""
+        output = self.test_forward_pass(batch_data)
+        loss = self._compute_loss(output)
+
+        # 累积预测
+        self.metrics_accumulator.update("test", output)
+
+        return loss.item()
+
+    @torch.no_grad()
+    def _evaluate_on_test_set(self, use_best_model: bool = True) -> dict[str, float]:
+        """训练结束后在测试集上评估并记录指标。"""
+        if self.test_data is None:
+            logger.info("Test data not provided. Skipping test evaluation.")
+            return {}
+
+        best_state = None
+        if use_best_model and self.early_stopping is not None:
+            checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
+            if checkpoint_cb is not None and checkpoint_cb.best_model_state is not None:
+                best_state = checkpoint_cb.best_model_state
+
+        if best_state is not None:
+            current_state = {
+                key: value.detach().cpu().clone()
+                for key, value in self.model.state_dict().items()
+            }
+            self.model.load_state_dict(best_state)
+        else:
+            current_state = None
+
+        self.metrics_accumulator.reset("test")
+        self.model.eval()
+
+        # 创建测试阶段进度条
+        test_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(bar_width=None),
+            TaskProgressColumn(),
+            MofNCompleteColumn(),
+            TimeRemainingColumn(),
+            expand=True,
+        )
+
+        total_loss = 0.0
+        with test_progress:
+            test_task = test_progress.add_task(
+                "[bold magenta]Testing", total=len(self.test_data)
+            )
+            for batch_data in self.test_data:
+                loss = self._run_test_batch(batch_data)
+                total_loss += loss
+                test_progress.advance(test_task)
+
+        metrics = self.metrics_accumulator.compute("test")
+        self.metrics_accumulator.log("test", metrics, epoch=self.epochs or 0)
+
+        if metrics:
+            metrics_str = ", ".join(
+                f"{name.upper()}={value:.4f}" for name, value in metrics.items()
+            )
+            logger.info(f"Test metrics: {metrics_str}")
+
+        if current_state is not None:
+            self.model.load_state_dict(current_state)
+
+        return metrics
+
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
         """计算损失。"""
         y_hat = outputs["y_hat"]
         y_label = outputs["y_label"]
         return self.loss(y_hat, y_label)
 
-    def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
-        """根据配置选择监控指标的值。"""
-        if self.early_stopping is None:
-            name = "auc"
-        else:
-            name = (self.early_stopping.cfg.monitor or "auc").lower()
-
-        value = None
-        if name == "loss":
-            value = float(val_loss) if val_loss is not None else None
-        elif name in metrics:
-            value = metrics[name]
-
-        # 回退策略
-        if value is None:
-            if metrics.get("auc") is not None:
-                value = float(metrics["auc"])
-            elif metrics.get("acc") is not None:
-                value = float(metrics["acc"])
-            elif metrics.get("rmse") is not None:
-                value = float(metrics["rmse"])
-
-        # 如果仍然是 None，返回一个极差的值
-        if value is None:
-            if name in ["loss", "rmse"]:
-                return float("inf")
-            return float("-inf")
-        return float(value)
-
-    def _get_early_stopping_state(self) -> dict | None:
-        """获取早停状态。"""
-        if self.early_stopping is None:
-            return None
-        state = {
-            "best_score": self.early_stopping.best_score,
-            "best_epoch": self.early_stopping.best_epoch,
-            "num_bad_epochs": self.early_stopping.num_bad_epochs,
-        }
-        # 保存完整指标
-        if self.early_stopping.best_metrics is not None:
-            state["best_metrics"] = self.early_stopping.best_metrics.copy()
-        return state
-
     def _monitor_name(self) -> str:
         """获取早停监控指标名称。"""
         if self.early_stopping is None:
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
-
-    def _save_best_model_checkpoint(self, metric: float, epoch: int):
-        """保存最佳模型检查点。
-
-        Args:
-            metric: 用于判断最佳模型的指标值
-            epoch: 当前 epoch
-        """
-        # 确定比较模式 (min 或 max)
-        mode = "max"
-        if self.early_stopping:
-            mode = self.early_stopping.cfg.mode
-        else:
-            # 默认推断
-            name = self._monitor_name()
-            if name in ["rmse", "loss"]:
-                mode = "min"
-
-        is_better = False
-        if not hasattr(self, "_best_metric"):
-            is_better = True
-        else:
-            is_better = (
-                metric > self._best_metric
-                if mode == "max"
-                else metric < self._best_metric
-            )
-
-        if is_better:
-            self._best_metric = metric
-            self._best_epoch = epoch
-            logger.info(
-                f"Saving best model at epoch {epoch + 1} with {self._monitor_name()} {metric:.4f}"
-            )
-            self.checkpoint_manager.save_weights(self.model, "best_model.pth")
 
     def _finish(self):
         """清理资源，结束实验追踪。"""

@@ -30,6 +30,7 @@ class UniversalRegistry:
         self._name = name
         self._namespace = namespace
         self._registry: dict[str, type[T]] = {}
+        self._lazy_registry: dict[str, tuple[str, str | None]] = {}
 
     @property
     def full_name(self) -> str:
@@ -60,8 +61,22 @@ class UniversalRegistry:
 
         return _register
 
+    def register_lazy(
+        self, name: str, module_path: str, attr_name: str | None = None
+    ) -> None:
+        """延迟注册组件，在调用 get() 时才真正导入。
+
+        Args:
+            name: 注册名称
+            module_path: 模块路径，如 "model.GIKT.GIKT_trainer"
+            attr_name: 属性名，如 "GIKTTrainer"。如果为 None，则导入模块本身
+        """
+        self._lazy_registry[name] = (module_path, attr_name)
+
     def get(self, name: str) -> type[T]:
         """获取已注册的组件。
+
+        支持延迟加载：如果组件通过 register_lazy() 注册，会在首次调用时导入。
 
         Args:
             name: 组件名称
@@ -72,20 +87,31 @@ class UniversalRegistry:
         Raises:
             KeyError: 如果组件未找到
         """
+        # 检查延迟注册
+        if name in self._lazy_registry:
+            import importlib
+
+            module_path, attr_name = self._lazy_registry.pop(name)
+            module = importlib.import_module(module_path)
+            cls = getattr(module, attr_name) if attr_name else module
+            # 注册到实际注册表
+            self._registry[name] = cls
+            return cls
+
         if name not in self._registry:
-            available = ", ".join(self._registry.keys())
+            available = ", ".join(self.keys())
             raise KeyError(
                 f"'{name}' not found in '{self.full_name}'. Available: {available}"
             )
         return self._registry[name]
 
-    def keys(self) -> list:
-        """获取所有已注册的名称。"""
-        return list(self._registry.keys())
+    def keys(self) -> list[str]:
+        """获取所有已注册的名称（包括延迟注册）。"""
+        return list(self._registry.keys()) + list(self._lazy_registry.keys())
 
     def __contains__(self, name: str) -> bool:
-        """检查组件是否已注册。"""
-        return name in self._registry
+        """检查组件是否已注册（包括延迟注册）。"""
+        return name in self._registry or name in self._lazy_registry
 
     def __repr__(self) -> str:
         return f"UniversalRegistry('{self.full_name}', items={self.keys()})"

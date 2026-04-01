@@ -5,7 +5,7 @@ from typing_extensions import override
 
 from utils.core import get_logger
 from utils.data_process import DataSource
-from utils.net_data import GraphModelData
+from utils.model_data import QuestionModelData
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,7 @@ class GIKTEdmineDataset(Dataset):
         return len(self.sequences)
 
 
-class GIKTEdmineModelData(GraphModelData):
+class GIKTEdmineModelData(QuestionModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
@@ -38,13 +38,9 @@ class GIKTEdmineModelData(GraphModelData):
         """
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
-        max_seq_len = self.data_src.get_metadata("max_seq_len")
-        min_seq_len = self.data_src.get_metadata("min_seq_len")
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            max_seq_len, min_seq_len
-        )
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
         # 构建问题-技能关联矩阵
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
@@ -73,21 +69,21 @@ class GIKTEdmineModelData(GraphModelData):
             logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
-            train_data, val_data = self.split_kfold_data(
+            train_data, val_data, test_data = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
         else:
-            train_data, val_data = self.split_data(
-                user_sequence, user_response, user_mask
-            )
+            raise ValueError("fold_idx must be specified for K-fold cross-validation.")
 
         # 构建模型数据集
         train_dataset = GIKTEdmineDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = GIKTEdmineDataset(val_data[0], val_data[1], val_data[2])
+        test_dataset = GIKTEdmineDataset(test_data[0], test_data[1], test_data[2])
 
         return (
             train_dataset,
             val_dataset,
+            test_dataset,
             question_neighbors,
             concept_neighbors,
             q_table,

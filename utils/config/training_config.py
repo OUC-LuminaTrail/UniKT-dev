@@ -118,9 +118,11 @@ class DataConfig:
 
     train_data: Any = None
     val_data: Any = None
+    test_data: Any = None
     batch_size: int = 128
     collate_fn: Callable | None = None
     val_collate_fn: Callable | None = None
+    test_collate_fn: Callable | None = None
 
 
 @dataclass
