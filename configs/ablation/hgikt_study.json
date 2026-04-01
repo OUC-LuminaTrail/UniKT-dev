@@ -62,6 +62,21 @@
       "name": "concat_fusion",
       "variant": "HGIKT_ConcatFusion",
       "description": "保留双图，使用 concat + 线性层融合"
+    },
+    {
+      "name": "qs_qt_only",
+      "variant": "HGIKT_QS_QT_Only",
+      "description": "异构图中只保留 QS+QT 边"
+    },
+    {
+      "name": "qs_sa_only",
+      "variant": "HGIKT_QS_SA_Only",
+      "description": "异构图中只保留 QS+SA 边"
+    },
+    {
+      "name": "hyper_only_unweighted",
+      "variant": "HGIKT_Hyper_Only_Unweighted",
+      "description": "超图分支，无难度加权"
     }
   ]
 }

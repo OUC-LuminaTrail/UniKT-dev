@@ -78,19 +78,18 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
         """HGIKT forward pass for inference.
 
         Args:
-            batch_data: Tuple of (users, sequence, response, mask)
+            batch_data: Tuple of (sequence, response, mask)
 
         Returns:
             Dictionary with y_hat (flattened), y_label (flattened), y_predict,
             full_y_hat (unflattened), and knowledge_states (for visualization)
         """
-        users, sequence, response, mask = batch_data
-        users = self._move_tensor_to_device(users)
+        sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
