@@ -1,7 +1,7 @@
 """Data preparation for HGIKT_QS_QT_Only variant."""
 
-from typing_extensions import override
 import torch
+from typing_extensions import override
 
 from model.HGIKT.HGIKT_data import HGIKTDataset, HGIKTModelData
 from utils.core import get_logger
@@ -15,24 +15,7 @@ class HGIKTQSQTOnlyData(HGIKTModelData):
     @override
     def prepare_data(self, args):
         fold_idx = args.fold if args.fold >= 0 else None
-        max_seq_len = self.data_src.get_metadata("max_seq_len")
-        min_seq_len = self.data_src.get_metadata("min_seq_len")
-
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data(
-            max_seq_len, min_seq_len
-        )
-
-        # Apply sampling for ednet and assistments12 datasets
-        dataset_name = getattr(args, "dataset", "").lower()
-        if "ednet" in dataset_name or "assistments12" in dataset_name:
-            sample_size = 5000
-            if len(user_sequence) > sample_size:
-                logger.info(f"Sampling {sample_size} users for {dataset_name} dataset")
-                import numpy as np
-                indices = np.random.choice(len(user_sequence), sample_size, replace=False)
-                user_sequence = user_sequence[indices]
-                user_response = user_response[indices]
-                user_mask = user_mask[indices]
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
@@ -50,7 +33,7 @@ class HGIKTQSQTOnlyData(HGIKTModelData):
             f"Hetero graph for QS_QT_Only: Node types: {hetero_graph.node_types}, Edge types: {hetero_graph.edge_types}"
         )
 
-        # Build default hypergraph (though it may be bypassed in model, we keep it for pipeline consistency)
+        # Build default hypergraph
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
             num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),

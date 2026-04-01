@@ -3,6 +3,7 @@
 Heterogeneous graph only contains question-skill edges.
 """
 
+import torch
 from typing_extensions import override
 
 from model.HGIKT.HGIKT_data import HGIKTDataset, HGIKTModelData
@@ -29,19 +30,7 @@ class HGIKTQuestionSkillOnlyData(HGIKTModelData):
 
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-        # Apply sampling for ednet and assistments12 datasets
-        dataset_name = getattr(args, "dataset", "").lower()
-        if "ednet" in dataset_name or "assistments12" in dataset_name:
-            sample_size = 5000
-            if len(user_sequence) > sample_size:
-                logger.info(f"Sampling {sample_size} users for {dataset_name} dataset")
-                import numpy as np
-                indices = np.random.choice(len(user_sequence), sample_size, replace=False)
-                user_sequence = user_sequence[indices]
-                user_response = user_response[indices]
-                user_mask = user_mask[indices]
 
-        import torch
 
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
