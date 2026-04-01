@@ -56,6 +56,21 @@ TRAINERS.register_lazy(
     "model.HGIKT.variants.hgikt_hyper_only_simple_trainer",
     "HGIKTHyperOnlySimpleTrainer",
 )
+TRAINERS.register_lazy(
+    "HGIKT_Hyper_Only_Unweighted",
+    "model.HGIKT.variants.hgikt_hyper_only_unweighted_trainer",
+    "HGIKTHyperOnlyUnweightedTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_QS_QT_Only",
+    "model.HGIKT.variants.hgikt_qs_qt_only_trainer",
+    "HGIKTQSSAOnlyTrainer",
+)
+TRAINERS.register_lazy(
+    "HGIKT_QS_SA_Only",
+    "model.HGIKT.variants.hgikt_qs_sa_only_trainer",
+    "HGIKTQSSAOnlyTrainer",
+)
 
 # =============================================================================
 # 参数配置延迟注册
@@ -108,4 +123,19 @@ PARAM_CONFIGS.register_lazy(
     "HGIKT_HyperOnlySimple",
     "model.HGIKT.variants.hgikt_hyper_only_simple_trainer",
     "HGIKTHyperOnlySimpleModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_Hyper_Only_Unweighted",
+    "model.HGIKT.variants.hgikt_hyper_only_unweighted_trainer",
+    "HGIKTHyperOnlyUnweightedModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_QS_QT_Only",
+    "model.HGIKT.variants.hgikt_qs_qt_only_trainer",
+    "HGIKTQSSAOnlyModelParams",
+)
+PARAM_CONFIGS.register_lazy(
+    "HGIKT_QS_SA_Only",
+    "model.HGIKT.variants.hgikt_qs_sa_only_trainer",
+    "HGIKTQSSAOnlyModelParams",
 )
