@@ -64,12 +64,12 @@ class BaseParamConfig(ABC):
             kwargs.setdefault("help", "")
             kwargs.setdefault("required", False)
 
-            if cfg["type"] is bool:
+            if cfg.get("type") is bool:
                 kwargs.setdefault(
                     "action",
                     "store_false" if kwargs.get("default") is True else "store_true",
                 )
-            else:
+            elif "type" in cfg:
                 kwargs["type"] = cfg["type"]
 
             group.add_argument(*arg_names, **kwargs)
