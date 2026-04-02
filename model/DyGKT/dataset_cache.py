@@ -1,6 +1,6 @@
-"""Dataset caching mechanism for DYGKT to avoid repeated preprocessing.
+"""Dataset caching mechanism for DyGKT to avoid repeated preprocessing.
 
-This module provides utilities to cache preprocessed DYGKT datasets,
+This module provides utilities to cache preprocessed DyGKT datasets,
 significantly reducing training start time for repeated runs.
 """
 

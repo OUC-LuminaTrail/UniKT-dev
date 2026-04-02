@@ -1,6 +1,4 @@
-"""DYGKT model implementation."""
-
-from __future__ import annotations
+"""DyGKT model implementation."""
 
 from typing import Any
 
@@ -115,7 +113,7 @@ class TimeDualDecayEncoder(nn.Module):
 
 
 class MergeLayer(nn.Module):
-    """Link predictor for DYGKT."""
+    """Link predictor for DyGKT."""
 
     def __init__(
         self, input_dim1: int, input_dim2: int, hidden_dim: int, output_dim: int
@@ -131,7 +129,7 @@ class MergeLayer(nn.Module):
 
 
 class DyKTSeq(nn.Module):
-    """GRU updater block for DYGKT."""
+    """GRU updater block for DyGKT."""
 
     def __init__(self, edge_dim: int, node_dim: int) -> None:
         super().__init__()
@@ -145,8 +143,8 @@ class DyKTSeq(nn.Module):
         return torch.squeeze(hidden, dim=0)
 
 
-@register_model("DYGKT")
-class DYGKT(nn.Module):
+@register_model("DyGKT")
+class DyGKT(nn.Module):
     """Dynamic Graph-based Knowledge Tracing model."""
 
     def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:

@@ -1,4 +1,4 @@
-"""DYGKT model trainer."""
+"""DyGKT model trainer."""
 
 import time
 from typing import Any
@@ -19,7 +19,7 @@ from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
 
-__all__ = ["DYGKTTrainer", "DYGKTModelParams"]
+__all__ = ["DyGKTTrainer", "DyGKTModelParams"]
 
 
 class _IndexDataset(Dataset):
@@ -35,12 +35,12 @@ class _IndexDataset(Dataset):
         return int(index)
 
 
-@register_model_params("DYGKT")
-class DYGKTModelParams(BaseParamConfig):
-    """DYGKT model parameters."""
+@register_model_params("DyGKT")
+class DyGKTModelParams(BaseParamConfig):
+    """DyGKT model parameters."""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "DYGKT Parameters"
+        group_name = "DyGKT Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -85,7 +85,7 @@ class DYGKTModelParams(BaseParamConfig):
                 "type": str,
                 "default": "time_decay",
                 "choices": ["recent", "time_decay"],
-                "help": "Neighbor sampling strategy in DYGKT data layer: recent truncation or time-decay weighted sampling (default: time_decay).",
+                "help": "Neighbor sampling strategy in DyGKT data layer: recent truncation or time-decay weighted sampling (default: time_decay).",
             },
             "time_decay_factor": {
                 "type": float,
@@ -106,7 +106,7 @@ class DYGKTModelParams(BaseParamConfig):
                 "type": str,
                 "default": "kfold",
                 "choices": ["kfold", "time_quantile"],
-                "help": "Data split protocol for DYGKT: kfold (project default) or time_quantile (original DyGKT-like).",
+                "help": "Data split protocol for DyGKT: kfold (project default) or time_quantile (original DyGKT-like).",
             },
             "dygkt_val_ratio": {
                 "type": float,
@@ -126,22 +126,22 @@ class DYGKTModelParams(BaseParamConfig):
             "compat_fields": {
                 "type": bool,
                 "default": False,
-                "help": "Whether to generate legacy compatibility fields in DYGKT dataset (default: False, faster)",
+                "help": "Whether to generate legacy compatibility fields in DyGKT dataset (default: False, faster)",
             },
             "no_cache": {
                 "type": bool,
                 "default": False,
-                "help": "Disable DYGKT dataset cache and force rebuilding preprocessing artifacts",
+                "help": "Disable DyGKT dataset cache and force rebuilding preprocessing artifacts",
             },
             "cache_dir": {
                 "type": str,
                 "default": None,
-                "help": "Directory for DYGKT dataset cache (default: ./cache/dygkt)",
+                "help": "Directory for DyGKT dataset cache (default: ./cache/dygkt)",
             },
             "cache_version": {
                 "type": int,
                 "default": 2,
-                "help": "Manual cache version to invalidate stale DYGKT cache entries (default: 2)",
+                "help": "Manual cache version to invalidate stale DyGKT cache entries (default: 2)",
             },
             "graph_neg_sampling": {
                 "type": bool,
@@ -238,9 +238,9 @@ class DYGKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("DYGKT")
-class DYGKTTrainer(BaseTrainer):
-    """DYGKT 模型训练器"""
+@TRAINERS.register("DyGKT")
+class DyGKTTrainer(BaseTrainer):
+    """DyGKT 模型训练器"""
 
     def __init__(
         self,
@@ -279,23 +279,23 @@ class DYGKTTrainer(BaseTrainer):
         self._profile_logged = False
         if self.profile_batches > 0:
             logger.info(
-                "DYGKT profiling enabled for first %s train batches",
+                "DyGKT profiling enabled for first %s train batches",
                 self.profile_batches,
             )
 
         # 1. 准备数据
-        from model.DYGKT import DYGKTModelData
+        from model.DyGKT import DyGKTModelData
 
-        model_data = DYGKTModelData(data_src)
+        model_data = DyGKTModelData(data_src)
         train_dataset, val_dataset, test_dataset, model_metadata = (
             model_data.prepare_data(args)
         )
 
         # 2. 初始化模型
-        from model.DYGKT.DYGKT_model import DYGKT
+        from model.DyGKT.DyGKT_model import DyGKT
 
-        logger.info("Initializing DYGKT model...")
-        model = DYGKT(args, model_metadata)
+        logger.info("Initializing DyGKT model...")
+        model = DyGKT(args, model_metadata)
 
         # Keep train batches chronological to match the original DyGKT setup.
         loader_device = (
@@ -368,7 +368,7 @@ class DYGKTTrainer(BaseTrainer):
         )
 
         # 3. 创建优化器和损失函数
-        # DYGKT 模型现在返回 logits，对应 BCEWithLogitsLoss。
+        # DyGKT 模型现在返回 logits，对应 BCEWithLogitsLoss。
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
@@ -417,7 +417,7 @@ class DYGKTTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="DYGKT",
+            model_name="DyGKT",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
@@ -472,14 +472,14 @@ class DYGKTTrainer(BaseTrainer):
                 ratio = avg_wait / max(avg_compute, 1e-12)
 
                 logger.info(
-                    "DYGKT profile summary (%s batches): avg_wait_data=%.4fs, avg_compute=%.4fs, wait/compute=%.2f",
+                    "DyGKT profile summary (%s batches): avg_wait_data=%.4fs, avg_compute=%.4fs, wait/compute=%.2f",
                     self.profile_batches,
                     avg_wait,
                     avg_compute,
                     ratio,
                 )
                 logger.info(
-                    "DYGKT profile breakdown per batch (s): zero_grad=%.4f, forward=%.4f, loss=%.4f, backward=%.4f, clip=%.4f, step=%.4f",
+                    "DyGKT profile breakdown per batch (s): zero_grad=%.4f, forward=%.4f, loss=%.4f, backward=%.4f, clip=%.4f, step=%.4f",
                     self._profile_sums["zero_grad"] / self.profile_batches,
                     self._profile_sums["forward"] / self.profile_batches,
                     self._profile_sums["loss"] / self.profile_batches,
@@ -587,7 +587,7 @@ class DYGKTTrainer(BaseTrainer):
         return loss.item()
 
     def forward_pass(self, batch_data: dict) -> dict[str, torch.Tensor]:
-        """DYGKT 前向传播（接受 batch 字典）。
+        """DyGKT 前向传播（接受 batch 字典）。
 
         Args:
             batch_data: 字典，包含所有交互信息和历史邻居
@@ -595,7 +595,7 @@ class DYGKTTrainer(BaseTrainer):
         Returns:
             包含 y_hat, y_label, y_predict 等的字典
         """
-        # batch_data 已经是字典格式（由 DYGKTDataset.__getitem__ 返回）
+        # batch_data 已经是字典格式（由 DyGKTDataset.__getitem__ 返回）
         # 移动所有张量到设备
         batch = {}
         for key, value in batch_data.items():

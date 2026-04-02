@@ -1,6 +1,4 @@
-"""Data pipeline for DYGKT."""
-
-from __future__ import annotations
+"""Data pipeline for DyGKT."""
 
 from typing import Any
 
@@ -16,7 +14,7 @@ from utils.model_data import QuestionModelData
 logger = get_logger(__name__)
 
 
-class DYGKTDataset(Dataset):
+class DyGKTDataset(Dataset):
     """Per-interaction dataset with prebuilt user/question histories."""
 
     def __init__(
@@ -43,7 +41,7 @@ class DYGKTDataset(Dataset):
         self.que_sim_matrix = que_sim_matrix  # Pre-computed similarity matrix
 
         self.num_neighbor = int(self.dataset_config["num_neighbor"])
-        # Compatibility fields are expensive and not used by current DYGKT model/trainer.
+        # Compatibility fields are expensive and not used by current DyGKT model/trainer.
         self.compat_fields = bool(self.dataset_config.get("compat_fields", False))
         self.neighbor_sampling_strategy = str(
             self.dataset_config.get("neighbor_sampling_strategy", "time_decay")
@@ -257,7 +255,7 @@ class DYGKTDataset(Dataset):
         num_neighbor = int(self.dataset_config["num_neighbor"])
 
         logger.info(
-            "DYGKT: building interaction records (strategy=%s, decay=%.2e, pool=%s)...",
+            "DyGKT: building interaction records (strategy=%s, decay=%.2e, pool=%s)...",
             self.neighbor_sampling_strategy,
             self.time_decay_factor,
             self.neighbor_candidate_pool,
@@ -370,7 +368,7 @@ class DYGKTDataset(Dataset):
 
                 n += 1
 
-        logger.info("DYGKT: building question histories with temporal sampling...")
+        logger.info("DyGKT: building question histories with temporal sampling...")
 
         # Build question histories after per-question sorting.
         # For equal timestamps, keep strict < t behavior by assigning sampled
@@ -440,7 +438,7 @@ class DYGKTDataset(Dataset):
         )
 
         logger.info(
-            "DYGKT dataset built: total interactions=%s, target interactions=%s",
+            "DyGKT dataset built: total interactions=%s, target interactions=%s",
             len(self.dataset_converted["idx"]),
             len(self.target_positions),
         )
@@ -525,8 +523,8 @@ class DYGKTDataset(Dataset):
                 self.history_feature_tensors[key] = padded
 
 
-class DYGKTModelData(QuestionModelData):
-    """Data adapter for DYGKT in kt-exp-graph."""
+class DyGKTModelData(QuestionModelData):
+    """Data adapter for DyGKT in kt-exp-graph."""
 
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
@@ -551,7 +549,7 @@ class DYGKTModelData(QuestionModelData):
                 return cached_data
             logger.info("Cache miss, building dataset from scratch...")
         else:
-            logger.info("DYGKT dataset cache disabled (--no_cache)")
+            logger.info("DyGKT dataset cache disabled (--no_cache)")
 
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
         num_questions = int(q_table.shape[0])
@@ -623,7 +621,7 @@ class DYGKTModelData(QuestionModelData):
             val_target_user_ids = self._extract_user_ids(val_records, num_questions)
             test_target_user_ids = self._extract_user_ids(test_records, num_questions)
         else:
-            logger.info("Using time_quantile split for DYGKT")
+            logger.info("Using time_quantile split for DyGKT")
 
         # For large question vocab, full NxN similarity is too expensive.
         max_similarity_matrix_questions = int(
@@ -666,13 +664,13 @@ class DYGKTModelData(QuestionModelData):
                 max_similarity_matrix_questions,
             )
 
-        train_dataset = DYGKTDataset(
+        train_dataset = DyGKTDataset(
             dataset_config, train_records, q_table, que_sim_matrix=que_sim_matrix
         )
 
         val_history_records = train_records + val_records
         if split_protocol == "time_quantile":
-            val_dataset = DYGKTDataset(
+            val_dataset = DyGKTDataset(
                 dataset_config,
                 val_history_records,
                 q_table,
@@ -680,7 +678,7 @@ class DYGKTModelData(QuestionModelData):
                 que_sim_matrix=que_sim_matrix,
             )
         else:
-            val_dataset = DYGKTDataset(
+            val_dataset = DyGKTDataset(
                 dataset_config,
                 val_history_records,
                 q_table,
@@ -690,7 +688,7 @@ class DYGKTModelData(QuestionModelData):
 
         test_history_records = train_records + val_records + test_records
         if split_protocol == "time_quantile":
-            test_dataset = DYGKTDataset(
+            test_dataset = DyGKTDataset(
                 dataset_config,
                 test_history_records,
                 q_table,
@@ -698,7 +696,7 @@ class DYGKTModelData(QuestionModelData):
                 que_sim_matrix=que_sim_matrix,
             )
         else:
-            test_dataset = DYGKTDataset(
+            test_dataset = DyGKTDataset(
                 dataset_config,
                 test_history_records,
                 q_table,
@@ -777,7 +775,7 @@ class DYGKTModelData(QuestionModelData):
 
         if scale > 1:
             logger.warning(
-                "DYGKT detected %s timestamps (median=%s); normalizing to seconds by /%s.",
+                "DyGKT detected %s timestamps (median=%s); normalizing to seconds by /%s.",
                 detected_unit,
                 median_abs,
                 scale,
@@ -863,7 +861,7 @@ class DYGKTModelData(QuestionModelData):
                 test_rows.append(row)
 
         logger.info(
-            "DYGKT time-quantile split: train=%s, val=%s, test=%s, val_time=%.3f, test_time=%.3f",
+            "DyGKT time-quantile split: train=%s, val=%s, test=%s, val_time=%.3f, test_time=%.3f",
             len(train_rows),
             len(val_rows),
             len(test_rows),

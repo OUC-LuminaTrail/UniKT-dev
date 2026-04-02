@@ -187,9 +187,9 @@ class SQGKTModelData(QuestionModelData):
         self.logger.info("Building user-question table with factors...")
         from scipy.stats import poisson
 
-        # 获取数据
-        data = self.data_src.sequence_data
-        num_users = self.data_src.get_metadata("num_users")
+        # 获取切分后的序列数据（用户ID已重新分配）
+        data = self.data_src.get_split_question_sequence_data().to_pandas()
+        num_users = self.data_src.get_metadata("num_split_question_users")
         num_questions = self.data_src.get_metadata("num_questions")
 
         # 创建三维表
