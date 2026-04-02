@@ -263,9 +263,9 @@ class SelfAttentionHistory(nn.Module):
                 batch_size, -1, -1
             )
         diff = input_embedding - input_embedding[:, :, 0:1]
-        transformed1 = torch.einsum("bsh,st->bth", diff, self.xt1)
+        transformed1 = torch.einsum("buh,us->bsh", diff, self.xt1)
         exp_transformed = torch.exp(transformed1)
-        transformed2 = torch.einsum("bsh,st->bth", exp_transformed, self.xt2)
+        transformed2 = torch.einsum("bvh,vs->bsh", exp_transformed, self.xt2)
         input_embedding_transformed = transformed2 + self.xita.unsqueeze(0).unsqueeze(
             -1
         )
