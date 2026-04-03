@@ -263,9 +263,9 @@ class SelfAttentionHistory(nn.Module):
                 batch_size, -1, -1
             )
         diff = input_embedding - input_embedding[:, :, 0:1]
-        transformed1 = torch.einsum("bsh,st->bth", diff, self.xt1)
+        transformed1 = torch.einsum("buh,us->bsh", diff, self.xt1)
         exp_transformed = torch.exp(transformed1)
-        transformed2 = torch.einsum("bsh,st->bth", exp_transformed, self.xt2)
+        transformed2 = torch.einsum("bvh,vs->bsh", exp_transformed, self.xt2)
         input_embedding_transformed = transformed2 + self.xita.unsqueeze(0).unsqueeze(
             -1
         )
@@ -376,6 +376,12 @@ class SGKT(nn.Module):
         self.hidden_dim = args.hidden_dim
         self.dropout_keep_probs = args.dropout_keep_probs
 
+        assert self.embedding_dim == self.hidden_dim, (
+            f"SGKT requires embedding_dim == hidden_dim for dimension consistency "
+            f"in student_status concatenation. Got embedding_dim={self.embedding_dim}, "
+            f"hidden_dim={self.hidden_dim}."
+        )
+
         self.feature_embedding = nn.Embedding(
             self.num_skills + self.num_questions + 2, self.embedding_dim
         )
@@ -467,10 +473,6 @@ class SGKT(nn.Module):
         next_neighbors = self.hrg_embedding.sample_next_neighbors(
             hrg_context["next_aggregate_embedding"],
             num_samples=hrg_data["next_neighbor_num"],
-        )
-
-        next_neighbors = self.feature_trans_activation(
-            self.feature_trans(next_neighbors)
         )
 
         output_series = output_series[:, : hist_neighbors_combined.size(1), :]
