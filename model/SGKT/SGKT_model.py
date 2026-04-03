@@ -376,6 +376,12 @@ class SGKT(nn.Module):
         self.hidden_dim = args.hidden_dim
         self.dropout_keep_probs = args.dropout_keep_probs
 
+        assert self.embedding_dim == self.hidden_dim, (
+            f"SGKT requires embedding_dim == hidden_dim for dimension consistency "
+            f"in student_status concatenation. Got embedding_dim={self.embedding_dim}, "
+            f"hidden_dim={self.hidden_dim}."
+        )
+
         self.feature_embedding = nn.Embedding(
             self.num_skills + self.num_questions + 2, self.embedding_dim
         )
@@ -467,10 +473,6 @@ class SGKT(nn.Module):
         next_neighbors = self.hrg_embedding.sample_next_neighbors(
             hrg_context["next_aggregate_embedding"],
             num_samples=hrg_data["next_neighbor_num"],
-        )
-
-        next_neighbors = self.feature_trans_activation(
-            self.feature_trans(next_neighbors)
         )
 
         output_series = output_series[:, : hist_neighbors_combined.size(1), :]
