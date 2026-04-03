@@ -7,6 +7,47 @@
 
 set -euo pipefail
 
+# ==============================================================================
+# Version Configuration
+# ==============================================================================
+# Common versions (shared across all features)
+TORCH_VER="2.10.0"
+PYG_LIB_VER="==0.6.0"
+TORCH_SCATTER_VER="==2.1.2"
+TORCH_GEOMETRIC_VER="==2.7.0"
+POLARS_VER=">=1.39.3,<2"
+PANDAS_VER="==3.0.2"
+SKLEARN_VER="==1.8.0"
+OPTUNA_VER="==4.8.0"
+PYARROW_VER=">=23.0.0,<24"
+PYTHON_DOTENV_VER=">=1.2.1,<2"
+RUFF_VER=">=0.15,<0.16"
+PYTEST_VER=">=9.0.2,<10"
+SEABORN_VER=">=0.13.2,<0.14"
+MATPLOTLIB_VER=">=3.10.8,<4"
+SWANLAB_VER=">=0.7.13,<0.8"
+DHG_VER=""
+PY_VER="3.12"
+CUDA_VER="cu128"
+
+# DHG-specific version overrides (applied when feature is dhg-gpu or dhg-cpu)
+DHG_TORCH_VER="1.13.1"
+DHG_PYG_LIB_VER=">=0.4.0,<0.5"
+DHG_TORCH_SCATTER_VER="==2.1.1"
+DHG_TORCH_GEOMETRIC_VER=">=2.7.0,<3"
+DHG_POLARS_VER=">=1.38.1,<2"
+DHG_PANDAS_VER=">=2.3.3,<3"
+DHG_SKLEARN_VER=">=1.7.2,<2"
+DHG_OPTUNA_VER=">=4.6.0,<5"
+DHG_PYARROW_VER=">=12.0.1,<13"
+DHG_PY_VER="3.10"
+DHG_CUDA_VER_GPU="cu117"
+DHG_CUDA_VER_CPU="cpu"
+DHG_DHGA_VER="==0.9.*"
+
+# ==============================================================================
+# Runtime Variables
+# ==============================================================================
 ENV_NAME="kt-exp"
 FEATURE=""
 FORCE=0
@@ -155,63 +196,38 @@ case "$FEATURE" in
   *) echo "Error: Invalid feature '$FEATURE'. Must be one of: gpu, cpu, dhg-gpu, dhg-cpu"; exit 1 ;;
 esac
 
-# Set configuration based on feature
+# Set configuration based on feature (override defaults for DHG environments)
 case "$FEATURE" in
-  gpu)
-    PY_VER="3.12"
-    CUDA_VER="cu128"
-    TORCH_VER="2.10.0"
-    PYG_LIB_VER="0.6.0"
-    TORCH_SCATTER_VER="2.1.2"
-    TORCH_GEOMETRIC_VER="2.7.0"
-    POLARS_VER=">=1.39.3,<2"
-    PANDAS_VER="3.0.2"
-    SKLEARN_VER="1.8.0"
-    OPTUNA_VER="4.8.0"
-    PYARROW_VER=">=23.0.0,<24"
-    DHG=""
-    ;;
   cpu)
-    PY_VER="3.12"
     CUDA_VER="cpu"
-    TORCH_VER="2.10.0"
-    PYG_LIB_VER="0.6.0"
-    TORCH_SCATTER_VER="2.1.2"
-    TORCH_GEOMETRIC_VER="2.7.0"
-    POLARS_VER=">=1.39.3,<2"
-    PANDAS_VER="3.0.2"
-    SKLEARN_VER="1.8.0"
-    OPTUNA_VER="4.8.0"
-    PYARROW_VER=">=23.0.0,<24"
-    DHG=""
     ;;
   dhg-gpu)
-    PY_VER="3.10"
-    CUDA_VER="cu117"
-    TORCH_VER="1.13.1"
-    PYG_LIB_VER=">=0.4.0,<0.5"
-    TORCH_SCATTER_VER="2.1.1"
-    TORCH_GEOMETRIC_VER=">=2.7.0,<3"
-    POLARS_VER=">=1.38.1,<2"
-    PANDAS_VER=">=2.3.3,<3"
-    SKLEARN_VER=">=1.7.2,<2"
-    OPTUNA_VER=">=4.6.0,<5"
-    PYARROW_VER=">=12.0.1,<13"
-    DHG="==0.9.*"
+    PY_VER="$DHG_PY_VER"
+    CUDA_VER="$DHG_CUDA_VER_GPU"
+    TORCH_VER="$DHG_TORCH_VER"
+    PYG_LIB_VER="$DHG_PYG_LIB_VER"
+    TORCH_SCATTER_VER="$DHG_TORCH_SCATTER_VER"
+    TORCH_GEOMETRIC_VER="$DHG_TORCH_GEOMETRIC_VER"
+    POLARS_VER="$DHG_POLARS_VER"
+    PANDAS_VER="$DHG_PANDAS_VER"
+    SKLEARN_VER="$DHG_SKLEARN_VER"
+    OPTUNA_VER="$DHG_OPTUNA_VER"
+    PYARROW_VER="$DHG_PYARROW_VER"
+    DHG_VER="$DHG_DHGA_VER"
     ;;
   dhg-cpu)
-    PY_VER="3.10"
-    CUDA_VER="cpu"
-    TORCH_VER="1.13.1"
-    PYG_LIB_VER=">=0.4.0,<0.5"
-    TORCH_SCATTER_VER="2.1.1"
-    TORCH_GEOMETRIC_VER=">=2.7.0,<3"
-    POLARS_VER=">=1.38.1,<2"
-    PANDAS_VER=">=2.3.3,<3"
-    SKLEARN_VER=">=1.7.2,<2"
-    OPTUNA_VER=">=4.6.0,<5"
-    PYARROW_VER=">=12.0.1,<13"
-    DHG="==0.9.*"
+    PY_VER="$DHG_PY_VER"
+    CUDA_VER="$DHG_CUDA_VER_CPU"
+    TORCH_VER="$DHG_TORCH_VER"
+    PYG_LIB_VER="$DHG_PYG_LIB_VER"
+    TORCH_SCATTER_VER="$DHG_TORCH_SCATTER_VER"
+    TORCH_GEOMETRIC_VER="$DHG_TORCH_GEOMETRIC_VER"
+    POLARS_VER="$DHG_POLARS_VER"
+    PANDAS_VER="$DHG_PANDAS_VER"
+    SKLEARN_VER="$DHG_SKLEARN_VER"
+    OPTUNA_VER="$DHG_OPTUNA_VER"
+    PYARROW_VER="$DHG_PYARROW_VER"
+    DHG_VER="$DHG_DHGA_VER"
     ;;
 esac
 
@@ -258,38 +274,38 @@ fi
 echo "Installing core PyPI packages (feature: $FEATURE)"
 echo "  torch==${TORCH_VER}+${CUDA_VER}"
 echo "  pyg_lib${PYG_LIB_VER}"
-echo "  torch-scatter==${TORCH_SCATTER_VER}"
+echo "  torch-scatter${TORCH_SCATTER_VER}"
 
 pip_install "torch==${TORCH_VER}+${CUDA_VER}" ${TORCH_INDEX_URL}
 pip_install "pyg_lib${PYG_LIB_VER}" ${PYG_FIND_LINKS}
-pip_install "torch-scatter==${TORCH_SCATTER_VER}" ${PYG_FIND_LINKS}
+pip_install "torch-scatter${TORCH_SCATTER_VER}" ${PYG_FIND_LINKS}
 
 # Step 2: Install torch-geometric (depends on pyg-lib and torch-scatter)
-echo "Installing torch-geometric==${TORCH_GEOMETRIC_VER}"
-pip_install "torch-geometric==${TORCH_GEOMETRIC_VER}" ${PYG_FIND_LINKS}
+echo "Installing torch-geometric${TORCH_GEOMETRIC_VER}"
+pip_install "torch-geometric${TORCH_GEOMETRIC_VER}" ${PYG_FIND_LINKS}
 
 # Step 3: Install conda-forge dependencies
 echo "Installing dependencies from conda-forge"
 conda install -c conda-forge -y \
   "optuna${OPTUNA_VER}" \
   "scikit-learn${SKLEARN_VER}" \
-  "pandas==${PANDAS_VER}" \
+  "pandas${PANDAS_VER}" \
   "pyarrow${PYARROW_VER}" \
-  "python-dotenv>=1.2.1,<2" \
-  "ruff>=0.15,<0.16" \
-  "pytest>=9.0.2,<10" \
+  "python-dotenv${PYTHON_DOTENV_VER}" \
+  "ruff${RUFF_VER}" \
+  "pytest${PYTEST_VER}" \
   "polars${POLARS_VER}" \
-  "seaborn>=0.13.2,<0.14" \
-  "matplotlib>=3.10.8,<4"
+  "seaborn${SEABORN_VER}" \
+  "matplotlib${MATPLOTLIB_VER}"
 
 # Step 4: Install remaining PyPI packages (dhg if applicable, swanlab)
-if [ -n "$DHG" ]; then
-  echo "Installing dhg${DHG}"
-  pip_install "dhg${DHG}"
+if [ -n "$DHG_VER" ]; then
+  echo "Installing dhg${DHG_VER}"
+  pip_install "dhg${DHG_VER}"
 fi
 
-echo "Installing swanlab>=0.7.13,<0.8"
-pip_install "swanlab>=0.7.13,<0.8"
+echo "Installing swanlab${SWANLAB_VER}"
+pip_install "swanlab${SWANLAB_VER}"
 
 # Print version info for verification
 echo "Installation completed — verification info:"
@@ -297,7 +313,7 @@ python - <<PY
 import sys
 import importlib
 pkgs = ["torch", "torch_geometric", "torch_scatter", "pyg_lib", "optuna", "pandas", "pyarrow", "swanlab", "polars", "sklearn", "ruff", "pytest", "seaborn", "matplotlib"]
-if "$DHG":
+if "$DHG_VER":
     pkgs.append("dhg")
 for p in pkgs:
     try:
