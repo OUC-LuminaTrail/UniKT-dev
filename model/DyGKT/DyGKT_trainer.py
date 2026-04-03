@@ -128,21 +128,6 @@ class DyGKTModelParams(BaseParamConfig):
                 "default": False,
                 "help": "Whether to generate legacy compatibility fields in DyGKT dataset (default: False, faster)",
             },
-            "no_cache": {
-                "type": bool,
-                "default": False,
-                "help": "Disable DyGKT dataset cache and force rebuilding preprocessing artifacts",
-            },
-            "cache_dir": {
-                "type": str,
-                "default": None,
-                "help": "Directory for DyGKT dataset cache (default: ./cache/dygkt)",
-            },
-            "cache_version": {
-                "type": int,
-                "default": 2,
-                "help": "Manual cache version to invalidate stale DyGKT cache entries (default: 2)",
-            },
             "graph_neg_sampling": {
                 "type": bool,
                 "default": True,
@@ -490,7 +475,7 @@ class DyGKTTrainer(BaseTrainer):
 
                 if ratio > 0.6:
                     logger.info(
-                        "Profile hint: data pipeline is likely the bottleneck (consider larger workers/prefetch/cache)."
+                        "Profile hint: data pipeline is likely the bottleneck (consider larger workers/prefetch)."
                     )
                 else:
                     logger.info(

@@ -194,40 +194,51 @@ class DyGKTDataset(Dataset):
         history_times: list[int],
         current_time: int,
     ) -> list[int]:
-        """Sample history neighbors with either recent truncation or time-decay weighting."""
-        if not history_indices:
+        """Sample history neighbors with either recent truncation or time-decay weighting.
+
+        Optimized version: reduces numpy array creation and memory copies.
+        """
+        n_hist = len(history_indices)
+        if n_hist == 0:
             return []
 
         if self.neighbor_sampling_strategy == "recent":
             return history_indices[-self.num_neighbor :]
 
-        if len(history_indices) <= self.num_neighbor:
+        if n_hist <= self.num_neighbor:
             return list(history_indices)
 
-        candidate_indices = history_indices
-        candidate_times = history_times
-        if (
-            self.neighbor_candidate_pool > 0
-            and len(history_indices) > self.neighbor_candidate_pool
-        ):
+        # Clip candidate pool to avoid processing large histories.
+        if self.neighbor_candidate_pool > 0 and n_hist > self.neighbor_candidate_pool:
             candidate_indices = history_indices[-self.neighbor_candidate_pool :]
             candidate_times = history_times[-self.neighbor_candidate_pool :]
+            n_candidates = self.neighbor_candidate_pool
+        else:
+            candidate_indices = history_indices
+            candidate_times = history_times
+            n_candidates = n_hist
 
-        candidate_times_np = np.asarray(candidate_times, dtype=np.float64)
-        deltas = np.maximum(0.0, float(current_time) - candidate_times_np)
+        # Compute time-decay weights using minimal numpy operations.
+        # Use float64 for time deltas to avoid overflow on large timestamps.
+        deltas = np.empty(n_candidates, dtype=np.float64)
+        for i in range(n_candidates):
+            dt = float(current_time) - float(candidate_times[i])
+            deltas[i] = dt if dt > 0.0 else 0.0
+
         log_weights = -self.time_decay_factor * deltas
-        if log_weights.size > 0:
-            log_weights -= float(log_weights.max())
-        weights = np.exp(log_weights)
+        log_max = float(log_weights.max())
+        log_weights -= log_max
+        weights = np.exp(log_weights, out=log_weights)
         weight_sum = float(weights.sum())
 
         if weight_sum <= 0.0 or not np.isfinite(weight_sum):
             probs = None
         else:
-            probs = weights / weight_sum
+            weights /= weight_sum
+            probs = weights
 
         selected_pos = self.rng.choice(
-            len(candidate_indices),
+            n_candidates,
             size=self.num_neighbor,
             replace=False,
             p=probs,
@@ -239,10 +250,8 @@ class DyGKTDataset(Dataset):
     def convert_dataset(self) -> None:
         """Convert per-user sequences into per-interaction records.
 
-        Optimized version with vectorized operations for better performance.
+        Optimized version with pre-allocated arrays and vectorized operations.
         """
-        # Use precomputed similarity matrix when available. For large datasets,
-        # fallback to local on-the-fly similarity to avoid building huge NxN matrices.
         use_precomputed_similarity = self.que_sim_matrix is not None
         if use_precomputed_similarity:
             que_sim_by_concept = self.que_sim_matrix
@@ -261,28 +270,50 @@ class DyGKTDataset(Dataset):
             self.neighbor_candidate_pool,
         )
 
-        # Reserve 0 as pad index.
+        # Pre-calculate total interactions for pre-allocation.
+        total_interactions = sum(int(u["seq_len"]) for u in self.data_all)
+
+        # Pre-allocate numpy arrays instead of list.append.
+        idx_arr = np.empty(total_interactions, dtype=np.int64)
+        global_id_arr = np.empty(total_interactions, dtype=np.int64)
+        user_arr = np.empty(total_interactions, dtype=np.int64)
+        question_arr = np.empty(total_interactions, dtype=np.int64)
+        question_raw_arr = np.empty(total_interactions, dtype=np.int64)
+        idx_in_seq_arr = np.empty(total_interactions, dtype=np.int64)
+        time_arr = np.empty(total_interactions, dtype=np.int64)
+        correctness_arr = np.empty(total_interactions, dtype=np.int64)
+
+        # History sequences still need object arrays for variable-length lists.
+        user_his_seq_list: list[list[int]] = [None] * total_interactions
+        que_his_seq_list: list[list[int]] = [None] * total_interactions
+
+        # Compatibility fields.
+        compat_arrays: dict[str, list] = {}
+        if self.compat_fields:
+            for key in [
+                "user_his_snq_seq",
+                "user_his_snd_seq",
+                "user_his_snk_seq",
+                "que_his_qn_seq",
+            ]:
+                compat_arrays[key] = [None] * total_interactions
+
         n = 1
         que_his_seqs: dict[int, list[tuple[int, int]]] = {}
 
         for user_data in self.data_all:
-            # Reserve node id 0 as a global padding id.
-            # Question ids are shifted by +1 and user ids start from num_question + 1.
             user_id = num_question + 1 + int(user_data["user_id"])
             seq_len = int(user_data["seq_len"])
-            question_seq = user_data["question_seq"][:seq_len]
-            correctness_seq = user_data["correctness_seq"][:seq_len]
-            time_seq = user_data["time_seq"][:seq_len]
-            interaction_id_seq = user_data.get("interaction_id_seq")
-
-            # 🚀 Optimization: Convert to numpy arrays once per user
-            question_seq_np = np.array(question_seq, dtype=np.int32)
-            correctness_seq_np = np.array(correctness_seq, dtype=np.int8)
-            # Keep 64-bit timestamps to avoid overflow on epoch-millisecond data.
-            time_seq_np = np.array(time_seq, dtype=np.int64)
+            question_seq_np = np.array(
+                user_data["question_seq"][:seq_len], dtype=np.int32
+            )
+            correctness_seq_np = np.array(
+                user_data["correctness_seq"][:seq_len], dtype=np.int8
+            )
+            time_seq_np = np.array(user_data["time_seq"][:seq_len], dtype=np.int64)
             interaction_id_seq_np = (
-                np.array(interaction_id_seq[:seq_len], dtype=np.int64)
-                if interaction_id_seq is not None
+                np.array(user_data["interaction_id_seq"][:seq_len], dtype=np.int64)
+                if user_data.get("interaction_id_seq") is not None
                 else None
             )
 
@@ -290,55 +321,57 @@ class DyGKTDataset(Dataset):
             user_history_times: list[int] = []
 
             for i in range(seq_len):
+                pos = n - 1  # 0-based position
                 q_id = int(question_seq_np[i])
                 t = int(time_seq_np[i])
                 c = int(correctness_seq_np[i])
                 global_id = (
                     int(interaction_id_seq_np[i])
                     if interaction_id_seq_np is not None
-                    else int(n)
+                    else n
                 )
 
                 if q_id not in que_his_seqs:
                     que_his_seqs[q_id] = []
                 que_his_seqs[q_id].append((n, t))
 
-                self.dataset_converted["idx"].append(n)
-                self.dataset_converted["global_id"].append(global_id)
-                self.dataset_converted["user"].append(user_id)
-                self.dataset_converted["question"].append(q_id + 1)
-                self.dataset_converted["question_raw"].append(q_id)
-                self.dataset_converted["idx_in_seq"].append(i)
-                self.dataset_converted["time"].append(t)
-                self.dataset_converted["correctness"].append(c)
+                # Direct array assignment instead of list.append.
+                idx_arr[pos] = n
+                global_id_arr[pos] = global_id
+                user_arr[pos] = user_id
+                question_arr[pos] = q_id + 1
+                question_raw_arr[pos] = q_id
+                idx_in_seq_arr[pos] = i
+                time_arr[pos] = t
+                correctness_arr[pos] = c
 
                 user_his_seq = self._sample_history_indices(
                     user_history_indices,
                     user_history_times,
                     t,
                 )
-                self.dataset_converted["user_his_seq"].append(user_his_seq)
+                user_his_seq_list[pos] = user_his_seq
 
-                # 🚀 Optimization: Vectorized operations for similarity calculations
                 if self.compat_fields:
                     if i == 0:
-                        # Empty history
-                        user_his_snd_seq = []
-                        user_his_snk_seq = []
+                        compat_arrays["user_his_snq_seq"][pos] = []
+                        compat_arrays["user_his_snd_seq"][pos] = []
+                        compat_arrays["user_his_snk_seq"][pos] = []
                     else:
                         start_pos = max(0, i - num_neighbor)
                         question_window = question_seq_np[start_pos:i]
 
-                        # Vectorized comparison (10-50x faster than list comprehension)
                         user_his_snd_seq = (
                             (question_window == q_id).astype(np.int8).tolist()
                         )
+                        compat_arrays["user_his_snd_seq"][pos] = user_his_snd_seq
+                        compat_arrays["user_his_snq_seq"][pos] = user_his_snd_seq
+
                         if use_precomputed_similarity:
                             user_his_snk_seq = que_sim_by_concept[
                                 question_window, q_id
                             ].tolist()
                         else:
-                            # Local concept overlap: similar iff shared concept exists.
                             window_concepts = q_table_binary[question_window]
                             current_concepts = q_table_binary[q_id]
                             user_his_snk_seq = (
@@ -346,14 +379,11 @@ class DyGKTDataset(Dataset):
                                 .astype(np.int8)
                                 .tolist()
                             )
+                        compat_arrays["user_his_snk_seq"][pos] = user_his_snk_seq
 
-                    self.dataset_converted["user_his_snq_seq"].append(user_his_snd_seq)
-                    self.dataset_converted["user_his_snd_seq"].append(user_his_snd_seq)
-                    self.dataset_converted["user_his_snk_seq"].append(user_his_snk_seq)
-
-                self.dataset_converted["que_his_seq"].append([])
+                que_his_seq_list[pos] = []
                 if self.compat_fields:
-                    self.dataset_converted["que_his_qn_seq"].append([])
+                    compat_arrays["que_his_qn_seq"][pos] = []
 
                 user_history_indices.append(n)
                 user_history_times.append(t)
@@ -371,8 +401,6 @@ class DyGKTDataset(Dataset):
         logger.info("DyGKT: building question histories with temporal sampling...")
 
         # Build question histories after per-question sorting.
-        # For equal timestamps, keep strict < t behavior by assigning sampled
-        # histories before inserting the current same-time group.
         histories_by_interaction_idx: list[list[int]] = [[] for _ in range(n)]
         for seq_list in que_his_seqs.values():
             if not seq_list:
@@ -413,25 +441,38 @@ class DyGKTDataset(Dataset):
                     ]
                 i = j
 
-        for i, interaction_idx in enumerate(self.dataset_converted["idx"]):
-            self.dataset_converted["que_his_seq"][i] = histories_by_interaction_idx[
-                interaction_idx
-            ]
+        for i in range(total_interactions):
+            interaction_idx = int(idx_arr[i])
+            que_his_seq_list[i] = histories_by_interaction_idx[interaction_idx]
+
+        # Convert numpy arrays to lists for dataset_converted.
+        self.dataset_converted["idx"] = idx_arr.tolist()
+        self.dataset_converted["global_id"] = global_id_arr.tolist()
+        self.dataset_converted["user"] = user_arr.tolist()
+        self.dataset_converted["question"] = question_arr.tolist()
+        self.dataset_converted["question_raw"] = question_raw_arr.tolist()
+        self.dataset_converted["idx_in_seq"] = idx_in_seq_arr.tolist()
+        self.dataset_converted["time"] = time_arr.tolist()
+        self.dataset_converted["correctness"] = correctness_arr.tolist()
+        self.dataset_converted["user_his_seq"] = user_his_seq_list
+        self.dataset_converted["que_his_seq"] = que_his_seq_list
+
+        if self.compat_fields:
+            for key in compat_arrays:
+                self.dataset_converted[key] = compat_arrays[key]
 
         if self.target_global_ids is not None:
-            self.target_positions = [
-                i
-                for i, global_id in enumerate(self.dataset_converted["global_id"])
-                if global_id in self.target_global_ids
-            ]
+            # Use numpy boolean indexing for faster filtering.
+            global_id_array = np.array(self.dataset_converted["global_id"])
+            target_mask = np.isin(global_id_array, list(self.target_global_ids))
+            self.target_positions = np.where(target_mask)[0].tolist()
         elif self.target_user_ids is None:
-            self.target_positions = list(range(len(self.dataset_converted["idx"])))
+            self.target_positions = list(range(total_interactions))
         else:
-            self.target_positions = [
-                i
-                for i, user_id in enumerate(self.dataset_converted["user"])
-                if user_id in self.target_user_ids
-            ]
+            # Use numpy boolean indexing for faster filtering.
+            user_array = np.array(self.dataset_converted["user"])
+            target_mask = np.isin(user_array, list(self.target_user_ids))
+            self.target_positions = np.where(target_mask)[0].tolist()
 
         self.target_positions_tensor = torch.tensor(
             self.target_positions, dtype=torch.long
@@ -466,7 +507,10 @@ class DyGKTDataset(Dataset):
         }
 
         # Build lookup tensors with index 0 reserved for padding.
-        max_idx = int(self.base_tensors["idx"].max().item()) if len(self) > 0 else 0
+        # Use num_records (total interactions) instead of len(self) (target interactions).
+        max_idx = (
+            int(self.base_tensors["idx"].max().item()) if num_records > 0 else 0
+        )
         self.lookup_tensors = {
             "user": torch.zeros(max_idx + 1, dtype=torch.long),
             "question": torch.zeros(max_idx + 1, dtype=torch.long),
@@ -535,21 +579,6 @@ class DyGKTModelData(QuestionModelData):
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         num_neighbor = int(getattr(args, "num_neighbor", 50))
         split_protocol = str(getattr(args, "dygkt_split_protocol", "kfold")).lower()
-
-        # 🚀 OPTIMIZATION: Try to load from cache first
-        use_cache = not bool(getattr(args, "no_cache", False))
-        cache_dir = getattr(args, "cache_dir", None)
-        if use_cache:
-            from .dataset_cache import get_cache_key, load_cached_dataset
-
-            cache_key = get_cache_key(args, fold_idx)
-            cached_data = load_cached_dataset(cache_key, cache_dir=cache_dir)
-            if cached_data is not None:
-                logger.info("✅ Using cached dataset (skip preprocessing)")
-                return cached_data
-            logger.info("Cache miss, building dataset from scratch...")
-        else:
-            logger.info("DyGKT dataset cache disabled (--no_cache)")
 
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
         num_questions = int(q_table.shape[0])
@@ -723,13 +752,6 @@ class DyGKTModelData(QuestionModelData):
             "question_features": q_table.astype(np.float32),
             "num_neighbor": num_neighbor,
         }
-
-        # 🚀 OPTIMIZATION: Save to cache for future runs
-        if use_cache:
-            from .dataset_cache import save_cached_dataset
-
-            dataset_tuple = (train_dataset, val_dataset, test_dataset, model_metadata)
-            save_cached_dataset(cache_key, dataset_tuple, cache_dir=cache_dir)
 
         return train_dataset, val_dataset, test_dataset, model_metadata
 
