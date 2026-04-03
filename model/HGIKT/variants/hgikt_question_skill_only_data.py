@@ -30,8 +30,6 @@ class HGIKTQuestionSkillOnlyData(HGIKTModelData):
 
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-
-
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
         ).float()

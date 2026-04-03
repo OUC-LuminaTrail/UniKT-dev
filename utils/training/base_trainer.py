@@ -230,6 +230,7 @@ class BaseTrainer(ABC):
         use_swanlab: bool = True,
         model_name: str = "",
         dataset_name: str = "",
+        skip_test: bool = False,
     ) -> "BaseTrainer":
         """配置实验管理和追踪。
 
@@ -239,6 +240,7 @@ class BaseTrainer(ABC):
             use_swanlab: 是否使用 SwanLab（默认 True）
             model_name: 模型名称
             dataset_name: 数据集名称
+            skip_test: 是否跳过训练完成后的测试集评估（默认 False）
 
         Returns:
             Self for method chaining
@@ -250,6 +252,7 @@ class BaseTrainer(ABC):
             model_name=model_name,
             dataset_name=dataset_name,
         )
+        self.skip_test = skip_test
         return self
 
     def build(self) -> "BaseTrainer":
@@ -345,7 +348,31 @@ class BaseTrainer(ABC):
                 ),
             )
         )
-        callbacks.append(TestEvaluationCallback(use_best_model=True))
+        if not getattr(self, "skip_test", False):
+            callbacks.append(TestEvaluationCallback(use_best_model=True))
+            # 检查测试集是否未传入或为空
+            if self.test_data is None:
+                logger.warning(
+                    "Test data was not provided during trainer initialization. Test evaluation will be skipped. \n"
+                    "Cause: The model's trainer was initialized without passing test_data to with_data(). \n"
+                    "Fix: Ensure to pass test_data to with_data(), or use '--skip_test' to skip test evaluation explicitly."
+                )
+            else:
+                test_len = (
+                    len(self.test_data) if hasattr(self.test_data, "__len__") else None
+                )
+                if test_len is not None and test_len == 0:
+                    logger.warning(
+                        "Test set is empty (0 samples). Test evaluation will produce no results. \n"
+                        "Cause: No users were assigned to the test fold (fold=-1) during data preprocessing. \n"
+                        "This happens when: \n"
+                        "(1) add_kfold_labels() was called with test_ratio=0, or \n"
+                        "(2) test_ratio > 0 but int(num_users * test_ratio) == 0 due to small dataset size. \n"
+                        "Fix: Re-run data preprocessing with a larger test_ratio value, \n"
+                        "or use '--skip_test' to skip test evaluation explicitly."
+                    )
+        else:
+            logger.info("Test evaluation will be skipped.")
         self.callback_manager = CallbackManager(callbacks)
 
         # 10. Setup hyperparameters
@@ -1052,6 +1079,17 @@ class BaseTrainer(ABC):
         """训练结束后在测试集上评估并记录指标。"""
         if self.test_data is None:
             logger.info("Test data not provided. Skipping test evaluation.")
+            return {}
+
+        # 检查测试集是否为空
+        test_len = len(self.test_data) if hasattr(self.test_data, "__len__") else None
+        if test_len is not None and test_len == 0:
+            logger.warning(
+                "Test DataLoader is empty (0 batches). Skipping test evaluation. "
+                "Cause: The test dataset contains no samples. "
+                "During data preprocessing, add_kfold_labels(test_ratio=...) assigned 0 users to the test fold (fold=-1). "
+                "Training and validation completed successfully, but no test metrics will be recorded."
+            )
             return {}
 
         best_state = None

@@ -269,6 +269,12 @@ class GeneralParams(BaseParamConfig):
                 "short": "usl",
                 "help": "Enable SwanLab experiment tracking (default: True)",
             },
+            "skip_test": {
+                "type": bool,
+                "default": False,
+                "short": "st",
+                "help": "Skip test set evaluation after training (default: False)",
+            },
         }
         return group_name, params
 
