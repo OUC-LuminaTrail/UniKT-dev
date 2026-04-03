@@ -2,36 +2,34 @@
 
 # Installer script to automatically create a conda environment and install project dependencies on Linux
 # Usage:
-#   ./scripts/setup_env.sh [--env-name NAME|-n NAME] [--cpu] [--cuda] [--cuda-ver cu117] [--force] [--yes]
-# Default behavior: auto-detect GPU (use CUDA/cu117 if nvidia-smi is available), otherwise install CPU packages
+#   ./scripts/setup_env.sh [--env-name NAME|-n NAME] [--feature gpu|cpu|dhg-gpu|dhg-cpu] [--force] [--yes]
+# Default behavior: auto-detect GPU (use gpu feature if nvidia-smi is available), otherwise cpu
 
 set -euo pipefail
 
-ENV_NAME="ktexp"
-PY_VER="3.10"
-DEFAULT_CUDA_VER="cu117"
+ENV_NAME="kt-exp"
+FEATURE=""
 FORCE=0
 ASSUME_YES=0
 FORCE_CPU=0
-FORCE_CUDA=0
-CUDA_VER="$DEFAULT_CUDA_VER"
+FORCE_GPU=0
 
 usage() {
   cat <<EOF
-Usage: $0 [--env-name NAME|-n NAME] [--cpu] [--cuda] [--cuda-ver cu117] [--force] [--yes]
+Usage: $0 [--env-name NAME|-n NAME] [--feature gpu|cpu|dhg-gpu|dhg-cpu] [--force] [--yes]
 
 Options:
-  -n, --env-name NAME   Specify the conda environment name (default: ktexp)
-  --cpu                 Force install CPU builds
-  --cuda                Force install CUDA builds (default CUDA version: cu117)
-  --cuda-ver VER        Specify CUDA version (e.g., cu117)
+  -n, --env-name NAME   Specify the conda environment name (default: kt-exp)
+  --feature FEATURE     Specify feature to install: gpu, cpu, dhg-gpu, dhg-cpu
+  --cpu                 Force install cpu feature
+  --gpu                 Force install gpu feature
   --force               Remove and recreate environment if it already exists
   --yes                 Non-interactive; assume yes to prompts
   -h, --help            Show this help message
 
 Examples:
-  $0 -n myenv --cpu               # Create a CPU environment named 'myenv'
-  $0 --env-name myenv --cuda --cuda-ver cu117  # Create a CUDA/cu117 environment named 'myenv'
+  $0 -n myenv --feature cpu               # Create a CPU environment named 'myenv'
+  $0 --env-name myenv --feature dhg-gpu   # Create a CUDA/dhg-gpu environment named 'myenv'
 
 EOF
 }
@@ -40,9 +38,9 @@ EOF
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -n|--env-name) ENV_NAME="$2"; shift 2 ;;
+    --feature) FEATURE="$2"; shift 2 ;;
     --cpu) FORCE_CPU=1; shift ;;
-    --cuda) FORCE_CUDA=1; shift ;;
-    --cuda-ver) CUDA_VER="$2"; shift 2 ;;
+    --gpu) FORCE_GPU=1; shift ;;
     --force) FORCE=1; shift ;;
     --yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -72,13 +70,15 @@ fi
 source "$CONDA_BASE/etc/profile.d/conda.sh"
 
 # If the environment already exists, prompt or handle according to --force
+USE_EXISTING=0
 if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
   if [ "$FORCE" -eq 1 ]; then
     echo "Environment $ENV_NAME already exists; --force specified: removing and recreating."
     conda remove -n "$ENV_NAME" --all -y
   else
     if [ "$ASSUME_YES" -eq 1 ]; then
-      echo "Environment $ENV_NAME already exists; skipping creation (--yes specified)."
+      echo "Environment $ENV_NAME already exists; using existing environment (--yes specified)."
+      USE_EXISTING=1
     else
       # Present options to the user. Default action is to exit.
       while true; do
@@ -131,10 +131,96 @@ if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
   fi
 fi
 
+# Determine feature if not specified
+if [ -z "$FEATURE" ]; then
+  if [ "$FORCE_GPU" -eq 1 ]; then
+    FEATURE="gpu"
+  elif [ "$FORCE_CPU" -eq 1 ]; then
+    FEATURE="cpu"
+  else
+    # Auto-detect presence of NVIDIA GPU
+    if command -v nvidia-smi >/dev/null 2>&1; then
+      echo "NVIDIA GPU detected (nvidia-smi available); using 'gpu' feature."
+      FEATURE="gpu"
+    else
+      echo "No NVIDIA GPU detected; using 'cpu' feature."
+      FEATURE="cpu"
+    fi
+  fi
+fi
+
+# Validate feature
+case "$FEATURE" in
+  gpu|cpu|dhg-gpu|dhg-cpu) ;;
+  *) echo "Error: Invalid feature '$FEATURE'. Must be one of: gpu, cpu, dhg-gpu, dhg-cpu"; exit 1 ;;
+esac
+
+# Set configuration based on feature
+case "$FEATURE" in
+  gpu)
+    PY_VER="3.12"
+    CUDA_VER="cu128"
+    TORCH_VER="2.10.0"
+    PYG_LIB_VER="0.6.0"
+    TORCH_SCATTER_VER="2.1.2"
+    TORCH_GEOMETRIC_VER="2.7.0"
+    POLARS_VER=">=1.39.3,<2"
+    PANDAS_VER="3.0.2"
+    SKLEARN_VER="1.8.0"
+    OPTUNA_VER="4.8.0"
+    PYARROW_VER=">=23.0.0,<24"
+    DHG=""
+    ;;
+  cpu)
+    PY_VER="3.12"
+    CUDA_VER="cpu"
+    TORCH_VER="2.10.0"
+    PYG_LIB_VER="0.6.0"
+    TORCH_SCATTER_VER="2.1.2"
+    TORCH_GEOMETRIC_VER="2.7.0"
+    POLARS_VER=">=1.39.3,<2"
+    PANDAS_VER="3.0.2"
+    SKLEARN_VER="1.8.0"
+    OPTUNA_VER="4.8.0"
+    PYARROW_VER=">=23.0.0,<24"
+    DHG=""
+    ;;
+  dhg-gpu)
+    PY_VER="3.10"
+    CUDA_VER="cu117"
+    TORCH_VER="1.13.1"
+    PYG_LIB_VER=">=0.4.0,<0.5"
+    TORCH_SCATTER_VER="2.1.1"
+    TORCH_GEOMETRIC_VER=">=2.7.0,<3"
+    POLARS_VER=">=1.38.1,<2"
+    PANDAS_VER=">=2.3.3,<3"
+    SKLEARN_VER=">=1.7.2,<2"
+    OPTUNA_VER=">=4.6.0,<5"
+    PYARROW_VER=">=12.0.1,<13"
+    DHG="==0.9.*"
+    ;;
+  dhg-cpu)
+    PY_VER="3.10"
+    CUDA_VER="cpu"
+    TORCH_VER="1.13.1"
+    PYG_LIB_VER=">=0.4.0,<0.5"
+    TORCH_SCATTER_VER="2.1.1"
+    TORCH_GEOMETRIC_VER=">=2.7.0,<3"
+    POLARS_VER=">=1.38.1,<2"
+    PANDAS_VER=">=2.3.3,<3"
+    SKLEARN_VER=">=1.7.2,<2"
+    OPTUNA_VER=">=4.6.0,<5"
+    PYARROW_VER=">=12.0.1,<13"
+    DHG="==0.9.*"
+    ;;
+esac
+
 # Create the environment (if it doesn't exist)
-if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
-  echo "Creating conda environment: $ENV_NAME (python=$PY_VER)"
-  conda create -n "$ENV_NAME" python="$PY_VER" -y
+if [ "$USE_EXISTING" -eq 0 ]; then
+  if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+    echo "Creating conda environment: $ENV_NAME (python=$PY_VER)"
+    conda create -n "$ENV_NAME" python="$PY_VER" -y
+  fi
 fi
 
 # Activate environment
@@ -158,51 +244,61 @@ pip_install() {
 # Upgrade pip, setuptools, wheel
 pip_install --upgrade pip setuptools wheel
 
-# Decide whether to install CPU or CUDA versions
-INSTALL_TARGET="cpu"
-if [ "$FORCE_CPU" -eq 1 ]; then
-  INSTALL_TARGET="cpu"
-elif [ "$FORCE_CUDA" -eq 1 ]; then
-  INSTALL_TARGET="cuda"
+# PyTorch index configuration
+if [ "$CUDA_VER" = "cpu" ]; then
+  TORCH_INDEX_URL="--extra-index-url https://download.pytorch.org/whl/cpu"
+  PYG_FIND_LINKS="-f https://data.pyg.org/whl/torch-${TORCH_VER}+cpu.html"
 else
-  # Auto-detect presence of NVIDIA GPU (nvidia-smi available)
-  if command -v nvidia-smi >/dev/null 2>&1; then
-    echo "NVIDIA GPU detected (nvidia-smi available); will install CUDA version (default: $CUDA_VER)."
-    INSTALL_TARGET="cuda"
-  else
-    echo "No NVIDIA GPU detected; installing CPU version."
-    INSTALL_TARGET="cpu"
-  fi
+  TORCH_INDEX_URL="--extra-index-url https://download.pytorch.org/whl/${CUDA_VER}"
+  PYG_FIND_LINKS="-f https://data.pyg.org/whl/torch-${TORCH_VER}+${CUDA_VER}.html"
 fi
 
-# PyPI-only packages (torch, torch-geometric, pyg-lib, dhg, swanlab)
-if [ "$INSTALL_TARGET" = "cpu" ]; then
-  echo "Installing PyPI packages (CPU version): torch, torch_geometric, pyg_lib"
-  pip_install "torch==1.13.1+cpu" --extra-index-url https://download.pytorch.org/whl/cpu
-  pip_install "torch_geometric>=2.7.0,<3" "pyg-lib>=0.4.0,<0.5" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
-else
-  echo "Installing PyPI packages (CUDA version): torch, torch_geometric, pyg_lib"
-  pip_install "torch==1.13.1+$CUDA_VER" --extra-index-url https://download.pytorch.org/whl/$CUDA_VER
-  pip_install "torch_geometric>=2.7.0,<3" "pyg-lib>=0.4.0,<0.5" -f https://data.pyg.org/whl/torch-1.13.1+$CUDA_VER.html || {
-    # Fallback install attempt (indexes or link formats may differ)
-    pip_install "torch_geometric>=2.7.0,<3" "pyg-lib>=0.4.0,<0.5" -f https://data.pyg.org/whl/torch-1.13.1+cpu.html
-  }
+# Step 1: Install core dependencies first (pyg-lib, torch-scatter) before torch-geometric
+# This ensures dependency resolution can find compatible versions
+echo "Installing core PyPI packages (feature: $FEATURE)"
+echo "  torch==${TORCH_VER}+${CUDA_VER}"
+echo "  pyg_lib${PYG_LIB_VER}"
+echo "  torch-scatter==${TORCH_SCATTER_VER}"
+
+pip_install "torch==${TORCH_VER}+${CUDA_VER}" ${TORCH_INDEX_URL}
+pip_install "pyg_lib${PYG_LIB_VER}" ${PYG_FIND_LINKS}
+pip_install "torch-scatter==${TORCH_SCATTER_VER}" ${PYG_FIND_LINKS}
+
+# Step 2: Install torch-geometric (depends on pyg-lib and torch-scatter)
+echo "Installing torch-geometric==${TORCH_GEOMETRIC_VER}"
+pip_install "torch-geometric==${TORCH_GEOMETRIC_VER}" ${PYG_FIND_LINKS}
+
+# Step 3: Install conda-forge dependencies
+echo "Installing dependencies from conda-forge"
+conda install -c conda-forge -y \
+  "optuna${OPTUNA_VER}" \
+  "scikit-learn${SKLEARN_VER}" \
+  "pandas==${PANDAS_VER}" \
+  "pyarrow${PYARROW_VER}" \
+  "python-dotenv>=1.2.1,<2" \
+  "ruff>=0.15,<0.16" \
+  "pytest>=9.0.2,<10" \
+  "polars${POLARS_VER}" \
+  "seaborn>=0.13.2,<0.14" \
+  "matplotlib>=3.10.8,<4"
+
+# Step 4: Install remaining PyPI packages (dhg if applicable, swanlab)
+if [ -n "$DHG" ]; then
+  echo "Installing dhg${DHG}"
+  pip_install "dhg${DHG}"
 fi
 
-# Conda-forge dependencies
-echo "Installing dependencies from conda-forge: optuna, scikit-learn, pandas, pyarrow, python-dotenv, ruff, pytest, polars"
-conda install -c conda-forge -y "optuna>=4.6.0,<5" "scikit-learn>=1.7.2,<2" "pandas>=2.3.3,<3" "pyarrow>=12.0.1,<13" "python-dotenv>=1.2.1,<2" "ruff>=0.15,<0.16" "pytest>=9.0.2,<10" "polars>=1.38.1,<2"
-
-# PyPI-only dependencies (dhg, swanlab)
-echo "Installing remaining PyPI packages: dhg, swanlab"
-pip_install "dhg==0.9.*" "swanlab<0.8"
+echo "Installing swanlab>=0.7.13,<0.8"
+pip_install "swanlab>=0.7.13,<0.8"
 
 # Print version info for verification
 echo "Installation completed — verification info:"
 python - <<PY
 import sys
 import importlib
-pkgs = ["torch", "torch_geometric", "dhg", "optuna", "pandas", "pyarrow", "swanlab", "polars", "sklearn", "ruff", "pytest"]
+pkgs = ["torch", "torch_geometric", "torch_scatter", "pyg_lib", "optuna", "pandas", "pyarrow", "swanlab", "polars", "sklearn", "ruff", "pytest", "seaborn", "matplotlib"]
+if "$DHG":
+    pkgs.append("dhg")
 for p in pkgs:
     try:
         if p == "sklearn":
