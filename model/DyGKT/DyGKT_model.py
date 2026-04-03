@@ -77,17 +77,12 @@ class TimeDualDecayEncoder(nn.Module):
         )
         timestamps_diff = timestamps_right - timestamps
 
-        threshold = 3600 * 24
-        use_short_branch = timestamps_diff > threshold
+        mask = (timestamps_diff > 3600 * 24).float()
 
-        short_features = self.f(self.w_short(timestamps_diff))
-        long_features = self.f(self.w_long(timestamps_diff))
+        short_features = self.f(self.w_short(timestamps_diff * mask))
+        long_features = self.f(self.w_long(timestamps_diff * (1 - mask)))
 
-        timestamps_encoded = torch.where(
-            use_short_branch, short_features, long_features
-        )
-
-        return self.w_o(timestamps_encoded)
+        return self.w_o(short_features + long_features)
 
 
 class MergeLayer(nn.Module):
