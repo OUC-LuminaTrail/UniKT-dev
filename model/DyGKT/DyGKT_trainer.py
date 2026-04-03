@@ -1,6 +1,5 @@
 """DyGKT model trainer."""
 
-import time
 from typing import Any
 
 import torch
@@ -42,27 +41,16 @@ class DyGKTModelParams(BaseParamConfig):
     def define_params(self) -> tuple[str, dict]:
         group_name = "DyGKT Parameters"
         params = {
-            "hidden_dim": {
+            "edge_dim": {
                 "type": int,
-                "default": 128,
-                "short": "hd",
-                "help": "Hidden layer dimension (default: 128)",
+                "default": 64,
+                "help": "Edge feature dimension (default: 64)",
             },
-            "num_predict_layer": {
+            "node_dim": {
                 "type": int,
-                "default": 2,
-                "help": "Number of predictor layers (default: 2)",
-            },
-            "activate_type": {
-                "type": str,
-                "default": "relu",
-                "help": "Activation type for predictor (default: relu)",
-            },
-            "embedding_dim": {
-                "type": int,
-                "default": 128,
-                "short": "ed",
-                "help": "Embedding dimension (default: 128)",
+                "default": 64,
+                "short": "nd",
+                "help": "Node embedding dimension (default: 64)",
             },
             "dim_time": {
                 "type": int,
@@ -148,11 +136,6 @@ class DyGKTModelParams(BaseParamConfig):
                 "default": 0.05,
                 "help": "Weight of graph negative sampling auxiliary loss (default: 0.05).",
             },
-            "profile_batches": {
-                "type": int,
-                "default": 0,
-                "help": "Profile first N train batches and log data-wait vs compute time (0 disables)",
-            },
             "dropout": {
                 "type": float,
                 "default": 0.1,
@@ -181,11 +164,6 @@ class DyGKTModelParams(BaseParamConfig):
                 "default": 1e-4,
                 "short": "wd",
                 "help": "Weight decay (L2 regularization) for optimizer (default: 1e-4)",
-            },
-            "max_grad_norm": {
-                "type": float,
-                "default": 10.0,
-                "help": "Maximum norm for gradient clipping (default: 10.0)",
             },
             "batch_size": {
                 "type": int,
@@ -233,12 +211,6 @@ class DyGKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        # 自动检测 GPU
-        if not hasattr(args, "device") or args.device is None or args.device == "auto":
-            args.device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Auto-detected device: {args.device}")
-
-        self.profile_batches = max(0, int(getattr(args, "profile_batches", 0)))
         self.graph_neg_sampling = bool(getattr(args, "graph_neg_sampling", True))
         self.graph_neg_num_samples = max(
             1, int(getattr(args, "graph_neg_num_samples", 2))
@@ -249,24 +221,6 @@ class DyGKTTrainer(BaseTrainer):
         self.graph_neg_loss_weight = max(
             0.0, float(getattr(args, "graph_neg_loss_weight", 0.05))
         )
-        self._profile_batch_count = 0
-        self._profile_last_batch_end: float | None = None
-        self._profile_sums: dict[str, float] = {
-            "wait_data": 0.0,
-            "zero_grad": 0.0,
-            "forward": 0.0,
-            "loss": 0.0,
-            "backward": 0.0,
-            "clip": 0.0,
-            "step": 0.0,
-            "total_compute": 0.0,
-        }
-        self._profile_logged = False
-        if self.profile_batches > 0:
-            logger.info(
-                "DyGKT profiling enabled for first %s train batches",
-                self.profile_batches,
-            )
 
         # 1. 准备数据
         from model.DyGKT import DyGKTModelData
@@ -353,14 +307,10 @@ class DyGKTTrainer(BaseTrainer):
         )
 
         # 3. 创建优化器和损失函数
-        # DyGKT 模型现在返回 logits，对应 BCEWithLogitsLoss。
         loss_fn = torch.nn.BCEWithLogitsLoss()
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
-
-        # 保存 max_grad_norm 以备后用
-        self.max_grad_norm = getattr(args, "max_grad_norm", 10.0)
 
         # 4. 创建学习率调度器
         lr_scheduler = None
@@ -397,6 +347,7 @@ class DyGKTTrainer(BaseTrainer):
         ).with_optimization(
             optimizer=optimizer,
             loss_fn=loss_fn,
+            max_clip_grad_norm=10.0,
             lr_scheduler=lr_scheduler,
             early_stopping=early_stopping_cfg,
         ).with_experiment(
@@ -405,87 +356,6 @@ class DyGKTTrainer(BaseTrainer):
             model_name="DyGKT",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
-
-    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """Train one batch with gradient clipping."""
-        profile_this_batch = self.profile_batches > 0 and not self._profile_logged
-        batch_start = time.perf_counter()
-
-        if profile_this_batch and self._profile_last_batch_end is not None:
-            self._profile_sums["wait_data"] += (
-                batch_start - self._profile_last_batch_end
-            )
-
-        t0 = batch_start
-        self.opt.zero_grad(set_to_none=True)
-        t1 = time.perf_counter()
-        output = self.forward_pass(batch_data)
-        t2 = time.perf_counter()
-        loss = self._compute_loss(output)
-        t3 = time.perf_counter()
-        loss.backward()
-        t4 = time.perf_counter()
-
-        # 梯度裁剪
-        torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), max_norm=self.max_grad_norm
-        )
-        t5 = time.perf_counter()
-
-        self.opt.step()
-        t6 = time.perf_counter()
-
-        # 累积预测
-        self.metrics_accumulator.update("train", output)
-
-        if profile_this_batch:
-            self._profile_batch_count += 1
-            self._profile_sums["zero_grad"] += t1 - t0
-            self._profile_sums["forward"] += t2 - t1
-            self._profile_sums["loss"] += t3 - t2
-            self._profile_sums["backward"] += t4 - t3
-            self._profile_sums["clip"] += t5 - t4
-            self._profile_sums["step"] += t6 - t5
-            self._profile_sums["total_compute"] += t6 - t0
-            self._profile_last_batch_end = t6
-
-            if self._profile_batch_count >= self.profile_batches:
-                avg_wait = self._profile_sums["wait_data"] / max(
-                    self.profile_batches - 1, 1
-                )
-                avg_compute = self._profile_sums["total_compute"] / self.profile_batches
-                ratio = avg_wait / max(avg_compute, 1e-12)
-
-                logger.info(
-                    "DyGKT profile summary (%s batches): avg_wait_data=%.4fs, avg_compute=%.4fs, wait/compute=%.2f",
-                    self.profile_batches,
-                    avg_wait,
-                    avg_compute,
-                    ratio,
-                )
-                logger.info(
-                    "DyGKT profile breakdown per batch (s): zero_grad=%.4f, forward=%.4f, loss=%.4f, backward=%.4f, clip=%.4f, step=%.4f",
-                    self._profile_sums["zero_grad"] / self.profile_batches,
-                    self._profile_sums["forward"] / self.profile_batches,
-                    self._profile_sums["loss"] / self.profile_batches,
-                    self._profile_sums["backward"] / self.profile_batches,
-                    self._profile_sums["clip"] / self.profile_batches,
-                    self._profile_sums["step"] / self.profile_batches,
-                )
-
-                if ratio > 0.6:
-                    logger.info(
-                        "Profile hint: data pipeline is likely the bottleneck (consider larger workers/prefetch)."
-                    )
-                else:
-                    logger.info(
-                        "Profile hint: model compute is likely the bottleneck (consider AMP/torch.compile/larger batch)."
-                    )
-                self._profile_logged = True
-        else:
-            self._profile_last_batch_end = t6
-
-        return loss.item()
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
         """Compute total loss = BCE + optional graph negative-sampling auxiliary loss."""
@@ -540,36 +410,6 @@ class DyGKTTrainer(BaseTrainer):
             int(valid_rows.sum().item()), dtype=torch.long, device=logits.device
         )
         return F.cross_entropy(logits[valid_rows], labels)
-
-    def _move_tensor_to_device(
-        self, tensor: torch.Tensor, dtype: torch.dtype = None
-    ) -> torch.Tensor:
-        """Train epoch with non-blocking GPU transfer."""
-        non_blocking = (
-            self.device_ is not None
-            and self.device_.type == "cuda"
-            and tensor.device.type == "cpu"
-        )
-        result = tensor.to(self.device_, non_blocking=non_blocking)
-        if dtype is not None:
-            result = result.to(dtype)
-        return result
-
-    @torch.inference_mode()
-    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """Validate with inference mode."""
-        output = self.forward_pass(batch_data)
-        loss = self._compute_loss(output)
-        self.metrics_accumulator.update("val", output)
-        return loss.item()
-
-    @torch.inference_mode()
-    def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """Test with inference mode."""
-        output = self.test_forward_pass(batch_data)
-        loss = self._compute_loss(output)
-        self.metrics_accumulator.update("test", output)
-        return loss.item()
 
     def forward_pass(self, batch_data: dict) -> dict[str, torch.Tensor]:
         """DyGKT 前向传播（接受 batch 字典）。

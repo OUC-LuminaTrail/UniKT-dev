@@ -131,9 +131,8 @@ class DyGKT(nn.Module):
         )
         self.ablation = str(getattr(args, "ablation", "-1"))
         self.time_dim = int(getattr(args, "dim_time", 16))
-
-        self.edge_dim = 64
-        self.node_dim = 64
+        self.edge_dim = int(getattr(args, "edge_dim", 64))
+        self.node_dim = int(getattr(args, "node_dim", 64))
 
         num_questions = int(data_metadata["num_questions"])
         num_users = int(data_metadata["num_users"])
@@ -208,7 +207,10 @@ class DyGKT(nn.Module):
             self.time_encoder = TimeDualDecayEncoder(time_dim=self.time_dim)
 
         self.link_predictor = MergeLayer(
-            input_dim1=64, input_dim2=64, hidden_dim=64, output_dim=1
+            input_dim1=self.node_dim,
+            input_dim2=self.node_dim,
+            hidden_dim=self.node_dim,
+            output_dim=1,
         )
 
     def set_neighbor_sampler(self, neighbor_sampler: Any) -> None:
