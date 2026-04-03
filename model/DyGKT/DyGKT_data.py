@@ -247,6 +247,149 @@ class DyGKTDataset(Dataset):
         selected_pos_sorted = np.sort(selected_pos)
         return [candidate_indices[int(p)] for p in selected_pos_sorted]
 
+    def _sample_history_batch(
+        self,
+        all_history_indices: list[list[int]],
+        all_history_times: list[list[int]],
+        all_current_times: list[int],
+        batch_size: int = 5000,
+    ) -> list[list[int]]:
+        """Batch sampling using Gumbel-Top-K trick for vectorized execution.
+
+        Replaces sequential _sample_history_indices calls with batched operations
+        that leverage numpy's SIMD parallelism for better multi-core utilization.
+
+        Args:
+            all_history_indices: List of history index lists for each interaction.
+            all_history_times: List of history time lists for each interaction.
+            all_current_times: Current time for each interaction.
+            batch_size: Number of samples to process in each batch (controls memory).
+
+        Returns:
+            List of sampled history lists for each interaction.
+        """
+        n_samples = len(all_history_indices)
+        if n_samples == 0:
+            return []
+
+        # Recent strategy: simple truncation (no sampling needed).
+        if self.neighbor_sampling_strategy == "recent":
+            return [h[-self.num_neighbor :] if h else [] for h in all_history_indices]
+
+        # Process in batches to control memory usage.
+        results: list[list[int]] = [None] * n_samples  # type: ignore
+
+        for batch_start in range(0, n_samples, batch_size):
+            batch_end = min(batch_start + batch_size, n_samples)
+            batch_hist = all_history_indices[batch_start:batch_end]
+            batch_times = all_history_times[batch_start:batch_end]
+            batch_current = all_current_times[batch_start:batch_end]
+            batch_n = batch_end - batch_start
+
+            # Find max candidate pool size for this batch.
+            max_pool = 0
+            for h in batch_hist:
+                n_hist = len(h)
+                if n_hist > self.num_neighbor:
+                    pool = (
+                        min(n_hist, self.neighbor_candidate_pool)
+                        if self.neighbor_candidate_pool > 0
+                        else n_hist
+                    )
+                    if pool > max_pool:
+                        max_pool = pool
+
+            if max_pool == 0:
+                # All histories are short enough.
+                for i in range(batch_n):
+                    h = batch_hist[i]
+                    results[batch_start + i] = list(h) if h else []
+                continue
+
+            # Build batch matrices: (batch_n, max_pool).
+            mat_times = np.zeros((batch_n, max_pool), dtype=np.float64)
+            mat_mask = np.zeros((batch_n, max_pool), dtype=bool)
+            valid_mask = np.zeros(batch_n, dtype=bool)
+
+            for i in range(batch_n):
+                h = batch_hist[i]
+                t = batch_times[i]
+                n_hist = len(h)
+
+                if n_hist == 0 or n_hist <= self.num_neighbor:
+                    continue
+
+                valid_mask[i] = True
+
+                # Clip candidate pool.
+                if (
+                    self.neighbor_candidate_pool > 0
+                    and n_hist > self.neighbor_candidate_pool
+                ):
+                    cand_times = t[-self.neighbor_candidate_pool :]
+                    n_cand = self.neighbor_candidate_pool
+                else:
+                    cand_times = t
+                    n_cand = n_hist
+
+                mat_times[i, :n_cand] = cand_times[:n_cand]
+                mat_mask[i, :n_cand] = True
+
+            if not valid_mask.any():
+                # No sampling needed for this batch.
+                for i in range(batch_n):
+                    h = batch_hist[i]
+                    if len(h) == 0:
+                        results[batch_start + i] = []
+                    elif len(h) <= self.num_neighbor:
+                        results[batch_start + i] = list(h)
+                    else:
+                        results[batch_start + i] = h[-self.num_neighbor :]
+                continue
+
+            # Compute time-decay weights in batch.
+            current_arr = np.array(batch_current, dtype=np.float64)
+            deltas = np.maximum(0.0, current_arr[:, None] - mat_times)
+            log_weights = -self.time_decay_factor * deltas
+
+            # Numerical stability: mask invalid positions.
+            log_weights = np.where(mat_mask, log_weights, -np.inf)
+            has_valid = mat_mask.any(axis=1, keepdims=True)
+            log_max = np.where(
+                has_valid,
+                np.where(mat_mask, log_weights, -np.inf).max(axis=1, keepdims=True),
+                0.0,
+            )
+            log_weights = np.where(mat_mask, log_weights - log_max, -np.inf)
+
+            # Gumbel-Top-K sampling.
+            # Generate Gumbel noise: g = -log(-log(u)), u ~ Uniform(0,1).
+            gumbel_noise = -np.log(-np.log(self.rng.uniform(size=(batch_n, max_pool))))
+            keys = np.where(mat_mask, log_weights + gumbel_noise, -np.inf)
+
+            # Select top-K positions.
+            n_select = self.num_neighbor
+            topk_pos = np.argpartition(keys, -n_select, axis=1)[:, -n_select:]
+
+            # Build results for this batch.
+            for i in range(batch_n):
+                h = batch_hist[i]
+                idx = batch_start + i
+
+                if len(h) == 0:
+                    results[idx] = []
+                elif len(h) <= self.num_neighbor:
+                    results[idx] = list(h)
+                elif not valid_mask[i]:
+                    results[idx] = h[-self.num_neighbor :]
+                else:
+                    # Extract and sort sampled positions.
+                    pos_mask = mat_mask[i, topk_pos[i]]
+                    selected = np.sort(topk_pos[i, pos_mask])
+                    results[idx] = [int(h[int(pos)]) for pos in selected]
+
+        return results
+
     def convert_dataset(self) -> None:
         """Convert per-user sequences into per-interaction records.
 
@@ -301,6 +444,12 @@ class DyGKTDataset(Dataset):
         n = 1
         que_his_seqs: dict[int, list[tuple[int, int]]] = {}
 
+        # Phase 1: Collect all user history states (without sampling).
+        user_hist_indices: list[list[int]] = []
+        user_hist_times: list[list[int]] = []
+        user_hist_current_times: list[int] = []
+        user_hist_positions: list[int] = []  # Maps to position in user_his_seq_list
+
         for user_data in self.data_all:
             user_id = num_question + 1 + int(user_data["user_id"])
             seq_len = int(user_data["seq_len"])
@@ -345,12 +494,11 @@ class DyGKTDataset(Dataset):
                 time_arr[pos] = t
                 correctness_arr[pos] = c
 
-                user_his_seq = self._sample_history_indices(
-                    user_history_indices,
-                    user_history_times,
-                    t,
-                )
-                user_his_seq_list[pos] = user_his_seq
+                # Collect history state for batch sampling later.
+                user_hist_indices.append(list(user_history_indices))
+                user_hist_times.append(list(user_history_times))
+                user_hist_current_times.append(t)
+                user_hist_positions.append(pos)
 
                 if self.compat_fields:
                     if i == 0:
@@ -398,10 +546,20 @@ class DyGKTDataset(Dataset):
 
                 n += 1
 
+        # Phase 2: Batch sample user histories using Gumbel-Top-K.
+        logger.info("DyGKT: batch sampling user histories (Gumbel-Top-K)...")
+        user_his_seq_sampled = self._sample_history_batch(
+            user_hist_indices, user_hist_times, user_hist_current_times
+        )
+        for pos, sampled in zip(user_hist_positions, user_his_seq_sampled):
+            user_his_seq_list[pos] = sampled
+
         logger.info("DyGKT: building question histories with temporal sampling...")
 
-        # Build question histories after per-question sorting.
+        # Build question histories: collect states first, then batch sample.
         histories_by_interaction_idx: list[list[int]] = [[] for _ in range(n)]
+        que_hist_states: list[dict] = []  # Collect for batch sampling
+
         for seq_list in que_his_seqs.values():
             if not seq_list:
                 continue
@@ -416,14 +574,15 @@ class DyGKTDataset(Dataset):
                 while j < seq_len and seq_sorted[j][1] == t:
                     j += 1
 
-                sampled_hist = self._sample_history_indices(
-                    question_history_indices,
-                    question_history_times,
-                    t,
+                # Collect state for batch sampling.
+                que_hist_states.append(
+                    {
+                        "history_indices": list(question_history_indices),
+                        "history_times": list(question_history_times),
+                        "current_time": t,
+                        "interaction_indices": [seq_sorted[k][0] for k in range(i, j)],
+                    }
                 )
-                for k in range(i, j):
-                    interaction_idx = seq_sorted[k][0]
-                    histories_by_interaction_idx[interaction_idx] = sampled_hist
 
                 for k in range(i, j):
                     question_history_indices.append(seq_sorted[k][0])
@@ -440,6 +599,18 @@ class DyGKTDataset(Dataset):
                         -self.history_keep_limit :
                     ]
                 i = j
+
+        # Batch sample question histories.
+        if que_hist_states:
+            logger.info("DyGKT: batch sampling question histories (Gumbel-Top-K)...")
+            que_sampled = self._sample_history_batch(
+                [s["history_indices"] for s in que_hist_states],
+                [s["history_times"] for s in que_hist_states],
+                [s["current_time"] for s in que_hist_states],
+            )
+            for state, sampled in zip(que_hist_states, que_sampled):
+                for idx in state["interaction_indices"]:
+                    histories_by_interaction_idx[idx] = sampled
 
         for i in range(total_interactions):
             interaction_idx = int(idx_arr[i])
@@ -508,9 +679,7 @@ class DyGKTDataset(Dataset):
 
         # Build lookup tensors with index 0 reserved for padding.
         # Use num_records (total interactions) instead of len(self) (target interactions).
-        max_idx = (
-            int(self.base_tensors["idx"].max().item()) if num_records > 0 else 0
-        )
+        max_idx = int(self.base_tensors["idx"].max().item()) if num_records > 0 else 0
         self.lookup_tensors = {
             "user": torch.zeros(max_idx + 1, dtype=torch.long),
             "question": torch.zeros(max_idx + 1, dtype=torch.long),
