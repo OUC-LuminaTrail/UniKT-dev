@@ -72,6 +72,9 @@ pixi shell -e cpu
 
 # Or use DHG environment (for HGIKT model)
 pixi shell -e dhg-gpu
+
+# Or use Mamba environment (for Mamba-based models)
+pixi shell -e mamba
 ```
 
 ### Option 2: Automated Conda Setup

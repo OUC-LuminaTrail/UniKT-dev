@@ -6,7 +6,7 @@ Train knowledge tracing models with the fluent trainer API.
 
 Before training, ensure your environment is properly configured. See [Quick Start](quick_start.md) for installation options:
 
-- **Pixi** (recommended): `pixi shell` for GPU or `pixi shell -e cpu` for CPU
+- **Pixi** (recommended): `pixi shell` for GPU, `pixi shell -e cpu` for CPU, or `pixi shell -e mamba` for Mamba-based models
 - **Automated Conda**: `./scripts/setup_env.sh` for auto-configuration
 - **Manual Conda**: Follow the guide in [Quick Start](quick_start.md#option-3-manual-conda-setup)
 

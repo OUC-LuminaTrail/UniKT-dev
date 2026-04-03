@@ -34,6 +34,33 @@ polars = { version = ">=1.39.3,<2", extras = ["rt64"] }
 extra-index-urls = ["https://download.pytorch.org/whl/cu128"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-2.10.0+cu128.html" }]
 
+[feature.mamba.system-requirements]
+cuda = "12.8"
+[feature.mamba.dependencies]
+cuda-version = "==12.8"
+python = "3.12.*"
+optuna = "==4.8.0"
+scikit-learn = "==1.8.0"
+pandas = "==3.0.2"
+pyarrow = ">=23.0.0,<24"
+python-dotenv = ">=1.2.1,<2"
+ruff = ">=0.15,<0.16"
+pytest = ">=9.0.2,<10"
+seaborn = ">=0.13.2,<0.14"
+matplotlib = ">=3.10.8,<4"
+[feature.mamba.pypi-dependencies]
+torch = "==2.10.0+cu128"
+pyg_lib = "==0.6.0"
+torch-scatter = "==2.1.2"
+torch-geometric = "==2.7.0"
+polars = { version = ">=1.39.3,<2", extras = ["rt64"] }
+#mamba-ssm = { version = "==2.3.1", extras = ["causal-conv1d"] }
+mamba-ssm = { url = "https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
+[feature.mamba.pypi-options]
+extra-index-urls = ["https://download.pytorch.org/whl/cu128"]
+find-links = [{ url = "https://data.pyg.org/whl/torch-2.10.0+cu128.html" }]
+
 [feature.cpu.system-requirements]
 cuda = "12.8"
 [feature.cpu.dependencies]
@@ -109,6 +136,8 @@ find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
 dhg-cpu = { features = ["dhg-cpu"] }
 dhg-gpu = { features = ["dhg-gpu"] }
 cpu = { features = ["cpu"] }
+mamba = { features = ["mamba"] }
+
 default = { features = ["gpu"] }
 
 [tasks]
@@ -116,3 +145,4 @@ lint = "ruff check ."
 fmt = "ruff format ."
 ckf = [{ task = "lint" }, { task = "fmt" }]
 clean-cache = "find . -name '__pycache__' -type d -print0 | xargs -0 rm -rf && find . -name '*.py[co]' -delete && rm -rf runs/* swanlog/*"
+

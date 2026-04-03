@@ -70,6 +70,12 @@ pixi shell
 
 # 或使用 CPU 环境
 pixi shell -e cpu
+
+# 或使用 DHG 环境（用于 HGIKT 模型）
+pixi shell -e dhg-gpu
+
+# 或使用 Mamba 环境（用于基于 Mamba 的模型）
+pixi shell -e mamba
 ```
 
 ### 方式二：自动配置 Conda 环境
