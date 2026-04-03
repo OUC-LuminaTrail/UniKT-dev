@@ -132,12 +132,14 @@ class OptimizationConfig:
     Attributes:
         optimizer: PyTorch optimizer
         loss_fn: Loss function
+        max_clip_grad_norm: Optional max norm for gradient clipping
         lr_scheduler: Optional learning rate scheduler
         early_stopping: Optional early stopping configuration
     """
 
     optimizer: Any = None
     loss_fn: Any = None
+    max_clip_grad_norm: float | None = None
     lr_scheduler: Any = None
     early_stopping: EarlyStoppingConfig | None = None
 

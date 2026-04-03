@@ -87,6 +87,7 @@ class BaseTrainer(ABC):
         self.train_data = None
         self.val_data = None
         self.opt = None
+        self.max_clip_grad_norm: float | None = None
         self.loss = None
         self.lr_scheduler = None
         self.early_stopping: EarlyStopping | None = None
@@ -197,6 +198,7 @@ class BaseTrainer(ABC):
         self,
         optimizer,
         loss_fn,
+        max_clip_grad_norm: float | None = None,
         lr_scheduler=None,
         early_stopping: EarlyStoppingConfig | None = None,
     ) -> "BaseTrainer":
@@ -205,6 +207,7 @@ class BaseTrainer(ABC):
         Args:
             optimizer: PyTorch 优化器
             loss_fn: 损失函数
+            max_clip_grad_norm: 最大梯度范数（可选）
             lr_scheduler: 学习率调度器（可选）
             early_stopping: 早停配置（可选）
 
@@ -214,6 +217,7 @@ class BaseTrainer(ABC):
         self._optimization_config = OptimizationConfig(
             optimizer=optimizer,
             loss_fn=loss_fn,
+            max_clip_grad_norm=max_clip_grad_norm,
             lr_scheduler=lr_scheduler,
             early_stopping=early_stopping,
         )
@@ -300,6 +304,7 @@ class BaseTrainer(ABC):
         # 5. Setup optimization
         self.opt = self._optimization_config.optimizer
         self.loss = self._optimization_config.loss_fn
+        self.max_clip_grad_norm = self._optimization_config.max_clip_grad_norm
         self.lr_scheduler = self._optimization_config.lr_scheduler
 
         # 6. Setup early stopping
@@ -1009,6 +1014,10 @@ class BaseTrainer(ABC):
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
         loss.backward()
+        if self.max_clip_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), max_norm=self.max_clip_grad_norm
+            )
         self.opt.step()
 
         # 累积预测
