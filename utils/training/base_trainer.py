@@ -1052,7 +1052,7 @@ class BaseTrainer(ABC):
 
         return loss.item()
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
         """执行一个验证批次。"""
         output = self.forward_pass(batch_data)
@@ -1063,7 +1063,7 @@ class BaseTrainer(ABC):
 
         return loss.item()
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
         """执行一个测试批次。"""
         output = self.test_forward_pass(batch_data)
@@ -1074,7 +1074,7 @@ class BaseTrainer(ABC):
 
         return loss.item()
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def _evaluate_on_test_set(self, use_best_model: bool = True) -> dict[str, float]:
         """训练结束后在测试集上评估并记录指标。"""
         if self.test_data is None:
