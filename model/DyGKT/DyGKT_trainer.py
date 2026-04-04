@@ -4,34 +4,14 @@ from typing import Any
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import Dataset
 
-from utils.config import (
-    BaseParamConfig,
-    DataLoaderConfig,
-    EarlyStoppingConfig,
-    create_optimized_dataloader,
-    register_model_params,
-)
+from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
 from utils.core import TRAINERS, get_logger
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
 
 __all__ = ["DyGKTTrainer", "DyGKTModelParams"]
-
-
-class _IndexDataset(Dataset):
-    """Dataset that only returns sample indices for vectorized collate."""
-
-    def __init__(self, size: int) -> None:
-        self._size = int(size)
-
-    def __len__(self) -> int:
-        return self._size
-
-    def __getitem__(self, index: int) -> int:
-        return int(index)
 
 
 @register_model_params("DyGKT")
@@ -90,32 +70,6 @@ class DyGKTModelParams(BaseParamConfig):
                 "default": 2020,
                 "help": "Random seed for time-decay neighbor sampling (default: 2020).",
             },
-            "dygkt_split_protocol": {
-                "type": str,
-                "default": "kfold",
-                "choices": ["kfold", "time_quantile"],
-                "help": "Data split protocol for DyGKT: kfold (project default) or time_quantile (original DyGKT-like).",
-            },
-            "dygkt_val_ratio": {
-                "type": float,
-                "default": 0.1,
-                "help": "Validation ratio when dygkt_split_protocol=time_quantile (default: 0.1).",
-            },
-            "dygkt_test_ratio": {
-                "type": float,
-                "default": 0.1,
-                "help": "Test ratio when dygkt_split_protocol=time_quantile (default: 0.1).",
-            },
-            "max_similarity_matrix_questions": {
-                "type": int,
-                "default": 12000,
-                "help": "Max question count to build full question-question similarity matrix; larger datasets use local on-the-fly similarity (default: 12000)",
-            },
-            "compat_fields": {
-                "type": bool,
-                "default": False,
-                "help": "Whether to generate legacy compatibility fields in DyGKT dataset (default: False, faster)",
-            },
             "graph_neg_sampling": {
                 "type": bool,
                 "default": True,
@@ -171,31 +125,6 @@ class DyGKTModelParams(BaseParamConfig):
                 "short": "bs",
                 "help": "Batch size for training (default: 2000)",
             },
-            "loader_num_workers": {
-                "type": int,
-                "default": -1,
-                "help": "DataLoader worker count (-1 means auto)",
-            },
-            "loader_prefetch_factor": {
-                "type": int,
-                "default": 2,
-                "help": "DataLoader prefetch factor when num_workers > 0 (default: 2)",
-            },
-            "loader_persistent_workers": {
-                "type": bool,
-                "default": True,
-                "help": "Enable persistent DataLoader workers when num_workers > 0",
-            },
-            "eval_batch_size": {
-                "type": int,
-                "default": 0,
-                "help": "Validation/test batch size (0 means auto=2*train batch size)",
-            },
-            "eval_loader_num_workers": {
-                "type": int,
-                "default": -1,
-                "help": "Validation/test DataLoader worker count (-1 means use loader_num_workers)",
-            },
         }
 
         return group_name, params
@@ -236,76 +165,6 @@ class DyGKTTrainer(BaseTrainer):
         logger.info("Initializing DyGKT model...")
         model = DyGKT(args, model_metadata)
 
-        # Keep train batches chronological to match the original DyGKT setup.
-        loader_device = (
-            args.device
-            if isinstance(args.device, torch.device)
-            else torch.device(args.device)
-        )
-        loader_num_workers_arg = int(getattr(args, "loader_num_workers", -1))
-        loader_num_workers: int | str = (
-            "auto" if loader_num_workers_arg < 0 else loader_num_workers_arg
-        )
-        loader_prefetch_factor = max(1, int(getattr(args, "loader_prefetch_factor", 2)))
-        loader_persistent_workers = bool(
-            getattr(args, "loader_persistent_workers", True)
-        )
-        eval_batch_size_arg = int(getattr(args, "eval_batch_size", 0))
-        eval_batch_size = (
-            eval_batch_size_arg
-            if eval_batch_size_arg > 0
-            else max(1, int(args.batch_size) * 2)
-        )
-        eval_loader_num_workers_arg = int(getattr(args, "eval_loader_num_workers", -1))
-        if eval_loader_num_workers_arg < 0:
-            eval_loader_num_workers = loader_num_workers
-        else:
-            eval_loader_num_workers = eval_loader_num_workers_arg
-
-        loader_config = DataLoaderConfig(
-            num_workers=loader_num_workers,
-            pin_memory=True,
-            prefetch_factor=loader_prefetch_factor,
-            persistent_workers=loader_persistent_workers,
-        )
-        eval_loader_config = DataLoaderConfig(
-            num_workers=eval_loader_num_workers,
-            pin_memory=True,
-            prefetch_factor=loader_prefetch_factor,
-            persistent_workers=loader_persistent_workers,
-        )
-
-        train_index_dataset = _IndexDataset(len(train_dataset))
-        val_index_dataset = _IndexDataset(len(val_dataset))
-        test_index_dataset = _IndexDataset(len(test_dataset))
-
-        train_loader = create_optimized_dataloader(
-            train_index_dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            device=loader_device,
-            config=loader_config,
-            collate_fn=train_dataset.collate_indices,
-        )
-
-        val_loader = create_optimized_dataloader(
-            val_index_dataset,
-            batch_size=eval_batch_size,
-            shuffle=False,
-            device=loader_device,
-            config=eval_loader_config,
-            collate_fn=val_dataset.collate_indices,
-        )
-
-        test_loader = create_optimized_dataloader(
-            test_index_dataset,
-            batch_size=eval_batch_size,
-            shuffle=False,
-            device=loader_device,
-            config=eval_loader_config,
-            collate_fn=test_dataset.collate_indices,
-        )
-
         # 3. 创建优化器和损失函数
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.AdamW(
@@ -340,10 +199,13 @@ class DyGKTTrainer(BaseTrainer):
             device=args.device,
             checkpoint_path=args.checkpoint_path,
         ).with_data(
-            train_data=train_loader,
-            val_data=val_loader,
-            test_data=test_loader,
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
             batch_size=args.batch_size,
+            collate_fn=train_dataset.get_batch,
+            val_collate_fn=val_dataset.get_batch,
+            test_collate_fn=test_dataset.get_batch,
         ).with_optimization(
             optimizer=optimizer,
             loss_fn=loss_fn,
@@ -412,7 +274,7 @@ class DyGKTTrainer(BaseTrainer):
         return F.cross_entropy(logits[valid_rows], labels)
 
     def forward_pass(self, batch_data: dict) -> dict[str, torch.Tensor]:
-        """DyGKT 前向传播（接受 batch 字典）。
+        """DyGKT 前向传播。
 
         Args:
             batch_data: 字典，包含所有交互信息和历史邻居
@@ -420,7 +282,6 @@ class DyGKTTrainer(BaseTrainer):
         Returns:
             包含 y_hat, y_label, y_predict 等的字典
         """
-        # batch_data 已经是字典格式（由 DyGKTDataset.__getitem__ 返回）
         # 移动所有张量到设备
         batch = {}
         for key, value in batch_data.items():
