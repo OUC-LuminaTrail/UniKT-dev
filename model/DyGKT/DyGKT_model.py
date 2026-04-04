@@ -72,44 +72,17 @@ class TimeDualDecayEncoder(nn.Module):
 
     def forward(self, timestamps: torch.Tensor) -> torch.Tensor:
         timestamps = timestamps.unsqueeze(dim=2)
-        timestamps_right = timestamps.clone()
         timestamps_right = torch.cat(
-            [timestamps_right[:, 1:, :], timestamps_right[:, -1, :].unsqueeze(1)], dim=1
+            [timestamps[:, 1:, :], timestamps[:, -1, :].unsqueeze(1)], dim=1
         )
         timestamps_diff = timestamps_right - timestamps
 
-        threshold = 3600 * 24
-        use_short_branch = timestamps_diff > threshold
-        use_short_branch_flat = use_short_branch.squeeze(-1)
+        mask = (timestamps_diff > 3600 * 24).float()
 
-        batch_size, seq_len = use_short_branch_flat.shape
-        target_shape = (batch_size, seq_len, self.time_dim)
+        short_features = self.f(self.w_short(timestamps_diff * mask))
+        long_features = self.f(self.w_long(timestamps_diff * (1 - mask)))
 
-        zero_input = timestamps_diff.new_zeros((1, 1))
-        short_zero = self.f(self.w_short(zero_input)).view(1, 1, self.time_dim)
-        long_zero = self.f(self.w_long(zero_input)).view(1, 1, self.time_dim)
-
-        timestamps_short = short_zero.expand(target_shape).clone()
-        timestamps_long = long_zero.expand(target_shape).clone()
-
-        if use_short_branch_flat.any():
-            short_input = timestamps_diff[use_short_branch_flat]
-            short_active = self.f(self.w_short(short_input))
-            timestamps_short = timestamps_short.masked_scatter(
-                use_short_branch.expand(-1, -1, self.time_dim),
-                short_active.reshape(-1),
-            )
-
-        use_long_branch = ~use_short_branch_flat
-        if use_long_branch.any():
-            long_input = timestamps_diff[use_long_branch]
-            long_active = self.f(self.w_long(long_input))
-            timestamps_long = timestamps_long.masked_scatter(
-                use_long_branch.unsqueeze(-1).expand(-1, -1, self.time_dim),
-                long_active.reshape(-1),
-            )
-
-        return self.w_o(timestamps_short + timestamps_long)
+        return self.w_o(short_features + long_features)
 
 
 class MergeLayer(nn.Module):
@@ -158,9 +131,8 @@ class DyGKT(nn.Module):
         )
         self.ablation = str(getattr(args, "ablation", "-1"))
         self.time_dim = int(getattr(args, "dim_time", 16))
-
-        self.edge_dim = 64
-        self.node_dim = 64
+        self.edge_dim = int(getattr(args, "edge_dim", 64))
+        self.node_dim = int(getattr(args, "node_dim", 64))
 
         num_questions = int(data_metadata["num_questions"])
         num_users = int(data_metadata["num_users"])
@@ -235,7 +207,10 @@ class DyGKT(nn.Module):
             self.time_encoder = TimeDualDecayEncoder(time_dim=self.time_dim)
 
         self.link_predictor = MergeLayer(
-            input_dim1=64, input_dim2=64, hidden_dim=64, output_dim=1
+            input_dim1=self.node_dim,
+            input_dim2=self.node_dim,
+            hidden_dim=self.node_dim,
+            output_dim=1,
         )
 
     def set_neighbor_sampler(self, neighbor_sampler: Any) -> None:
@@ -323,28 +298,19 @@ class DyGKT(nn.Module):
         dst_neighbor_edge_feats = torch.cat([dst_neighbor_edge_feats, zero_edge], dim=1)
 
         src_nodes_neighbor_co_occurrence_features = (
-            (
-                src_neighbor_node_ids[:, :-1]
-                == dst_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
-            )
+            (src_neighbor_node_ids[:, :-1] == dst_node_ids.unsqueeze(1))
             .unsqueeze(-1)
             .float()
         )
         dst_nodes_neighbor_co_occurrence_features = (
-            (
-                dst_neighbor_node_ids[:, :-1]
-                == src_node_ids.unsqueeze(1).repeat(1, self.num_neighbors)
-            )
+            (dst_neighbor_node_ids[:, :-1] == src_node_ids.unsqueeze(1))
             .unsqueeze(-1)
             .float()
         )
 
         src_node_skill = self.node_skill_ids[src_neighbor_node_ids][:, :-1].long()
         dst_node_skill = (
-            self.node_skill_ids[dst_neighbor_node_ids][:, -1]
-            .long()
-            .unsqueeze(1)
-            .repeat(1, self.num_neighbors)
+            self.node_skill_ids[dst_neighbor_node_ids[:, -1]].long().unsqueeze(1)
         )
         src_nodes_neighbor_skill_features = (
             (src_node_skill == dst_node_skill).unsqueeze(-1).float()
@@ -352,15 +318,21 @@ class DyGKT(nn.Module):
 
         a = 0.0 if self.ablation == "counter" else 1.0
 
-        src_nodes_neighbor_struct_features = self.projection_layer["struct"](
-            a * src_nodes_neighbor_co_occurrence_features
+        struct_features = (
+            torch.stack(
+                [
+                    src_nodes_neighbor_co_occurrence_features,
+                    dst_nodes_neighbor_co_occurrence_features,
+                    src_nodes_neighbor_skill_features,
+                ],
+                dim=0,
+            )
+            * a
         )
-        dst_nodes_neighbor_struct_features = self.projection_layer["struct"](
-            a * dst_nodes_neighbor_co_occurrence_features
-        )
-        src_nodes_neighbor_skill_struct_features = self.projection_layer["struct"](
-            a * src_nodes_neighbor_skill_features
-        )
+        struct_projections = self.projection_layer["struct"](struct_features)
+        src_nodes_neighbor_struct_features = struct_projections[0]
+        dst_nodes_neighbor_struct_features = struct_projections[1]
+        src_nodes_neighbor_skill_struct_features = struct_projections[2]
 
         (
             src_nodes_neighbor_node_raw_features,
