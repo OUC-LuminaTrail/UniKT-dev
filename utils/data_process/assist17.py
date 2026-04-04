@@ -221,6 +221,11 @@ class Assistments2017Data(DataSource):
         data = data.unique()
         data = data.collect()
 
+        # Convert Unix seconds to milliseconds for consistency
+        data = data.with_columns(
+            (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp")
+        )
+
         data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         data = data.filter(pl.col("skill").is_not_null())
