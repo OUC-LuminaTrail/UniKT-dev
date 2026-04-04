@@ -239,38 +239,39 @@ class DyGKTTrainer(BaseTrainer):
         if src_embeddings is None or dst_embeddings is None or dst_node_ids is None:
             return outputs["y_hat"].new_zeros(())
 
-        batch_size = src_embeddings.shape[0]
-        if batch_size < 2:
+        B = src_embeddings.shape[0]
+        if B < 2:
             return outputs["y_hat"].new_zeros(())
 
-        pos_logits = (src_embeddings * dst_embeddings).sum(
-            dim=-1
-        ) / self.graph_neg_temperature
-        neg_logits_list: list[torch.Tensor] = []
+        temp = self.graph_neg_temperature
+        num_samples = self.graph_neg_num_samples
 
-        base_index = torch.arange(batch_size, device=src_embeddings.device)
-        for _ in range(self.graph_neg_num_samples):
-            perm = torch.randperm(batch_size, device=src_embeddings.device)
-            if torch.all(perm == base_index):
-                perm = torch.roll(perm, shifts=1)
+        # 正样本 logits: [B]
+        pos_logits = (src_embeddings * dst_embeddings).sum(dim=-1) / temp
 
-            neg_dst_embeddings = dst_embeddings[perm]
-            neg_dst_ids = dst_node_ids[perm]
-            neg_logits = (src_embeddings * neg_dst_embeddings).sum(
-                dim=-1
-            ) / self.graph_neg_temperature
-            same_target_mask = neg_dst_ids == dst_node_ids
-            neg_logits = neg_logits.masked_fill(same_target_mask, -1e9)
-            neg_logits_list.append(neg_logits)
+        # 预计算相似度矩阵: [B, B]
+        all_sim = src_embeddings @ dst_embeddings.T / temp
 
-        logits = torch.stack([pos_logits] + neg_logits_list, dim=1)
+        # 生成随机负样本索引: [B, num_samples]
+        perms = torch.rand(num_samples, B, device=src_embeddings.device).argsort(dim=-1)
+        neg_indices = perms.T
+
+        # 提取负样本 logits: [B, num_samples]
+        neg_logits = torch.gather(all_sim, dim=1, index=neg_indices)
+
+        # 掩码相同目标节点
+        neg_dst_ids = dst_node_ids[neg_indices]
+        same_target_mask = neg_dst_ids == dst_node_ids.unsqueeze(1)
+        neg_logits = neg_logits.masked_fill(same_target_mask, -1e9)
+
+        # 组合 logits: [B, 1 + num_samples]
+        logits = torch.cat([pos_logits.unsqueeze(1), neg_logits], dim=1)
+
         valid_rows = torch.isfinite(logits[:, 1:]).any(dim=1)
         if not bool(valid_rows.any()):
             return outputs["y_hat"].new_zeros(())
 
-        labels = torch.zeros(
-            int(valid_rows.sum().item()), dtype=torch.long, device=logits.device
-        )
+        labels = torch.zeros(int(valid_rows.sum().item()), dtype=torch.long, device=logits.device)
         return F.cross_entropy(logits[valid_rows], labels)
 
     def forward_pass(self, batch_data: dict) -> dict[str, torch.Tensor]:
