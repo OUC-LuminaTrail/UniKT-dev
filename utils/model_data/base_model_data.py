@@ -16,6 +16,141 @@ class BaseModelData(ABC):
 
     def __init__(self, data_src: DataSource):
         self.data_src = data_src
+        self._cache = True  # 是否开启缓存
+
+    @staticmethod
+    def disk_cache(cache_name: str | None = None):
+        """
+        为实例方法提供磁盘缓存的装饰器工厂。
+
+        Usage:
+            @BaseModelData.cached()
+            def prepare_data(self, args):
+                ...
+
+            @BaseModelData.cached("my_data")
+            def prepare_data(self, args):
+                ...
+
+        参数:
+            cache_name: 缓存文件名前缀（可选）。不传时使用函数名。
+
+        说明:
+            - 仅在实例 `self._cache` 为 True 时启用缓存
+            - 缓存键基于类名、函数名、入参（args/kwargs）构建
+            - 缓存目录: .cache/<ClassName>/
+        """
+        import functools
+        import hashlib
+        import os
+        import pickle
+
+        from utils.core import get_logger
+
+        logger = get_logger(__name__)
+
+        def _normalize_for_key(obj):
+            """将对象转为稳定、可序列化的结构"""
+            if isinstance(obj, (str, int, float, bool, type(None))):
+                return obj
+
+            if isinstance(obj, bytes):
+                return ("__bytes__", len(obj), hashlib.md5(obj).hexdigest())
+
+            if isinstance(obj, (list, tuple)):
+                return [_normalize_for_key(x) for x in obj]
+
+            if isinstance(obj, set):
+                normalized = [_normalize_for_key(x) for x in obj]
+                return sorted(normalized, key=lambda x: repr(x))
+
+            if isinstance(obj, dict):
+                items = []
+                for k, v in obj.items():
+                    items.append((str(k), _normalize_for_key(v)))
+                items.sort(key=lambda kv: kv[0])
+                return items
+
+            # argparse.Namespace 或任意含 __dict__ 的参数对象
+            if hasattr(obj, "__dict__"):
+                return _normalize_for_key(vars(obj))
+
+            # numpy / torch 等大型对象不直接入键，只保留类型信息
+            module = getattr(type(obj), "__module__", "")
+            name = getattr(type(obj), "__name__", type(obj).__name__)
+            return ("__object__", module, name, repr(obj))
+
+        def _stable_key(obj):
+            """将规范化对象编码为稳定字节串。"""
+            normalized = _normalize_for_key(obj)
+            return repr(normalized).encode("utf-8")
+
+        def decorator(func):
+            @functools.wraps(func)  # 保持原函数的元数据
+            def wrapper(self, *args, **kwargs):
+                if not getattr(self, "_cache", False):
+                    return func(self, *args, **kwargs)
+
+                # 定义缓存目录
+                cache_dir = ".cache"
+                os.makedirs(cache_dir, exist_ok=True)
+                gitignore_path = os.path.join(cache_dir, ".gitignore")
+                if not os.path.exists(gitignore_path):
+                    with open(gitignore_path, "w", encoding="utf-8") as f:
+                        f.write("*\n")
+
+                # 获取类名
+                class_name = self.__class__.__name__
+                target_dir = os.path.join(cache_dir, class_name)
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir, exist_ok=True)
+
+                method_name = cache_name or func.__name__
+                dataset_tag = getattr(getattr(self, "data_src", None), "dataset", None)
+                key_payload = (
+                    class_name,
+                    func.__name__,
+                    dataset_tag,
+                    _normalize_for_key(args),
+                    _normalize_for_key(kwargs),
+                )
+                key_hash = hashlib.md5(_stable_key(key_payload)).hexdigest()  # nosec B324
+
+                # 构造缓存文件完整路径，避免不同参数调用相互覆盖
+                file_path = os.path.join(target_dir, f"{method_name}_{key_hash}.pkl")
+
+                # 检查缓存是否存在
+                if os.path.exists(file_path):
+                    try:
+                        with open(file_path, "rb") as f:
+                            data = pickle.load(f)
+                        logger.info(f"Loaded cache from: {file_path}")
+                        return data
+                    except Exception as _:
+                        logger.error("Fail to load cache, rebuilding data...")
+
+                # 缓存不存在或读取失败，执行原函数逻辑
+                result = func(self, *args, **kwargs)
+
+                # 自动将结果写入缓存
+                try:
+                    with open(file_path, "wb") as f:
+                        pickle.dump(result, f)
+                    logger.info(f"Saved cache to: {file_path}")
+                except Exception as e:
+                    logger.error(f"Fail to save cache: {e}")
+
+                return result
+
+            return wrapper
+
+        # 兼容 @BaseModelData.cached 的无参写法
+        if callable(cache_name):
+            func = cache_name
+            cache_name = None
+            return decorator(func)
+
+        return decorator
 
     def _get_kfold_data(self):
         r"""
