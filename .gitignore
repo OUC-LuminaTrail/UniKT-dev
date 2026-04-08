@@ -28,6 +28,10 @@ data/
 *.pt
 *.pth
 .env
+
+# Cache
+.cache/
+
 # System files
 .DS_Store
 
