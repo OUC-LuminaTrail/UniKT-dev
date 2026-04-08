@@ -1,8 +1,13 @@
+import functools
+import hashlib
+import pickle
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import numpy as np
 import polars as pl
 
+from utils.core import get_logger
 from utils.data_process import DataSource
 
 
@@ -14,9 +19,9 @@ class BaseModelData(ABC):
         data_src: 数据源对象
     """
 
-    def __init__(self, data_src: DataSource):
+    def __init__(self, data_src: DataSource, cache: bool = True):
         self.data_src = data_src
-        self._cache = True  # 是否开启缓存
+        self._cache = cache
 
     @staticmethod
     def disk_cache(cache_name: str | None = None):
@@ -24,11 +29,11 @@ class BaseModelData(ABC):
         为实例方法提供磁盘缓存的装饰器工厂。
 
         Usage:
-            @BaseModelData.cached()
+            @BaseModelData.disk_cache()
             def prepare_data(self, args):
                 ...
 
-            @BaseModelData.cached("my_data")
+            @BaseModelData.disk_cache("my_data")
             def prepare_data(self, args):
                 ...
 
@@ -40,13 +45,6 @@ class BaseModelData(ABC):
             - 缓存键基于类名、函数名、入参（args/kwargs）构建
             - 缓存目录: .cache/<ClassName>/
         """
-        import functools
-        import hashlib
-        import os
-        import pickle
-
-        from utils.core import get_logger
-
         logger = get_logger(__name__)
 
         def _normalize_for_key(obj):
@@ -75,10 +73,13 @@ class BaseModelData(ABC):
             if hasattr(obj, "__dict__"):
                 return _normalize_for_key(vars(obj))
 
-            # numpy / torch 等大型对象不直接入键，只保留类型信息
+            # numpy / torch 等大型对象不直接入键，只保留类型信息和内容哈希
             module = getattr(type(obj), "__module__", "")
             name = getattr(type(obj), "__name__", type(obj).__name__)
-            return ("__object__", module, name, repr(obj))
+            if hasattr(obj, "shape"):
+                shape = tuple(obj.shape)
+                return ("__object__", module, name, shape)
+            return ("__object__", module, name)
 
         def _stable_key(obj):
             """将规范化对象编码为稳定字节串。"""
@@ -91,19 +92,18 @@ class BaseModelData(ABC):
                 if not getattr(self, "_cache", False):
                     return func(self, *args, **kwargs)
 
-                # 定义缓存目录
-                cache_dir = ".cache"
-                os.makedirs(cache_dir, exist_ok=True)
-                gitignore_path = os.path.join(cache_dir, ".gitignore")
-                if not os.path.exists(gitignore_path):
-                    with open(gitignore_path, "w", encoding="utf-8") as f:
-                        f.write("*\n")
+                # 缓存目录相对于项目根目录
+                project_root = Path(__file__).resolve().parent.parent.parent
+                cache_dir = project_root / ".cache"
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                gitignore_path = cache_dir / ".gitignore"
+                if not gitignore_path.exists():
+                    gitignore_path.write_text("*\n", encoding="utf-8")
 
                 # 获取类名
                 class_name = self.__class__.__name__
-                target_dir = os.path.join(cache_dir, class_name)
-                if not os.path.exists(target_dir):
-                    os.makedirs(target_dir, exist_ok=True)
+                target_dir = cache_dir / class_name
+                target_dir.mkdir(parents=True, exist_ok=True)
 
                 method_name = cache_name or func.__name__
                 dataset_tag = getattr(getattr(self, "data_src", None), "dataset", None)
@@ -117,17 +117,17 @@ class BaseModelData(ABC):
                 key_hash = hashlib.md5(_stable_key(key_payload)).hexdigest()  # nosec B324
 
                 # 构造缓存文件完整路径，避免不同参数调用相互覆盖
-                file_path = os.path.join(target_dir, f"{method_name}_{key_hash}.pkl")
+                file_path = target_dir / f"{method_name}_{key_hash}.pkl"
 
                 # 检查缓存是否存在
-                if os.path.exists(file_path):
+                if file_path.exists():
                     try:
                         with open(file_path, "rb") as f:
                             data = pickle.load(f)
                         logger.info(f"Loaded cache from: {file_path}")
                         return data
-                    except Exception as _:
-                        logger.error("Fail to load cache, rebuilding data...")
+                    except Exception as e:
+                        logger.error(f"Fail to load cache, rebuilding data: {e}")
 
                 # 缓存不存在或读取失败，执行原函数逻辑
                 result = func(self, *args, **kwargs)
@@ -144,7 +144,7 @@ class BaseModelData(ABC):
 
             return wrapper
 
-        # 兼容 @BaseModelData.cached 的无参写法
+        # 兼容 @BaseModelData.disk_cache 的无参写法
         if callable(cache_name):
             func = cache_name
             cache_name = None
