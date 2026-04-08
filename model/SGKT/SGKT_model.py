@@ -253,46 +253,68 @@ class SelfAttentionHistory(nn.Module):
 
     def forward(self, input_embedding, hist_neighbor_index):
         batch_size, seq_len, hidden_dim = input_embedding.shape
-        if self.xt1.size(0) != seq_len:
-            self.xt1 = nn.Parameter(self.xt1[:seq_len, :seq_len])
-            self.xt2 = nn.Parameter(self.xt2[:seq_len, :seq_len])
-            self.xita = nn.Parameter(self.xita[:seq_len])
-            self.bias = nn.Parameter(self.bias[: seq_len + 1])
+        device = input_embedding.device
+
         if hist_neighbor_index.dim() == 2:
             hist_neighbor_index = hist_neighbor_index.unsqueeze(0).expand(
                 batch_size, -1, -1
             )
-        diff = input_embedding - input_embedding[:, :, 0:1]
-        transformed1 = torch.einsum("buh,us->bsh", diff, self.xt1)
-        exp_transformed = torch.exp(transformed1)
-        transformed2 = torch.einsum("bvh,vs->bsh", exp_transformed, self.xt2)
+
+        causal_mask_xt = torch.triu(
+            torch.ones(seq_len, seq_len, device=device, dtype=self.xt1.dtype)
+        )  # [T, T],  mask[u, s] = 1  当  u <= s
+
+        diff = input_embedding - input_embedding[:, :, 0:1]  # [B, T, H]
+
+        transformed1 = torch.einsum(
+            "buh,us->bsh", diff, self.xt1 * causal_mask_xt
+        )  # [B, T, H]
+
+        exp_transformed = torch.exp(transformed1)  # [B, T, H]
+
+        transformed2 = torch.einsum(
+            "bvh,vs->bsh", exp_transformed, self.xt2 * causal_mask_xt
+        )  # [B, T, H]
+
         input_embedding_transformed = transformed2 + self.xita.unsqueeze(0).unsqueeze(
             -1
-        )
+        )  # [B, T, H]
 
         zero_padding = torch.zeros(
             batch_size,
             1,
             hidden_dim,
-            device=input_embedding.device,
+            device=device,
             dtype=input_embedding.dtype,
         )
-        input_emb_padded = torch.cat([input_embedding_transformed, zero_padding], dim=1)
+        input_emb_padded = torch.cat(
+            [input_embedding_transformed, zero_padding], dim=1
+        )  # [B, T+1, H]
 
-        EK = input_emb_padded @ self.K + self.bias
-        EQ = input_emb_padded @ self.Q + self.bias
-        EV = input_emb_padded @ self.V + self.bias
+        EK = input_emb_padded @ self.K + self.bias  # [B, T+1, H]
+        EQ = input_emb_padded @ self.Q + self.bias  # [B, T+1, H]
+        EV = input_emb_padded @ self.V + self.bias  # [B, T+1, H]
+
         A = torch.matmul(EQ, EK.transpose(1, 2)) / math.sqrt(hidden_dim)
-        B = torch.matmul(A, EV)
+        # [B, T+1, T+1]
+
+        att_len = A.size(1)  # T+1
+        causal_mask_att = torch.triu(
+            torch.ones(att_len, att_len, device=device), diagonal=1
+        ).bool()
+
+        A = A.masked_fill(causal_mask_att.unsqueeze(0), float("-inf"))
+        A = F.softmax(A, dim=-1)  # [B, T+1, T+1]
+        B = torch.matmul(A, EV)  # [B, T+1, H]
 
         zero_padding = torch.zeros(
             batch_size,
             1,
             hidden_dim,
-            device=B.device,
+            device=device,
             dtype=B.dtype,
         )
-        B_padded = torch.cat([B, zero_padding], dim=1)
+        B_padded = torch.cat([B, zero_padding], dim=1)  # [B, T+2, H]
         padding_position = B.size(1)
 
         hist_neighbor_index = hist_neighbor_index[:, :seq_len, :]
@@ -302,12 +324,13 @@ class SelfAttentionHistory(nn.Module):
             torch.full_like(hist_neighbor_index, padding_position),
         )
         hist_neighbor_index = hist_neighbor_index.reshape(batch_size, -1)
-        temp_hist_index = hist_neighbor_index
+
         hist_neighbors_features = torch.gather(
             B_padded,
             1,
-            temp_hist_index.unsqueeze(-1).expand(-1, -1, hidden_dim),
+            hist_neighbor_index.unsqueeze(-1).expand(-1, -1, hidden_dim),
         ).reshape(batch_size, seq_len, self.hist_neighbor_num, hidden_dim)
+
         return hist_neighbors_features
 
 
