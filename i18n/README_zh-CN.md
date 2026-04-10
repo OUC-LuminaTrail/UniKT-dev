@@ -228,13 +228,13 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 
 | 文档 | 内容 |
 |------|------|
-| [快速开始](docs/quick_start.md) | 环境配置与最小示例 |
-| [数据处理](docs/data_processing.md) | 下载、清洗、K 折划分 |
-| [模型训练](docs/training.md) | 训练流程、K 折验证、早停机制 |
-| [超参搜索](docs/hyperparameter_search.md) | Optuna 配置与可视化 |
-| [消融实验](docs/ablation_study.md) | 组件分析框架 |
-| [案例分析](docs/case_analysis.md) | 推理、用户筛选、可视化 |
-| [架构设计](docs/architecture.md) | 框架设计与扩展指南 |
+| [快速开始](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/quick_start.md) | 环境配置与最小示例 |
+| [数据处理](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/data_processing.md) | 下载、清洗、K 折划分 |
+| [模型训练](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/training.md) | 训练流程、K 折验证、早停机制 |
+| [超参搜索](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/hyperparameter_search.md) | Optuna 配置与可视化 |
+| [消融实验](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/ablation_study.md) | 组件分析框架 |
+| [案例分析](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/case_analysis.md) | 推理、用户筛选、可视化 |
+| [架构设计](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/architecture.md) | 框架设计与扩展指南 |
 
 ## 📁 项目结构
 

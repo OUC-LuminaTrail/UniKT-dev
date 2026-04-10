@@ -227,13 +227,13 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 
 | Document | Description |
 |----------|-------------|
-| [Quick Start](docs/quick_start.md) | Environment setup and minimal example |
-| [Data Processing](docs/data_processing.md) | Download, cleaning, and K-fold splitting |
-| [Training](docs/training.md) | Training pipeline, K-fold, early stopping |
-| [Hyperparameter Search](docs/hyperparameter_search.md) | Optuna configuration and visualization |
-| [Ablation Study](docs/ablation_study.md) | Component analysis framework |
-| [Case Analysis](docs/case_analysis.md) | Inference, user selection, visualization |
-| [Architecture](docs/architecture.md) | Framework design and extension guide |
+| [Quick Start](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/quick_start.md) | Environment setup and minimal example |
+| [Data Processing](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/data_processing.md) | Download, cleaning, and K-fold splitting |
+| [Training](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/training.md) | Training pipeline, K-fold, early stopping |
+| [Hyperparameter Search](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/hyperparameter_search.md) | Optuna configuration and visualization |
+| [Ablation Study](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/ablation_study.md) | Component analysis framework |
+| [Case Analysis](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/case_analysis.md) | Inference, user selection, visualization |
+| [Architecture](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/architecture.md) | Framework design and extension guide |
 
 ## 📁 Project Structure
 
