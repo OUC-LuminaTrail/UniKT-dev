@@ -7,8 +7,8 @@ from .assist12 import Assistments2012Data
 from .assist17 import Assistments2017Data
 from .data_source import DataSource
 from .ednet_kt1 import EdNetKT1Data
-from .slepemapy import SlepemapyData
 from .junyi2015 import Junyi2015Data
+from .slepemapy import SlepemapyData
 
 
 def get_data_source(dataset_name: str, args: Any) -> DataSource:
