@@ -14,6 +14,7 @@ SUPPORTED_DATASETS = [
     "assistments12",
     "assistments17",
     "ednet_kt1",
+    "slepemapy",
 ]
 
 
