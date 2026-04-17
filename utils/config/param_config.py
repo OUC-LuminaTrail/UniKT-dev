@@ -149,8 +149,9 @@ class DataParams(BaseParamConfig):
                     "assistments17",
                     "ednet_kt1",
                     "slepemapy",
+                    "junyi2015",
                 ],
-                "help": "Dataset name to use (choices: assistments09, assistments12, assistments17, ednet_kt1, slepemapy)",
+                "help": "Dataset name to use (choices: assistments09, assistments12, assistments17, ednet_kt1, slepemapy, junyi2015)",
             },
             "data_base_path": {
                 "type": str,

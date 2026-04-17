@@ -7,6 +7,7 @@ from .assist12 import Assistments2012Data
 from .assist17 import Assistments2017Data
 from .data_source import DataSource
 from .ednet_kt1 import EdNetKT1Data
+from .junyi2015 import Junyi2015Data
 from .slepemapy import SlepemapyData
 
 
@@ -37,6 +38,7 @@ __all__ = [
     "Assistments2017Data",
     "EdNetKT1Data",
     "SlepemapyData",
+    "Junyi2015Data",
     "DataSource",
     "get_data_source",
 ]
