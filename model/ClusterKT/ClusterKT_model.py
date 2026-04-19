@@ -152,42 +152,33 @@ class ClusterKT(nn.Module):
         )
         b_state_center = self.state_center.data.unsqueeze(0).repeat(batch_size, 1, 1)
 
-        q_ori = q_embed_data.clone().detach().permute(1, 0, 2)
-        q_ori = torch.unsqueeze(q_ori, dim=-1)
-        qa_ori = qa_embed_data.clone().detach().permute(1, 0, 2)
-        qa_ori = torch.unsqueeze(qa_ori, dim=-1)
+        q_ori = q_embed_data.detach().permute(1, 0, 2).unsqueeze(-1)
+        qa_ori = qa_embed_data.detach().permute(1, 0, 2).unsqueeze(-1)
         h_add = torch.tanh(self.add_gate(qa_embed_data))
         h_minus = torch.sigmoid(self.erase_gate(qa_embed_data))
         h_list = []
-        cluster_loss_list = []
+        cluster_loss = torch.tensor(0.0, device=q_embed_data.device)
         sum_center = b_concept_center.clone().detach()
-        # Exercise clusters and Performance clusters
+        batch_arange = torch.arange(batch_size, device=q_embed_data.device)
         for i in range(seq_len):
             sim = F.cosine_similarity(
-                q_ori[i, :, :], b_concept_center.permute(0, 2, 1), dim=1
+                q_ori[i], b_concept_center.permute(0, 2, 1), dim=1
             )
             idx = torch.argmax(sim, dim=-1)
             b_loss = torch.max(sim, dim=-1).values
-            cluster_loss_list.append(torch.sum(1 - b_loss))
-            idx_center = sum_center[torch.arange(batch_size, device=idx.device), idx, :]
-            tempt = q_ori[i, :, :].squeeze(-1) + idx_center
+            cluster_loss = cluster_loss + (1 - b_loss).sum()
+            idx_center = sum_center[batch_arange, idx, :]
+            tempt = q_ori[i].squeeze(-1) + idx_center
             cluster_norm = torch.norm(tempt, p=1, dim=-1).unsqueeze(dim=-1)
-            center = torch.div(tempt, cluster_norm)
-            b_concept_center[torch.arange(batch_size, device=idx.device), idx, :] = (
-                center
-            )
-            sum_center[torch.arange(batch_size, device=idx.device), idx, :] = tempt
+            b_concept_center[batch_arange, idx, :] = tempt / cluster_norm
+            sum_center[batch_arange, idx, :] = tempt
 
-            batch_idx_state = b_state_center[
-                torch.arange(batch_size, device=idx.device), idx, :
-            ]
+            batch_idx_state = b_state_center[batch_arange, idx, :]
             h_list.append(batch_idx_state)
             batch_idx_state = batch_idx_state * (1 - h_minus[:, i, :]) + h_add[
                 :, i, :
-            ] * qa_ori[i, :, :].squeeze(-1)
-            b_state_center[torch.arange(batch_size, device=idx.device), idx, :] = (
-                batch_idx_state
-            )
+            ] * qa_ori[i].squeeze(-1)
+            b_state_center[batch_arange, idx, :] = batch_idx_state
 
         cluster_state = torch.stack(h_list, dim=1)
         # Pairwise cosine similarity
@@ -231,7 +222,6 @@ class ClusterKT(nn.Module):
         output = self.mlp(concat_q)
         x = output.squeeze(-1)
 
-        cluster_loss = sum(cluster_loss_list)
         return x, cluster_loss
 
 
@@ -253,7 +243,6 @@ class LearningGainUnit(nn.Module):
         shifted_cluster = torch.cat((padding, cluster_state[:, :-1, :]), dim=1)
         shifted_q = torch.cat((padding, q_embed_data[:, :-1, :]), dim=1)
 
-        # Batch all linear operations (steps 1..L-1, skip padding at index 0)
         x = torch.cat([shifted_cluster[:, 1:, :], shifted_q[:, 1:, :]], dim=-1)
         gate = torch.sigmoid(self.linear_gate(x))
         gain = gate * torch.tanh(self.linear_k(x))
@@ -262,17 +251,17 @@ class LearningGainUnit(nn.Module):
         seqlen = L - 1
         sim_weight = all_sim[:, :seqlen, :].mean(dim=-1, keepdim=True)
 
-        # Minimal sequential scan for the recurrence
         exp = self.exp.repeat(B, 1).to(device)
-        learning_gain_list = [exp.unsqueeze(1)]
+        result = torch.empty(B, L, d, device=device)
+        result[:, 0, :] = exp
         for t in range(seqlen):
             exp = (
                 reset[:, t, :] * exp
                 + (1 - reset[:, t, :]) * gain[:, t, :] * sim_weight[:, t, :]
             )
-            learning_gain_list.append(exp.unsqueeze(1))
+            result[:, t + 1, :] = exp
 
-        return torch.cat(learning_gain_list, dim=1)
+        return result
 
 
 class Architecture(nn.Module):
@@ -433,9 +422,7 @@ class MultiHeadAttention(nn.Module):
         return self.out_proj(concat)
 
 
-def forgetting_attention(
-    q, k, v, d_k, mask, dropout, zero_pad, state_sim, difficulty
-):
+def forgetting_attention(q, k, v, d_k, mask, dropout, zero_pad, state_sim, difficulty):
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     bs, head, seqlen = scores.size(0), scores.size(1), scores.size(2)
 
@@ -450,9 +437,7 @@ def forgetting_attention(
             (disttotal_scores - distcum_scores) * position_effect, min=0.0
         )
         dist_scores = dist_scores.sqrt().detach()
-        m = nn.Softplus()
-        gamma = torch.unsqueeze(difficulty, 1)
-        gamma = -1.0 * m(gamma)
+        gamma = -1.0 * F.softplus(difficulty.unsqueeze(1))
 
         total_effect = torch.clamp(
             torch.clamp((dist_scores * gamma).exp(), min=1e-5), max=1e5
