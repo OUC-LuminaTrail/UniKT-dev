@@ -185,7 +185,6 @@ class ClusterKTTrainer(BaseTrainer):
             )
 
         self.cluster_loss_weight = args.cluster_loss_weight
-        self.n_st = args.n_st
 
         self.with_training(
             epochs=args.epochs,

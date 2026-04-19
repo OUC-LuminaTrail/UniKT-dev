@@ -52,7 +52,6 @@ class ClusterKT(nn.Module):
         self.decoder_map = nn.Linear(self.d_model * 3, self.d_model)
         self.encoder_map = nn.Linear(self.d_model * 3, self.d_model)
         self.lg_unit = LearningGainUnit(dropout, self.d_model)
-        self.rnn_attn_map = nn.Linear(self.d_model * 2, self.d_model)
         self.trans = Architecture(
             n_blocks=n_blocks,
             n_heads=n_heads,
@@ -62,12 +61,11 @@ class ClusterKT(nn.Module):
             kq_same=self.kq_same,
         )
 
-        self.n_center = cluster_size
         self.concept_center = Parameter(
-            torch.Tensor(self.n_center, d_model), requires_grad=True
+            torch.Tensor(cluster_size, d_model), requires_grad=True
         )
         self.state_center = Parameter(
-            torch.Tensor(self.n_center, d_model), requires_grad=True
+            torch.Tensor(cluster_size, d_model), requires_grad=True
         )
         kaiming_normal_(self.concept_center)
         kaiming_normal_(self.state_center)
@@ -75,12 +73,8 @@ class ClusterKT(nn.Module):
         self.add_gate = nn.Linear(d_model, d_model)
         self.erase_gate = nn.Linear(d_model, d_model)
         self.forget_para_map = nn.Linear(2 * d_model, 1)
-        self.sig = nn.Sigmoid()
 
         self.pre_attn = nn.MultiheadAttention(
-            embed_dim=self.d_model, num_heads=n_heads, dropout=dropout, batch_first=True
-        )
-        self.pre_attn_ = nn.MultiheadAttention(
             embed_dim=self.d_model, num_heads=n_heads, dropout=dropout, batch_first=True
         )
 
@@ -203,7 +197,7 @@ class ClusterKT(nn.Module):
 
         # Forgetting difficulty: use zeros if Rasch is not enabled
         if q_embed_diff_data is not None:
-            forget_difficulty = self.sig(
+            forget_difficulty = torch.sigmoid(
                 self.forget_para_map(
                     torch.cat((cluster_state, q_embed_diff_data), dim=-1)
                 )
@@ -212,7 +206,7 @@ class ClusterKT(nn.Module):
             zeros_input = torch.zeros(
                 batch_size, seq_len, self.d_model, device=q_embed_data.device
             )
-            forget_difficulty = self.sig(
+            forget_difficulty = torch.sigmoid(
                 self.forget_para_map(torch.cat((cluster_state, zeros_input), dim=-1))
             )
 
@@ -233,9 +227,6 @@ class ClusterKT(nn.Module):
         trans_output, _ = self.pre_attn(
             learning_states, forgetting_states, cluster_state, attn_mask=attn_mask
         )
-        knowledge_states, _ = self.pre_attn_(
-            learning_states, trans_output, cluster_state, attn_mask=attn_mask
-        )
         concat_q = torch.cat([trans_output, q_embed_data], dim=-1)
         output = self.mlp(concat_q)
         x = output.squeeze(-1)
@@ -248,9 +239,6 @@ class LearningGainUnit(nn.Module):
     def __init__(self, dropout, d_model):
         super().__init__()
         self.d_model = d_model
-        self.sigmoid = nn.Sigmoid()
-        self.tanh = nn.Tanh()
-        self.dropout = nn.Dropout(dropout)
         self.exp = Parameter(
             nn.init.xavier_uniform_(torch.empty(1, self.d_model)), requires_grad=True
         )
@@ -409,8 +397,6 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.proj_bias = bias
         self.out_proj = nn.Linear(d_model, d_model, bias=bias)
-        self.gammas = nn.Parameter(torch.zeros(n_heads, 1, 1))
-        xavier_uniform_(self.gammas)
 
         self._reset_parameters()
 
@@ -439,9 +425,8 @@ class MultiHeadAttention(nn.Module):
         k = k.transpose(1, 2)
         q = q.transpose(1, 2)
         v = v.transpose(1, 2)
-        gammas = self.gammas
         scores = forgetting_attention(
-            q, k, v, self.d_k, mask, self.dropout, zero_pad, state_sim, decay, gammas
+            q, k, v, self.d_k, mask, self.dropout, zero_pad, state_sim, decay
         )
 
         concat = scores.transpose(1, 2).contiguous().view(bs, -1, self.d_model)
@@ -449,7 +434,7 @@ class MultiHeadAttention(nn.Module):
 
 
 def forgetting_attention(
-    q, k, v, d_k, mask, dropout, zero_pad, state_sim, difficulty, gammas
+    q, k, v, d_k, mask, dropout, zero_pad, state_sim, difficulty
 ):
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     bs, head, seqlen = scores.size(0), scores.size(1), scores.size(2)
