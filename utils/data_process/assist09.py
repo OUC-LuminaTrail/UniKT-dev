@@ -194,6 +194,16 @@ class Assistments2009Data(DataSource):
         )
 
         data = data.unique().collect()
+
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        data = data.with_columns(
+            pl.col("timestamp")
+            .cast(pl.Int64)
+            .sub(pl.col("timestamp").cast(pl.Int64).min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
+
         data = data.sort(["user", "timestamp"])
 
         # Exclude sequences that are too short

@@ -322,6 +322,13 @@ class EdNetKT1Data(DataSource):
             .sort(["user", "timestamp"])
         )
 
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        sequence_data = sequence_data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
+
         # Exclude sequences that are too short
         data = exclude_short_sequences(sequence_data, self.args.min_seq_len)
 

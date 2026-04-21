@@ -180,7 +180,15 @@ class Assistments2012Data(DataSource):
                 pl.col("timestamp")
                 .str.strptime(pl.Datetime, strict=False)
                 .dt.epoch("ms")  # Convert to Unix milliseconds (int64)
+                .alias("timestamp")
             ]
+        )
+
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        data = data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
         )
 
         data = data.sort(["user", "timestamp"])
