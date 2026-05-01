@@ -287,16 +287,21 @@ class SamplingParams(BaseParamConfig):
     def define_params(self) -> tuple[str, dict]:
         group_name = "Sampling Parameters"
         params = {
-            "sample_users": {
+            "sample_size": {
                 "type": int,
                 "default": None,
-                "help": "Number of users to sample (None to disable sampling)",
+                "help": "Absolute sample count. For random/stratified: number of users. For time: number of interactions (None to disable)",
+            },
+            "sample_ratio": {
+                "type": float,
+                "default": None,
+                "help": "Sample ratio (0.0-1.0). Overrides sample_size if set. For random/stratified: ratio of users. For time: ratio of interactions",
             },
             "sample_strategy": {
                 "type": str,
                 "default": "random",
-                "choices": ["random", "stratified"],
-                "help": "Sampling strategy (default: random, choices: random, stratified)",
+                "choices": ["random", "stratified", "time"],
+                "help": "Sampling strategy (default: random, choices: random, stratified, time)",
             },
             "sample_attempts_bins": {
                 "type": int,

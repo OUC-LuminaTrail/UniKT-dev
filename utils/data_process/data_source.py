@@ -965,43 +965,67 @@ class DataSource(ABC):
 
         return user_stats
 
-    def sample_users(
+    def sample(
         self,
-        n_samples: int,
+        sample_size: int = None,
+        sample_ratio: float = None,
         sample_strategy: str = "random",
         attempts_bins: list = [20, 100],
         correct_bins: list = [0.4, 0.8],
     ):
-        """Sample users with stratified sampling based on user statistics.
-
-        Stratifies by attempts and correct rate dimensions.
+        """Sample dataset by users or interactions.
 
         Args:
-            n_samples: Number of users to sample.
-            sample_strategy: Sampling strategy (default: "random").
-            attempts_bins: Attempt count bin edges.
-            correct_bins: Correct rate bin edges.
+            sample_size: Absolute sample count. For random/stratified: number
+                of users. For time: number of interactions.
+            sample_ratio: Sample ratio (0.0-1.0). Overrides sample_size if set.
+            sample_strategy: Sampling strategy (random, stratified, time).
+            attempts_bins: Attempt count bin edges for stratified sampling.
+            correct_bins: Correct rate bin edges for stratified sampling.
 
         Raises:
-            ValueError: If n_samples exceeds total users or data not loaded.
+            ValueError: If neither sample_size nor sample_ratio is provided,
+                or if the computed size exceeds available data.
         """
-        logger.info(
-            f"Sampling {n_samples} users from dataset, strategy={sample_strategy}"
-        )
-
         user_stats = self.get_user_stats()
         total_users = len(user_stats)
+        original_records = len(self.sequence_data)
 
-        if n_samples > total_users:
+        # Compute n_samples from sample_ratio or sample_size
+        if sample_ratio is not None and sample_size is not None:
             raise ValueError(
-                f"Requested sample size ({n_samples}) exceeds total users ({total_users})"
+                "Cannot specify both sample_ratio and sample_size, use one only"
             )
-
-        if n_samples == total_users:
-            logger.info("Sample size equals total users, skipping sampling.")
+        elif sample_ratio is not None:
+            if not 0.0 < sample_ratio <= 1.0:
+                raise ValueError(
+                    f"sample_ratio must be in (0.0, 1.0], got {sample_ratio}"
+                )
+            total = original_records if sample_strategy == "time" else total_users
+            n_samples = max(1, int(total * sample_ratio))
+            logger.info(
+                f"Sampling {sample_ratio:.2%} of {total} "
+                f"({'interactions' if sample_strategy == 'time' else 'users'}) "
+                f"= {n_samples}, strategy={sample_strategy}"
+            )
+        elif sample_size is not None:
+            n_samples = sample_size
+            logger.info(
+                f"Sampling {n_samples} "
+                f"({'interactions' if sample_strategy == 'time' else 'users'}) "
+                f"from dataset, strategy={sample_strategy}"
+            )
+        else:
             return
 
-        original_records = len(self.sequence_data)
+        if sample_strategy in ("random", "stratified"):
+            if n_samples > total_users:
+                raise ValueError(
+                    f"Requested sample size ({n_samples}) exceeds total users ({total_users})"
+                )
+            if n_samples == total_users:
+                logger.info("Sample size equals total users, skipping sampling.")
+                return
 
         if sample_strategy == "random":
             sampled_users = (
@@ -1010,16 +1034,20 @@ class DataSource(ABC):
                 .to_series()
                 .to_list()
             )
+            self._apply_sampling_to_data(
+                sampled_users, n_samples, total_users, original_records
+            )
         elif sample_strategy == "stratified":
             sampled_users = self._sample_users_stratified(
                 user_stats, n_samples, attempts_bins, correct_bins
             )
+            self._apply_sampling_to_data(
+                sampled_users, n_samples, total_users, original_records
+            )
+        elif sample_strategy == "time":
+            self._apply_time_sampling(n_samples, total_users, original_records)
         else:
             raise ValueError(f"Unsupported sample strategy: {sample_strategy}")
-
-        self._apply_sampling_to_data(
-            sampled_users, n_samples, total_users, original_records
-        )
 
     def _sample_users_stratified(
         self,
@@ -1138,6 +1166,55 @@ class DataSource(ABC):
         logger.info(
             f"Sampling complete: {len(sampled_users)}/{total_users} users, "
             f"{sampled_records}/{original_records} records"
+        )
+        logger.info(f"Sampling ratio: {sampling_config['sampling_ratio']:.2%}")
+
+    def _apply_time_sampling(
+        self,
+        n_samples: int,
+        total_users: int,
+        original_records: int,
+    ):
+        """Sample by taking the earliest N interactions sorted by timestamp."""
+        if n_samples > original_records:
+            raise ValueError(
+                f"Requested sample size ({n_samples}) exceeds total records ({original_records})"
+            )
+
+        self.sequence_data = self.sequence_data.sort("timestamp").head(n_samples)
+
+        self._remap_user_ids()
+        self._remap_question_ids()
+
+        num_users = self.sequence_data.select(pl.col("user").n_unique()).item()
+        num_questions = self.question_data.select(pl.col("question").n_unique()).item()
+        num_skills = self.question_data.select(pl.col("skill").n_unique()).item()
+        sampled_records = len(self.sequence_data)
+
+        sampling_config = {
+            "n_samples_requested": n_samples,
+            "n_samples_actual": sampled_records,
+            "sampling_ratio": sampled_records / original_records,
+            "strategy": "time",
+        }
+
+        sampling_stats = {
+            "original_users": total_users,
+            "sampled_users": num_users,
+            "original_records": original_records,
+            "sampled_records": sampled_records,
+        }
+
+        self.update_metadata("sampled", True)
+        self.update_metadata("sampling_config", sampling_config)
+        self.update_metadata("sampling_stats", sampling_stats)
+        self.update_metadata("num_users", int(num_users))
+        self.update_metadata("num_questions", int(num_questions))
+        self.update_metadata("num_skills", int(num_skills))
+
+        logger.info(
+            f"Time sampling complete: {sampled_records}/{original_records} records, "
+            f"{num_users}/{total_users} users"
         )
         logger.info(f"Sampling ratio: {sampling_config['sampling_ratio']:.2%}")
 

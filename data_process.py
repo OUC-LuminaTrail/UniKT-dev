@@ -107,9 +107,10 @@ def cmd_process(args):
     dp.clean_raw_data()
     dp.transform_data()
 
-    if args.sample_users is not None and args.sample_users > 0:
-        dp.sample_users(
-            args.sample_users,
+    if args.sample_size is not None or args.sample_ratio is not None:
+        dp.sample(
+            sample_size=args.sample_size,
+            sample_ratio=args.sample_ratio,
             sample_strategy=args.sample_strategy,
             attempts_bins=args.sample_attempts_bins,
             correct_bins=args.sample_correct_bins,
