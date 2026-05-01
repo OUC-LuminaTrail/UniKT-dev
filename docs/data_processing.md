@@ -75,10 +75,30 @@ python data_process.py process \
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--sample_users` | None | Number of users to sample (None to disable) |
-| `--sample_strategy` | random | Sampling strategy (random, stratified) |
+| `--sample_size` | None | Absolute sample count. For random/stratified: number of users. For time: number of interactions (None to disable) |
+| `--sample_ratio` | None | Sample ratio (0.0-1.0). Overrides `sample_size` if set. For random/stratified: ratio of users. For time: ratio of interactions |
+| `--sample_strategy` | random | Sampling strategy (random, stratified, time) |
 | `--sample_attempts_bins` | 20 100 | Attempt count bin edges for stratified sampling |
 | `--sample_correct_bins` | 0.4 0.8 | Correct rate bin edges for stratified sampling |
+
+> [!NOTE]
+> `--sample_size` and `--sample_ratio` are mutually exclusive. Use one only.
+>
+> **Sampling strategies:**
+> - `random`: Randomly sample N users
+> - `stratified`: Stratified sampling based on user attempts and correct rate
+> - `time`: Sort interactions by timestamp and take the earliest N records
+
+```bash
+# Sample 1000 users randomly
+python data_process.py process -d assistments09 --sample_size 1000
+
+# Sample 10% of interactions by time (earliest first)
+python data_process.py process -d assistments09 --sample_ratio 0.1 --sample_strategy time
+
+# Stratified sampling with custom bins
+python data_process.py process -d assistments09 --sample_size 500 --sample_strategy stratified
+```
 
 **Extra Processing:**
 
