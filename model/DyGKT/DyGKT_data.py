@@ -410,8 +410,8 @@ class DyGKTDataset(Dataset):
         data_indices = self.target_indices[batch_indices.numpy()]
         t = self.tensors
 
-        user_his_idx = t["user_his_idx"][data_indices]
-        que_his_idx = t["que_his_idx"][data_indices]
+        user_his_idx = t["user_his_idx"][data_indices].long()
+        que_his_idx = t["que_his_idx"][data_indices].long()
 
         return {
             "idx": t["idx"][data_indices],
