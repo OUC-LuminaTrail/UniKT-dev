@@ -4,6 +4,7 @@ from utils.core import DATA_SOURCES
 
 from .assist09 import Assistments2009Data
 from .assist12 import Assistments2012Data
+from .assist15 import Assistments2015Data
 from .assist17 import Assistments2017Data
 from .data_source import DataSource
 from .ednet_kt1 import EdNetKT1Data
@@ -35,6 +36,7 @@ def get_data_source(dataset_name: str, args: Any) -> DataSource:
 __all__ = [
     "Assistments2009Data",
     "Assistments2012Data",
+    "Assistments2015Data",
     "Assistments2017Data",
     "EdNetKT1Data",
     "SlepemapyData",
