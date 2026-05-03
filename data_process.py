@@ -12,6 +12,7 @@ logger = get_logger(__name__)
 SUPPORTED_DATASETS = [
     "assistments09",
     "assistments12",
+    "assistments15",
     "assistments17",
     "ednet_kt1",
     "slepemapy",
