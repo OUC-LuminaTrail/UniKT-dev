@@ -129,7 +129,15 @@ class Assistments2009Data(DataSource):
 
         # Build final sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
+            [
+                "user",
+                "question",
+                "label",
+                "attempt_count",
+                "hint_count",
+                "ms_first_response",
+                "timestamp",
+            ]
         )
 
         # Build ID mapping for user in sequence_data
@@ -146,32 +154,6 @@ class Assistments2009Data(DataSource):
 
         schema_names = self.raw_data.collect_schema().names()
         data = self.raw_data.drop("") if "" in schema_names else self.raw_data
-
-        # Drop unnecessary columns
-        data = data.drop(
-            [
-                "assistment_id",
-                "ms_first_response",
-                "tutor_mode",
-                "answer_type",
-                "sequence_id",
-                "student_class_id",
-                "position",
-                "type",
-                "base_sequence_id",
-                "skill_name",
-                "teacher_id",
-                "school_id",
-                "hint_total",
-                "overlap_time",
-                "answer_id",
-                "answer_text",
-                "first_action",
-                "bottom_hint",
-                "opportunity",
-                "opportunity_original",
-            ]
-        )
 
         # Rename columns
         data = data.rename(

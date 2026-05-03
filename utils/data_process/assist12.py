@@ -109,7 +109,15 @@ class Assistments2012Data(DataSource):
 
         # Build final sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
+            [
+                "user",
+                "question",
+                "label",
+                "attempt_count",
+                "hint_count",
+                "ms_first_response",
+                "timestamp",
+            ]
         )
 
         # Build ID mapping for user in sequence_data
@@ -126,37 +134,8 @@ class Assistments2012Data(DataSource):
         if self.raw_data is None:
             self.load_src_data()
 
-        # Drop unnecessary columns
-        data = self.raw_data.drop(
-            [
-                "problem_log_id",
-                "skill",
-                "assistment_id",
-                "end_time",
-                "problem_type",
-                "original",
-                "bottom_hint",
-                "actions",
-                "ms_first_response",
-                "tutor_mode",
-                "sequence_id",
-                "student_class_id",
-                "position",
-                "type",
-                "base_sequence_id",
-                "teacher_id",
-                "school_id",
-                "overlap_time",
-                "answer_id",
-                "answer_text",
-                "first_action",
-                "problemlogid",
-                "Average_confidence(FRUSTRATED)",
-                "Average_confidence(CONFUSED)",
-                "Average_confidence(CONCENTRATING)",
-                "Average_confidence(BORED)",
-            ]
-        )
+        # Drop skill text column
+        data = self.raw_data.drop("skill")
 
         # Rename columns
         data = data.rename(
