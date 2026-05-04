@@ -1,0 +1,232 @@
+import numpy as np
+import torch
+from scipy.stats import norm, poisson
+from torch.utils.data.dataset import Dataset
+from typing_extensions import override
+
+from utils.core import get_logger
+from utils.data_process import DataSource
+from utils.model_data import QuestionModelData
+
+logger = get_logger(__name__)
+
+_RESPONSE_TIME_COL = "ms_first_response"
+_REQUIRED_COLUMNS = ["attempt_count", "hint_count"]
+
+
+class LBKTDataset(Dataset):
+    def __init__(
+        self, sequences, responses, masks, time_factors, attempt_factors, hint_factors
+    ):
+        self.sequences = sequences
+        self.responses = responses
+        self.masks = masks
+        self.time_factors = time_factors
+        self.attempt_factors = attempt_factors
+        self.hint_factors = hint_factors
+
+    def __getitem__(self, index):
+        return (
+            torch.tensor(self.sequences[index], dtype=torch.long),
+            torch.tensor(self.responses[index], dtype=torch.long),
+            torch.tensor(self.masks[index], dtype=torch.bool),
+            torch.tensor(self.time_factors[index], dtype=torch.float32),
+            torch.tensor(self.attempt_factors[index], dtype=torch.float32),
+            torch.tensor(self.hint_factors[index], dtype=torch.float32),
+        )
+
+    def __len__(self):
+        return len(self.sequences)
+
+
+def _validate_required_columns(columns: list[str]):
+    if _RESPONSE_TIME_COL not in columns:
+        raise ValueError(
+            f"LBKT requires '{_RESPONSE_TIME_COL}' column for time_factor computation, "
+            f"but it was not found. Available columns: {columns}. "
+            f"Please ensure the data source preserves this field."
+        )
+
+    for col in _REQUIRED_COLUMNS:
+        if col not in columns:
+            raise ValueError(
+                f"LBKT requires '{col}' column for behavioral factor computation, "
+                f"but it was not found. Available columns: {columns}. "
+            )
+
+
+class LBKTModelData(QuestionModelData):
+    def __init__(self, data_src: DataSource):
+        super().__init__(data_src)
+
+    @override
+    def prepare_data(self, args):
+        fold_idx = args.fold if args.fold >= 0 else None
+        kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
+
+        (
+            user_sequence,
+            user_response,
+            user_mask,
+            user_time_factor,
+            user_attempt_factor,
+            user_hint_factor,
+        ) = self.load_sequence_data_with_factors()
+
+        q_matrix = self.build_q_matrix(gamma=args.q_gamma)
+
+        if fold_idx is not None:
+            if fold_idx < 0 or fold_idx >= kfold_n_splits:
+                raise ValueError(
+                    f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
+                )
+            logger.info(
+                f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
+            )
+            train_data, val_data, test_data = self.split_kfold_data(
+                user_sequence,
+                user_response,
+                user_mask,
+                user_time_factor,
+                user_attempt_factor,
+                user_hint_factor,
+                fold_idx=fold_idx,
+            )
+        else:
+            raise ValueError("fold_idx must be specified for K-fold cross-validation")
+
+        train_dataset = LBKTDataset(*train_data)
+        val_dataset = LBKTDataset(*val_data)
+        test_dataset = LBKTDataset(*test_data)
+
+        return train_dataset, val_dataset, test_dataset, q_matrix
+
+    def load_sequence_data_with_factors(self):
+        """加载用户答题序列并计算行为因子。
+
+        - time_factor: norm(mean_log, std_log).cdf(log(response_time))
+          其中 mean_log/std_log 是每个 question 的 log(响应时间) 的统计量
+        - attempt_factor: 1 - poisson.cdf(attempt - 1, mean_attempts)
+        - hint_factor: 1 - poisson.cdf(hint - 1, mean_hints)
+        """
+        logger.info("Building response sequences with behavioral factors...")
+
+        data = self.data_src.get_split_question_sequence_data().to_pandas()
+        columns = data.columns.tolist()
+
+        _validate_required_columns(columns)
+
+        max_seq_len = self.data_src.get_metadata("max_seq_len")
+        num_users = data["user"].nunique()
+
+        logger.info("Computing behavioral factors...")
+        time_factors = self._compute_time_factor(data)
+        attempt_factors = self._compute_attempt_factor(data)
+        hint_factors = self._compute_hint_factor(data)
+
+        user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        user_response = np.zeros((num_users, max_seq_len), dtype=int)
+        user_mask = np.zeros((num_users, max_seq_len), dtype=int)
+        user_time_factor = np.zeros((num_users, max_seq_len), dtype=np.float32)
+        user_attempt_factor = np.zeros((num_users, max_seq_len), dtype=np.float32)
+        user_hint_factor = np.zeros((num_users, max_seq_len), dtype=np.float32)
+
+        user_indices = data["user"].values
+        seq_positions = data["seq_pos"].values
+
+        user_sequence[user_indices, seq_positions] = data["question"].values
+        user_response[user_indices, seq_positions] = data["label"].values
+        user_mask[user_indices, seq_positions] = 1
+        user_time_factor[user_indices, seq_positions] = time_factors
+        user_attempt_factor[user_indices, seq_positions] = attempt_factors
+        user_hint_factor[user_indices, seq_positions] = hint_factors
+
+        return (
+            user_sequence,
+            user_response,
+            user_mask,
+            user_time_factor,
+            user_attempt_factor,
+            user_hint_factor,
+        )
+
+    def _compute_time_factor(self, data) -> np.ndarray:
+        """计算时间因子。
+
+        1. ms_first_response 毫秒转秒
+        2. 仅对 response_time > 0 的行取 log
+        3. 按 question 分组计算有效 log(time) 的 mean 和 std
+        4. time_factor = norm(mean, std).cdf(log(response_time))
+        5. std == 0 时 time_factor = 1
+        6. response_time == 0 的行（padding/缺失）time_factor = 1
+        """
+        response_times = data[_RESPONSE_TIME_COL].values.astype(np.float64) / 1000.0
+
+        time_factors = np.ones(len(data), dtype=np.float32)
+
+        valid_mask = response_times > 0
+        if not np.any(valid_mask):
+            return time_factors
+
+        valid_log_times = np.log(response_times[valid_mask])
+        valid_questions = data.loc[valid_mask, "question"]
+
+        valid_df = valid_questions.to_frame()
+        valid_df["_log_time"] = valid_log_times
+        question_stats = valid_df.groupby("question")["_log_time"].agg(["mean", "std"])
+        question_stats["std"] = question_stats["std"].fillna(0)
+
+        # 向量化：通过 map 查表获取每行的 mean/std，一次性计算 CDF
+        means = valid_questions.map(question_stats["mean"]).values.astype(np.float64)
+        stds = valid_questions.map(question_stats["std"]).values.astype(np.float64)
+
+        has_std = stds > 0
+        if np.any(has_std):
+            cdf_values = np.ones(len(valid_log_times), dtype=np.float32)
+            cdf_values[has_std] = (
+                norm(means[has_std], stds[has_std])
+                .cdf(valid_log_times[has_std])
+                .astype(np.float32)
+            )
+            time_factors[valid_mask] = cdf_values
+
+        return time_factors
+
+    def _compute_attempt_factor(self, data) -> np.ndarray:
+        """计算尝试因子。
+
+        1 - poisson.cdf(attempt - 1, mean_attempts)
+        其中 mean_attempts 为每个 question 的平均尝试次数。
+        """
+        attempt_counts = data["attempt_count"].values.astype(np.float64)
+        mean_attempts = data.groupby("question")["attempt_count"].mean()
+        mean_per_row = data["question"].map(mean_attempts).values
+
+        return (1 - poisson.cdf(attempt_counts - 1, mean_per_row)).astype(np.float32)
+
+    def _compute_hint_factor(self, data) -> np.ndarray:
+        """计算提示因子。
+
+        - mean_hints > 0 时：1 - poisson.cdf(hint - 1, mean_hints)
+        - mean_hints == 0 时：hint_factor = 0
+        """
+        hint_counts = data["hint_count"].values.astype(np.float64)
+        mean_hints_series = data.groupby("question")["hint_count"].mean()
+        mean_hints = data["question"].map(mean_hints_series).values
+
+        hint_factors = np.zeros(len(data), dtype=np.float32)
+        mask = mean_hints > 0
+        if np.any(mask):
+            hint_factors[mask] = (
+                1 - poisson.cdf(hint_counts[mask] - 1, mean_hints[mask])
+            ).astype(np.float32)
+
+        return hint_factors
+
+    def build_q_matrix(self, gamma: float = 0.1) -> torch.Tensor:
+        """构建带 gamma 平滑的 Q-matrix。"""
+        binary_matrix = self.build_relationship_matrix(
+            ("question", "has", "skill"), value_type="binary"
+        )
+        q_matrix = (1 - gamma) * binary_matrix + gamma
+        return torch.from_numpy(q_matrix).float()
