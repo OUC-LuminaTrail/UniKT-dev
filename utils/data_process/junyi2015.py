@@ -64,6 +64,7 @@ class Junyi2015Data(DataSource):
                 "time_done",
                 "count_attempts",
                 "count_hints",
+                "time_taken_attempts",
             ]
         )
 
@@ -147,7 +148,15 @@ class Junyi2015Data(DataSource):
 
         # Build final sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
+            [
+                "user",
+                "question",
+                "label",
+                "attempt_count",
+                "hint_count",
+                "timestamp",
+                "ms_first_response",
+            ]
         )
 
         # Build ID mapping for user in sequence_data
@@ -176,9 +185,19 @@ class Junyi2015Data(DataSource):
                     (pl.col("correct") == "true").cast(pl.Int8).alias("label"),
                     # Convert microseconds to milliseconds
                     (pl.col("time_done") / 1000).cast(pl.Int64).alias("timestamp"),
+                    # Extract first attempt time (seconds → milliseconds)
+                    (
+                        pl.col("time_taken_attempts")
+                        .str.split_exact("&", 1)
+                        .struct[0]
+                        .cast(pl.Float64)
+                        * 1000
+                    )
+                    .cast(pl.Int64)
+                    .alias("ms_first_response"),
                 ]
             )
-            .drop(["correct", "time_done"])
+            .drop(["correct", "time_done", "time_taken_attempts"])
             .rename(
                 {
                     "user_id": "user",
