@@ -190,39 +190,15 @@ class DataSource(ABC):
     def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
         """Validate consistency between question_data and sequence_data."""
         # Validate question_data columns
-        expected_question_cols = {"question", "skill", "assignment"}
-        if "template" in question_data.columns:
-            expected_question_cols.add("template")
-
+        expected_question_cols = {"question", "skill"}
         actual_question_cols = set(question_data.columns)
-        assert actual_question_cols == expected_question_cols, (
+        assert expected_question_cols.issubset(actual_question_cols), (
             f"question_data columns mismatch. "
-            f"Expected: {expected_question_cols}, Got: {actual_question_cols}"
+            f"Expected to contain: {expected_question_cols}, Got: {actual_question_cols}"
         )
 
-        # Validate sequence_data columns
-        expected_sequence_cols = {
-            "user",
-            "question",
-            "label",
-            "attempt_count",
-            "hint_count",
-            "timestamp",
-        }
-
-        actual_sequence_cols = set(sequence_data.columns)
-
-        # Check for unexpected columns
-        metadata_cols = {"fold"}
-        unexpected_cols = actual_sequence_cols - expected_sequence_cols - metadata_cols
-        if unexpected_cols:
-            raise AssertionError(
-                f"sequence_data contains unexpected columns: {unexpected_cols}. "
-                f"Expected: {expected_sequence_cols}, Got: {actual_sequence_cols}"
-            )
-
-        # Validate sequence_data doesn't contain skill/assignment/template
-        for col in ["skill", "assignment", "template"]:
+        # Validate sequence_data doesn't contain skill
+        for col in ["skill"]:
             assert col not in sequence_data.columns, (
                 f"sequence_data should not contain '{col}' column"
             )
