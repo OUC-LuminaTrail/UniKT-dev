@@ -106,7 +106,7 @@ class LBKTTrainer(BaseTrainer):
         model = LBKT(args, data_src.get_metadata())
 
         # 优化器和损失函数
-        loss_fn = torch.nn.BCEWithLogitsLoss()
+        loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
             model.parameters(),
             lr=args.learning_rate,
