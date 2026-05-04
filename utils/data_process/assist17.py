@@ -108,7 +108,15 @@ class Assistments2017Data(DataSource):
 
         # Build sequence_data
         sequence_data = mapped_data.select(
-            ["user", "question", "label", "attempt_count", "hint_count", "timestamp"]
+            [
+                "user",
+                "question",
+                "label",
+                "attempt_count",
+                "hint_count",
+                "ms_first_response",
+                "timestamp",
+            ]
         )
 
         # Build ID mapping for user in sequence_data
@@ -145,7 +153,6 @@ class Assistments2017Data(DataSource):
                 "problemType",
                 "assistmentId",
                 "endTime",
-                "timeTaken",
                 "hint",
                 "hintTotal",
                 "scaffold",
@@ -215,6 +222,7 @@ class Assistments2017Data(DataSource):
                 "hintCount": "hint_count",
                 "attemptCount": "attempt_count",
                 "startTime": "timestamp",
+                "timeTaken": "ms_first_response",
             }
         )
 
@@ -224,6 +232,13 @@ class Assistments2017Data(DataSource):
         # Convert Unix seconds to milliseconds for consistency
         data = data.with_columns(
             (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp")
+        )
+
+        # Convert response time from seconds to milliseconds
+        data = data.with_columns(
+            (pl.col("ms_first_response") * 1000).cast(pl.Int64).alias(
+                "ms_first_response"
+            )
         )
 
         # Convert to global relative time (dataset-wise earliest timestamp as zero)
