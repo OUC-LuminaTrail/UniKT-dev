@@ -1,81 +1,60 @@
 <template>
   <div class="task-launch">
     <div class="page-header">
-      <h2>新建训练任务</h2>
+      <h1 class="page-title">New Training Task</h1>
+      <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
     </div>
 
-    <el-card shadow="never" class="section-card">
-      <template #header><span class="section-title">基本配置</span></template>
-      <el-form :model="form" label-width="100px">
-        <el-row :gutter="24">
-          <el-col :span="8">
-            <el-form-item label="任务名称">
-              <el-input v-model="form.name" placeholder="留空自动生成" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="运行环境">
-              <el-select v-model="form.env_id" placeholder="选择环境" style="width: 100%">
-                <el-option-group label="Pixi">
-                  <el-option
-                    v-for="env in pixiEnvs"
-                    :key="env.id"
-                    :label="env.display_name"
-                    :value="env.id"
-                  />
-                </el-option-group>
-                <el-option-group label="Conda" v-if="condaEnvs.length">
-                  <el-option
-                    v-for="env in condaEnvs"
-                    :key="env.id"
-                    :label="env.display_name"
-                    :value="env.id"
-                  />
-                </el-option-group>
-                <el-option-group label="其他">
-                  <el-option
-                    v-for="env in otherEnvs"
-                    :key="env.id"
-                    :label="env.display_name"
-                    :value="env.id"
-                  />
-                </el-option-group>
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :span="8">
-            <el-form-item label="选择模型">
-              <el-select
-                v-model="form.model_name"
-                placeholder="选择模型"
-                style="width: 100%"
-                @change="onModelChange"
-              >
-                <el-option v-for="m in models" :key="m" :label="m" :value="m" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-        <el-row :gutter="24" v-if="form.env_id === 'custom:0'">
-          <el-col :span="12">
-            <el-form-item label="Python 路径">
-              <el-input v-model="form.custom_python_path" placeholder="/path/to/python" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-    </el-card>
-
-    <ParamForm
-      v-if="currentSchema"
-      :schema="currentSchema"
-      @update:params="form.params = $event"
+    <CommandPreview
+      :modelName="modelName"
+      :dataset="dataset"
+      :params="params"
+      :schemaDefaultParams="schemaDefaultParams"
     />
 
-    <div class="submit-bar">
-      <el-button type="primary" size="large" :loading="submitting" @click="onSubmit">
-        启动训练
-      </el-button>
+    <SelectionStep
+      v-if="step === 'select'"
+      :envId="envId"
+      :customPythonPath="customPythonPath"
+      :modelName="modelName"
+      :dataset="dataset"
+      :environments="environments"
+      :models="models"
+      :datasets="datasets"
+      @update:envId="envId = $event"
+      @update:customPythonPath="customPythonPath = $event"
+      @update:modelName="onModelChange"
+      @update:dataset="dataset = $event"
+      @confirm="onSelectConfirm"
+    />
+
+    <div v-if="step === 'params'" class="params-step">
+      <div class="params-header">
+        <el-button class="back-btn" @click="step = 'select'">
+          <svg width="14" height="14" viewBox="0 0 12 12" fill="none" style="margin-right:4px">
+            <path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          返回选择
+        </el-button>
+      </div>
+
+      <ParamForm
+        v-if="selectionSchema"
+        :schema="selectionSchema"
+        @update:params="params = $event"
+      />
+
+      <div class="action-bar">
+        <el-button
+          type="primary"
+          size="large"
+          :loading="submitting"
+          @click="onStartTraining"
+        >
+          <span v-if="!submitting">开始训练</span>
+          <span v-else>创建任务...</span>
+        </el-button>
+      </div>
     </div>
   </div>
 </template>
@@ -84,70 +63,68 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { createTask } from '@/api/tasks'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
-import { createTask } from '@/api/tasks'
+import CommandPreview from '@/components/task/CommandPreview.vue'
+import SelectionStep from '@/components/task/SelectionStep.vue'
 import ParamForm from '@/components/task/ParamForm.vue'
 
 const router = useRouter()
+const step = ref<'select' | 'params'>('select')
+const submitting = ref(false)
+const selectionSchema = ref<ModelSchema | null>(null)
+const params = ref<Record<string, any>>({})
+
 const environments = ref<EnvironmentInfo[]>([])
 const models = ref<string[]>([])
-const currentSchema = ref<ModelSchema | null>(null)
-const submitting = ref(false)
+const datasets = ref<string[]>([])
 
-const form = ref({
-  name: '',
-  env_id: '',
-  custom_python_path: '',
-  model_name: '',
-  params: {} as Record<string, any>,
-})
-
-const pixiEnvs = computed(() => environments.value.filter(e => e.type === 'pixi'))
-const condaEnvs = computed(() => environments.value.filter(e => e.type === 'conda'))
-const otherEnvs = computed(() => environments.value.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
+const envId = ref('')
+const customPythonPath = ref('')
+const modelName = ref('')
+const dataset = ref('')
 
 const STORAGE_KEY_ENV = 'kt-web:last-env-id'
 const STORAGE_KEY_MODEL = 'kt-web:last-model-name'
+const STORAGE_KEY_DATASET = 'kt-web:last-dataset'
 
-onMounted(async () => {
-  const [envs, modelList] = await Promise.all([listEnvironments(), listModels()])
-  environments.value = envs
-  models.value = modelList
-
-  const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
-  if (savedEnv && envs.some(e => e.id === savedEnv)) {
-    form.value.env_id = savedEnv
+const schemaDefaultParams = computed(() => {
+  if (!selectionSchema.value) return {}
+  const defaults: Record<string, any> = {}
+  for (const g of selectionSchema.value.param_groups) {
+    for (const [k, f] of Object.entries(g.params)) {
+      defaults[k] = f.default
+    }
   }
-
-  const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)
-  if (savedModel && modelList.includes(savedModel)) {
-    form.value.model_name = savedModel
-    onModelChange(savedModel)
-  }
+  return defaults
 })
 
-const onModelChange = async (model: string) => {
-  currentSchema.value = await getModelParams(model)
-  const dataset = form.value.params.dataset || ''
-  form.value.name = `${model}_${dataset}`.replace(/_$/, '')
+async function onModelChange(val: string) {
+  modelName.value = val
+  if (!val) return
+  localStorage.setItem(STORAGE_KEY_MODEL, val)
+  selectionSchema.value = await getModelParams(val)
 }
 
-const onSubmit = async () => {
-  if (!form.value.model_name) {
-    ElMessage.warning('请选择模型')
-    return
-  }
-  localStorage.setItem(STORAGE_KEY_ENV, form.value.env_id)
-  localStorage.setItem(STORAGE_KEY_MODEL, form.value.model_name)
+function onSelectConfirm() {
+  if (!modelName.value || !dataset.value) return
+  localStorage.setItem(STORAGE_KEY_ENV, envId.value)
+  localStorage.setItem(STORAGE_KEY_DATASET, dataset.value)
+  step.value = 'params'
+}
+
+async function onStartTraining() {
   submitting.value = true
   try {
+    const taskName = `${modelName.value}_${dataset.value}`
+    const taskParams = { ...params.value, dataset: dataset.value }
     const task = await createTask({
-      name: form.value.name || `${form.value.model_name}_task`,
-      env_id: form.value.env_id,
-      custom_python_path: form.value.custom_python_path || null,
-      model_name: form.value.model_name,
-      params: form.value.params,
+      name: taskName,
+      env_id: envId.value,
+      custom_python_path: customPythonPath.value || null,
+      model_name: modelName.value,
+      params: taskParams,
     })
     ElMessage.success('任务已创建')
     router.push(`/tasks/${task.id}`)
@@ -157,24 +134,89 @@ const onSubmit = async () => {
     submitting.value = false
   }
 }
+
+onMounted(async () => {
+  const [envs, modelList] = await Promise.all([listEnvironments(), listModels()])
+  environments.value = envs
+  models.value = modelList
+
+  const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
+  if (savedEnv && envs.some(e => e.id === savedEnv)) envId.value = savedEnv
+
+  const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)
+  if (savedModel && modelList.includes(savedModel)) {
+    modelName.value = savedModel
+    onModelChange(savedModel)
+  }
+
+  const anyModel = modelList[0]
+  if (anyModel) {
+    const s = await getModelParams(anyModel)
+    for (const g of s.param_groups) {
+      if (g.params['dataset']?.choices?.length) {
+        datasets.value = g.params['dataset'].choices as string[]
+        break
+      }
+    }
+  }
+
+  const savedDataset = localStorage.getItem(STORAGE_KEY_DATASET)
+  if (savedDataset && datasets.value.includes(savedDataset)) {
+    dataset.value = savedDataset
+  }
+})
 </script>
 
 <style scoped>
-.page-header {
-  margin-bottom: 20px;
+.task-launch {
+  max-width: 1100px;
 }
-.page-header h2 {
+
+.page-header {
+  margin-bottom: 28px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+  letter-spacing: -0.3px;
+}
+
+.page-subtitle {
+  font-size: 14px;
+  color: var(--text-tertiary);
   margin: 0;
 }
-.section-card {
-  margin-bottom: 16px;
+
+.params-step {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
-.section-title {
-  font-weight: 600;
+
+.params-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.back-btn {
+  font-size: 13px;
+}
+
+.action-bar {
+  padding: 20px 0 8px;
+  border-top: 1px solid var(--border-muted);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.action-bar .el-button {
+  min-width: 200px;
+  height: 44px;
   font-size: 15px;
-}
-.submit-bar {
-  margin-top: 24px;
-  padding: 16px 0;
+  font-weight: 600;
+  border-radius: var(--radius-md);
 }
 </style>
