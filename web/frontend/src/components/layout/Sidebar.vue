@@ -4,7 +4,7 @@
       <div class="brand-icon">KT</div>
       <div class="brand-text">
         <span class="brand-title">KT Exp</span>
-        <span class="brand-sub">Graph Manager</span>
+        <span class="brand-sub">training manager</span>
       </div>
     </div>
 
