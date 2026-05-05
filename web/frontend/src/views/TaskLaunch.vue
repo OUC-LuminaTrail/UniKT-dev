@@ -1,59 +1,87 @@
 <template>
   <div class="task-launch">
-    <h2>新建训练任务</h2>
+    <div class="page-header">
+      <h2>新建训练任务</h2>
+    </div>
 
-    <el-form :model="form" label-width="120px" style="max-width: 900px">
-      <el-form-item label="任务名称">
-        <el-input v-model="form.name" placeholder="例如: GIKT_assist09_fold0" />
-      </el-form-item>
+    <el-card shadow="never" class="section-card">
+      <template #header><span class="section-title">基本配置</span></template>
+      <el-form :model="form" label-width="100px">
+        <el-row :gutter="24">
+          <el-col :span="8">
+            <el-form-item label="任务名称">
+              <el-input v-model="form.name" placeholder="GIKT_assist09_fold0" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="运行环境">
+              <el-select v-model="form.env_id" placeholder="选择环境" style="width: 100%">
+                <el-option-group label="Pixi">
+                  <el-option
+                    v-for="env in pixiEnvs"
+                    :key="env.id"
+                    :label="env.display_name"
+                    :value="env.id"
+                  />
+                </el-option-group>
+                <el-option-group label="Conda" v-if="condaEnvs.length">
+                  <el-option
+                    v-for="env in condaEnvs"
+                    :key="env.id"
+                    :label="env.display_name"
+                    :value="env.id"
+                  />
+                </el-option-group>
+                <el-option-group label="其他">
+                  <el-option
+                    v-for="env in otherEnvs"
+                    :key="env.id"
+                    :label="env.display_name"
+                    :value="env.id"
+                  />
+                </el-option-group>
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="8">
+            <el-form-item label="选择模型">
+              <el-select
+                v-model="form.model_name"
+                placeholder="选择模型"
+                style="width: 100%"
+                @change="onModelChange"
+              >
+                <el-option v-for="m in models" :key="m" :label="m" :value="m" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <el-row :gutter="24" v-if="form.env_id === 'custom:0'">
+          <el-col :span="12">
+            <el-form-item label="Python 路径">
+              <el-input v-model="form.custom_python_path" placeholder="/path/to/python" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
 
-      <el-form-item label="运行环境">
-        <el-select v-model="form.env_id" placeholder="选择环境" style="width: 100%">
-          <el-option
-            v-for="env in environments"
-            :key="env.id"
-            :label="env.display_name"
-            :value="env.id"
-          />
-        </el-select>
-        <el-input
-          v-if="form.env_id === 'custom:0'"
-          v-model="form.custom_python_path"
-          placeholder="输入 Python 可执行文件路径"
-          style="margin-top: 8px"
-        />
-      </el-form-item>
+    <ParamForm
+      v-if="currentSchema"
+      :schema="currentSchema"
+      @update:params="form.params = $event"
+    />
 
-      <el-form-item label="选择模型">
-        <el-select
-          v-model="form.model_name"
-          placeholder="选择模型"
-          style="width: 100%"
-          @change="onModelChange"
-        >
-          <el-option v-for="m in models" :key="m" :label="m" :value="m" />
-        </el-select>
-      </el-form-item>
-
-      <el-divider v-if="currentSchema" />
-
-      <ParamForm
-        v-if="currentSchema"
-        :schema="currentSchema"
-        @update:params="form.params = $event"
-      />
-
-      <el-form-item style="margin-top: 20px">
-        <el-button type="primary" :loading="submitting" @click="onSubmit">
-          启动训练
-        </el-button>
-      </el-form-item>
-    </el-form>
+    <div class="submit-bar">
+      <el-button type="primary" size="large" :loading="submitting" @click="onSubmit">
+        启动训练
+      </el-button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
@@ -74,6 +102,10 @@ const form = ref({
   model_name: '',
   params: {} as Record<string, any>,
 })
+
+const pixiEnvs = computed(() => environments.value.filter(e => e.type === 'pixi'))
+const condaEnvs = computed(() => environments.value.filter(e => e.type === 'conda'))
+const otherEnvs = computed(() => environments.value.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
 
 const STORAGE_KEY_ENV = 'kt-web:last-env-id'
 const STORAGE_KEY_MODEL = 'kt-web:last-model-name'
@@ -128,7 +160,21 @@ const onSubmit = async () => {
 </script>
 
 <style scoped>
-.task-launch {
-  max-width: 960px;
+.page-header {
+  margin-bottom: 20px;
+}
+.page-header h2 {
+  margin: 0;
+}
+.section-card {
+  margin-bottom: 16px;
+}
+.section-title {
+  font-weight: 600;
+  font-size: 15px;
+}
+.submit-bar {
+  margin-top: 24px;
+  padding: 16px 0;
 }
 </style>
