@@ -16,5 +16,21 @@ export interface GpuStatus {
   updated_at: string
 }
 
+export interface SystemStatus {
+  cpu_percent: number
+  memory_used_gb: number
+  memory_total_gb: number
+  memory_percent: number
+  gpu_utilization: number
+  gpu_memory_percent: number
+  load_1m: number
+  load_5m: number
+  load_15m: number
+  updated_at: string
+}
+
 export const getGpuStatus = () =>
   api.get<GpuStatus>('/gpu/status').then(r => r.data)
+
+export const getSystemStatus = () =>
+  api.get<SystemStatus>('/gpu/system').then(r => r.data)

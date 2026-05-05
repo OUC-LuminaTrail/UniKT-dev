@@ -1,7 +1,10 @@
+import os
 import subprocess
 import time
 
-from schemas import GpuInfo, GpuStatusResponse
+import psutil
+
+from schemas import GpuInfo, GpuStatusResponse, SystemStatusResponse
 
 
 class GpuMonitor:
@@ -60,3 +63,27 @@ class GpuMonitor:
             return gpus
         except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
             return []
+
+    def get_system_status(self) -> SystemStatusResponse:
+        cpu_percent = psutil.cpu_percent(interval=0.3)
+        mem = psutil.virtual_memory()
+        gpus = self.get_status()
+        gpu_util = 0.0
+        gpu_mem_percent = 0.0
+        if gpus.gpus:
+            gpu_util = gpus.gpus[0].utilization_percent
+            g = gpus.gpus[0]
+            gpu_mem_percent = (g.memory_used_mb / g.memory_total_mb * 100) if g.memory_total_mb > 0 else 0
+        load1, load5, load15 = os.getloadavg()
+        return SystemStatusResponse(
+            cpu_percent=cpu_percent,
+            memory_used_gb=round(mem.used / (1024 ** 3), 1),
+            memory_total_gb=round(mem.total / (1024 ** 3), 1),
+            memory_percent=mem.percent,
+            gpu_utilization=gpu_util,
+            gpu_memory_percent=round(gpu_mem_percent, 1),
+            load_1m=round(load1, 2),
+            load_5m=round(load5, 2),
+            load_15m=round(load15, 2),
+            updated_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        )

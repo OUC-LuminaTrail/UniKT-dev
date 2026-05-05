@@ -1,5 +1,5 @@
 <template>
-  <el-menu :default-active="activeRoute" router class="sidebar">
+  <el-menu :default-active="activeRoute" router class="sidebar-menu">
     <el-menu-item index="/tasks">
       <el-icon><Monitor /></el-icon>
       <span>训练任务</span>
@@ -29,8 +29,8 @@ const activeRoute = computed(() => route.path)
 </script>
 
 <style scoped>
-.sidebar {
-  height: 100vh;
-  width: 200px;
+.sidebar-menu {
+  border-right: none;
+  flex: 1;
 }
 </style>

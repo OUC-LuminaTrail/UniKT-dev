@@ -92,3 +92,16 @@ class GpuInfo(BaseModel):
 class GpuStatusResponse(BaseModel):
     gpus: list[GpuInfo]
     updated_at: str
+
+
+class SystemStatusResponse(BaseModel):
+    cpu_percent: float
+    memory_used_gb: float
+    memory_total_gb: float
+    memory_percent: float
+    gpu_utilization: float
+    gpu_memory_percent: float
+    load_1m: float
+    load_5m: float
+    load_15m: float
+    updated_at: str
