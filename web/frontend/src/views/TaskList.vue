@@ -1,68 +1,122 @@
 <template>
   <div class="task-list">
-    <div class="header">
-      <h2>训练任务</h2>
-      <el-button type="primary" @click="$router.push('/tasks/new')">新建任务</el-button>
+    <div class="page-header">
+      <h1 class="page-title">Training Tasks</h1>
+      <router-link to="/tasks/new" class="btn-primary">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z" />
+        </svg>
+        New Task
+      </router-link>
     </div>
 
-    <el-tabs v-model="activeTab" @tab-change="loadTasks">
-      <el-tab-pane label="运行中" name="running" />
-      <el-tab-pane label="已完成" name="completed" />
-      <el-tab-pane label="失败" name="failed" />
-      <el-tab-pane label="全部" name="" />
-    </el-tabs>
+    <div class="tab-bar">
+      <button
+        v-for="tab in tabs"
+        :key="tab.value"
+        :class="['tab-item', { active: activeTab === tab.value }]"
+        @click="activeTab = tab.value; loadTasks()"
+      >
+        {{ tab.label }}
+        <span v-if="tab.value === 'running' && runningCount > 0" class="tab-badge">{{ runningCount }}</span>
+      </button>
+    </div>
 
-    <el-table :data="tasks" stripe style="width: 100%">
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="名称" min-width="200" />
-      <el-table-column prop="model_name" label="模型" width="120" />
-      <el-table-column prop="dataset_name" label="数据集" width="140" />
-      <el-table-column prop="env_name" label="环境" width="100" />
-      <el-table-column prop="status" label="状态" width="100">
-        <template #default="{ row }">
-          <el-tag :type="statusTagType(row.status)">{{ row.status }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" label="创建时间" width="180">
-        <template #default="{ row }">
-          {{ formatTime(row.created_at) }}
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
-        <template #default="{ row }">
-          <el-button size="small" @click="$router.push(`/tasks/${row.id}`)">详情</el-button>
-          <el-button
-            v-if="row.status === 'running'"
-            size="small"
-            type="warning"
-            @click="handleStop(row.id)"
-          >停止</el-button>
-          <el-button
-            v-if="row.status !== 'running'"
-            size="small"
-            type="danger"
-            @click="handleDelete(row.id)"
-          >删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div v-if="tasks.length === 0" class="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M9 9h6M9 13h6M9 17h4" />
+      </svg>
+      <p>No tasks found</p>
+      <span>Tasks will appear here when you start a training run.</span>
+    </div>
+
+    <div v-else class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="col-id">ID</th>
+            <th class="col-name">Name</th>
+            <th class="col-model">Model</th>
+            <th class="col-dataset">Dataset</th>
+            <th class="col-env">Env</th>
+            <th class="col-status">Status</th>
+            <th class="col-time">Created</th>
+            <th class="col-actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="task in tasks" :key="task.id">
+            <td class="col-id">{{ task.id }}</td>
+            <td class="col-name">
+              <router-link :to="`/tasks/${task.id}`" class="task-name-link">{{ task.name }}</router-link>
+            </td>
+            <td class="col-model">{{ task.model_name }}</td>
+            <td class="col-dataset">{{ task.dataset_name }}</td>
+            <td class="col-env">
+              <span class="env-tag">{{ task.env_name }}</span>
+            </td>
+            <td class="col-status">
+              <span class="status-cell">
+                <span :class="['status-dot', `status-${task.status}`]" />
+                <span class="status-text">{{ task.status }}</span>
+              </span>
+            </td>
+            <td class="col-time">
+              <span class="mono-time">{{ formatTime(task.created_at) }}</span>
+            </td>
+            <td class="col-actions">
+              <div class="action-group">
+                <router-link :to="`/tasks/${task.id}`" class="action-btn" title="View details">
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" />
+                  </svg>
+                </router-link>
+                <button
+                  v-if="task.status === 'running'"
+                  class="action-btn action-stop"
+                  title="Stop task"
+                  @click="handleStop(task.id)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                    <rect x="3" y="3" width="10" height="10" rx="1.5" />
+                  </svg>
+                </button>
+                <button
+                  v-if="task.status !== 'running'"
+                  class="action-btn action-delete"
+                  title="Delete task"
+                  @click="handleDelete(task.id)"
+                >
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z" />
+                  </svg>
+                </button>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 
 const tasks = ref<TaskInfo[]>([])
 const activeTab = ref('running')
+const runningCount = ref(0)
 
-const statusTagType = (status: string) => {
-  const map: Record<string, string> = {
-    running: 'primary', completed: 'success', failed: 'danger', stopped: 'warning', pending: 'info',
-  }
-  return map[status] || 'info'
-}
+const tabs = [
+  { label: 'Running', value: 'running' },
+  { label: 'Completed', value: 'completed' },
+  { label: 'Failed', value: 'failed' },
+  { label: 'Stopped', value: 'stopped' },
+  { label: 'All', value: '' },
+]
 
 const formatTime = (t: string | null) => {
   if (!t) return '-'
@@ -70,29 +124,351 @@ const formatTime = (t: string | null) => {
 }
 
 const loadTasks = async () => {
-  tasks.value = await listTasks({ status: activeTab.value || undefined })
+  const [filtered, running] = await Promise.all([
+    listTasks({ status: activeTab.value || undefined }),
+    listTasks({ status: 'running' }),
+  ])
+  tasks.value = filtered
+  runningCount.value = running.length
 }
 
 const handleStop = async (id: number) => {
   await stopTask(id)
   ElMessage.success('已发送停止信号')
-  loadTasks()
+  setTimeout(loadTasks, 2000)
 }
 
 const handleDelete = async (id: number) => {
+  await ElMessageBox.confirm('确定删除该任务？此操作不可撤销。', '确认删除', {
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+  })
   await deleteTask(id)
   ElMessage.success('已删除')
   loadTasks()
 }
 
-onMounted(loadTasks)
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+onMounted(() => {
+  loadTasks()
+  pollTimer = setInterval(() => {
+    loadTasks()
+  }, 5000)
+})
+
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
 </script>
 
 <style scoped>
-.header {
+.task-list {
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.page-header {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  background: #1f6feb;
+  color: #fff;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  border: 1px solid #1f6feb;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-primary:hover {
+  background: #388bfd;
+  border-color: #388bfd;
+}
+
+.tab-bar {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-surface);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-muted);
+  width: fit-content;
+}
+
+.tab-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  font-family: var(--font-sans);
+}
+
+.tab-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.tab-item.active {
+  color: var(--accent-blue);
+  background: var(--bg-elevated);
+  box-shadow: inset 0 -2px 0 var(--accent-blue);
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-blue);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+.empty-state svg {
   margin-bottom: 16px;
+  opacity: 0.4;
+}
+
+.empty-state p {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.empty-state span {
+  font-size: 13px;
+}
+
+.table-wrapper {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table thead {
+  background: var(--bg-elevated);
+}
+
+.data-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 8px 12px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-muted);
+  white-space: nowrap;
+}
+
+.data-table tbody tr {
+  transition: background 0.1s;
+}
+
+.data-table tbody tr:hover {
+  background: var(--bg-overlay);
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.col-id {
+  width: 56px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.col-name {
+  min-width: 180px;
+}
+
+.col-model,
+.col-dataset {
+  width: 120px;
+}
+
+.col-env {
+  width: 100px;
+}
+
+.col-status {
+  width: 110px;
+}
+
+.col-time {
+  width: 170px;
+}
+
+.col-actions {
+  width: 100px;
+  text-align: right;
+}
+
+.task-name-link {
+  color: var(--text-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s;
+}
+
+.task-name-link:hover {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.env-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-elevated);
+  border-radius: 20px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-muted);
+}
+
+.status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot.status-running {
+  background: var(--accent-blue);
+  box-shadow: 0 0 6px var(--accent-blue);
+}
+
+.status-dot.status-completed {
+  background: var(--accent-green);
+}
+
+.status-dot.status-failed {
+  background: var(--accent-red);
+}
+
+.status-dot.status-stopped {
+  background: var(--accent-orange);
+}
+
+.status-dot.status-pending {
+  background: var(--text-tertiary);
+}
+
+.status-text {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-transform: capitalize;
+  color: var(--text-secondary);
+}
+
+.mono-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.action-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none;
+}
+
+.action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.action-stop:hover {
+  color: var(--accent-orange);
+  background: rgba(210, 153, 34, 0.12);
+}
+
+.action-delete:hover {
+  color: var(--accent-red);
+  background: rgba(248, 81, 73, 0.12);
 }
 </style>

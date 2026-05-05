@@ -1,13 +1,12 @@
 <template>
   <div class="app-layout">
-    <aside class="sidebar">
-      <div class="sidebar-brand">KT Experiment</div>
-      <Sidebar />
-    </aside>
+    <Sidebar />
     <div class="right-panel">
       <header class="app-header">
         <span class="header-title">{{ currentTitle }}</span>
-        <span class="header-time">{{ currentTime }}</span>
+        <div class="header-right">
+          <span class="header-time">{{ currentTime }}</span>
+        </div>
       </header>
       <main class="main-content">
         <slot />
@@ -15,45 +14,46 @@
       <footer class="app-footer">
         <div class="status-bar">
           <div class="status-item">
+            <span class="status-dot" :style="{ background: progressColor(sys.cpu_percent) }"></span>
             <span class="status-label">CPU</span>
-            <el-progress
-              :percentage="sys.cpu_percent"
-              :stroke-width="8"
-              :color="progressColor(sys.cpu_percent)"
-              style="width: 80px"
-            />
+            <div class="status-bar-track">
+              <div class="status-bar-fill" :style="{ width: sys.cpu_percent + '%', background: progressColor(sys.cpu_percent) }"></div>
+            </div>
+            <span class="status-value">{{ sys.cpu_percent.toFixed(0) }}%</span>
           </div>
+          <div class="status-sep"></div>
           <div class="status-item">
-            <span class="status-label">内存</span>
-            <el-progress
-              :percentage="sys.memory_percent"
-              :stroke-width="8"
-              :color="progressColor(sys.memory_percent)"
-              style="width: 80px"
-            />
-            <span class="status-value">{{ sys.memory_used_gb }}/{{ sys.memory_total_gb }}GB</span>
+            <span class="status-dot" :style="{ background: progressColor(sys.memory_percent) }"></span>
+            <span class="status-label">MEM</span>
+            <div class="status-bar-track">
+              <div class="status-bar-fill" :style="{ width: sys.memory_percent + '%', background: progressColor(sys.memory_percent) }"></div>
+            </div>
+            <span class="status-value">{{ sys.memory_used_gb.toFixed(1) }}/{{ sys.memory_total_gb.toFixed(0) }}G</span>
           </div>
+          <div class="status-sep"></div>
           <div class="status-item">
+            <span class="status-dot" :style="{ background: progressColor(sys.gpu_utilization) }"></span>
             <span class="status-label">GPU</span>
-            <el-progress
-              :percentage="sys.gpu_utilization"
-              :stroke-width="8"
-              :color="progressColor(sys.gpu_utilization)"
-              style="width: 80px"
-            />
+            <div class="status-bar-track">
+              <div class="status-bar-fill" :style="{ width: sys.gpu_utilization + '%', background: progressColor(sys.gpu_utilization) }"></div>
+            </div>
+            <span class="status-value">{{ sys.gpu_utilization.toFixed(0) }}%</span>
           </div>
+          <div class="status-sep"></div>
           <div class="status-item">
-            <span class="status-label">显存</span>
-            <el-progress
-              :percentage="sys.gpu_memory_percent"
-              :stroke-width="8"
-              :color="progressColor(sys.gpu_memory_percent)"
-              style="width: 80px"
-            />
+            <span class="status-dot" :style="{ background: progressColor(sys.gpu_memory_percent) }"></span>
+            <span class="status-label">VRAM</span>
+            <div class="status-bar-track">
+              <div class="status-bar-fill" :style="{ width: sys.gpu_memory_percent + '%', background: progressColor(sys.gpu_memory_percent) }"></div>
+            </div>
+            <span class="status-value">{{ sys.gpu_memory_percent.toFixed(0) }}%</span>
           </div>
-          <div class="status-item">
-            <span class="status-label">Load</span>
-            <span class="status-value">{{ sys.load_1m }} / {{ sys.load_5m }} / {{ sys.load_15m }}</span>
+          <div class="status-sep"></div>
+          <div class="status-item status-load">
+            <span class="status-label">LOAD</span>
+            <span class="status-value">{{ sys.load_1m.toFixed(2) }}</span>
+            <span class="status-value-sub">{{ sys.load_5m.toFixed(2) }}</span>
+            <span class="status-value-sub">{{ sys.load_15m.toFixed(2) }}</span>
           </div>
         </div>
       </footer>
@@ -70,14 +70,14 @@ import { getSystemStatus, type SystemStatus } from '@/api/gpu'
 const route = useRoute()
 
 const titleMap: Record<string, string> = {
-  '/tasks': '训练任务',
-  '/tasks/new': '新建任务',
-  '/experiments': '实验记录',
-  '/gpu': 'GPU 监控',
+  '/tasks': 'Training Tasks',
+  '/tasks/new': 'New Training Task',
+  '/experiments': 'Experiment Records',
+  '/gpu': 'GPU Monitor',
 }
 
 const currentTitle = computed(() => {
-  if (route.path.match(/^\/tasks\/\d+$/)) return '任务详情'
+  if (route.path.match(/^\/tasks\/\d+$/)) return 'Task Detail'
   return titleMap[route.path] || 'KT Experiment Manager'
 })
 
@@ -85,7 +85,7 @@ const currentTime = ref('')
 let timeTimer: ReturnType<typeof setInterval> | null = null
 
 const updateTime = () => {
-  currentTime.value = new Date().toLocaleString('zh-CN')
+  currentTime.value = new Date().toLocaleTimeString('en-US', { hour12: false })
 }
 
 const defaultSys: SystemStatus = {
@@ -97,9 +97,9 @@ const sys = ref<SystemStatus>(defaultSys)
 let statusTimer: ReturnType<typeof setInterval> | null = null
 
 const progressColor = (pct: number) => {
-  if (pct > 90) return '#f56c6c'
-  if (pct > 70) return '#e6a23c'
-  return '#67c23a'
+  if (pct > 90) return 'var(--accent-red)'
+  if (pct > 70) return 'var(--accent-orange)'
+  return 'var(--accent-green)'
 }
 
 const loadStatus = async () => {
@@ -124,35 +124,11 @@ onUnmounted(() => {
   display: flex;
   height: 100vh;
   overflow: hidden;
-}
-
-.sidebar {
-  width: 200px;
-  flex-shrink: 0;
-  background: #fff;
-  border-right: 1px solid #e4e7ed;
-  display: flex;
-  flex-direction: column;
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  z-index: 10;
-}
-
-.sidebar-brand {
-  height: 50px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 16px;
-  color: #303133;
-  border-bottom: 1px solid #e4e7ed;
+  background: var(--bg-base);
 }
 
 .right-panel {
-  margin-left: 200px;
+  margin-left: 220px;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -161,69 +137,121 @@ onUnmounted(() => {
 }
 
 .app-header {
-  height: 50px;
+  height: 48px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-muted);
 }
 
 .header-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .header-time {
-  font-size: 13px;
-  color: #909399;
-  font-family: monospace;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-weight: 500;
 }
 
 .main-content {
   flex: 1;
-  padding: 20px 24px;
+  padding: 24px;
   overflow-y: auto;
-  background: #f5f7fa;
+  background: var(--bg-base);
 }
 
 .app-footer {
   flex-shrink: 0;
-  height: 40px;
-  background: #fff;
-  border-top: 1px solid #e4e7ed;
+  height: 32px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-muted);
   display: flex;
   align-items: center;
-  padding: 0 24px;
+  padding: 0 16px;
 }
 
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 0;
   width: 100%;
 }
 
 .status-item {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
+  padding: 0 8px;
+}
+
+.status-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border-default);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .status-label {
-  font-size: 12px;
-  color: #606266;
-  font-weight: 500;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   white-space: nowrap;
 }
 
+.status-bar-track {
+  width: 48px;
+  height: 3px;
+  background: var(--border-default);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.status-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s ease, background 0.3s ease;
+}
+
 .status-value {
-  font-size: 11px;
-  color: #909399;
-  font-family: monospace;
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-weight: 500;
   white-space: nowrap;
+  min-width: 36px;
+}
+
+.status-value-sub {
+  font-size: 9px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.status-load .status-value-sub {
+  opacity: 0.6;
 }
 </style>

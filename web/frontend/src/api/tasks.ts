@@ -49,3 +49,6 @@ export const deleteTask = (id: number) =>
 
 export const getTaskLogs = (id: number, offset = 0, limit = 10000) =>
   api.get(`/tasks/${id}/logs`, { params: { offset, limit } }).then(r => r.data)
+
+export const resizeTerminal = (id: number, cols: number, rows: number) =>
+  api.post(`/tasks/${id}/resize`, { cols, rows }).then(r => r.data)
