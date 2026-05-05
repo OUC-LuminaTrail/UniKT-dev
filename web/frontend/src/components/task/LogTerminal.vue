@@ -123,7 +123,7 @@ onMounted(() => {
     },
     fontSize: 13,
     fontFamily: '"JetBrains Mono", Menlo, Monaco, "Courier New", monospace',
-    convertEol: true,
+    convertEol: false,
     scrollback: 50000,
     cursorBlink: false,
     cursorStyle: 'bar',

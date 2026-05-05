@@ -56,7 +56,7 @@ class ProcessManager:
 
             master_fd, slave_fd = pty.openpty()
 
-            winsize = struct.pack("HHHH", 50, 200, 0, 0)
+            winsize = struct.pack("HHHH", 24, 80, 0, 0)
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
             env = os.environ.copy()
@@ -84,9 +84,10 @@ class ProcessManager:
                 task.python_path = custom_python_path
             session.commit()
 
+            raw_log_path = str(log_path)
             reader = threading.Thread(
                 target=self._read_pty,
-                args=(task_id, master_fd, str(log_path)),
+                args=(task_id, master_fd, raw_log_path),
                 daemon=True,
             )
             reader.start()
@@ -107,8 +108,7 @@ class ProcessManager:
                     data = os.read(master_fd, 65536)
                     if not data:
                         break
-                    clean = self._clean_ansi_for_log(data)
-                    f.write(clean)
+                    f.write(data)
                     f.flush()
                 except OSError:
                     break
@@ -117,51 +117,6 @@ class ProcessManager:
         except OSError:
             pass
         self._master_fds.pop(task_id, None)
-
-    def _clean_ansi_for_log(self, data: bytes) -> bytes:
-        result = bytearray()
-        i = 0
-        length = len(data)
-        while i < length:
-            b = data[i]
-            if b == 0x1b and i + 1 < length:
-                j = i + 1
-                if j < length and data[j] in (ord('['), ord('(')):
-                    j += 1
-                    while j < length:
-                        c = data[j]
-                        if 0x40 <= c <= 0x7e:
-                            j += 1
-                            break
-                        j += 1
-                    result.extend(data[i:j])
-                    i = j
-                elif j < length and data[j] == ord(']'):
-                    j += 1
-                    while j < length:
-                        if data[j] == 0x07:
-                            j += 1
-                            break
-                        if (
-                            data[j] == 0x1b
-                            and j + 1 < length
-                            and data[j + 1] == ord('\\')
-                        ):
-                            j += 2
-                            break
-                        j += 1
-                    i = j
-                else:
-                    result.append(b)
-                    i += 1
-            elif b == 0x0d and i + 1 < length and data[i + 1] != 0x0a:
-                i += 1
-            elif b == 0x07:
-                i += 1
-            else:
-                result.append(b)
-                i += 1
-        return bytes(result)
 
     def _build_cli_args(self, model_name: str, params: dict) -> list[str]:
         args = ["train.py", "-m", model_name]

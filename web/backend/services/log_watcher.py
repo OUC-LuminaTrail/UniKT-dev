@@ -54,7 +54,7 @@ class LogWatcher:
                     try:
                         text = new_data.decode("utf-8", errors="replace")
                     except Exception:
-                        text = new_data.decode("latin-1")
+                        text = data.decode("latin-1")
                     await websocket.send_json({"type": "data", "content": text, "offset": offset})
                 else:
                     await asyncio.sleep(0.3)
