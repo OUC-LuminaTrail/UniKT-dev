@@ -1,12 +1,12 @@
 <template>
   <div class="task-list">
     <div class="page-header">
-      <h1 class="page-title">Training Tasks</h1>
+      <h1 class="page-title">训练任务</h1>
       <router-link to="/tasks/new" class="btn-primary">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z" />
         </svg>
-        New Task
+        新建任务
       </router-link>
     </div>
 
@@ -27,8 +27,8 @@
         <rect x="3" y="3" width="18" height="18" rx="2" />
         <path d="M9 9h6M9 13h6M9 17h4" />
       </svg>
-      <p>No tasks found</p>
-      <span>Tasks will appear here when you start a training run.</span>
+      <p>暂无任务</p>
+      <span>开始训练后任务将显示在这里</span>
     </div>
 
     <div v-else class="table-wrapper">
@@ -36,13 +36,13 @@
         <thead>
           <tr>
             <th class="col-id">ID</th>
-            <th class="col-name">Name</th>
-            <th class="col-model">Model</th>
-            <th class="col-dataset">Dataset</th>
-            <th class="col-env">Env</th>
-            <th class="col-status">Status</th>
-            <th class="col-time">Created</th>
-            <th class="col-actions">Actions</th>
+            <th class="col-name">名称</th>
+            <th class="col-model">模型</th>
+            <th class="col-dataset">数据集</th>
+            <th class="col-env">环境</th>
+            <th class="col-status">状态</th>
+            <th class="col-time">创建时间</th>
+            <th class="col-actions">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -59,7 +59,7 @@
             <td class="col-status">
               <span class="status-cell">
                 <span :class="['status-dot', `status-${task.status}`]" />
-                <span class="status-text">{{ task.status }}</span>
+                <span class="status-text">{{ statusLabel(task.status) }}</span>
               </span>
             </td>
             <td class="col-time">
@@ -67,7 +67,7 @@
             </td>
             <td class="col-actions">
               <div class="action-group">
-                <router-link :to="`/tasks/${task.id}`" class="action-btn" title="View details">
+                <router-link :to="`/tasks/${task.id}`" class="action-btn" title="查看详情">
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" />
                   </svg>
@@ -75,7 +75,7 @@
                 <button
                   v-if="task.status === 'running'"
                   class="action-btn action-stop"
-                  title="Stop task"
+                  title="停止任务"
                   @click="handleStop(task.id)"
                 >
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
@@ -85,7 +85,7 @@
                 <button
                   v-if="task.status !== 'running'"
                   class="action-btn action-delete"
-                  title="Delete task"
+                  title="删除任务"
                   @click="handleDelete(task.id)"
                 >
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
@@ -111,12 +111,22 @@ const activeTab = ref('running')
 const runningCount = ref(0)
 
 const tabs = [
-  { label: 'Running', value: 'running' },
-  { label: 'Completed', value: 'completed' },
-  { label: 'Failed', value: 'failed' },
-  { label: 'Stopped', value: 'stopped' },
-  { label: 'All', value: '' },
+  { label: '运行中', value: 'running' },
+  { label: '已完成', value: 'completed' },
+  { label: '已失败', value: 'failed' },
+  { label: '已停止', value: 'stopped' },
+  { label: '全部', value: '' },
 ]
+
+const statusLabels: Record<string, string> = {
+  running: '运行中',
+  completed: '已完成',
+  failed: '已失败',
+  stopped: '已停止',
+  pending: '等待中',
+}
+
+const statusLabel = (s: string) => statusLabels[s] || s
 
 const formatTime = (t: string | null) => {
   if (!t) return '-'
@@ -425,7 +435,6 @@ onUnmounted(() => {
 .status-text {
   font-size: 12px;
   font-family: var(--font-mono);
-  text-transform: capitalize;
   color: var(--text-secondary);
 }
 

@@ -1,10 +1,10 @@
 <template>
   <div class="gpu-monitor">
     <div class="page-header">
-      <h2 class="page-title">GPU Monitor</h2>
+      <h2 class="page-title">GPU 监控</h2>
       <div class="live-badge">
         <span class="live-dot"></span>
-        <span class="live-text">Live</span>
+        <span class="live-text">实时</span>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
 
         <div class="stats-grid">
           <div class="stat-block">
-            <div class="stat-label">Utilization</div>
+            <div class="stat-label">利用率</div>
             <div class="progress-track">
               <div
                 class="progress-fill"
@@ -31,7 +31,7 @@
           </div>
 
           <div class="stat-block">
-            <div class="stat-label">VRAM</div>
+            <div class="stat-label">显存</div>
             <div class="progress-track">
               <div
                 class="progress-fill"
@@ -48,7 +48,7 @@
           </div>
 
           <div class="stat-block">
-            <div class="stat-label">Temperature</div>
+            <div class="stat-label">温度</div>
             <div class="stat-row">
               <span
                 class="temp-indicator"
@@ -59,7 +59,7 @@
           </div>
 
           <div class="stat-block">
-            <div class="stat-label">Power</div>
+            <div class="stat-label">功耗</div>
             <div class="stat-value">{{ gpu.power_usage_w.toFixed(1) }}W</div>
           </div>
         </div>
@@ -68,12 +68,12 @@
 
     <div class="empty-state" v-else>
       <div class="empty-icon">⬡</div>
-      <div class="empty-text">No GPU detected</div>
-      <div class="empty-sub">Ensure NVIDIA drivers and nvidia-smi are available</div>
+      <div class="empty-text">未检测到 GPU</div>
+      <div class="empty-sub">请确保已安装 NVIDIA 驱动和 nvidia-smi</div>
     </div>
 
     <div class="updated-at" v-if="status">
-      Updated: {{ status.updated_at }}
+      更新时间: {{ status.updated_at }}
     </div>
   </div>
 </template>
@@ -217,7 +217,6 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   font-size: 11px;
   font-weight: 500;
   color: var(--text-tertiary);
-  text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 

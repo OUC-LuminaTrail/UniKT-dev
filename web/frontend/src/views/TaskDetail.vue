@@ -17,48 +17,48 @@
       <div class="header-actions" v-if="task.status === 'running'">
         <button class="action-btn stop" :disabled="stopping" @click="handleStop">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
-          <span>{{ stopping ? 'Stopping…' : 'Stop' }}</span>
+          <span>{{ stopping ? '停止中…' : '停止' }}</span>
         </button>
         <button class="action-btn kill" :disabled="killing" @click="handleKill">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <path d="M4 4L12 12M12 4L4 12"/>
           </svg>
-          <span>{{ killing ? 'Killing…' : 'Kill' }}</span>
+          <span>{{ killing ? '终止中…' : '强制终止' }}</span>
         </button>
       </div>
     </header>
 
     <section class="meta-grid">
       <div class="meta-cell">
-        <span class="meta-key">Model</span>
+        <span class="meta-key">模型</span>
         <span class="meta-val">{{ task.model_name }}</span>
       </div>
       <div class="meta-cell">
-        <span class="meta-key">Dataset</span>
+        <span class="meta-key">数据集</span>
         <span class="meta-val">{{ task.dataset_name }}</span>
       </div>
       <div class="meta-cell">
-        <span class="meta-key">Environment</span>
+        <span class="meta-key">运行环境</span>
         <span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span>
       </div>
       <div class="meta-cell">
-        <span class="meta-key">PID</span>
+        <span class="meta-key">进程 ID</span>
         <span class="meta-val mono">{{ task.pid || '—' }}</span>
       </div>
       <div class="meta-cell">
-        <span class="meta-key">Started</span>
+        <span class="meta-key">开始时间</span>
         <span class="meta-val mono">{{ formatTime(task.started_at) }}</span>
       </div>
       <div class="meta-cell">
-        <span class="meta-key">Exit Code</span>
+        <span class="meta-key">退出码</span>
         <span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span>
       </div>
     </section>
 
     <div class="command-block">
       <div class="command-bar">
-        <span class="command-label">Command</span>
-        <button class="copy-btn" @click="copyCommand">Copy</button>
+        <span class="command-label">命令</span>
+        <button class="copy-btn" @click="copyCommand">复制</button>
       </div>
       <pre class="command-text"><code>{{ task.command }}</code></pre>
     </div>
@@ -71,13 +71,13 @@
             <line x1="5" y1="7" x2="11" y2="7"/>
             <line x1="5" y1="9.5" x2="9" y2="9.5"/>
           </svg>
-          <span>Logs</span>
+          <span>运行日志</span>
         </div>
         <button class="scroll-btn" @click="scrollToBottom">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 6L8 11L13 6"/>
           </svg>
-          Jump to bottom
+          跳到底部
         </button>
       </div>
       <div class="terminal-wrapper">
@@ -104,11 +104,11 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 let terminal: Terminal | null = null
 
 const statusMap: Record<string, { color: string; label: string }> = {
-  running: { color: 'var(--accent-blue)', label: 'Running' },
-  completed: { color: 'var(--accent-green)', label: 'Completed' },
-  failed: { color: 'var(--accent-red)', label: 'Failed' },
-  stopped: { color: 'var(--accent-orange)', label: 'Stopped' },
-  pending: { color: 'var(--text-tertiary)', label: 'Pending' },
+  running: { color: 'var(--accent-blue)', label: '运行中' },
+  completed: { color: 'var(--accent-green)', label: '已完成' },
+  failed: { color: 'var(--accent-red)', label: '已失败' },
+  stopped: { color: 'var(--accent-orange)', label: '已停止' },
+  pending: { color: 'var(--text-tertiary)', label: '等待中' },
 }
 
 const formatTime = (t: string | null) => t ? new Date(t).toLocaleString('zh-CN') : '-'

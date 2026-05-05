@@ -1,7 +1,7 @@
 <template>
   <div class="task-launch">
     <div class="page-header">
-      <h1 class="page-title">New Training Task</h1>
+      <h1 class="page-title">新建训练任务</h1>
       <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
     </div>
 

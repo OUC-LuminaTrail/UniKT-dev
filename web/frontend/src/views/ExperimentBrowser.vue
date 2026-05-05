@@ -1,19 +1,19 @@
 <template>
   <div class="experiment-browser">
     <div class="page-header">
-      <h2 class="page-title">Experiment Records</h2>
+      <h2 class="page-title">实验记录</h2>
       <div class="filter-bar">
         <select v-model="filters.type" class="filter-select">
-          <option value="normal">Normal Training</option>
-          <option value="hyperparam_search">Hyperparameter Search</option>
-          <option value="ablation">Ablation Study</option>
+          <option value="normal">常规训练</option>
+          <option value="hyperparam_search">超参数搜索</option>
+          <option value="ablation">消融实验</option>
         </select>
         <input
           v-model="filters.model"
-          placeholder="Filter by model"
+          placeholder="按模型筛选"
           class="filter-input"
         />
-        <button class="filter-btn" @click="loadExperiments">Query</button>
+        <button class="filter-btn" @click="loadExperiments">查询</button>
       </div>
     </div>
 
@@ -21,11 +21,11 @@
       <table class="data-table">
         <thead>
           <tr>
-            <th class="col-name">Experiment Name</th>
-            <th class="col-model">Model</th>
-            <th class="col-dataset">Dataset</th>
-            <th class="col-time">Timestamp</th>
-            <th class="col-action">Action</th>
+            <th class="col-name">实验名称</th>
+            <th class="col-model">模型</th>
+            <th class="col-dataset">数据集</th>
+            <th class="col-time">时间戳</th>
+            <th class="col-action">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -35,26 +35,26 @@
             <td class="mono">{{ row.dataset_name }}</td>
             <td class="mono">{{ row.timestamp }}</td>
             <td>
-              <button class="action-btn" @click="showDetail(row.path)">Detail</button>
+              <button class="action-btn" @click="showDetail(row.path)">详情</button>
             </td>
           </tr>
           <tr v-if="experiments.length === 0">
-            <td colspan="5" class="empty-cell">No experiments found</td>
+            <td colspan="5" class="empty-cell">暂无实验记录</td>
           </tr>
         </tbody>
       </table>
     </div>
 
-    <el-drawer v-model="drawerVisible" title="Experiment Detail" size="50%">
+    <el-drawer v-model="drawerVisible" title="实验详情" size="50%">
       <template v-if="detail">
         <div class="detail-section">
           <div class="detail-row">
-            <span class="detail-label">Name</span>
+            <span class="detail-label">名称</span>
             <span class="detail-value">{{ detail.name }}</span>
           </div>
         </div>
 
-        <h4 class="section-heading">Files</h4>
+        <h4 class="section-heading">文件列表</h4>
         <div class="file-list">
           <div
             v-for="f in fileTree"
