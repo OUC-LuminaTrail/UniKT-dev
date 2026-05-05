@@ -1,12 +1,10 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
 from config import LOG_DIR
 from database import init_db
-from dependencies import process_manager, gpu_monitor
-from routers import tasks, logs, environments, schemas_api, experiments, gpu
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from routers import datasets, environments, experiments, gpu, logs, schemas_api, tasks
 
 
 @asynccontextmanager
@@ -39,3 +37,4 @@ app.include_router(environments.router)
 app.include_router(schemas_api.router)
 app.include_router(experiments.router)
 app.include_router(gpu.router)
+app.include_router(datasets.router)

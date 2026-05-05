@@ -169,7 +169,7 @@ onMounted(async () => {
 
 <style scoped>
 .task-launch {
-  max-width: 1100px;
+  max-width: 100%;
 }
 
 .page-header {
