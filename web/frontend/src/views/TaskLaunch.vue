@@ -75,10 +75,24 @@ const form = ref({
   params: {} as Record<string, any>,
 })
 
+const STORAGE_KEY_ENV = 'kt-web:last-env-id'
+const STORAGE_KEY_MODEL = 'kt-web:last-model-name'
+
 onMounted(async () => {
   const [envs, modelList] = await Promise.all([listEnvironments(), listModels()])
   environments.value = envs
   models.value = modelList
+
+  const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
+  if (savedEnv && envs.some(e => e.id === savedEnv)) {
+    form.value.env_id = savedEnv
+  }
+
+  const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)
+  if (savedModel && modelList.includes(savedModel)) {
+    form.value.model_name = savedModel
+    onModelChange(savedModel)
+  }
 })
 
 const onModelChange = async (model: string) => {
@@ -92,6 +106,8 @@ const onSubmit = async () => {
     ElMessage.warning('请选择模型')
     return
   }
+  localStorage.setItem(STORAGE_KEY_ENV, form.value.env_id)
+  localStorage.setItem(STORAGE_KEY_MODEL, form.value.model_name)
   submitting.value = true
   try {
     const task = await createTask({
