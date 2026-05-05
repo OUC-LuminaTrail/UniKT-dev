@@ -70,10 +70,10 @@ import { getSystemStatus, type SystemStatus } from '@/api/gpu'
 const route = useRoute()
 
 const titleMap: Record<string, string> = {
-  '/tasks': 'Training Tasks',
-  '/tasks/new': 'New Training Task',
-  '/experiments': 'Experiment Records',
-  '/gpu': 'GPU Monitor',
+  '/tasks': '训练任务',
+  '/tasks/new': '新建训练任务',
+  '/experiments': '实验日志',
+  '/gpu': 'GPU 监控',
 }
 
 const currentTitle = computed(() => {
