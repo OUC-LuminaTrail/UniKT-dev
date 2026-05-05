@@ -94,6 +94,16 @@ const formatLabel = (key: string) => {
     .replace(/\b\w/g, c => c.toUpperCase())
 }
 
+const emitParams = (data: Record<string, any>) => {
+  const cleaned: Record<string, any> = {}
+  for (const [k, v] of Object.entries(data)) {
+    if (v !== null && v !== undefined && v !== '') {
+      cleaned[k] = v
+    }
+  }
+  emit('update:params', cleaned)
+}
+
 watch(
   () => props.schema,
   (schema) => {
@@ -107,21 +117,14 @@ watch(
     }
     formData.value = data
     expandedGroups.value = groups
+    emitParams(data)
   },
   { immediate: true }
 )
 
 watch(
   formData,
-  (data) => {
-    const cleaned: Record<string, any> = {}
-    for (const [k, v] of Object.entries(data)) {
-      if (v !== null && v !== undefined && v !== '') {
-        cleaned[k] = v
-      }
-    }
-    emit('update:params', cleaned)
-  },
+  (data) => emitParams(data),
   { deep: true }
 )
 </script>
