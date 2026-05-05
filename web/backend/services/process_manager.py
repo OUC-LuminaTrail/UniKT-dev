@@ -1,6 +1,10 @@
+import fcntl
 import os
+import pty
 import signal
+import struct
 import subprocess
+import termios
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +19,9 @@ class ProcessManager:
     def __init__(self):
         self._resolver = EnvironmentResolver()
         self._monitors: dict[int, threading.Thread] = {}
+        self._procs: dict[int, subprocess.Popen] = {}
+        self._master_fds: dict[int, int] = {}
+        self._readers: dict[int, threading.Thread] = {}
 
     def launch_task(
         self,
@@ -47,14 +54,28 @@ class ProcessManager:
 
             project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 
-            with open(log_path, "w") as log_file:
-                proc = subprocess.Popen(
-                    cmd,
-                    stdout=log_file,
-                    stderr=subprocess.STDOUT,
-                    cwd=project_root,
-                    start_new_session=True,
-                )
+            master_fd, slave_fd = pty.openpty()
+
+            winsize = struct.pack("HHHH", 50, 200, 0, 0)
+            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+            env = os.environ.copy()
+            env["TERM"] = "xterm-256color"
+            env["FORCE_COLOR"] = "1"
+
+            proc = subprocess.Popen(
+                cmd,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=project_root,
+                start_new_session=True,
+                env=env,
+            )
+            os.close(slave_fd)
+
+            self._procs[task_id] = proc
+            self._master_fds[task_id] = master_fd
 
             task.pid = proc.pid
             task.status = "running"
@@ -63,13 +84,84 @@ class ProcessManager:
                 task.python_path = custom_python_path
             session.commit()
 
+            reader = threading.Thread(
+                target=self._read_pty,
+                args=(task_id, master_fd, str(log_path)),
+                daemon=True,
+            )
+            reader.start()
+            self._readers[task_id] = reader
+
             t = threading.Thread(
                 target=self._monitor_process,
-                args=(task_id, proc.pid),
+                args=(task_id,),
                 daemon=True,
             )
             t.start()
             self._monitors[task_id] = t
+
+    def _read_pty(self, task_id: int, master_fd: int, log_path: str) -> None:
+        with open(log_path, "wb") as f:
+            while True:
+                try:
+                    data = os.read(master_fd, 65536)
+                    if not data:
+                        break
+                    clean = self._clean_ansi_for_log(data)
+                    f.write(clean)
+                    f.flush()
+                except OSError:
+                    break
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        self._master_fds.pop(task_id, None)
+
+    def _clean_ansi_for_log(self, data: bytes) -> bytes:
+        result = bytearray()
+        i = 0
+        length = len(data)
+        while i < length:
+            b = data[i]
+            if b == 0x1b and i + 1 < length:
+                j = i + 1
+                if j < length and data[j] in (ord('['), ord('(')):
+                    j += 1
+                    while j < length:
+                        c = data[j]
+                        if 0x40 <= c <= 0x7e:
+                            j += 1
+                            break
+                        j += 1
+                    result.extend(data[i:j])
+                    i = j
+                elif j < length and data[j] == ord(']'):
+                    j += 1
+                    while j < length:
+                        if data[j] == 0x07:
+                            j += 1
+                            break
+                        if (
+                            data[j] == 0x1b
+                            and j + 1 < length
+                            and data[j + 1] == ord('\\')
+                        ):
+                            j += 2
+                            break
+                        j += 1
+                    i = j
+                else:
+                    result.append(b)
+                    i += 1
+            elif b == 0x0d and i + 1 < length and data[i + 1] != 0x0a:
+                i += 1
+            elif b == 0x07:
+                i += 1
+            else:
+                result.append(b)
+                i += 1
+        return bytes(result)
 
     def _build_cli_args(self, model_name: str, params: dict) -> list[str]:
         args = ["train.py", "-m", model_name]
@@ -89,17 +181,80 @@ class ProcessManager:
                 args.append(str(value))
         return args
 
-    def _monitor_process(self, task_id: int, pid: int) -> None:
+    def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
+        master_fd = self._master_fds.get(task_id)
+        if master_fd is None:
+            return False
         try:
-            proc = psutil.Process(pid)
+            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+            return True
+        except OSError:
+            return False
+
+    def _kill_process_group(self, pid: int, sig: int) -> None:
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass
+
+    def _terminate_task_processes(self, task_id: int) -> bool:
+        proc = self._procs.get(task_id)
+        if proc is None:
+            return False
+
+        pid = proc.pid
+        try:
+            self._kill_process_group(pid, signal.SIGTERM)
+        except Exception:
+            pass
+
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                self._kill_process_group(pid, signal.SIGKILL)
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                pass
+
+        master_fd = self._master_fds.get(task_id)
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+
+        self._procs.pop(task_id, None)
+        return True
+
+    def _monitor_process(self, task_id: int) -> None:
+        proc = self._procs.get(task_id)
+        if proc is None:
+            return
+
+        try:
             proc.wait()
             exit_code = proc.returncode
-        except psutil.NoSuchProcess:
+        except Exception:
             exit_code = -1
+
+        self._procs.pop(task_id, None)
+
+        reader = self._readers.pop(task_id, None)
+        if reader and reader.is_alive():
+            reader.join(timeout=5)
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
-            if task:
+            if task and task.status == "running":
                 task.status = "completed" if exit_code == 0 else "failed"
                 task.exit_code = exit_code
                 task.finished_at = datetime.now()
@@ -113,44 +268,69 @@ class ProcessManager:
             task = session.query(Task).get(task_id)
             if not task or task.status != "running":
                 return False
-            if task.pid:
-                try:
-                    os.kill(task.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
+
+            task.status = "stopping"
+            session.commit()
+
+        self._terminate_task_processes(task_id)
+
+        with SessionLocal() as session:
+            task = session.query(Task).get(task_id)
+            if task and task.status == "stopping":
                 task.status = "stopped"
                 task.finished_at = datetime.now()
                 task.pid = None
                 session.commit()
-            return True
+
+        return True
 
     def kill_task(self, task_id: int) -> bool:
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task or task.status != "running":
                 return False
-            if task.pid:
-                try:
-                    os.killpg(os.getpgid(task.pid), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+
+            task.status = "stopping"
+            session.commit()
+
+        proc = self._procs.get(task_id)
+        if proc:
+            try:
+                self._kill_process_group(proc.pid, signal.SIGKILL)
+            except Exception:
+                pass
+            self._procs.pop(task_id, None)
+
+        master_fd = self._master_fds.get(task_id)
+        if master_fd is not None:
+            try:
+                os.close(master_fd)
+            except OSError:
+                pass
+
+        with SessionLocal() as session:
+            task = session.query(Task).get(task_id)
+            if task and task.status == "stopping":
                 task.status = "stopped"
                 task.finished_at = datetime.now()
                 task.exit_code = -9
                 task.pid = None
                 session.commit()
-            return True
+
+        return True
 
     def recover_tasks(self) -> None:
         with SessionLocal() as session:
-            running_tasks = session.query(Task).filter(Task.status == "running").all()
+            running_tasks = session.query(Task).filter(
+                Task.status.in_(["running", "stopping"])
+            ).all()
             for task in running_tasks:
                 if task.pid and psutil.pid_exists(task.pid):
                     try:
                         proc = psutil.Process(task.pid)
                         if proc.is_running():
                             t = threading.Thread(
-                                target=self._monitor_process,
+                                target=self._recover_monitor,
                                 args=(task.id, task.pid),
                                 daemon=True,
                             )
@@ -164,5 +344,25 @@ class ProcessManager:
                 task.pid = None
                 session.commit()
 
+    def _recover_monitor(self, task_id: int, pid: int) -> None:
+        try:
+            proc = psutil.Process(pid)
+            proc.wait()
+            exit_code = proc.returncode
+        except psutil.NoSuchProcess:
+            exit_code = -1
+
+        with SessionLocal() as session:
+            task = session.query(Task).get(task_id)
+            if task and task.status == "running":
+                task.status = "completed" if exit_code == 0 else "failed"
+                task.exit_code = exit_code
+                task.finished_at = datetime.now()
+                task.pid = None
+                session.commit()
+
+        self._monitors.pop(task_id, None)
+
     def shutdown(self) -> None:
-        pass
+        for task_id in list(self._procs.keys()):
+            self._terminate_task_processes(task_id)
