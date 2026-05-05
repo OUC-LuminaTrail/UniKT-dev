@@ -135,12 +135,17 @@ find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
 [feature.web.dependencies]
 python = "3.12.*"
 python-dotenv = ">=1.2.1,<2"
+nodejs = "20.*"
 [feature.web.pypi-dependencies]
 fastapi = ">=0.115.0"
 uvicorn = { version = ">=0.34.0", extras = ["standard"] }
 sqlalchemy = ">=2.0.0"
 pydantic = ">=2.0.0"
-psutil = ">=6.0.0"
+psutil = ">=7.2.0"
+[feature.web.tasks]
+web-backend = { cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8765", cwd = "web/backend", env = { PYTHONPATH = "../../" }, description = "Start the backend server" }
+web-frontend = { cmd = "npm run dev", cwd = "web/frontend", description = "Start the frontend in dev mode" }
+web-dev = { cmd = "cd web/backend && python -m uvicorn main:app --host 127.0.0.1 --port 8765 & cd web/frontend && npm run dev", description = "Start both backend and frontend in dev mode" }
 
 [environments]
 dhg-cpu = { features = ["dhg-cpu"] }
@@ -148,7 +153,6 @@ dhg-gpu = { features = ["dhg-gpu"] }
 cpu = { features = ["cpu"] }
 mamba = { features = ["mamba"] }
 web = { features = ["gpu", "web"] }
-
 default = { features = ["gpu"] }
 
 [tasks]
@@ -156,5 +160,3 @@ lint = "ruff check ."
 fmt = "ruff format ."
 ckf = [{ task = "lint" }, { task = "fmt" }]
 clean-cache = "find . -name '__pycache__' -type d -print0 | xargs -0 rm -rf && find . -name '*.py[co]' -delete && rm -rf runs/* swanlog/*"
-web-backend = { cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8765", cwd = "web/backend", env = { PYTHONPATH = "../../" } }
-

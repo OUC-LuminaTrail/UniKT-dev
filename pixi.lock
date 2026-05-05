@@ -1561,6 +1561,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libtiff-4.7.1-h9d88235_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libutf8proc-2.11.3-hfe17d71_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libuuid-2.42-h5347b49_0.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/libuv-1.51.0-hb03c661_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libvulkan-loader-1.4.341.0-h5279c79_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libwebp-base-1.6.0-hd42ef1d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/libxcb-1.17.0-h8a09558_0.conda
@@ -1578,6 +1579,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/munkres-1.1.4-pyhd8ed1ab_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ncurses-6.6-hdb14827_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/nlohmann_json-3.12.0-h54a6638_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/nodejs-20.20.2-h44b80ee_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-2.4.3-py312h33ff503_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openjpeg-2.5.4-h55fea9a_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/openldap-2.6.13-hbde042b_0.conda
@@ -4592,6 +4594,17 @@ packages:
   purls: []
   size: 40297
   timestamp: 1775052476770
+- conda: https://conda.anaconda.org/conda-forge/linux-64/libuv-1.51.0-hb03c661_1.conda
+  sha256: c180f4124a889ac343fc59d15558e93667d894a966ec6fdb61da1604481be26b
+  md5: 0f03292cc56bf91a077a134ea8747118
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - libgcc >=14
+  license: MIT
+  license_family: MIT
+  purls: []
+  size: 895108
+  timestamp: 1753948278280
 - conda: https://conda.anaconda.org/conda-forge/linux-64/libvulkan-loader-1.4.341.0-h5279c79_0.conda
   sha256: a68280d57dfd29e3d53400409a39d67c4b9515097eba733aa6fe00c880620e2b
   md5: 31ad065eda3c2d88f8215b1289df9c89
@@ -5034,6 +5047,23 @@ packages:
   purls: []
   size: 136216
   timestamp: 1758194284857
+- conda: https://conda.anaconda.org/conda-forge/linux-64/nodejs-20.20.2-h44b80ee_0.conda
+  sha256: 9a4af21d212e0b4aa8ed2b8c14786560a2923554d7ae1a8cd77ba9952e81b3af
+  md5: 113e0116af867d4d96325b5b93d984c5
+  depends:
+  - __glibc >=2.17,<3.0.a0
+  - icu >=78.3,<79.0a0
+  - libgcc >=14
+  - libstdcxx >=14
+  - libuv >=1.51.0,<2.0a0
+  - libzlib >=1.3.2,<2.0a0
+  - openssl >=3.5.5,<4.0a0
+  - zlib
+  license: MIT
+  license_family: MIT
+  purls: []
+  size: 17422799
+  timestamp: 1774517512361
 - conda: https://conda.anaconda.org/conda-forge/linux-64/numpy-1.26.4-py310hb13e2d6_0.conda
   sha256: 028fe2ea8e915a0a032b75165f11747770326f3d767e642880540c60a3256425
   md5: 6593de64c935768b6bad3e19b3e978be
