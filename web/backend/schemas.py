@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class TaskCreate(BaseModel):
-    name: str
+    name: str = ""
     env_id: str
     custom_python_path: str | None = None
     model_name: str

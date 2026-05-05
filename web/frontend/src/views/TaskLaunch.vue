@@ -10,7 +10,7 @@
         <el-row :gutter="24">
           <el-col :span="8">
             <el-form-item label="任务名称">
-              <el-input v-model="form.name" placeholder="GIKT_assist09_fold0" />
+              <el-input v-model="form.name" placeholder="留空自动生成" />
             </el-form-item>
           </el-col>
           <el-col :span="8">
