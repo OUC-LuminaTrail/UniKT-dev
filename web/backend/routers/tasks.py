@@ -8,6 +8,7 @@ from database import SessionLocal
 from dependencies import get_process_manager
 from models import Task
 from schemas import TaskCreate, TaskResponse
+from pydantic import BaseModel
 from services.process_manager import ProcessManager
 from config import LOG_DIR
 
@@ -85,6 +86,17 @@ def kill_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     if not pm.kill_task(task_id):
         raise HTTPException(400, "Cannot kill task")
     return {"status": "killed"}
+
+
+class ResizeRequest(BaseModel):
+    cols: int
+    rows: int
+
+
+@router.post("/{task_id}/resize")
+def resize_terminal(task_id: int, body: ResizeRequest, pm: ProcessManager = Depends(get_process_manager)):
+    pm.resize_pty(task_id, body.cols, body.rows)
+    return {"ok": True}
 
 
 @router.delete("/{task_id}")
