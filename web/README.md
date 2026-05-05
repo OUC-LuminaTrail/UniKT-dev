@@ -4,25 +4,39 @@ KT 实验框架的 Web 管理系统，用于启动、管理和监控训练任务
 
 ## 快速启动
 
-### 后端
+### 环境准备
 
 ```bash
-# 安装依赖
-cd web/backend
-pip install -r requirements.txt
+# 安装 mise（如未安装）
+curl https://mise.run | sh
 
-# 启动服务（默认端口 8765）
-python -m uvicorn main:app --host 127.0.0.1 --port 8765
+# 安装 Node.js（前端依赖）
+mise install
+
+# 安装后端 pixi 环境
+pixi install -e web
+
+# 安装前端 npm 依赖
+cd web/frontend && npm install
 ```
 
-### 前端
+### 启动后端
 
 ```bash
-# 安装依赖
-cd web/frontend
-npm install
+# 方式 1：使用 pixi task（推荐）
+pixi run -e web web-backend
 
-# 启动开发服务器（默认端口 5173）
+# 方式 2：手动启动
+pixi shell -e web
+cd web/backend
+PYTHONPATH=../../ python -m uvicorn main:app --host 127.0.0.1 --port 8765
+```
+
+### 启动前端
+
+```bash
+eval "$(mise activate bash)"   # 或 zsh/fish，按你的 shell 调整
+cd web/frontend
 npm run dev
 ```
 

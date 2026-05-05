@@ -4,7 +4,6 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from database import SessionLocal
 from models import Task
 from services.log_watcher import LogWatcher
-from main import get_process_manager
 
 router = APIRouter(tags=["logs"])
 

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from main import get_gpu_monitor
+from dependencies import get_gpu_monitor
 from schemas import GpuStatusResponse
 from services.gpu_monitor import GpuMonitor
 

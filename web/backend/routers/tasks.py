@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc
 
 from database import SessionLocal
-from main import get_process_manager
+from dependencies import get_process_manager
 from models import Task
 from schemas import TaskCreate, TaskResponse
 from services.process_manager import ProcessManager

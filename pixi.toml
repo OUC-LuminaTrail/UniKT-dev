@@ -132,11 +132,22 @@ matplotlib = ">=3.10.8,<4"
 extra-index-urls = ["https://download.pytorch.org/whl/cpu"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
 
+[feature.web.dependencies]
+python = "3.12.*"
+python-dotenv = ">=1.2.1,<2"
+[feature.web.pypi-dependencies]
+fastapi = ">=0.115.0"
+uvicorn = { version = ">=0.34.0", extras = ["standard"] }
+sqlalchemy = ">=2.0.0"
+pydantic = ">=2.0.0"
+psutil = ">=6.0.0"
+
 [environments]
 dhg-cpu = { features = ["dhg-cpu"] }
 dhg-gpu = { features = ["dhg-gpu"] }
 cpu = { features = ["cpu"] }
 mamba = { features = ["mamba"] }
+web = { features = ["gpu", "web"] }
 
 default = { features = ["gpu"] }
 
@@ -145,4 +156,5 @@ lint = "ruff check ."
 fmt = "ruff format ."
 ckf = [{ task = "lint" }, { task = "fmt" }]
 clean-cache = "find . -name '__pycache__' -type d -print0 | xargs -0 rm -rf && find . -name '*.py[co]' -delete && rm -rf runs/* swanlog/*"
+web-backend = { cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8765", cwd = "web/backend", env = { PYTHONPATH = "../../" } }
 
