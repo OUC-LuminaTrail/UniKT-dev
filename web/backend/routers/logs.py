@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Query
 from database import SessionLocal
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from models import Task
 from services.log_watcher import LogWatcher
 
@@ -17,7 +17,7 @@ def get_logs(task_id: int, offset: int = 0, limit: int = 10000):
         log_path = Path(task.log_file_path)
         if not log_path.exists():
             return {"content": "", "total_lines": 0}
-        with open(log_path, "r") as f:
+        with open(log_path) as f:
             lines = f.readlines()
         total = len(lines)
         selected = lines[offset : offset + limit]
@@ -34,13 +34,13 @@ async def stream_logs(websocket: WebSocket, task_id: int, from_offset: int = Que
             await websocket.close()
             return
         log_path = task.log_file_path
-        task_pid = task.pid
-        task_status = task.status
-
-    is_running = task_status in ("running", "stopping")
 
     def check_alive():
-        return task_pid is not None and is_running
+        with SessionLocal() as session:
+            t = session.query(Task).get(task_id)
+            if not t:
+                return False
+            return t.pid is not None and t.status in ("running", "stopping")
 
     watcher = LogWatcher()
     try:

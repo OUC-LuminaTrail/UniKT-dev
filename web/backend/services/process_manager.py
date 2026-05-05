@@ -1,3 +1,4 @@
+import contextlib
 import fcntl
 import os
 import pty
@@ -12,6 +13,7 @@ from pathlib import Path
 import psutil
 from database import SessionLocal
 from models import Task
+
 from services.environment_resolver import EnvironmentResolver
 
 
@@ -112,10 +114,8 @@ class ProcessManager:
                     f.flush()
                 except OSError:
                     break
-        try:
+        with contextlib.suppress(OSError):
             os.close(master_fd)
-        except OSError:
-            pass
         self._master_fds.pop(task_id, None)
 
     def _build_cli_args(self, model_name: str, params: dict) -> list[str]:
@@ -152,10 +152,8 @@ class ProcessManager:
             pgid = os.getpgid(pid)
             os.killpg(pgid, sig)
         except (ProcessLookupError, PermissionError, OSError):
-            try:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
                 os.kill(pid, sig)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
 
     def _terminate_task_processes(self, task_id: int) -> bool:
         proc = self._procs.get(task_id)
@@ -163,29 +161,21 @@ class ProcessManager:
             return False
 
         pid = proc.pid
-        try:
-            self._kill_process_group(pid, signal.SIGTERM)
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            self._kill_process_group(pid, signal.SIGINT)
 
         try:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            try:
+            with contextlib.suppress(Exception):
                 self._kill_process_group(pid, signal.SIGKILL)
-            except Exception:
-                pass
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
 
         master_fd = self._master_fds.get(task_id)
         if master_fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(master_fd)
-            except OSError:
-                pass
 
         self._procs.pop(task_id, None)
         return True
@@ -250,18 +240,14 @@ class ProcessManager:
 
         proc = self._procs.get(task_id)
         if proc:
-            try:
+            with contextlib.suppress(Exception):
                 self._kill_process_group(proc.pid, signal.SIGKILL)
-            except Exception:
-                pass
             self._procs.pop(task_id, None)
 
         master_fd = self._master_fds.get(task_id)
         if master_fd is not None:
-            try:
+            with contextlib.suppress(OSError):
                 os.close(master_fd)
-            except OSError:
-                pass
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)

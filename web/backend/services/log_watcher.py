@@ -1,6 +1,29 @@
 import asyncio
 from pathlib import Path
 
+INITIAL_CHUNK_SIZE = 65536
+
+
+def _find_safe_boundary(data: bytes, intended_end: int) -> int:
+    i = intended_end
+    while i > 0:
+        b = data[i - 1]
+        if (b & 0b11_000000) != 0b10_000000:
+            if (b & 0b1111_0000) == 0b1111_0000:
+                needed = 4
+            elif (b & 0b1110_0000) == 0b1110_0000:
+                needed = 3
+            elif (b & 0b1100_0000) == 0b1100_0000:
+                needed = 2
+            else:
+                needed = 1
+            char_end = i - 1 + needed
+            if char_end <= intended_end:
+                return char_end
+            return i - 1
+        i -= 1
+    return 0
+
 
 class LogWatcher:
     async def stream_log(
@@ -15,26 +38,31 @@ class LogWatcher:
         with open(path, "rb") as f:
             file_size = f.seek(0, 2)
 
+            start = 0
             if from_offset > 0 and from_offset <= file_size:
-                f.seek(from_offset)
-                data = f.read()
-            elif from_offset == 0:
-                f.seek(0)
-                data = f.read()
-                if len(data) > 50000:
-                    data = b"..." + data[-50000:]
-            else:
-                f.seek(0)
-                data = f.read()
+                start = from_offset
 
-            offset = f.tell()
+            offset = start
+            while offset < file_size:
+                f.seek(offset)
+                read_size = min(INITIAL_CHUNK_SIZE + 4, file_size - offset + 4)
+                raw = f.read(read_size)
+                if not raw:
+                    break
 
-            if data:
+                boundary = _find_safe_boundary(raw, min(INITIAL_CHUNK_SIZE, len(raw)))
+                if boundary == 0 and offset == start:
+                    boundary = min(INITIAL_CHUNK_SIZE, len(raw))
+                chunk = raw[:boundary]
+
+                offset += boundary
                 try:
-                    text = data.decode("utf-8", errors="replace")
-                except Exception:
-                    text = data.decode("latin-1")
-                await websocket.send_json({"type": "data", "content": text, "offset": offset})
+                    text = chunk.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = chunk.decode("utf-8", errors="replace")
+                await websocket.send_json(
+                    {"type": "data", "content": text, "offset": offset}
+                )
                 await asyncio.sleep(0)
 
             if not check_alive or not check_alive():
@@ -44,7 +72,7 @@ class LogWatcher:
 
             while True:
                 if check_alive and not check_alive():
-                    await self._send_remaining(f, websocket)
+                    await self._send_remaining(f, websocket, offset)
                     break
 
                 f.seek(offset)
@@ -52,28 +80,35 @@ class LogWatcher:
                 if new_data:
                     offset = f.tell()
                     try:
+                        text = new_data.decode("utf-8")
+                    except UnicodeDecodeError:
                         text = new_data.decode("utf-8", errors="replace")
-                    except Exception:
-                        text = data.decode("latin-1")
-                    await websocket.send_json({"type": "data", "content": text, "offset": offset})
+                    await websocket.send_json(
+                        {"type": "data", "content": text, "offset": offset}
+                    )
                 else:
                     await asyncio.sleep(0.3)
 
                 if check_alive and not check_alive():
-                    await self._send_remaining(f, websocket)
+                    await self._send_remaining(f, websocket, offset)
                     break
 
         await websocket.send_json({"type": "done", "final": True})
         await websocket.close()
 
-    async def _send_remaining(self, f, websocket):
+    async def _send_remaining(self, f, websocket, last_sent_offset: int):
         f.seek(0, 2)
-        pos = f.tell()
-        f.seek(max(0, pos - 8192))
+        file_size = f.tell()
+        if file_size <= last_sent_offset:
+            return
+        f.seek(last_sent_offset)
         remaining = f.read()
         if remaining:
+            offset = f.tell()
             try:
+                text = remaining.decode("utf-8")
+            except UnicodeDecodeError:
                 text = remaining.decode("utf-8", errors="replace")
-            except Exception:
-                text = remaining.decode("latin-1")
-            await websocket.send_json({"type": "data", "content": text, "offset": f.tell()})
+            await websocket.send_json(
+                {"type": "data", "content": text, "offset": offset}
+            )

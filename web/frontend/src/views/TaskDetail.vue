@@ -90,7 +90,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Terminal } from '@xterm/xterm'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogTerminal from '@/components/task/LogTerminal.vue'
@@ -128,6 +128,9 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
 const loadTask = async () => { task.value = await getTask(taskId) }
 
 const handleStop = async () => {
+  try {
+    await ElMessageBox.confirm('确定要停止该任务吗？任务将收到 Ctrl+C 信号，SwanLab 会正确记录任务停止信息。', '停止任务', { confirmButtonText: '停止', cancelButtonText: '取消', type: 'warning' })
+  } catch { return }
   stopping.value = true
   try {
     await stopTask(taskId)
@@ -137,6 +140,9 @@ const handleStop = async () => {
 }
 
 const handleKill = async () => {
+  try {
+    await ElMessageBox.confirm('确定要强制终止该任务吗？任务将收到 SIGKILL 信号并立即退出，可能导致数据丢失。', '强制终止任务', { confirmButtonText: '强制终止', cancelButtonText: '取消', type: 'error' })
+  } catch { return }
   killing.value = true
   try {
     await killTask(taskId)
