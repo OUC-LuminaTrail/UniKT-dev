@@ -4,7 +4,7 @@ from config import LOG_DIR
 from database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import datasets, environments, experiments, gpu, logs, preprocess, schemas_api, tasks
+from routers import datasets, environments, experiments, gpu, logs, preprocess, schemas_api, settings_api, tasks
 
 
 @asynccontextmanager
@@ -40,3 +40,4 @@ app.include_router(experiments.router)
 app.include_router(gpu.router)
 app.include_router(preprocess.router)
 app.include_router(datasets.router)
+app.include_router(settings_api.router)

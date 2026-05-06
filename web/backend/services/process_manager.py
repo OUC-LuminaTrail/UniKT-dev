@@ -1,5 +1,6 @@
 import contextlib
 import fcntl
+import json
 import os
 import pty
 import signal
@@ -24,8 +25,99 @@ class ProcessManager:
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
+        self._queue: list[int] = []
+        self._max_concurrent = 1
+        self._lock = threading.Lock()
+
+    @property
+    def max_concurrent(self) -> int:
+        return self._max_concurrent
+
+    @max_concurrent.setter
+    def max_concurrent(self, value: int) -> None:
+        with self._lock:
+            self._max_concurrent = max(1, value)
+            self._dequeue_next()
+
+    @property
+    def running_count(self) -> int:
+        return len(self._procs)
+
+    def get_queue(self) -> list[int]:
+        return list(self._queue)
+
+    def reorder_queue(self, task_ids: list[int]) -> None:
+        with self._lock:
+            valid = [tid for tid in task_ids if tid in self._queue]
+            self._queue = valid
+
+    def remove_from_queue(self, task_id: int) -> bool:
+        with self._lock:
+            if task_id in self._queue:
+                self._queue.remove(task_id)
+                return True
+            return False
 
     def launch_task(
+        self,
+        task_id: int,
+        model_name: str,
+        params: dict,
+        env_id: str,
+        custom_python_path: str | None = None,
+    ) -> None:
+        with SessionLocal() as session:
+            task = session.query(Task).get(task_id)
+            if not task:
+                return
+
+            base_cmd = self._resolver.resolve_command(env_id, custom_python_path)
+            cli_args = self._build_cli_args(model_name, params)
+            cmd = base_cmd + cli_args
+
+            env_type, env_name = env_id.split(":", 1)
+
+            task.command = " ".join(cmd)
+            task.model_name = model_name
+            task.dataset_name = params.get("dataset", "")
+            task.env_type = env_type
+            task.env_name = env_name
+            task.extra_params = str(params)
+            task.status = "pending"
+            session.commit()
+
+        self._enqueue(task_id, model_name, params, env_id, custom_python_path)
+
+    def _enqueue(
+        self,
+        task_id: int,
+        model_name: str,
+        params: dict,
+        env_id: str,
+        custom_python_path: str | None = None,
+    ) -> None:
+        with self._lock:
+            if self.running_count < self._max_concurrent:
+                self._do_launch(task_id, model_name, params, env_id, custom_python_path)
+            else:
+                self._queue.append(task_id)
+
+    def _dequeue_next(self) -> None:
+        while self._queue and self.running_count < self._max_concurrent:
+            task_id = self._queue.pop(0)
+            with SessionLocal() as session:
+                task = session.query(Task).get(task_id)
+                if not task or task.status != "pending":
+                    continue
+                extra = task.extra_params or "{}"
+                params = json.loads(extra) if isinstance(extra, str) else extra
+                model_name = task.model_name
+                env_id = f"{task.env_type}:{task.env_name}"
+                custom_python_path = task.python_path or None
+
+            self._do_launch(task_id, model_name, params, env_id, custom_python_path)
+
+    def _do_launch(
         self,
         task_id: int,
         model_name: str,
@@ -208,7 +300,21 @@ class ProcessManager:
 
         self._monitors.pop(task_id, None)
 
+        with self._lock:
+            self._dequeue_next()
+
     def stop_task(self, task_id: int) -> bool:
+        if self.remove_from_queue(task_id):
+            with SessionLocal() as session:
+                task = session.query(Task).get(task_id)
+                if task and task.status == "pending":
+                    task.status = "stopped"
+                    task.finished_at = datetime.now()
+                    session.commit()
+            with self._lock:
+                self._dequeue_next()
+            return True
+
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task or task.status != "running":
@@ -230,6 +336,18 @@ class ProcessManager:
         return True
 
     def kill_task(self, task_id: int) -> bool:
+        if self.remove_from_queue(task_id):
+            with SessionLocal() as session:
+                task = session.query(Task).get(task_id)
+                if task and task.status == "pending":
+                    task.status = "stopped"
+                    task.exit_code = -9
+                    task.finished_at = datetime.now()
+                    session.commit()
+            with self._lock:
+                self._dequeue_next()
+            return True
+
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task or task.status != "running":
@@ -284,6 +402,15 @@ class ProcessManager:
                 task.finished_at = datetime.now()
                 task.pid = None
                 session.commit()
+
+            pending_tasks = session.query(Task).filter(
+                Task.status == "pending"
+            ).order_by(Task.created_at).all()
+            for task in pending_tasks:
+                self._queue.append(task.id)
+
+        with self._lock:
+            self._dequeue_next()
 
     def _recover_monitor(self, task_id: int, pid: int) -> None:
         try:

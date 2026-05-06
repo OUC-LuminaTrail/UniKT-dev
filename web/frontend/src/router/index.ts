@@ -10,6 +10,7 @@ const router = createRouter({
     { path: '/experiments', component: () => import('@/views/ExperimentBrowser.vue') },
     { path: '/gpu', component: () => import('@/views/GPUMonitor.vue') },
     { path: '/preprocess', component: () => import('@/views/PreprocessView.vue') },
+    { path: '/settings', component: () => import('@/views/SettingsView.vue') },
   ],
 })
 

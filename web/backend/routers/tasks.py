@@ -100,13 +100,46 @@ def resize_terminal(task_id: int, body: ResizeRequest, pm: ProcessManager = Depe
 
 
 @router.delete("/{task_id}")
-def delete_task(task_id: int):
+def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     with SessionLocal() as session:
         task = session.query(Task).get(task_id)
         if not task:
             raise HTTPException(404, "Task not found")
         if task.status == "running":
             raise HTTPException(400, "Cannot delete running task")
+        if task.status == "pending":
+            pm.remove_from_queue(task_id)
         session.delete(task)
         session.commit()
     return {"status": "deleted"}
+
+
+@router.get("/queue/list")
+def get_queue(pm: ProcessManager = Depends(get_process_manager)):
+    task_ids = pm.get_queue()
+    with SessionLocal() as session:
+        tasks = session.query(Task).filter(Task.id.in_(task_ids)).all() if task_ids else []
+        order = {tid: i for i, tid in enumerate(task_ids)}
+        tasks.sort(key=lambda t: order.get(t.id, 999))
+        return [
+            {
+                "id": t.id,
+                "name": t.name,
+                "model_name": t.model_name,
+                "dataset_name": t.dataset_name,
+                "env_name": t.env_name,
+                "status": t.status,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in tasks
+        ]
+
+
+class ReorderRequest(BaseModel):
+    task_ids: list[int]
+
+
+@router.put("/queue/reorder")
+def reorder_queue(body: ReorderRequest, pm: ProcessManager = Depends(get_process_manager)):
+    pm.reorder_queue(body.task_ids)
+    return {"ok": True}
