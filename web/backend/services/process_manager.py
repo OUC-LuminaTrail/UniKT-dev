@@ -82,7 +82,7 @@ class ProcessManager:
             task.dataset_name = params.get("dataset", "")
             task.env_type = env_type
             task.env_name = env_name
-            task.extra_params = str(params)
+            task.extra_params = json.dumps(params)
             task.status = "pending"
             session.commit()
 
@@ -110,7 +110,7 @@ class ProcessManager:
                 if not task or task.status != "pending":
                     continue
                 extra = task.extra_params or "{}"
-                params = json.loads(extra) if isinstance(extra, str) else extra
+                params = json.loads(extra)
                 model_name = task.model_name
                 env_id = f"{task.env_type}:{task.env_name}"
                 custom_python_path = task.python_path or None
@@ -141,7 +141,7 @@ class ProcessManager:
             task.dataset_name = params.get("dataset", "")
             task.env_type = env_type
             task.env_name = env_name
-            task.extra_params = str(params)
+            task.extra_params = json.dumps(params)
 
             log_path = Path(task.log_file_path)
             log_path.parent.mkdir(parents=True, exist_ok=True)
