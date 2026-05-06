@@ -228,6 +228,7 @@ const tasks = ref<TaskInfo[]>([])
 const runningTasks = ref<TaskInfo[]>([])
 const queueItems = ref<QueueItem[]>([])
 const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
+if (activeTab.value === 'all') activeTab.value = ''
 
 const loading = ref(true)
 const initialLoad = ref(true)
@@ -254,8 +255,9 @@ const statusLabel = (s: string) => statusLabels[s] || s
 
 const switchTab = (tab: string) => {
   activeTab.value = tab
-  sessionStorage.setItem('taskListTab', tab)
-  router.replace({ query: tab ? { tab } : {} })
+  const stored = tab || 'all'
+  sessionStorage.setItem('taskListTab', stored)
+  router.replace({ query: stored !== 'running' ? { tab: stored } : {} })
   loadAll()
 }
 
