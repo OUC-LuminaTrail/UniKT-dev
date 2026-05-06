@@ -1,3 +1,4 @@
+import importlib
 import json
 
 from config import PROJECT_ROOT
@@ -8,14 +9,29 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 DATA_DIR = PROJECT_ROOT / "data"
 
 
+def _get_supported_datasets() -> list[str]:
+    try:
+        mod = importlib.import_module("data_process")
+        return list(getattr(mod, "SUPPORTED_DATASETS", []))
+    except Exception:
+        return []
+
+
 @router.get("")
 def list_datasets():
+    supported = _get_supported_datasets()
+    if not supported:
+        supported = sorted(p.name for p in DATA_DIR.iterdir() if p.is_dir())
+
     result = []
-    for meta_path in sorted(DATA_DIR.glob("*/metadata.json")):
-        name = meta_path.parent.name
-        try:
-            meta = json.loads(meta_path.read_text())
-        except Exception:
+    for name in supported:
+        meta_path = DATA_DIR / name / "metadata.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+            except Exception:
+                meta = {}
+        else:
             meta = {}
         result.append({
             "name": name,
