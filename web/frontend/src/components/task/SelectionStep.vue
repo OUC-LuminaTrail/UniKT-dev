@@ -119,17 +119,6 @@
         </div>
       </div>
     </div>
-
-    <div class="action-bar">
-      <el-button
-        type="primary"
-        size="large"
-        :disabled="!modelName || !dataset"
-        @click="emit('confirm')"
-      >
-        确认选择
-      </el-button>
-    </div>
   </div>
 </template>
 
@@ -485,19 +474,5 @@ watch(() => props.dataset, (name) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.action-bar {
-  padding-top: 8px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-.action-bar .el-button {
-  min-width: 160px;
-  height: 44px;
-  font-size: 15px;
-  font-weight: 600;
-  border-radius: var(--radius-md);
 }
 </style>

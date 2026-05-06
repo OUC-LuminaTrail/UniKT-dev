@@ -1,10 +1,17 @@
 <template>
   <div class="command-preview">
-    <div class="command-line">
-      <span class="prompt">$</span>
-      <span class="command-text">{{ command }}</span>
+    <div class="command-preview-inner">
+      <div class="command-info">
+        <div class="command-line">
+          <span class="prompt">$</span>
+          <span class="command-text">{{ command }}</span>
+        </div>
+        <div class="task-name">{{ taskName }}</div>
+      </div>
+      <div class="command-actions">
+        <slot />
+      </div>
     </div>
-    <div class="task-name">{{ taskName }}</div>
   </div>
 </template>
 
@@ -48,14 +55,21 @@ const command = computed(() => {
 
 <style scoped>
 .command-preview {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  padding: 12px 18px;
-  margin-bottom: 20px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
+  flex-shrink: 0;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-muted);
+  padding: 10px 20px;
+}
+
+.command-preview-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.command-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .command-line {
@@ -85,6 +99,13 @@ const command = computed(() => {
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   font-size: 11px;
-  margin-top: 4px;
+  margin-top: 2px;
+}
+
+.command-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

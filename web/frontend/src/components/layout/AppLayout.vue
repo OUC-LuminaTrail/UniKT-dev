@@ -8,8 +8,8 @@
           <span class="header-time">{{ currentTime }}</span>
         </div>
       </header>
-      <main class="main-content">
-        <slot />
+      <main class="main-content" :class="{ 'main-content--flush': flushContent }">
+        <slot :flushContent="flushContent" />
       </main>
       <footer class="app-footer">
         <div class="status-bar">
@@ -75,6 +75,8 @@ const titleMap: Record<string, string> = {
   '/experiments': '实验日志',
   '/gpu': 'GPU 监控',
 }
+
+const flushContent = computed(() => route.path === '/tasks/new')
 
 const currentTitle = computed(() => {
   if (route.path.match(/^\/tasks\/\d+$/)) return 'Task Detail'
@@ -173,6 +175,11 @@ onUnmounted(() => {
   padding: 24px;
   overflow-y: auto;
   background: var(--bg-base);
+}
+
+.main-content--flush {
+  padding: 0;
+  overflow: hidden;
 }
 
 .app-footer {

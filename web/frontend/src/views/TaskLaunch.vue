@@ -1,8 +1,43 @@
 <template>
   <div class="task-launch">
-    <div class="page-header">
-      <h1 class="page-title">新建训练任务</h1>
-      <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
+    <div class="task-launch-body">
+      <div class="page-header">
+        <h1 class="page-title">新建训练任务</h1>
+        <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
+      </div>
+
+      <SelectionStep
+        v-if="step === 'select'"
+        :envId="envId"
+        :customPythonPath="customPythonPath"
+        :modelName="modelName"
+        :dataset="dataset"
+        :environments="environments"
+        :models="models"
+        :datasets="datasets"
+        @update:envId="envId = $event"
+        @update:customPythonPath="customPythonPath = $event"
+        @update:modelName="onModelChange"
+        @update:dataset="dataset = $event"
+        @confirm="onSelectConfirm"
+      />
+
+      <div v-if="step === 'params'" class="params-step">
+        <div class="params-header">
+          <el-button class="back-btn" @click="step = 'select'">
+            <svg width="14" height="14" viewBox="0 0 12 12" fill="none" style="margin-right:4px">
+              <path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            返回选择
+          </el-button>
+        </div>
+
+        <ParamForm
+          v-if="selectionSchema"
+          :schema="selectionSchema"
+          @update:params="params = $event"
+        />
+      </div>
     </div>
 
     <CommandPreview
@@ -10,52 +45,27 @@
       :dataset="dataset"
       :params="params"
       :schemaDefaultParams="schemaDefaultParams"
-    />
-
-    <SelectionStep
-      v-if="step === 'select'"
-      :envId="envId"
-      :customPythonPath="customPythonPath"
-      :modelName="modelName"
-      :dataset="dataset"
-      :environments="environments"
-      :models="models"
-      :datasets="datasets"
-      @update:envId="envId = $event"
-      @update:customPythonPath="customPythonPath = $event"
-      @update:modelName="onModelChange"
-      @update:dataset="dataset = $event"
-      @confirm="onSelectConfirm"
-    />
-
-    <div v-if="step === 'params'" class="params-step">
-      <div class="params-header">
-        <el-button class="back-btn" @click="step = 'select'">
-          <svg width="14" height="14" viewBox="0 0 12 12" fill="none" style="margin-right:4px">
-            <path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          返回选择
-        </el-button>
-      </div>
-
-      <ParamForm
-        v-if="selectionSchema"
-        :schema="selectionSchema"
-        @update:params="params = $event"
-      />
-
-      <div class="action-bar">
-        <el-button
-          type="primary"
-          size="large"
-          :loading="submitting"
-          @click="onStartTraining"
-        >
-          <span v-if="!submitting">开始训练</span>
-          <span v-else>创建任务...</span>
-        </el-button>
-      </div>
-    </div>
+    >
+      <el-button
+        v-if="step === 'select'"
+        type="primary"
+        size="large"
+        :disabled="!modelName || !dataset"
+        @click="onSelectConfirm"
+      >
+        确认选择
+      </el-button>
+      <el-button
+        v-if="step === 'params'"
+        type="primary"
+        size="large"
+        :loading="submitting"
+        @click="onStartTraining"
+      >
+        <span v-if="!submitting">开始训练</span>
+        <span v-else>创建任务...</span>
+      </el-button>
+    </CommandPreview>
   </div>
 </template>
 
@@ -169,11 +179,20 @@ onMounted(async () => {
 
 <style scoped>
 .task-launch {
-  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.task-launch-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 20px;
 }
 
 .page-header {
-  margin-bottom: 28px;
+  margin-bottom: 20px;
 }
 
 .page-title {
@@ -203,20 +222,5 @@ onMounted(async () => {
 
 .back-btn {
   font-size: 13px;
-}
-
-.action-bar {
-  padding: 20px 0 8px;
-  border-top: 1px solid var(--border-muted);
-  display: flex;
-  justify-content: flex-end;
-}
-
-.action-bar .el-button {
-  min-width: 200px;
-  height: 44px;
-  font-size: 15px;
-  font-weight: 600;
-  border-radius: var(--radius-md);
 }
 </style>
