@@ -77,7 +77,7 @@
         v-if="step === 'select'"
         type="primary"
         size="large"
-        :disabled="!modelName || !dataset"
+        :disabled="!envId || !modelName || !dataset"
         @click="onSelectConfirm"
       >
         确认选择
@@ -146,7 +146,7 @@ async function onModelChange(val: string) {
 }
 
 function onSelectConfirm() {
-  if (!modelName.value || !dataset.value) return
+  if (!envId.value || !modelName.value || !dataset.value) return
   localStorage.setItem(STORAGE_KEY_ENV, envId.value)
   localStorage.setItem(STORAGE_KEY_DATASET, dataset.value)
   step.value = 'params'
