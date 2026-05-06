@@ -73,7 +73,7 @@
           :loading="submitting"
           @click="onStart"
         >
-          {{ submitting ? '启动中...' : '开始处理' }}
+          {{ submitting ? '启动中...' : action === 'download' ? '开始下载' : '开始处理' }}
         </el-button>
       </CommandPreview>
     </template>
