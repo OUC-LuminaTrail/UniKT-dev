@@ -14,6 +14,11 @@ class PreprocessStartRequest(BaseModel):
     params: dict = {}
 
 
+class ResizeRequest(BaseModel):
+    cols: int
+    rows: int
+
+
 @router.post("", status_code=201)
 def start_preprocess(body: PreprocessStartRequest, pm: PreprocessManager = Depends(get_preprocess_manager)):
     if body.action not in ("download", "process"):
@@ -51,7 +56,13 @@ def stop_preprocess(task_id: int, pm: PreprocessManager = Depends(get_preprocess
     return {"status": "stopping"}
 
 
-@router.websocket("/api-preprocess/{task_id}/logs/stream")
+@router.post("/{task_id}/resize")
+def resize_preprocess(task_id: int, body: ResizeRequest, pm: PreprocessManager = Depends(get_preprocess_manager)):
+    pm.resize_pty(task_id, body.cols, body.rows)
+    return {"ok": True}
+
+
+@router.websocket("/{task_id}/logs/stream")
 async def stream_preprocess_logs(websocket: WebSocket, task_id: int, from_offset: int = Query(0), pm: PreprocessManager = Depends(get_preprocess_manager)):
     await websocket.accept()
     task = pm.get(task_id)

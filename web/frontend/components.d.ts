@@ -13,6 +13,7 @@ declare module 'vue' {
   export interface GlobalComponents {
     AppLayout: typeof import('./src/components/layout/AppLayout.vue')['default']
     CommandPreview: typeof import('./src/components/task/CommandPreview.vue')['default']
+    DatasetMetadataPanel: typeof import('./src/components/task/DatasetMetadataPanel.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
@@ -22,8 +23,10 @@ declare module 'vue' {
     ElOptionGroup: typeof import('element-plus/es')['ElOptionGroup']
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
+    LogCard: typeof import('./src/components/task/LogCard.vue')['default']
     LogTerminal: typeof import('./src/components/task/LogTerminal.vue')['default']
     ParamForm: typeof import('./src/components/task/ParamForm.vue')['default']
+    PreprocessForm: typeof import('./src/components/task/PreprocessForm.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SelectionStep: typeof import('./src/components/task/SelectionStep.vue')['default']

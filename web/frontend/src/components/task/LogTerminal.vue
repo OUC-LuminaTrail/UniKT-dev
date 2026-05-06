@@ -10,11 +10,13 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { resizeTerminal } from '@/api/tasks'
+import api from '@/api/index'
 
 const props = defineProps<{
   wsUrl: string
   taskStatus: string
   taskId: number
+  resizePrefix?: string
 }>()
 const emit = defineEmits<{ (e: 'ready', terminal: Terminal): void }>()
 
@@ -37,7 +39,11 @@ const sendResize = (cols: number, rows: number) => {
   if (cols === lastCols && rows === lastRows) return
   lastCols = cols
   lastRows = rows
-  resizeTerminal(props.taskId, cols, rows).catch(() => {})
+  if (props.resizePrefix) {
+    api.post(`${props.resizePrefix}/${props.taskId}/resize`, { cols, rows }).catch(() => {})
+  } else {
+    resizeTerminal(props.taskId, cols, rows).catch(() => {})
+  }
 }
 
 const debouncedResize = () => {

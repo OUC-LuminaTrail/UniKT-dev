@@ -1,7 +1,11 @@
 import contextlib
+import fcntl
 import os
+import pty
 import signal
+import struct
 import subprocess
+import termios
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +29,8 @@ class PreprocessManager:
     def __init__(self):
         self._tasks: dict[int, PreprocessTask] = {}
         self._procs: dict[int, subprocess.Popen] = {}
+        self._master_fds: dict[int, int] = {}
+        self._readers: dict[int, threading.Thread] = {}
         self._next_id = 1
 
     def start(self, action: str, dataset: str, params: dict) -> PreprocessTask:
@@ -39,19 +45,37 @@ class PreprocessManager:
         task = PreprocessTask(task_id, command, str(log_path))
         self._tasks[task_id] = task
 
-        log_file = open(log_path, "wb")
+        master_fd, slave_fd = pty.openpty()
+
+        winsize = struct.pack("HHHH", 24, 80, 0, 0)
+        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+        env = os.environ.copy()
+        env["TERM"] = "xterm-256color"
+        env["FORCE_COLOR"] = "1"
 
         proc = subprocess.Popen(
             command,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
             cwd=str(PROJECT_ROOT),
             start_new_session=True,
+            env=env,
         )
-        log_file.close()
+        os.close(slave_fd)
 
         task.pid = proc.pid
         self._procs[task_id] = proc
+        self._master_fds[task_id] = master_fd
+
+        raw_log_path = str(log_path)
+        reader = threading.Thread(
+            target=self._read_pty, args=(task_id, master_fd, raw_log_path),
+            daemon=True,
+        )
+        reader.start()
+        self._readers[task_id] = reader
 
         t = threading.Thread(
             target=self._monitor, args=(task_id,), daemon=True
@@ -59,6 +83,32 @@ class PreprocessManager:
         t.start()
 
         return task
+
+    def _read_pty(self, task_id: int, master_fd: int, log_path: str) -> None:
+        with open(log_path, "wb") as f:
+            while True:
+                try:
+                    data = os.read(master_fd, 65536)
+                    if not data:
+                        break
+                    f.write(data)
+                    f.flush()
+                except OSError:
+                    break
+        with contextlib.suppress(OSError):
+            os.close(master_fd)
+        self._master_fds.pop(task_id, None)
+
+    def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
+        master_fd = self._master_fds.get(task_id)
+        if master_fd is None:
+            return False
+        try:
+            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+            return True
+        except OSError:
+            return False
 
     def get(self, task_id: int) -> PreprocessTask | None:
         return self._tasks.get(task_id)
@@ -121,6 +171,15 @@ class PreprocessManager:
 
         self._procs.pop(task_id, None)
 
+        reader = self._readers.pop(task_id, None)
+        if reader and reader.is_alive():
+            reader.join(timeout=5)
+
+        master_fd = self._master_fds.get(task_id)
+        if master_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(master_fd)
+
         task = self._tasks.get(task_id)
         if task and task.status in ("running", "stopping"):
             if task.status == "stopping":
@@ -137,3 +196,7 @@ class PreprocessManager:
             if proc:
                 with contextlib.suppress(Exception):
                     os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            master_fd = self._master_fds.pop(task_id, None)
+            if master_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(master_fd)

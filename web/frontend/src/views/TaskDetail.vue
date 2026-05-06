@@ -63,27 +63,7 @@
       <pre class="command-text"><code>{{ task.command }}</code></pre>
     </div>
 
-    <section class="log-card">
-      <div class="log-card-header">
-        <div class="log-card-title">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-            <polyline points="2 4 2 12 14 12 14 4"/>
-            <line x1="5" y1="7" x2="11" y2="7"/>
-            <line x1="5" y1="9.5" x2="9" y2="9.5"/>
-          </svg>
-          <span>运行日志</span>
-        </div>
-        <button class="scroll-btn" @click="scrollToBottom">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M3 6L8 11L13 6"/>
-          </svg>
-          跳到底部
-        </button>
-      </div>
-      <div class="terminal-wrapper">
-        <LogTerminal :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" @ready="onTerminalReady" />
-      </div>
-    </section>
+    <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
   </div>
 </template>
 
@@ -91,9 +71,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Terminal } from '@xterm/xterm'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
-import LogTerminal from '@/components/task/LogTerminal.vue'
+import LogCard from '@/components/task/LogCard.vue'
 
 const route = useRoute()
 const taskId = Number(route.params.id)
@@ -101,7 +80,6 @@ const task = ref<TaskInfo | null>(null)
 const stopping = ref(false)
 const killing = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
-let terminal: Terminal | null = null
 
 const statusMap: Record<string, { color: string; label: string }> = {
   running: { color: 'var(--accent-blue)', label: '运行中' },
@@ -121,9 +99,6 @@ const exitCodeClass = computed(() => {
 const copyCommand = () => {
   if (task.value) navigator.clipboard.writeText(task.value.command)
 }
-
-const onTerminalReady = (term: Terminal) => { terminal = term }
-const scrollToBottom = () => { terminal?.scrollToBottom() }
 
 const loadTask = async () => { task.value = await getTask(taskId) }
 
@@ -402,59 +377,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   line-height: 1.6;
   word-break: break-all;
   white-space: pre-wrap;
-}
-
-.log-card {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--bg-surface);
-  display: flex;
-  flex-direction: column;
-}
-
-.log-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-muted);
-}
-
-.log-card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.scroll-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-tertiary);
-  background: none;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  cursor: pointer;
-  font-family: var(--font-sans);
-  transition: all 0.15s ease;
-}
-
-.scroll-btn:hover {
-  color: var(--accent-blue);
-  border-color: var(--accent-blue);
-}
-
-.terminal-wrapper {
-  height: calc(100vh - 320px);
-  min-height: 500px;
-  background: #1a1b26;
 }
 
 @media (max-width: 900px) {
