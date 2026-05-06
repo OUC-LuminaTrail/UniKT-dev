@@ -305,6 +305,11 @@ const moveDown = async (idx: number) => {
 }
 
 const handleStop = async (id: number) => {
+  await ElMessageBox.confirm('确定停止该任务？正在进行的训练进度将丢失。', '确认停止', {
+    confirmButtonText: '停止',
+    cancelButtonText: '取消',
+    type: 'warning',
+  })
   await stopTask(id)
   ElMessage.success('已发送停止信号')
   setTimeout(loadAll, 2000)
