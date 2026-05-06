@@ -74,9 +74,10 @@ const titleMap: Record<string, string> = {
   '/tasks/new': '新建训练任务',
   '/experiments': '实验日志',
   '/gpu': 'GPU 监控',
+  '/preprocess': '数据预处理',
 }
 
-const flushContent = computed(() => route.path === '/tasks/new')
+const flushContent = computed(() => route.path === '/tasks/new' || route.path === '/preprocess')
 
 const currentTitle = computed(() => {
   if (route.path.match(/^\/tasks\/\d+$/)) return 'Task Detail'
