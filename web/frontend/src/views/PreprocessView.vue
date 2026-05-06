@@ -27,7 +27,8 @@
         <div class="section">
           <div class="section-label">数据集</div>
           <div class="dataset-layout">
-            <div class="dataset-cards" v-if="datasets.length">
+            <SkeletonCards v-if="loading" :count="4" :cardWidth="140" />
+            <div class="dataset-cards" v-else-if="datasets.length">
               <div
                 v-for="ds in datasets"
                 :key="ds.name"
@@ -101,6 +102,7 @@ import CommandPreview from '@/components/task/CommandPreview.vue'
 import LogCard from '@/components/task/LogCard.vue'
 import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
 import PreprocessForm from '@/components/task/PreprocessForm.vue'
+import SkeletonCards from '@/components/common/SkeletonCards.vue'
 
 type Phase = 'config' | 'running'
 const route = useRoute()
@@ -111,6 +113,7 @@ const stopping = ref(false)
 const action = ref<'download' | 'process'>('process')
 const dataset = ref('')
 const datasets = ref<DatasetInfo[]>([])
+const loading = ref(true)
 
 const preprocessFormRef = ref<InstanceType<typeof PreprocessForm> | null>(null)
 
@@ -291,6 +294,7 @@ const stopPolling = () => {
 
 onMounted(async () => {
   try { datasets.value = await listDatasets() } catch {}
+  loading.value = false
   const q = route.query.dataset as string
   if (q && datasets.value.some(d => d.name === q)) {
     dataset.value = q

@@ -17,7 +17,10 @@
       </div>
     </div>
 
-    <div class="table-wrapper">
+    <div class="table-wrapper" v-if="loading">
+      <SkeletonTable :rows="6" :cols="5" :colWidths="['30%', '12%', '12%', '18%', '10%']" />
+    </div>
+    <div class="table-wrapper" v-else>
       <table class="data-table">
         <thead>
           <tr>
@@ -83,9 +86,11 @@ import {
   type ExperimentInfo,
   type ExperimentDetail,
 } from '@/api/experiments'
+import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const filters = ref({ type: 'normal', model: '' })
 const experiments = ref<ExperimentInfo[]>([])
+const loading = ref(true)
 const drawerVisible = ref(false)
 const detail = ref<ExperimentDetail | null>(null)
 const fileDialogVisible = ref(false)
@@ -97,6 +102,7 @@ const loadExperiments = async () => {
     type: filters.value.type,
     model: filters.value.model || undefined,
   })
+  loading.value = false
 }
 
 const showDetail = async (path: string) => {

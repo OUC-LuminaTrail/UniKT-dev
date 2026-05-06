@@ -5,7 +5,23 @@
       <p class="page-subtitle">配置训练任务的全局参数</p>
     </div>
 
-    <div class="settings-card">
+    <div class="settings-card" v-if="loading">
+      <div class="card-section">
+        <div class="section-header">
+          <div class="skeleton-bar shimmer-block" style="width:120px;height:18px;border-radius:6px" />
+          <div class="skeleton-bar shimmer-block" style="width:80%;height:12px;border-radius:6px;margin-top:8px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="skeleton-bar shimmer-block" style="width:100px;height:14px;border-radius:6px" />
+            <div class="skeleton-bar shimmer-block" style="width:160px;height:12px;border-radius:6px;margin-top:4px" />
+          </div>
+          <div class="skeleton-bar shimmer-block" style="width:140px;height:32px;border-radius:6px" />
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-card" v-else>
       <div class="card-section">
         <div class="section-header">
           <div class="section-title-row">
@@ -57,6 +73,7 @@ const COOKIE_KEY = 'kt-settings'
 const maxConcurrent = ref(1)
 const saving = ref(false)
 const saved = ref(false)
+const loading = ref(true)
 
 onMounted(async () => {
   try {
@@ -67,6 +84,8 @@ onMounted(async () => {
     if (cached?.max_concurrent) {
       maxConcurrent.value = cached.max_concurrent
     }
+  } finally {
+    loading.value = false
   }
 })
 
@@ -188,5 +207,25 @@ const onSave = async () => {
 .saved-hint {
   font-size: 12px;
   color: var(--accent-green);
+}
+
+.skeleton-bar {
+  display: inline-block;
+}
+
+.shimmer-block {
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

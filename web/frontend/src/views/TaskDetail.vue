@@ -1,5 +1,15 @@
 <template>
-  <div class="task-detail" v-if="task">
+  <div class="task-detail task-detail--skeleton" v-if="loading && !task">
+    <div class="skeleton-header">
+      <div class="skeleton-line skeleton-shimmer" style="width:32px;height:32px;border-radius:var(--radius-sm)"></div>
+      <div class="skeleton-line skeleton-shimmer" style="width:180px;height:24px;border-radius:4px"></div>
+      <div class="skeleton-line skeleton-shimmer" style="width:80px;height:24px;border-radius:20px"></div>
+    </div>
+    <SkeletonTable :cols="4" :rows="3" />
+    <div class="skeleton-line skeleton-shimmer" style="height:80px;border-radius:var(--radius-md)"></div>
+  </div>
+
+  <div class="task-detail" v-else-if="task">
     <header class="detail-header">
       <button class="back-btn" @click="$router.back()">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
@@ -73,10 +83,12 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
+import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const route = useRoute()
 const taskId = Number(route.params.id)
 const task = ref<TaskInfo | null>(null)
+const loading = ref(true)
 const stopping = ref(false)
 const killing = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -100,7 +112,10 @@ const copyCommand = () => {
   if (task.value) navigator.clipboard.writeText(task.value.command)
 }
 
-const loadTask = async () => { task.value = await getTask(taskId) }
+const loadTask = async () => {
+  task.value = await getTask(taskId)
+  loading.value = false
+}
 
 const handleStop = async () => {
   try {
@@ -393,5 +408,45 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   .task-detail {
     padding: 12px;
   }
+}
+
+.skeleton-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+}
+
+.skeleton-line {
+  background: var(--bg-elevated, #e0e0e0);
+}
+
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: var(--border-muted, #e8e8e8);
+}
+
+.skeleton-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.4) 50%, transparent 75%);
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.task-detail--skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+  min-height: 100vh;
 }
 </style>

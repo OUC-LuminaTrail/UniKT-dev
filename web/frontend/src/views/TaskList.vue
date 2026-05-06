@@ -22,8 +22,13 @@
       </button>
     </div>
 
+    <!-- Loading skeleton -->
+    <template v-if="loading">
+      <SkeletonTable :rows="5" :cols="8" />
+    </template>
+
     <!-- Active tab: running tasks + queued tasks -->
-    <template v-if="activeTab === 'running'">
+    <template v-else-if="activeTab === 'running'">
       <div v-if="runningTasks.length === 0 && queueItems.length === 0" class="empty-state">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -214,6 +219,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
+import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -222,6 +228,9 @@ const tasks = ref<TaskInfo[]>([])
 const runningTasks = ref<TaskInfo[]>([])
 const queueItems = ref<QueueItem[]>([])
 const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
+
+const loading = ref(true)
+const initialLoad = ref(true)
 
 const activeCount = computed(() => runningTasks.value.length + queueItems.value.length)
 
@@ -256,16 +265,24 @@ const formatTime = (t: string | null) => {
 }
 
 const loadAll = async () => {
-  if (activeTab.value === 'running') {
-    const [running, queue] = await Promise.all([
-      listTasks({ status: 'running' }),
-      getQueue().catch(() => []),
-    ])
-    runningTasks.value = running
-    queueItems.value = queue
-  } else {
-    const filtered = await listTasks({ status: activeTab.value || undefined })
-    tasks.value = filtered
+  if (initialLoad.value) {
+    loading.value = true
+  }
+  try {
+    if (activeTab.value === 'running') {
+      const [running, queue] = await Promise.all([
+        listTasks({ status: 'running' }),
+        getQueue().catch(() => []),
+      ])
+      runningTasks.value = running
+      queueItems.value = queue
+    } else {
+      const filtered = await listTasks({ status: activeTab.value || undefined })
+      tasks.value = filtered
+    }
+  } finally {
+    loading.value = false
+    initialLoad.value = false
   }
 }
 

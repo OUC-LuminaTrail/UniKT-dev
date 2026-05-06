@@ -8,7 +8,8 @@
       </div>
     </div>
 
-    <div class="gpu-grid" v-if="status && status.gpus.length > 0">
+    <SkeletonCards v-if="loading" :count="2" :cardWidth="400" />
+    <div class="gpu-grid" v-else-if="status && status.gpus.length > 0">
       <div class="gpu-card" v-for="gpu in status.gpus" :key="gpu.index">
         <div class="gpu-card-header">
           <span class="gpu-index">GPU {{ gpu.index }}</span>
@@ -81,8 +82,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getGpuStatus, type GpuStatus } from '@/api/gpu'
+import SkeletonCards from '@/components/common/SkeletonCards.vue'
 
 const status = ref<GpuStatus | null>(null)
+const loading = ref(true)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const progressColor = (pct: number) => {
@@ -99,6 +102,7 @@ const tempColor = (temp: number) => {
 
 const loadStatus = async () => {
   try { status.value = await getGpuStatus() } catch {}
+  loading.value = false
 }
 
 onMounted(() => { loadStatus(); timer = setInterval(loadStatus, 3000) })

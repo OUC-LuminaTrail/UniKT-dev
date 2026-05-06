@@ -31,5 +31,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SelectionStep: typeof import('./src/components/task/SelectionStep.vue')['default']
     Sidebar: typeof import('./src/components/layout/Sidebar.vue')['default']
+    SkeletonCards: typeof import('./src/components/common/SkeletonCards.vue')['default']
+    SkeletonTable: typeof import('./src/components/common/SkeletonTable.vue')['default']
   }
 }
