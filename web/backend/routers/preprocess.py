@@ -34,6 +34,21 @@ def start_preprocess(body: PreprocessStartRequest, pm: PreprocessManager = Depen
     }
 
 
+@router.get("")
+def list_preprocess(pm: PreprocessManager = Depends(get_preprocess_manager)):
+    tasks = []
+    for t in pm.list_all():
+        tasks.append({
+            "id": t.id,
+            "command": " ".join(t.command),
+            "status": t.status,
+            "exit_code": t.exit_code,
+            "started_at": t.started_at.isoformat() if t.started_at else None,
+            "finished_at": t.finished_at.isoformat() if t.finished_at else None,
+        })
+    return tasks
+
+
 @router.get("/{task_id}")
 def get_preprocess(task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)):
     task = pm.get(task_id)

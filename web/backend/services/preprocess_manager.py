@@ -113,6 +113,9 @@ class PreprocessManager:
     def get(self, task_id: int) -> PreprocessTask | None:
         return self._tasks.get(task_id)
 
+    def list_all(self) -> list[PreprocessTask]:
+        return list(self._tasks.values())
+
     def stop(self, task_id: int) -> bool:
         task = self._tasks.get(task_id)
         if not task or task.status != "running":

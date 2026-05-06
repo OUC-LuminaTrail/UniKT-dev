@@ -81,7 +81,7 @@
     <!-- Running state -->
     <template v-if="phase === 'running' && taskInfo">
       <div class="running-header">
-        <button class="back-btn" @click="onBack">
+        <button v-if="taskInfo.status !== 'running'" class="back-btn" @click="onBack">
           <svg width="14" height="14" viewBox="0 0 12 12" fill="none"><path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           返回
         </button>
@@ -102,7 +102,7 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listDatasets, getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
-import { startPreprocess, getPreprocess, stopPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
+import { startPreprocess, getPreprocess, stopPreprocess, listPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
 import CommandPreview from '@/components/task/CommandPreview.vue'
 import LogCard from '@/components/task/LogCard.vue'
 import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
@@ -297,6 +297,17 @@ const stopPolling = () => {
 }
 
 onMounted(async () => {
+  try {
+    const allTasks = await listPreprocess()
+    const activeTask = allTasks.find(t => t.status === 'running')
+    if (activeTask) {
+      taskId.value = activeTask.id
+      taskInfo.value = activeTask
+      phase.value = 'running'
+      startPolling()
+    }
+  } catch {}
+
   try { datasets.value = await listDatasets() } catch {}
   loading.value = false
   const q = route.query.dataset as string

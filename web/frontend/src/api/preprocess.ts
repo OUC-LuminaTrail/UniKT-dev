@@ -15,6 +15,9 @@ export interface PreprocessStartRequest {
   params: Record<string, any>
 }
 
+export const listPreprocess = () =>
+  api.get<PreprocessTaskInfo[]>('/preprocess').then(r => r.data)
+
 export const startPreprocess = (data: PreprocessStartRequest) =>
   api.post<PreprocessTaskInfo>('/preprocess', data).then(r => r.data)
 
