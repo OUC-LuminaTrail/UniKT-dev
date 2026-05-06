@@ -396,13 +396,13 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 6px 16px;
-  background: #1f6feb;
+  background: var(--accent-blue);
   color: #fff;
   border-radius: var(--radius-md);
   font-size: 13px;
   font-weight: 500;
   text-decoration: none;
-  border: 1px solid #1f6feb;
+  border: 1px solid var(--accent-blue);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -410,6 +410,11 @@ onUnmounted(() => {
 .btn-primary:hover {
   background: #388bfd;
   border-color: #388bfd;
+}
+
+html.dark .btn-primary:hover {
+  background: #1f6feb;
+  border-color: #1f6feb;
 }
 
 .tab-bar {

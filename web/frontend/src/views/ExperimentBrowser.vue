@@ -196,20 +196,28 @@ onMounted(loadExperiments)
 }
 
 .filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
   background: var(--accent-blue);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: #0d1117;
-  font-family: var(--font-sans);
+  color: #fff;
+  border-radius: var(--radius-md);
   font-size: 13px;
-  font-weight: 600;
-  padding: 6px 18px;
+  font-weight: 500;
+  border: 1px solid var(--accent-blue);
   cursor: pointer;
-  transition: opacity 0.2s;
+  transition: background 0.15s, border-color 0.15s;
 }
 
 .filter-btn:hover {
-  opacity: 0.85;
+  background: #388bfd;
+  border-color: #388bfd;
+}
+
+html.dark .filter-btn:hover {
+  background: #1f6feb;
+  border-color: #1f6feb;
 }
 
 .table-wrapper {
