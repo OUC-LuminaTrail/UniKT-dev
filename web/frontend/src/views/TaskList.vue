@@ -18,80 +18,129 @@
         @click="switchTab(tab.value)"
       >
         {{ tab.label }}
-        <span v-if="tab.value === 'running' && runningCount > 0" class="tab-badge">{{ runningCount }}</span>
-        <span v-if="tab.value === 'pending' && queueCount > 0" class="tab-badge tab-badge-queue">{{ queueCount }}</span>
+        <span v-if="tab.value === 'running' && activeCount > 0" class="tab-badge">{{ activeCount }}</span>
       </button>
     </div>
 
-    <div v-if="activeTab === 'pending'" class="queue-section">
-      <div v-if="queueItems.length === 0" class="empty-state">
+    <!-- Active tab: running tasks + queued tasks -->
+    <template v-if="activeTab === 'running'">
+      <div v-if="runningTasks.length === 0 && queueItems.length === 0" class="empty-state">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="M9 9h6M9 13h6M9 17h4" />
         </svg>
-        <p>队列为空</p>
-        <span>新建的训练任务会按顺序排队等待执行</span>
+        <p>暂无活跃任务</p>
+        <span>新建的训练任务会显示在这里</span>
       </div>
-      <div v-else class="table-wrapper">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th class="col-pos">位置</th>
-              <th class="col-id">ID</th>
-              <th class="col-name">名称</th>
-              <th class="col-model">模型</th>
-              <th class="col-dataset">数据集</th>
-              <th class="col-time">创建时间</th>
-              <th class="col-actions">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(task, idx) in queueItems" :key="task.id">
-              <td class="col-pos">
-                <span class="pos-badge">#{{ idx + 1 }}</span>
-              </td>
-              <td class="col-id">{{ task.id }}</td>
-              <td class="col-name">
-                <span class="task-name-text">{{ task.name }}</span>
-              </td>
-              <td class="col-model">{{ task.model_name }}</td>
-              <td class="col-dataset">{{ task.dataset_name }}</td>
-              <td class="col-time">
-                <span class="mono-time">{{ formatTime(task.created_at) }}</span>
-              </td>
-              <td class="col-actions">
-                <div class="action-group">
-                  <button
-                    v-if="idx > 0"
-                    class="action-btn"
-                    title="上移"
-                    @click="moveUp(idx)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 1 .354.146l4 4a.5.5 0 0 1-.708.708L8 4.707 4.354 8.354a.5.5 0 1 1-.708-.708l4-4A.5.5 0 0 1 8 3.5z"/></svg>
-                  </button>
-                  <button
-                    v-if="idx < queueItems.length - 1"
-                    class="action-btn"
-                    title="下移"
-                    @click="moveDown(idx)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12.5a.5.5 0 0 1-.354-.146l-4-4a.5.5 0 1 1 .708-.708L8 11.293l3.646-3.647a.5.5 0 0 1 .708.708l-4 4A.5.5 0 0 1 8 12.5z"/></svg>
-                  </button>
-                  <button
-                    class="action-btn action-delete"
-                    title="取消任务"
-                    @click="handleCancelQueue(task.id)"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
 
+      <template v-if="runningTasks.length > 0">
+        <div class="section-divider">
+          <span class="divider-label">运行中</span>
+          <span class="divider-count">{{ runningTasks.length }}</span>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="col-id">ID</th>
+                <th class="col-name">名称</th>
+                <th class="col-model">模型</th>
+                <th class="col-dataset">数据集</th>
+                <th class="col-env">环境</th>
+                <th class="col-status">状态</th>
+                <th class="col-time">创建时间</th>
+                <th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="task in runningTasks" :key="task.id">
+                <td class="col-id">{{ task.id }}</td>
+                <td class="col-name">
+                  <router-link :to="`/tasks/${task.id}`" class="task-name-link">{{ task.name }}</router-link>
+                </td>
+                <td class="col-model">{{ task.model_name }}</td>
+                <td class="col-dataset">{{ task.dataset_name }}</td>
+                <td class="col-env">
+                  <span class="env-tag">{{ task.env_name }}</span>
+                </td>
+                <td class="col-status">
+                  <span class="status-cell">
+                    <span class="status-dot status-running" />
+                    <span class="status-text">运行中</span>
+                  </span>
+                </td>
+                <td class="col-time">
+                  <span class="mono-time">{{ formatTime(task.created_at) }}</span>
+                </td>
+                <td class="col-actions">
+                  <div class="action-group">
+                    <router-link :to="`/tasks/${task.id}`" class="action-btn" title="查看详情">
+                      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
+                    </router-link>
+                    <button class="action-btn action-stop" title="停止任务" @click="handleStop(task.id)">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <template v-if="queueItems.length > 0">
+        <div class="section-divider">
+          <span class="divider-label">排队中</span>
+          <span class="divider-count">{{ queueItems.length }}</span>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="col-pos">位置</th>
+                <th class="col-id">ID</th>
+                <th class="col-name">名称</th>
+                <th class="col-model">模型</th>
+                <th class="col-dataset">数据集</th>
+                <th class="col-time">创建时间</th>
+                <th class="col-actions">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(task, idx) in queueItems" :key="task.id">
+                <td class="col-pos">
+                  <span class="pos-badge">#{{ idx + 1 }}</span>
+                </td>
+                <td class="col-id">{{ task.id }}</td>
+                <td class="col-name">
+                  <span class="task-name-text">{{ task.name }}</span>
+                </td>
+                <td class="col-model">{{ task.model_name }}</td>
+                <td class="col-dataset">{{ task.dataset_name }}</td>
+                <td class="col-time">
+                  <span class="mono-time">{{ formatTime(task.created_at) }}</span>
+                </td>
+                <td class="col-actions">
+                  <div class="action-group">
+                    <button v-if="idx > 0" class="action-btn" title="上移" @click="moveUp(idx)">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 1 .354.146l4 4a.5.5 0 0 1-.708.708L8 4.707 4.354 8.354a.5.5 0 1 1-.708-.708l4-4A.5.5 0 0 1 8 3.5z"/></svg>
+                    </button>
+                    <button v-if="idx < queueItems.length - 1" class="action-btn" title="下移" @click="moveDown(idx)">
+                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12.5a.5.5 0 0 1-.354-.146l-4-4a.5.5 0 1 1 .708-.708L8 11.293l3.646-3.647a.5.5 0 0 1 .708.708l-4 4A.5.5 0 0 1 8 12.5z"/></svg>
+                    </button>
+                    <button class="action-btn action-delete" title="取消任务" @click="handleCancelQueue(task.id)">
+                      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </template>
+    </template>
+
+    <!-- Other tabs -->
     <template v-else>
       <div v-if="tasks.length === 0" class="empty-state">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -139,29 +188,15 @@
               <td class="col-actions">
                 <div class="action-group">
                   <router-link :to="`/tasks/${task.id}`" class="action-btn" title="查看详情">
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" />
-                    </svg>
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
                   </router-link>
-                  <button
-                    v-if="task.status === 'running'"
-                    class="action-btn action-stop"
-                    title="停止任务"
-                    @click="handleStop(task.id)"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-                      <rect x="3" y="3" width="10" height="10" rx="1.5" />
-                    </svg>
-                  </button>
                   <button
                     v-if="task.status !== 'running'"
                     class="action-btn action-delete"
                     title="删除任务"
                     @click="handleDelete(task.id)"
                   >
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z" />
-                    </svg>
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
                   </button>
                 </div>
               </td>
@@ -174,7 +209,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
@@ -184,14 +219,14 @@ const route = useRoute()
 const router = useRouter()
 
 const tasks = ref<TaskInfo[]>([])
+const runningTasks = ref<TaskInfo[]>([])
 const queueItems = ref<QueueItem[]>([])
 const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
-const runningCount = ref(0)
-const queueCount = ref(0)
+
+const activeCount = computed(() => runningTasks.value.length + queueItems.value.length)
 
 const tabs = [
-  { label: '运行中', value: 'running' },
-  { label: '队列', value: 'pending' },
+  { label: '活跃', value: 'running' },
   { label: '已完成', value: 'completed' },
   { label: '已失败', value: 'failed' },
   { label: '已停止', value: 'stopped' },
@@ -212,11 +247,7 @@ const switchTab = (tab: string) => {
   activeTab.value = tab
   sessionStorage.setItem('taskListTab', tab)
   router.replace({ query: tab ? { tab } : {} })
-  if (tab === 'pending') {
-    loadQueue()
-  } else {
-    loadTasks()
-  }
+  loadAll()
 }
 
 const formatTime = (t: string | null) => {
@@ -224,27 +255,18 @@ const formatTime = (t: string | null) => {
   return new Date(t).toLocaleString('zh-CN')
 }
 
-const loadTasks = async () => {
-  const [filtered, running] = await Promise.all([
-    listTasks({ status: activeTab.value || undefined }),
-    listTasks({ status: 'running' }),
-  ])
-  tasks.value = filtered
-  runningCount.value = running.length
-}
-
-const loadQueue = async () => {
-  try {
-    queueItems.value = await getQueue()
-    queueCount.value = queueItems.value.length
-  } catch {
-    queueItems.value = []
-    queueCount.value = 0
-  }
-}
-
 const loadAll = async () => {
-  await Promise.all([loadTasks(), loadQueue()])
+  if (activeTab.value === 'running') {
+    const [running, queue] = await Promise.all([
+      listTasks({ status: 'running' }),
+      getQueue().catch(() => []),
+    ])
+    runningTasks.value = running
+    queueItems.value = queue
+  } else {
+    const filtered = await listTasks({ status: activeTab.value || undefined })
+    tasks.value = filtered
+  }
 }
 
 const moveUp = async (idx: number) => {
@@ -402,12 +424,27 @@ onUnmounted(() => {
   line-height: 1;
 }
 
-.tab-badge-queue {
-  background: var(--accent-orange);
+.section-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-.queue-section {
-  min-height: 100px;
+.divider-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.divider-count {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  background: var(--bg-overlay);
+  padding: 1px 7px;
+  border-radius: 10px;
+  line-height: 1.6;
 }
 
 .empty-state {
