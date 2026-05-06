@@ -93,6 +93,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { listDatasets, getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
 import { startPreprocess, getPreprocess, stopPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
@@ -102,6 +103,7 @@ import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
 import PreprocessForm from '@/components/task/PreprocessForm.vue'
 
 type Phase = 'config' | 'running'
+const route = useRoute()
 const phase = ref<Phase>('config')
 const submitting = ref(false)
 const stopping = ref(false)
@@ -289,6 +291,10 @@ const stopPolling = () => {
 
 onMounted(async () => {
   try { datasets.value = await listDatasets() } catch {}
+  const q = route.query.dataset as string
+  if (q && datasets.value.some(d => d.name === q)) {
+    dataset.value = q
+  }
 })
 
 onUnmounted(() => { stopPolling() })

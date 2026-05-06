@@ -34,9 +34,13 @@
     <div class="empty-text">加载中...</div>
   </div>
 
-  <div class="metadata-panel metadata-placeholder" v-else-if="dataset">
+  <div class="metadata-panel metadata-no-data" v-else-if="dataset && !loading">
     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-    <span>暂无处理数据</span>
+    <span class="no-data-text">该数据集尚未预处理</span>
+    <router-link :to="`/preprocess?dataset=${dataset}`" class="preprocess-link">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      去预处理
+    </router-link>
   </div>
 
   <div class="metadata-panel metadata-placeholder" v-else>
@@ -216,6 +220,37 @@ function formatValue(val: any): string {
 .empty-text {
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+.metadata-no-data {
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.no-data-text {
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+.preprocess-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--accent-blue);
+  background: rgba(9, 105, 218, 0.08);
+  border: 1px solid rgba(9, 105, 218, 0.2);
+  transition: all 0.15s ease;
+}
+
+.preprocess-link:hover {
+  background: rgba(9, 105, 218, 0.14);
+  border-color: var(--accent-blue);
 }
 
 .metadata-placeholder {
