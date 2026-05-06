@@ -15,7 +15,7 @@
         v-for="tab in tabs"
         :key="tab.value"
         :class="['tab-item', { active: activeTab === tab.value }]"
-        @click="activeTab = tab.value; loadTasks()"
+        @click="switchTab(tab.value)"
       >
         {{ tab.label }}
         <span v-if="tab.value === 'running' && runningCount > 0" class="tab-badge">{{ runningCount }}</span>
@@ -103,11 +103,15 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 
+const route = useRoute()
+const router = useRouter()
+
 const tasks = ref<TaskInfo[]>([])
-const activeTab = ref('running')
+const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
 const runningCount = ref(0)
 
 const tabs = [
@@ -127,6 +131,13 @@ const statusLabels: Record<string, string> = {
 }
 
 const statusLabel = (s: string) => statusLabels[s] || s
+
+const switchTab = (tab: string) => {
+  activeTab.value = tab
+  sessionStorage.setItem('taskListTab', tab)
+  router.replace({ query: tab ? { tab } : {} })
+  loadTasks()
+}
 
 const formatTime = (t: string | null) => {
   if (!t) return '-'
