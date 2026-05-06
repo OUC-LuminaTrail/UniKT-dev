@@ -27,7 +27,12 @@
         <div class="section">
           <div class="section-label">数据集</div>
           <div class="dataset-layout">
-            <SkeletonCards v-if="loading" :count="4" :cardWidth="140" />
+            <div class="dataset-cards sk-dataset-cards" v-if="loading">
+              <div class="select-card sk-card-skel" v-for="i in 4" :key="i">
+                <div class="sk-bar" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
+                <div class="sk-bar" style="width:60%;height:12px;border-radius:4px" />
+              </div>
+            </div>
             <div class="dataset-cards" v-else-if="datasets.length">
               <div
                 v-for="ds in datasets"
@@ -102,7 +107,6 @@ import CommandPreview from '@/components/task/CommandPreview.vue'
 import LogCard from '@/components/task/LogCard.vue'
 import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
 import PreprocessForm from '@/components/task/PreprocessForm.vue'
-import SkeletonCards from '@/components/common/SkeletonCards.vue'
 
 type Phase = 'config' | 'running'
 const route = useRoute()
@@ -534,5 +538,27 @@ onUnmounted(() => { stopPolling() })
 .stop-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.sk-card-skel {
+  cursor: default;
+}
+
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

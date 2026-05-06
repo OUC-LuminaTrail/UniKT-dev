@@ -6,7 +6,30 @@
         <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
       </div>
 
-      <SkeletonCards v-if="loading" :count="6" :cardWidth="140" />
+      <div v-if="loading" class="selection-step-skeleton">
+        <div class="sk-section">
+          <div class="sk-bar" style="width:80px;height:14px;border-radius:4px;margin-bottom:10px" />
+          <div class="sk-bar" style="width:240px;height:32px;border-radius:var(--radius-sm)" />
+        </div>
+        <div class="sk-section">
+          <div class="sk-bar" style="width:48px;height:14px;border-radius:4px;margin-bottom:10px" />
+          <div class="sk-card-grid">
+            <div class="sk-card" v-for="i in 6" :key="'m'+i">
+              <div class="sk-bar" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
+              <div class="sk-bar" style="width:50px;height:12px;border-radius:4px" />
+            </div>
+          </div>
+        </div>
+        <div class="sk-section">
+          <div class="sk-bar" style="width:60px;height:14px;border-radius:4px;margin-bottom:10px" />
+          <div class="sk-card-grid">
+            <div class="sk-card" v-for="i in 4" :key="'d'+i">
+              <div class="sk-bar" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
+              <div class="sk-bar" style="width:70px;height:12px;border-radius:4px" />
+            </div>
+          </div>
+        </div>
+      </div>
       <template v-else>
         <SelectionStep
           v-if="step === 'select'"
@@ -83,7 +106,6 @@ import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
 import CommandPreview from '@/components/task/CommandPreview.vue'
 import SelectionStep from '@/components/task/SelectionStep.vue'
 import ParamForm from '@/components/task/ParamForm.vue'
-import SkeletonCards from '@/components/common/SkeletonCards.vue'
 
 const router = useRouter()
 const step = ref<'select' | 'params'>('select')
@@ -237,5 +259,51 @@ onMounted(async () => {
 
 .back-btn {
   font-size: 13px;
+}
+
+.selection-step-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.sk-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.sk-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.sk-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 12px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+}
+
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

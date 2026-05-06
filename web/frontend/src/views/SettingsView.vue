@@ -8,15 +8,17 @@
     <div class="settings-card" v-if="loading">
       <div class="card-section">
         <div class="section-header">
-          <div class="skeleton-bar shimmer-block" style="width:120px;height:18px;border-radius:6px" />
-          <div class="skeleton-bar shimmer-block" style="width:80%;height:12px;border-radius:6px;margin-top:8px" />
+          <div class="section-title-row">
+            <div class="sk-bar" style="width:140px;height:16px;border-radius:4px" />
+          </div>
+          <div class="sk-bar" style="width:80%;height:12px;border-radius:4px;margin-top:6px" />
         </div>
         <div class="setting-row">
           <div class="setting-info">
-            <div class="skeleton-bar shimmer-block" style="width:100px;height:14px;border-radius:6px" />
-            <div class="skeleton-bar shimmer-block" style="width:160px;height:12px;border-radius:6px;margin-top:4px" />
+            <div class="sk-bar" style="width:100px;height:13px;border-radius:4px" />
+            <div class="sk-bar" style="width:160px;height:11px;border-radius:4px;margin-top:3px" />
           </div>
-          <div class="skeleton-bar shimmer-block" style="width:140px;height:32px;border-radius:6px" />
+          <div class="sk-bar" style="width:140px;height:32px;border-radius:var(--radius-sm)" />
         </div>
       </div>
     </div>
@@ -209,11 +211,9 @@ const onSave = async () => {
   color: var(--accent-green);
 }
 
-.skeleton-bar {
-  display: inline-block;
-}
-
-.shimmer-block {
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
   background: linear-gradient(
     90deg,
     var(--bg-overlay) 25%,
@@ -221,10 +221,10 @@ const onSave = async () => {
     var(--bg-overlay) 75%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
 }
 
-@keyframes shimmer {
+@keyframes sk-shimmer {
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }

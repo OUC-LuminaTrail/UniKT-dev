@@ -18,7 +18,22 @@
     </div>
 
     <div class="table-wrapper" v-if="loading">
-      <SkeletonTable :rows="6" :cols="5" :colWidths="['30%', '12%', '12%', '18%', '10%']" />
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th class="col-name">实验名称</th>
+            <th class="col-model">模型</th>
+            <th class="col-dataset">数据集</th>
+            <th class="col-time">时间戳</th>
+            <th class="col-action">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="i in 6" :key="i">
+            <td v-for="c in 5" :key="c"><div class="sk-bar" /></td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div class="table-wrapper" v-else>
       <table class="data-table">
@@ -86,7 +101,6 @@ import {
   type ExperimentInfo,
   type ExperimentDetail,
 } from '@/api/experiments'
-import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const filters = ref({ type: 'normal', model: '' })
 const experiments = ref<ExperimentInfo[]>([])
@@ -350,5 +364,24 @@ onMounted(loadExperiments)
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
+  width: 60%;
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

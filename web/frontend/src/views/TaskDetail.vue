@@ -1,12 +1,28 @@
 <template>
-  <div class="task-detail task-detail--skeleton" v-if="loading && !task">
-    <div class="skeleton-header">
-      <div class="skeleton-line skeleton-shimmer" style="width:32px;height:32px;border-radius:var(--radius-sm)"></div>
-      <div class="skeleton-line skeleton-shimmer" style="width:180px;height:24px;border-radius:4px"></div>
-      <div class="skeleton-line skeleton-shimmer" style="width:80px;height:24px;border-radius:20px"></div>
+  <div class="task-detail" v-if="loading && !task">
+    <header class="detail-header">
+      <div class="sk-bar" style="width:32px;height:32px;border-radius:var(--radius-sm);flex-shrink:0"></div>
+      <div class="sk-bar" style="width:180px;height:20px;border-radius:4px"></div>
+      <div class="sk-bar" style="width:72px;height:24px;border-radius:20px"></div>
+    </header>
+
+    <section class="meta-grid">
+      <div class="meta-cell" v-for="i in 6" :key="i">
+        <div class="sk-bar" style="width:40px;height:10px;border-radius:4px" />
+        <div class="sk-bar" style="width:70%;height:13px;border-radius:4px;margin-top:2px" />
+      </div>
+    </section>
+
+    <div class="command-block">
+      <div class="command-bar">
+        <span class="command-label">命令</span>
+      </div>
+      <div style="padding:12px 14px"><div class="sk-bar" style="width:90%;height:14px;border-radius:4px" /></div>
     </div>
-    <SkeletonTable :cols="4" :rows="3" />
-    <div class="skeleton-line skeleton-shimmer" style="height:80px;border-radius:var(--radius-md)"></div>
+
+    <div style="min-height:200px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface)">
+      <div class="sk-bar" style="margin:16px;width:60%;height:14px;border-radius:4px" />
+    </div>
   </div>
 
   <div class="task-detail" v-else-if="task">
@@ -83,7 +99,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
-import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -419,43 +434,21 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
   }
 }
 
-.skeleton-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 36px;
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
 }
 
-.skeleton-line {
-  background: var(--bg-elevated, #e0e0e0);
-}
-
-.skeleton-shimmer {
-  position: relative;
-  overflow: hidden;
-  background: var(--border-muted, #e8e8e8);
-}
-
-.skeleton-shimmer::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.4) 50%, transparent 75%);
-  animation: shimmer 1.5s ease-in-out infinite;
-}
-
-@keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
-}
-
-.task-detail--skeleton {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 24px;
-  min-height: 100vh;
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

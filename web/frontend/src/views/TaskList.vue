@@ -24,7 +24,27 @@
 
     <!-- Loading skeleton -->
     <template v-if="loading">
-      <SkeletonTable :rows="5" :cols="8" />
+      <div class="table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-id">ID</th>
+              <th class="col-name">名称</th>
+              <th class="col-model">模型</th>
+              <th class="col-dataset">数据集</th>
+              <th class="col-env">环境</th>
+              <th class="col-status">状态</th>
+              <th class="col-time">创建时间</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="i in 5" :key="i">
+              <td v-for="c in 8" :key="c"><div class="sk-bar" /></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </template>
 
     <!-- Active tab: running tasks + queued tasks -->
@@ -219,7 +239,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
-import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -702,5 +721,24 @@ onUnmounted(() => {
 .action-delete:hover {
   color: var(--accent-red);
   background: rgba(248, 81, 73, 0.12);
+}
+
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
+  width: 60%;
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>

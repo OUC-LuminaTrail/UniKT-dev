@@ -8,7 +8,20 @@
       </div>
     </div>
 
-    <SkeletonCards v-if="loading" :count="2" :cardWidth="400" />
+    <div class="gpu-grid" v-if="loading">
+      <div class="gpu-card" v-for="i in 2" :key="i">
+        <div class="gpu-card-header">
+          <div class="sk-bar" style="width:50px;height:18px;border-radius:var(--radius-sm)" />
+          <div class="sk-bar" style="width:120px;height:14px;border-radius:4px" />
+        </div>
+        <div class="stats-grid">
+          <div class="stat-block" v-for="j in 4" :key="j">
+            <div class="sk-bar" style="width:40px;height:10px;border-radius:4px" />
+            <div class="sk-bar" style="width:70%;height:12px;border-radius:4px;margin-top:4px" />
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="gpu-grid" v-else-if="status && status.gpus.length > 0">
       <div class="gpu-card" v-for="gpu in status.gpus" :key="gpu.index">
         <div class="gpu-card-header">
@@ -82,7 +95,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getGpuStatus, type GpuStatus } from '@/api/gpu'
-import SkeletonCards from '@/components/common/SkeletonCards.vue'
 
 const status = ref<GpuStatus | null>(null)
 const loading = ref(true)
@@ -291,5 +303,23 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   font-size: 11px;
   color: var(--text-tertiary);
   text-align: right;
+}
+
+.sk-bar {
+  height: 12px;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-overlay) 25%,
+    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
+    var(--bg-overlay) 75%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.5s ease-in-out infinite;
+}
+
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 </style>
