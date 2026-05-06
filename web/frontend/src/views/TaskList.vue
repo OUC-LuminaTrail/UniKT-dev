@@ -296,8 +296,14 @@ const loadAll = async () => {
       runningTasks.value = running
       queueItems.value = queue
     } else {
-      const filtered = await listTasks({ status: activeTab.value !== 'all' ? activeTab.value : undefined })
+      const [filtered, running, queue] = await Promise.all([
+        listTasks({ status: activeTab.value !== 'all' ? activeTab.value : undefined }),
+        listTasks({ status: 'running' }),
+        getQueue().catch(() => []),
+      ])
       tasks.value = filtered
+      runningTasks.value = running
+      queueItems.value = queue
     }
   } finally {
     loading.value = false
