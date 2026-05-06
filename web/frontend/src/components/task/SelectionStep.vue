@@ -83,6 +83,7 @@
           :metadata="metadata"
           :loading="metadataLoading"
           :icon-gradient="dataset ? getGradient('ds-' + dataset) : undefined"
+          show-preprocess-link
         />
       </div>
     </div>
