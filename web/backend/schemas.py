@@ -22,7 +22,6 @@ class TaskResponse(BaseModel):
     python_path: str
     status: str
     pid: int | None
-    log_file_path: str
     exp_dir: str
     started_at: datetime | None
     finished_at: datetime | None

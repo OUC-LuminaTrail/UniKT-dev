@@ -1,6 +1,5 @@
 from contextlib import asynccontextmanager
 
-from config import LOG_DIR
 from database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +10,6 @@ from routers import datasets, environments, experiments, gpu, logs, preprocess, 
 async def lifespan(app: FastAPI):
     import dependencies as deps
 
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
     init_db()
     deps.process_manager = __import__("services.process_manager", fromlist=["ProcessManager"]).ProcessManager()
     deps.process_manager.recover_tasks()

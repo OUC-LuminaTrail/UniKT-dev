@@ -93,7 +93,8 @@ async def stream_preprocess_logs(websocket: WebSocket, task_id: int, from_offset
     watcher = LogWatcher()
     try:
         await watcher.stream_log(
-            task.log_path,
+            "preprocess",
+            task_id,
             websocket,
             check_alive=check_alive,
             from_offset=from_offset,

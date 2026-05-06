@@ -8,12 +8,13 @@ import struct
 import subprocess
 import termios
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
 import psutil
 from database import SessionLocal
-from models import Task
+from models import LogChunk, Task
 
 from services.environment_resolver import EnvironmentResolver
 
@@ -143,9 +144,6 @@ class ProcessManager:
             task.env_name = env_name
             task.extra_params = json.dumps(params)
 
-            log_path = Path(task.log_file_path)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-
             project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 
             master_fd, slave_fd = pty.openpty()
@@ -178,10 +176,9 @@ class ProcessManager:
                 task.python_path = custom_python_path
             session.commit()
 
-            raw_log_path = str(log_path)
             reader = threading.Thread(
                 target=self._read_pty,
-                args=(task_id, master_fd, raw_log_path),
+                args=(task_id, master_fd),
                 daemon=True,
             )
             reader.start()
@@ -195,17 +192,35 @@ class ProcessManager:
             t.start()
             self._monitors[task_id] = t
 
-    def _read_pty(self, task_id: int, master_fd: int, log_path: str) -> None:
-        with open(log_path, "wb") as f:
-            while True:
-                try:
-                    data = os.read(master_fd, 65536)
-                    if not data:
-                        break
-                    f.write(data)
-                    f.flush()
-                except OSError:
+    def _read_pty(self, task_id: int, master_fd: int) -> None:
+        offset = 0
+        with SessionLocal() as session:
+            last_chunk = (
+                session.query(LogChunk)
+                .filter_by(source="task", source_id=task_id)
+                .order_by(LogChunk.byte_offset.desc())
+                .first()
+            )
+            if last_chunk:
+                offset = last_chunk.byte_offset
+        while True:
+            try:
+                data = os.read(master_fd, 65536)
+                if not data:
                     break
+                with SessionLocal() as session:
+                    chunk = LogChunk(
+                        source="task",
+                        source_id=task_id,
+                        byte_offset=offset,
+                        raw_data=data,
+                        created_at=time.time(),
+                    )
+                    session.add(chunk)
+                    session.commit()
+                offset += len(data)
+            except OSError:
+                break
         with contextlib.suppress(OSError):
             os.close(master_fd)
         self._master_fds.pop(task_id, None)

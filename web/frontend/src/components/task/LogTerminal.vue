@@ -71,11 +71,7 @@ const connect = () => {
 
   ws = new WebSocket(url)
 
-  ws.onopen = () => {
-    if (byteOffset === 0) {
-      terminal?.write('\x1b[32m--- Connected to log stream ---\x1b[0m\r\n')
-    }
-  }
+  ws.onopen = () => {}
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data)
@@ -86,7 +82,7 @@ const connect = () => {
       }
     } else if (data.type === 'done') {
       streamEnded = true
-      terminal?.write('\r\n\x1b[33m--- Log stream ended ---\x1b[0m\r\n')
+      terminal?.write('\r\n\x1b[2m——— Process exited ———\x1b[0m\r\n')
     } else if (data.type === 'error') {
       terminal?.write(`\x1b[31m${data.content}\x1b[0m\r\n`)
     }

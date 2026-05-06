@@ -10,7 +10,6 @@ from models import Task
 from schemas import TaskCreate, TaskResponse
 from pydantic import BaseModel
 from services.process_manager import ProcessManager
-from config import LOG_DIR
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -27,13 +26,10 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
             env_type="",
             env_name="",
             status="pending",
-            log_file_path=str(LOG_DIR / f"task_{0}.log"),
             tags="[]",
             extra_params=json.dumps(body.params),
         )
         session.add(task)
-        session.flush()
-        task.log_file_path = str(LOG_DIR / f"task_{task.id}.log")
         session.commit()
         session.refresh(task)
         task_id = task.id

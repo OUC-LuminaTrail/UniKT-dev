@@ -7,17 +7,19 @@ import struct
 import subprocess
 import termios
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
-from config import LOG_DIR, PROJECT_ROOT
+from config import PROJECT_ROOT
+from database import SessionLocal
+from models import LogChunk
 
 
 class PreprocessTask:
-    def __init__(self, task_id: int, command: list[str], log_path: str):
+    def __init__(self, task_id: int, command: list[str]):
         self.id = task_id
         self.command = command
-        self.log_path = log_path
         self.status: str = "running"
         self.exit_code: int | None = None
         self.started_at: datetime = datetime.now()
@@ -39,10 +41,7 @@ class PreprocessManager:
 
         command = self._build_command(action, dataset, params)
 
-        log_path = LOG_DIR / f"preprocess_{task_id}.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        task = PreprocessTask(task_id, command, str(log_path))
+        task = PreprocessTask(task_id, command)
         self._tasks[task_id] = task
 
         master_fd, slave_fd = pty.openpty()
@@ -69,9 +68,8 @@ class PreprocessManager:
         self._procs[task_id] = proc
         self._master_fds[task_id] = master_fd
 
-        raw_log_path = str(log_path)
         reader = threading.Thread(
-            target=self._read_pty, args=(task_id, master_fd, raw_log_path),
+            target=self._read_pty, args=(task_id, master_fd),
             daemon=True,
         )
         reader.start()
@@ -84,17 +82,35 @@ class PreprocessManager:
 
         return task
 
-    def _read_pty(self, task_id: int, master_fd: int, log_path: str) -> None:
-        with open(log_path, "wb") as f:
-            while True:
-                try:
-                    data = os.read(master_fd, 65536)
-                    if not data:
-                        break
-                    f.write(data)
-                    f.flush()
-                except OSError:
+    def _read_pty(self, task_id: int, master_fd: int) -> None:
+        offset = 0
+        with SessionLocal() as session:
+            last_chunk = (
+                session.query(LogChunk)
+                .filter_by(source="preprocess", source_id=task_id)
+                .order_by(LogChunk.byte_offset.desc())
+                .first()
+            )
+            if last_chunk:
+                offset = last_chunk.byte_offset
+        while True:
+            try:
+                data = os.read(master_fd, 65536)
+                if not data:
                     break
+                with SessionLocal() as session:
+                    chunk = LogChunk(
+                        source="preprocess",
+                        source_id=task_id,
+                        byte_offset=offset,
+                        raw_data=data,
+                        created_at=time.time(),
+                    )
+                    session.add(chunk)
+                    session.commit()
+                offset += len(data)
+            except OSError:
+                break
         with contextlib.suppress(OSError):
             os.close(master_fd)
         self._master_fds.pop(task_id, None)
