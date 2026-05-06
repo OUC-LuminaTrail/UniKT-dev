@@ -1,9 +1,9 @@
+import contextlib
 import json
 import re
-from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
 from config import RUNS_DIR
+from fastapi import APIRouter, HTTPException
 from schemas import ExperimentDetail, ExperimentInfo
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
@@ -54,10 +54,8 @@ def get_experiment(exp_path: str):
     hyperparams = None
     hp_file = full_path / "hyperparameters.json"
     if hp_file.exists():
-        try:
+        with contextlib.suppress(json.JSONDecodeError):
             hyperparams = json.loads(hp_file.read_text())
-        except json.JSONDecodeError:
-            pass
 
     return ExperimentDetail(
         name=full_path.name,

@@ -1,9 +1,8 @@
 import asyncio
 
-from sqlalchemy import asc
-
 from database import SessionLocal
 from models import LogChunk
+from sqlalchemy import asc
 
 INITIAL_CHUNK_SIZE = 65536
 
@@ -31,12 +30,19 @@ def _find_safe_boundary(data: bytes, intended_end: int) -> int:
 
 class LogWatcher:
     async def stream_log(
-        self, source: str, source_id: int, websocket, check_alive=None, from_offset: int = 0
+        self,
+        source: str,
+        source_id: int,
+        websocket,
+        check_alive=None,
+        from_offset: int = 0,
     ):
         offset = from_offset
         chunks = self._read_chunks(source, source_id, offset)
         for raw_data, chunk_offset in chunks:
-            boundary = _find_safe_boundary(raw_data, min(INITIAL_CHUNK_SIZE, len(raw_data)))
+            boundary = _find_safe_boundary(
+                raw_data, min(INITIAL_CHUNK_SIZE, len(raw_data))
+            )
             if boundary == 0 and offset == from_offset:
                 boundary = min(INITIAL_CHUNK_SIZE, len(raw_data))
             chunk = raw_data[:boundary]
@@ -99,7 +105,9 @@ class LogWatcher:
         await websocket.send_json({"type": "done", "final": True})
         await websocket.close()
 
-    def _read_chunks(self, source: str, source_id: int, from_offset: int) -> list[tuple[bytes, int]]:
+    def _read_chunks(
+        self, source: str, source_id: int, from_offset: int
+    ) -> list[tuple[bytes, int]]:
         with SessionLocal() as session:
             rows = (
                 session.query(LogChunk.raw_data, LogChunk.byte_offset)

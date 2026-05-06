@@ -395,9 +395,11 @@ class ProcessManager:
 
     def recover_tasks(self) -> None:
         with SessionLocal() as session:
-            running_tasks = session.query(Task).filter(
-                Task.status.in_(["running", "stopping"])
-            ).all()
+            running_tasks = (
+                session.query(Task)
+                .filter(Task.status.in_(["running", "stopping"]))
+                .all()
+            )
             for task in running_tasks:
                 if task.pid and psutil.pid_exists(task.pid):
                     try:
@@ -418,9 +420,12 @@ class ProcessManager:
                 task.pid = None
                 session.commit()
 
-            pending_tasks = session.query(Task).filter(
-                Task.status == "pending"
-            ).order_by(Task.created_at).all()
+            pending_tasks = (
+                session.query(Task)
+                .filter(Task.status == "pending")
+                .order_by(Task.created_at)
+                .all()
+            )
             for task in pending_tasks:
                 self._queue.append(task.id)
 

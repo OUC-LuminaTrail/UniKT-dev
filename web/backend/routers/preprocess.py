@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-
 from dependencies import get_preprocess_manager
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
+from pydantic import BaseModel
 from services.log_watcher import LogWatcher
 from services.preprocess_manager import PreprocessManager
-from pydantic import BaseModel
 
 router = APIRouter(prefix="/api/preprocess", tags=["preprocess"])
 
@@ -20,7 +26,10 @@ class ResizeRequest(BaseModel):
 
 
 @router.post("", status_code=201)
-def start_preprocess(body: PreprocessStartRequest, pm: PreprocessManager = Depends(get_preprocess_manager)):
+def start_preprocess(
+    body: PreprocessStartRequest,
+    pm: PreprocessManager = Depends(get_preprocess_manager),
+):
     if body.action not in ("download", "process"):
         raise HTTPException(400, "action must be 'download' or 'process'")
     if not body.dataset:
@@ -38,19 +47,23 @@ def start_preprocess(body: PreprocessStartRequest, pm: PreprocessManager = Depen
 def list_preprocess(pm: PreprocessManager = Depends(get_preprocess_manager)):
     tasks = []
     for t in pm.list_all():
-        tasks.append({
-            "id": t.id,
-            "command": " ".join(t.command),
-            "status": t.status,
-            "exit_code": t.exit_code,
-            "started_at": t.started_at.isoformat() if t.started_at else None,
-            "finished_at": t.finished_at.isoformat() if t.finished_at else None,
-        })
+        tasks.append(
+            {
+                "id": t.id,
+                "command": " ".join(t.command),
+                "status": t.status,
+                "exit_code": t.exit_code,
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "finished_at": t.finished_at.isoformat() if t.finished_at else None,
+            }
+        )
     return tasks
 
 
 @router.get("/{task_id}")
-def get_preprocess(task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)):
+def get_preprocess(
+    task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)
+):
     task = pm.get(task_id)
     if not task:
         raise HTTPException(404, "Preprocess task not found")
@@ -65,20 +78,31 @@ def get_preprocess(task_id: int, pm: PreprocessManager = Depends(get_preprocess_
 
 
 @router.post("/{task_id}/stop")
-def stop_preprocess(task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)):
+def stop_preprocess(
+    task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)
+):
     if not pm.stop(task_id):
         raise HTTPException(400, "Cannot stop task")
     return {"status": "stopping"}
 
 
 @router.post("/{task_id}/resize")
-def resize_preprocess(task_id: int, body: ResizeRequest, pm: PreprocessManager = Depends(get_preprocess_manager)):
+def resize_preprocess(
+    task_id: int,
+    body: ResizeRequest,
+    pm: PreprocessManager = Depends(get_preprocess_manager),
+):
     pm.resize_pty(task_id, body.cols, body.rows)
     return {"ok": True}
 
 
 @router.websocket("/{task_id}/logs/stream")
-async def stream_preprocess_logs(websocket: WebSocket, task_id: int, from_offset: int = Query(0), pm: PreprocessManager = Depends(get_preprocess_manager)):
+async def stream_preprocess_logs(
+    websocket: WebSocket,
+    task_id: int,
+    from_offset: int = Query(0),
+    pm: PreprocessManager = Depends(get_preprocess_manager),
+):
     await websocket.accept()
     task = pm.get(task_id)
     if not task:

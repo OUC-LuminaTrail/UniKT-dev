@@ -51,7 +51,6 @@ class SchemaExtractor:
         if model_cls is None:
             raise KeyError(f"Model '{model_name}' not found")
 
-        model_inst = model_cls()
         groups: list[ParamGroup] = []
 
         for cls in [self._general, self._data, self._early_stopping, model_cls]:

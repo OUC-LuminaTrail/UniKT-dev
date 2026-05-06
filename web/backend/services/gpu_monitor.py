@@ -3,7 +3,6 @@ import subprocess
 import time
 
 import psutil
-
 from schemas import GpuInfo, GpuStatusResponse, SystemStatusResponse
 
 
@@ -73,12 +72,16 @@ class GpuMonitor:
         if gpus.gpus:
             gpu_util = gpus.gpus[0].utilization_percent
             g = gpus.gpus[0]
-            gpu_mem_percent = (g.memory_used_mb / g.memory_total_mb * 100) if g.memory_total_mb > 0 else 0
+            gpu_mem_percent = (
+                (g.memory_used_mb / g.memory_total_mb * 100)
+                if g.memory_total_mb > 0
+                else 0
+            )
         load1, load5, load15 = os.getloadavg()
         return SystemStatusResponse(
             cpu_percent=cpu_percent,
-            memory_used_gb=round(mem.used / (1024 ** 3), 1),
-            memory_total_gb=round(mem.total / (1024 ** 3), 1),
+            memory_used_gb=round(mem.used / (1024**3), 1),
+            memory_total_gb=round(mem.total / (1024**3), 1),
             memory_percent=mem.percent,
             gpu_utilization=gpu_util,
             gpu_memory_percent=round(gpu_mem_percent, 1),

@@ -33,12 +33,14 @@ def list_datasets():
                 meta = {}
         else:
             meta = {}
-        result.append({
-            "name": name,
-            "num_users": meta.get("num_users"),
-            "num_questions": meta.get("num_questions"),
-            "num_skills": meta.get("num_skills"),
-        })
+        result.append(
+            {
+                "name": name,
+                "num_users": meta.get("num_users"),
+                "num_questions": meta.get("num_questions"),
+                "num_skills": meta.get("num_skills"),
+            }
+        )
     return result
 
 

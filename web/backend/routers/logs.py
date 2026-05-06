@@ -1,9 +1,8 @@
-from sqlalchemy import asc
-
 from database import SessionLocal
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from models import LogChunk, Task
 from services.log_watcher import LogWatcher
+from sqlalchemy import asc
 
 router = APIRouter(tags=["logs"])
 

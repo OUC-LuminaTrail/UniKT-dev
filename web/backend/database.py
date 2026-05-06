@@ -1,7 +1,6 @@
+from config import DATABASE_PATH
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
-
-from config import DATABASE_PATH
 
 
 class Base(DeclarativeBase):

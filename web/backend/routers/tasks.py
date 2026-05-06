@@ -1,15 +1,13 @@
 import json
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import desc
 
 from database import SessionLocal
 from dependencies import get_process_manager
+from fastapi import APIRouter, Depends, HTTPException
 from models import Task
-from schemas import TaskCreate, TaskResponse
 from pydantic import BaseModel
+from schemas import TaskCreate, TaskResponse
 from services.process_manager import ProcessManager
+from sqlalchemy import desc
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -90,7 +88,9 @@ class ResizeRequest(BaseModel):
 
 
 @router.post("/{task_id}/resize")
-def resize_terminal(task_id: int, body: ResizeRequest, pm: ProcessManager = Depends(get_process_manager)):
+def resize_terminal(
+    task_id: int, body: ResizeRequest, pm: ProcessManager = Depends(get_process_manager)
+):
     pm.resize_pty(task_id, body.cols, body.rows)
     return {"ok": True}
 
@@ -114,7 +114,9 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
 def get_queue(pm: ProcessManager = Depends(get_process_manager)):
     task_ids = pm.get_queue()
     with SessionLocal() as session:
-        tasks = session.query(Task).filter(Task.id.in_(task_ids)).all() if task_ids else []
+        tasks = (
+            session.query(Task).filter(Task.id.in_(task_ids)).all() if task_ids else []
+        )
         order = {tid: i for i, tid in enumerate(task_ids)}
         tasks.sort(key=lambda t: order.get(t.id, 999))
         return [
@@ -136,6 +138,8 @@ class ReorderRequest(BaseModel):
 
 
 @router.put("/queue/reorder")
-def reorder_queue(body: ReorderRequest, pm: ProcessManager = Depends(get_process_manager)):
+def reorder_queue(
+    body: ReorderRequest, pm: ProcessManager = Depends(get_process_manager)
+):
     pm.reorder_queue(body.task_ids)
     return {"ok": True}

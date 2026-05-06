@@ -102,7 +102,9 @@ class EnvironmentResolver:
             pass
         return envs
 
-    def resolve_command(self, env_id: str, custom_python_path: str | None = None) -> list[str]:
+    def resolve_command(
+        self, env_id: str, custom_python_path: str | None = None
+    ) -> list[str]:
         env_type, env_name = env_id.split(":", 1)
         if env_type == "pixi":
             pixi_bin = _find_pixi() or "pixi"

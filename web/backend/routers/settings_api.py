@@ -1,8 +1,7 @@
-from fastapi import APIRouter, Depends
-
 from dependencies import get_process_manager
-from services.process_manager import ProcessManager
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from services.process_manager import ProcessManager
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -21,6 +20,8 @@ def get_settings(pm: ProcessManager = Depends(get_process_manager)):
 
 
 @router.put("")
-def update_settings(body: SettingsUpdate, pm: ProcessManager = Depends(get_process_manager)):
+def update_settings(
+    body: SettingsUpdate, pm: ProcessManager = Depends(get_process_manager)
+):
     pm.max_concurrent = body.max_concurrent
     return SettingsResponse(max_concurrent=pm.max_concurrent)

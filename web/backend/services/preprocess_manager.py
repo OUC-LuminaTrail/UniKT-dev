@@ -9,7 +9,6 @@ import termios
 import threading
 import time
 from datetime import datetime
-from pathlib import Path
 
 from config import PROJECT_ROOT
 from database import SessionLocal
@@ -69,15 +68,14 @@ class PreprocessManager:
         self._master_fds[task_id] = master_fd
 
         reader = threading.Thread(
-            target=self._read_pty, args=(task_id, master_fd),
+            target=self._read_pty,
+            args=(task_id, master_fd),
             daemon=True,
         )
         reader.start()
         self._readers[task_id] = reader
 
-        t = threading.Thread(
-            target=self._monitor, args=(task_id,), daemon=True
-        )
+        t = threading.Thread(target=self._monitor, args=(task_id,), daemon=True)
         t.start()
 
         return task
@@ -169,9 +167,13 @@ class PreprocessManager:
             if params.get("sample_strategy"):
                 cmd.extend(["--sample_strategy", params["sample_strategy"]])
             if params.get("sample_attempts_bins") is not None:
-                cmd.extend(["--sample_attempts_bins", str(params["sample_attempts_bins"])])
+                cmd.extend(
+                    ["--sample_attempts_bins", str(params["sample_attempts_bins"])]
+                )
             if params.get("sample_correct_bins") is not None:
-                cmd.extend(["--sample_correct_bins", str(params["sample_correct_bins"])])
+                cmd.extend(
+                    ["--sample_correct_bins", str(params["sample_correct_bins"])]
+                )
             extra = params.get("extra")
             if extra:
                 cmd.extend(["--extra", str(extra)])
