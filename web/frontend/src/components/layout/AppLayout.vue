@@ -69,19 +69,10 @@ import { getSystemStatus, type SystemStatus } from '@/api/gpu'
 
 const route = useRoute()
 
-const titleMap: Record<string, string> = {
-  '/tasks': '训练任务',
-  '/tasks/new': '新建训练任务',
-  '/experiments': '实验日志',
-  '/gpu': 'GPU 监控',
-  '/preprocess': '数据预处理',
-}
-
-const flushContent = computed(() => route.path === '/tasks/new' || route.path === '/preprocess')
+const flushContent = computed(() => !!route.meta?.flush)
 
 const currentTitle = computed(() => {
-  if (route.path.match(/^\/tasks\/\d+$/)) return 'Task Detail'
-  return titleMap[route.path] || 'KT Experiment Manager'
+  return (route.meta?.title as string) || 'KT Experiment Manager'
 })
 
 const currentTime = ref('')

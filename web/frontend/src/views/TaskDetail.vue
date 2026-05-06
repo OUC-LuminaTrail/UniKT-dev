@@ -11,7 +11,7 @@
 
   <div class="task-detail" v-else-if="task">
     <header class="detail-header">
-      <button class="back-btn" @click="$router.back()">
+      <button class="back-btn" @click="goBack">
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
           <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
@@ -79,14 +79,23 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
 import SkeletonTable from '@/components/common/SkeletonTable.vue'
 
 const route = useRoute()
+const router = useRouter()
 const taskId = Number(route.params.id)
+
+const goBack = () => {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.replace({ name: 'tasks' })
+  }
+}
 const task = ref<TaskInfo | null>(null)
 const loading = ref(true)
 const stopping = ref(false)

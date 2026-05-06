@@ -144,10 +144,10 @@ async function onStartTraining() {
     })
     if (task.status === 'pending') {
       ElMessage.success('任务已加入队列')
-      router.replace('/tasks')
+      router.replace({ name: 'tasks' })
     } else {
       ElMessage.success('任务已创建')
-      router.replace(`/tasks/${task.id}`)
+      router.replace({ name: 'task-detail', params: { id: task.id } })
     }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || '创建失败')

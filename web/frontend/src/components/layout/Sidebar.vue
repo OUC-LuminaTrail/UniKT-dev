@@ -75,7 +75,7 @@ const navItems = [
 ]
 
 const isActive = (path: string) => {
-  if (path === '/tasks') return route.path === '/tasks' || /^\/tasks\/\d+$/.test(route.path)
+  if (path === '/tasks') return route.path === '/tasks' || route.path.startsWith('/tasks/')
   return route.path === path
 }
 </script>

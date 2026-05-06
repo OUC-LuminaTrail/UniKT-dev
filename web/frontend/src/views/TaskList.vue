@@ -2,7 +2,7 @@
   <div class="task-list">
     <div class="page-header">
       <h1 class="page-title">训练任务</h1>
-      <router-link to="/tasks/new" class="btn-primary">
+      <router-link :to="{ name: 'task-new' }" class="btn-primary">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
           <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z" />
         </svg>
@@ -61,7 +61,7 @@
               <tr v-for="task in runningTasks" :key="task.id">
                 <td class="col-id">{{ task.id }}</td>
                 <td class="col-name">
-                  <router-link :to="`/tasks/${task.id}`" class="task-name-link">{{ task.name }}</router-link>
+                  <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="task-name-link">{{ task.name }}</router-link>
                 </td>
                 <td class="col-model">{{ task.model_name }}</td>
                 <td class="col-dataset">{{ task.dataset_name }}</td>
@@ -79,7 +79,7 @@
                 </td>
                 <td class="col-actions">
                   <div class="action-group">
-                    <router-link :to="`/tasks/${task.id}`" class="action-btn" title="查看详情">
+                    <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="action-btn" title="查看详情">
                       <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
                     </router-link>
                     <button class="action-btn action-stop" title="停止任务" @click="handleStop(task.id)">
@@ -174,7 +174,7 @@
             <tr v-for="task in tasks" :key="task.id">
               <td class="col-id">{{ task.id }}</td>
               <td class="col-name">
-                <router-link :to="`/tasks/${task.id}`" class="task-name-link">{{ task.name }}</router-link>
+                <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="task-name-link">{{ task.name }}</router-link>
               </td>
               <td class="col-model">{{ task.model_name }}</td>
               <td class="col-dataset">{{ task.dataset_name }}</td>
@@ -192,7 +192,7 @@
               </td>
               <td class="col-actions">
                 <div class="action-group">
-                  <router-link :to="`/tasks/${task.id}`" class="action-btn" title="查看详情">
+                  <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="action-btn" title="查看详情">
                     <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
                   </router-link>
                   <button
@@ -228,7 +228,6 @@ const tasks = ref<TaskInfo[]>([])
 const runningTasks = ref<TaskInfo[]>([])
 const queueItems = ref<QueueItem[]>([])
 const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
-if (activeTab.value === 'all') activeTab.value = ''
 
 const loading = ref(true)
 const initialLoad = ref(true)
@@ -240,7 +239,7 @@ const tabs = [
   { label: '已完成', value: 'completed' },
   { label: '已失败', value: 'failed' },
   { label: '已停止', value: 'stopped' },
-  { label: '全部', value: '' },
+  { label: '全部', value: 'all' },
 ]
 
 const statusLabels: Record<string, string> = {
@@ -255,9 +254,8 @@ const statusLabel = (s: string) => statusLabels[s] || s
 
 const switchTab = (tab: string) => {
   activeTab.value = tab
-  const stored = tab || 'all'
-  sessionStorage.setItem('taskListTab', stored)
-  router.replace({ query: stored !== 'running' ? { tab: stored } : {} })
+  sessionStorage.setItem('taskListTab', tab)
+  router.replace({ query: tab !== 'running' ? { tab } : {} })
   loadAll()
 }
 
@@ -279,7 +277,7 @@ const loadAll = async () => {
       runningTasks.value = running
       queueItems.value = queue
     } else {
-      const filtered = await listTasks({ status: activeTab.value || undefined })
+      const filtered = await listTasks({ status: activeTab.value !== 'all' ? activeTab.value : undefined })
       tasks.value = filtered
     }
   } finally {
