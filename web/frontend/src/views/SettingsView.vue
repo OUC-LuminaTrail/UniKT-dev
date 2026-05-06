@@ -210,22 +210,4 @@ const onSave = async () => {
   font-size: 12px;
   color: var(--accent-green);
 }
-
-.sk-bar {
-  height: 12px;
-  border-radius: 6px;
-  background: linear-gradient(
-    90deg,
-    var(--bg-overlay) 25%,
-    color-mix(in srgb, var(--bg-overlay) 80%, var(--text-tertiary)) 50%,
-    var(--bg-overlay) 75%
-  );
-  background-size: 200% 100%;
-  animation: sk-shimmer 1.5s ease-in-out infinite;
-}
-
-@keyframes sk-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
 </style>
