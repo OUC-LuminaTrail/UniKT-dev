@@ -13,3 +13,13 @@ def get_process_manager() -> ProcessManager:
 def get_gpu_monitor() -> GpuMonitor:
     assert gpu_monitor is not None
     return gpu_monitor
+
+
+from services.preprocess_manager import PreprocessManager
+
+preprocess_manager: PreprocessManager | None = None
+
+
+def get_preprocess_manager() -> PreprocessManager:
+    assert preprocess_manager is not None
+    return preprocess_manager
