@@ -4,7 +4,7 @@
       <div class="command-info">
         <div class="command-line">
           <span class="prompt">$</span>
-          <span class="command-text">{{ command }}</span>
+          <span class="command-text">{{ commandDisplay }}</span>
         </div>
         <div class="task-name">{{ taskName }}</div>
       </div>
@@ -19,27 +19,30 @@
 import { computed } from 'vue'
 
 const props = defineProps<{
-  modelName: string
-  dataset: string
-  params: Record<string, any>
-  schemaDefaultParams: Record<string, any>
+  command?: string
+  modelName?: string
+  dataset?: string
+  params?: Record<string, any>
+  schemaDefaultParams?: Record<string, any>
 }>()
 
 const taskName = computed(() => {
+  if (props.command) return ''
   const m = props.modelName || ''
   const d = props.dataset || ''
   return d ? `${m}_${d}` : m || '...'
 })
 
-const command = computed(() => {
+const commandDisplay = computed(() => {
+  if (props.command) return props.command
   const parts = ['python train.py']
   if (props.modelName) parts.push(`-m ${props.modelName}`)
   if (props.dataset) parts.push(`-d ${props.dataset}`)
 
   const overridden: string[] = []
-  for (const [key, value] of Object.entries(props.params)) {
+  for (const [key, value] of Object.entries(props.params || {})) {
     if (value === null || value === undefined || value === '') continue
-    const defaultVal = props.schemaDefaultParams[key]
+    const defaultVal = (props.schemaDefaultParams || {})[key]
     if (value === defaultVal) continue
     if (typeof value === 'boolean') {
       overridden.push(value ? `--${key}` : `--no_${key.replace(/^no_/, '')}`)
