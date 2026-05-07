@@ -142,6 +142,7 @@ uvicorn = { version = ">=0.34.0", extras = ["standard"] }
 sqlalchemy = ">=2.0.0"
 pydantic = ">=2.0.0"
 psutil = ">=7.2.0"
+fastapi-problem = ">=0.12.0"
 [feature.web.tasks]
 web-backend = { cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8765", cwd = "web/backend", env = { PYTHONPATH = "../../" }, description = "Start the backend server" }
 web-frontend = { cmd = "npm run dev", cwd = "web/frontend", description = "Start the frontend in dev mode" }
