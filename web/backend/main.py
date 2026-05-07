@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_problem.handler import add_exception_handler, new_exception_handler
+from middleware import MessageMiddleware
 from routers import (
     datasets,
     environments,
@@ -38,13 +40,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="KT Experiment Manager", lifespan=lifespan)
 
+eh = new_exception_handler()
+add_exception_handler(app, eh)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Messages"],
 )
+
+app.add_middleware(MessageMiddleware)
 
 app.include_router(tasks.router)
 app.include_router(logs.router)
