@@ -1,4 +1,5 @@
 import { ref, onUnmounted } from 'vue'
+import { ElNotification } from 'element-plus'
 
 export function useWebSocket(url: string) {
   const messages = ref<string[]>([])
@@ -25,6 +26,11 @@ export function useWebSocket(url: string) {
         messages.value.push(data.content)
       } else if (data.type === 'done') {
         done.value = true
+      } else if (data.type === 'error') {
+        ElNotification.error({
+          message: data.content,
+          duration: 0,
+        })
       }
     }
     ws.onerror = () => { ws?.close() }
