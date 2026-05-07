@@ -100,8 +100,7 @@ const onSave = async () => {
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
     ElMessage.success('设置已保存')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '保存失败')
+  } catch {
   } finally {
     saving.value = false
   }

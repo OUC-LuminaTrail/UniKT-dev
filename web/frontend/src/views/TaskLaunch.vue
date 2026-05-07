@@ -171,8 +171,7 @@ async function onStartTraining() {
       ElMessage.success('任务已创建')
       router.replace({ name: 'task-detail', params: { id: task.id } })
     }
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '创建失败')
+  } catch {
   } finally {
     submitting.value = false
   }

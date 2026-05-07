@@ -262,8 +262,7 @@ const onStart = async () => {
     taskInfo.value = result
     phase.value = 'running'
     startPolling()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '启动失败')
+  } catch {
   } finally {
     submitting.value = false
   }
