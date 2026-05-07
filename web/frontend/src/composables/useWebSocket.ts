@@ -29,7 +29,7 @@ export function useWebSocket(url: string) {
       } else if (data.type === 'error') {
         ElNotification.error({
           message: data.content,
-          duration: 0,
+          duration: 5000,
         })
       }
     }

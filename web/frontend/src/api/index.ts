@@ -29,12 +29,12 @@ api.interceptors.response.use(
       ElNotification.error({
         title: d.title,
         message: typeof d.detail === 'string' ? d.detail : d.title,
-        duration: 0,
+        duration: 5000,
       })
     } else if (d?.detail) {
       ElNotification.error({
         message: typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail),
-        duration: 0,
+        duration: 5000,
       })
     }
     return Promise.reject(error)
