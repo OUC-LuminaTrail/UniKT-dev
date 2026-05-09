@@ -7,7 +7,10 @@ export interface DatasetInfo {
   num_skills: number | null
 }
 
-export type DatasetMetadata = Record<string, any>
+export interface DatasetMetadata {
+  kfold?: number
+  [key: string]: any
+}
 
 export const listDatasets = () =>
   api.get<DatasetInfo[]>('/datasets').then(r => r.data)
