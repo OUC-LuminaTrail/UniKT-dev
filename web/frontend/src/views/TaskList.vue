@@ -335,8 +335,9 @@ const handleStop = async (id: number) => {
     cancelButtonText: '取消',
     type: 'warning',
   })
-  await stopTask(id)
   ElMessage.success('已发送停止信号')
+  await stopTask(id)
+  ElMessage.success('任务已停止')
   setTimeout(loadAll, 2000)
 }
 
