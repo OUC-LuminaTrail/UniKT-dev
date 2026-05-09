@@ -254,11 +254,11 @@ const initialLoad = ref(true)
 const activeCount = computed(() => runningTasks.value.length + queueItems.value.length)
 
 const tabs = [
+  { label: '全部', value: 'all' },
   { label: '活跃', value: 'running' },
   { label: '已完成', value: 'completed' },
   { label: '已失败', value: 'failed' },
   { label: '已停止', value: 'stopped' },
-  { label: '全部', value: 'all' },
 ]
 
 const statusLabels: Record<string, string> = {

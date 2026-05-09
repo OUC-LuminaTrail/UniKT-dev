@@ -94,7 +94,7 @@
         <el-option
           v-for="fold in kfoldCount"
           :key="fold - 1"
-          :label="`Fold ${fold - 1}`"
+          :label="`fold ${fold - 1}`"
           :value="fold - 1"
         />
       </el-select>
@@ -113,7 +113,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createTask } from '@/api/tasks'
@@ -181,7 +181,7 @@ watch(dataset, async (name) => {
   }
   try {
     const meta = await getDatasetMetadata(name)
-    const kfold = typeof meta.kfold === 'number' ? meta.kfold : null
+    const kfold = typeof meta.kfold_n_splits === 'number' ? meta.kfold_n_splits : null
     kfoldCount.value = kfold
     selectedFolds.value = kfold && kfold >= 2 ? [0] : []
   } catch {
@@ -198,13 +198,13 @@ function buildTaskName(fold?: number) {
 
 async function confirmMultiFold(): Promise<void> {
   const folds = [...selectedFolds.value].sort((a, b) => a - b)
-  const content = [
-    `模型：${modelName.value}`,
-    `数据集：${dataset.value}`,
-    `折号：${folds.join(', ')}`,
-    `任务数量：${folds.length}`,
-  ].join('\n')
-  await ElMessageBox.confirm(content, '确认多折训练任务', {
+  const message = h('div', { style: 'line-height: 1.8' }, [
+    h('div', `模型：${modelName.value}`),
+    h('div', `数据集：${dataset.value}`),
+    h('div', `折号：${folds.join(', ')}`),
+    h('div', `任务数量：${folds.length}`),
+  ])
+  await ElMessageBox.confirm(message, '确认多折训练任务', {
     confirmButtonText: '创建任务',
     cancelButtonText: '取消',
     type: 'warning',
