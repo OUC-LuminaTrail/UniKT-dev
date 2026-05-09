@@ -82,6 +82,22 @@
       >
         确认选择
       </el-button>
+      <el-select
+        v-if="step === 'params' && showKfoldSelector"
+        v-model="selectedFolds"
+        multiple
+        collapse-tags
+        collapse-tags-tooltip
+        placeholder="多折训练"
+        class="kfold-select"
+      >
+        <el-option
+          v-for="fold in kfoldCount"
+          :key="fold - 1"
+          :label="`Fold ${fold - 1}`"
+          :value="fold - 1"
+        />
+      </el-select>
       <el-button
         v-if="step === 'params'"
         type="primary"
@@ -97,10 +113,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { createTask } from '@/api/tasks'
+import { getDatasetMetadata } from '@/api/datasets'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
 import CommandPreview from '@/components/task/CommandPreview.vue'
@@ -122,6 +139,10 @@ const envId = ref('')
 const customPythonPath = ref('')
 const modelName = ref('')
 const dataset = ref('')
+
+const kfoldCount = ref<number | null>(null)
+const selectedFolds = ref<number[]>([])
+const showKfoldSelector = computed(() => (kfoldCount.value ?? 0) >= 2)
 
 const STORAGE_KEY_ENV = 'kt-web:last-env-id'
 const STORAGE_KEY_MODEL = 'kt-web:last-model-name'
@@ -152,13 +173,69 @@ function onSelectConfirm() {
   step.value = 'params'
 }
 
+watch(dataset, async (name) => {
+  if (!name) {
+    kfoldCount.value = null
+    selectedFolds.value = []
+    return
+  }
+  try {
+    const meta = await getDatasetMetadata(name)
+    const kfold = typeof meta.kfold === 'number' ? meta.kfold : null
+    kfoldCount.value = kfold
+    selectedFolds.value = kfold && kfold >= 2 ? [0] : []
+  } catch {
+    kfoldCount.value = null
+    selectedFolds.value = []
+  }
+})
+
+function buildTaskName(fold?: number) {
+  return fold === undefined
+    ? `${modelName.value}_${dataset.value}`
+    : `${modelName.value}_${dataset.value}_fold${fold}`
+}
+
+async function confirmMultiFold(): Promise<void> {
+  const folds = [...selectedFolds.value].sort((a, b) => a - b)
+  const content = [
+    `模型：${modelName.value}`,
+    `数据集：${dataset.value}`,
+    `折号：${folds.join(', ')}`,
+    `任务数量：${folds.length}`,
+  ].join('\n')
+  await ElMessageBox.confirm(content, '确认多折训练任务', {
+    confirmButtonText: '创建任务',
+    cancelButtonText: '取消',
+    type: 'warning',
+  })
+}
+
 async function onStartTraining() {
   submitting.value = true
   try {
-    const taskName = `${modelName.value}_${dataset.value}`
     const taskParams = { ...params.value, dataset: dataset.value }
+
+    if (showKfoldSelector.value && selectedFolds.value.length > 0) {
+      await confirmMultiFold()
+      let created = 0
+      for (const fold of selectedFolds.value) {
+        await createTask({
+          name: buildTaskName(fold),
+          env_id: envId.value,
+          custom_python_path: customPythonPath.value || null,
+          model_name: modelName.value,
+          params: { ...taskParams, fold },
+        })
+        created += 1
+      }
+      ElMessage.success(`已创建 ${created} 个任务`)
+      router.replace({ name: 'tasks' })
+      return
+    }
+
     const task = await createTask({
-      name: taskName,
+      name: buildTaskName(),
       env_id: envId.value,
       custom_python_path: customPythonPath.value || null,
       model_name: modelName.value,
@@ -171,7 +248,10 @@ async function onStartTraining() {
       ElMessage.success('任务已创建')
       router.replace({ name: 'task-detail', params: { id: task.id } })
     }
-  } catch {
+  } catch (err: any) {
+    if (err?.message && err?.message !== 'cancel') {
+      ElMessage.error(`创建失败：${err.message}`)
+    }
   } finally {
     submitting.value = false
   }
@@ -286,5 +366,9 @@ onMounted(async () => {
   background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-lg);
+}
+
+.kfold-select {
+  min-width: 180px;
 }
 </style>
