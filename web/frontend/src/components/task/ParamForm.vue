@@ -85,7 +85,7 @@ interface FieldEntry {
   def: ParamField
 }
 
-const TOP_BAR_PARAMS = new Set(['dataset'])
+const TOP_BAR_PARAMS = new Set(['dataset', 'fold'])
 
 const props = defineProps<{ schema: ModelSchema }>()
 const emit = defineEmits<{ (e: 'update:params', params: Record<string, any>): void }>()
