@@ -114,7 +114,7 @@ class SlepemapyData(DataSource):
                 pl.col("timestamp")
                 .str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S")
                 .cast(pl.Int64)
-                / 1_000_000
+                / 1_000
             )
             .cast(pl.Int64)
             .alias("timestamp")
