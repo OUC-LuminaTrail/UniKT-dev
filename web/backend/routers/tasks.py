@@ -5,7 +5,7 @@ from dependencies import get_process_manager
 from fastapi import APIRouter, Depends, HTTPException
 from models import Task
 from pydantic import BaseModel
-from schemas import TaskCreate, TaskResponse
+from schemas import PaginatedResponse, TaskCreate, TaskResponse
 from services.process_manager import ProcessManager
 from sqlalchemy import desc
 
@@ -45,7 +45,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         return task
 
 
-@router.get("", response_model=list[TaskResponse])
+@router.get("", response_model=PaginatedResponse[TaskResponse])
 def list_tasks(
     status: str | None = None,
     page: int = 1,
@@ -55,8 +55,9 @@ def list_tasks(
         q = session.query(Task).order_by(desc(Task.created_at))
         if status:
             q = q.filter(Task.status == status)
+        total = q.count()
         tasks = q.offset((page - 1) * page_size).limit(page_size).all()
-        return tasks
+        return {"items": tasks, "total": total, "page": page, "page_size": page_size}
 
 
 @router.get("/{task_id}", response_model=TaskResponse)

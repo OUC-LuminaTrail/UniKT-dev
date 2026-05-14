@@ -31,8 +31,15 @@ export interface TaskCreateRequest {
 export const createTask = (data: TaskCreateRequest) =>
   api.post<TaskInfo>('/tasks', data).then(r => r.data)
 
+export interface PaginatedTasks {
+  items: TaskInfo[]
+  total: number
+  page: number
+  page_size: number
+}
+
 export const listTasks = (params?: { status?: string; page?: number; page_size?: number }) =>
-  api.get<TaskInfo[]>('/tasks', { params }).then(r => r.data)
+  api.get<PaginatedTasks>('/tasks', { params }).then(r => r.data)
 
 export const getTask = (id: number) =>
   api.get<TaskInfo>(`/tasks/${id}`).then(r => r.data)

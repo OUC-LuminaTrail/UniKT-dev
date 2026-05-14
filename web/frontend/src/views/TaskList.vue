@@ -38,16 +38,16 @@
           <span class="divider-label">运行中</span>
           <span class="divider-count">{{ runningTasks.length }}</span>
         </div>
-        <el-table :data="runningTasks" size="small" class="task-table">
-          <el-table-column prop="id" label="ID" width="70" />
+        <el-table :data="runningTasks" size="small" class="task-table" :default-sort="{ prop: 'id', order: 'ascending' }">
+          <el-table-column prop="id" label="ID" width="70" sortable />
           <el-table-column label="名称" min-width="160">
             <template #default="{ row }">
               <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
             </template>
           </el-table-column>
-          <el-table-column prop="model_name" label="模型" width="110" />
-          <el-table-column prop="dataset_name" label="数据集" width="110" />
-          <el-table-column label="环境" width="100">
+          <el-table-column prop="model_name" label="模型" width="110" sortable />
+          <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
+          <el-table-column prop="env_name" label="环境" width="100" sortable>
             <template #default="{ row }">
               <span class="env-tag">{{ row.env_name }}</span>
             </template>
@@ -60,7 +60,7 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="创建时间" width="170">
+          <el-table-column prop="created_at" label="创建时间" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatTime(row.created_at) }}</span>
             </template>
@@ -78,6 +78,18 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-pagination
+          v-if="runningTotal > runningPageSize"
+          class="table-pagination"
+          v-model:current-page="runningPage"
+          v-model:page-size="runningPageSize"
+          :total="runningTotal"
+          :page-sizes="[10, 20, 50]"
+          layout="total, sizes, prev, pager, next"
+          size="small"
+          @current-change="handleRunningPageChange"
+          @size-change="handleRunningPageSizeChange"
+        />
       </template>
 
       <template v-if="queueItems.length > 0">
@@ -91,15 +103,15 @@
               <span class="pos-badge">#{{ $index + 1 }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column prop="id" label="ID" width="70" sortable />
           <el-table-column label="名称" min-width="160">
             <template #default="{ row }">
               <span class="task-name-text">{{ row.name }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="model_name" label="模型" width="110" />
-          <el-table-column prop="dataset_name" label="数据集" width="110" />
-          <el-table-column label="创建时间" width="170">
+          <el-table-column prop="model_name" label="模型" width="110" sortable />
+          <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
+          <el-table-column prop="created_at" label="创建时间" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatTime(row.created_at) }}</span>
             </template>
@@ -134,21 +146,21 @@
         <span>开始训练后任务将显示在这里</span>
       </div>
 
-      <el-table v-else :data="tasks" size="small" class="task-table" v-loading="loading">
-        <el-table-column prop="id" label="ID" width="70" />
+      <el-table v-else :data="tasks" size="small" class="task-table" v-loading="loading" :default-sort="{ prop: 'id', order: 'ascending' }">
+        <el-table-column prop="id" label="ID" width="70" sortable />
         <el-table-column label="名称" min-width="160">
           <template #default="{ row }">
             <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="model_name" label="模型" width="110" />
-        <el-table-column prop="dataset_name" label="数据集" width="110" />
-        <el-table-column label="环境" width="100">
+        <el-table-column prop="model_name" label="模型" width="110" sortable />
+        <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
+        <el-table-column prop="env_name" label="环境" width="100" sortable>
           <template #default="{ row }">
             <span class="env-tag">{{ row.env_name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column prop="status" label="状态" width="110" sortable>
           <template #default="{ row }">
             <span class="status-cell">
               <span :class="['status-dot', `status-${row.status}`]" />
@@ -156,7 +168,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="创建时间" width="170">
+        <el-table-column prop="created_at" label="创建时间" width="170" sortable>
           <template #default="{ row }">
             <span class="mono-time">{{ formatTime(row.created_at) }}</span>
           </template>
@@ -178,8 +190,20 @@
             </div>
           </template>
         </el-table-column>
-      </el-table>
-    </template>
+        </el-table>
+        <el-pagination
+          v-if="total > 0"
+          class="table-pagination"
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next"
+          size="small"
+          @current-change="handlePageChange"
+          @size-change="handlePageSizeChange"
+        />
+      </template>
   </div>
 </template>
 
@@ -201,7 +225,14 @@ const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('tas
 const loading = ref(true)
 const initialLoad = ref(true)
 
-const activeCount = computed(() => runningTasks.value.length + queueItems.value.length)
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
+const runningPage = ref(1)
+const runningPageSize = ref(20)
+const runningTotal = ref(0)
+
+const activeCount = computed(() => runningTotal.value + queueItems.value.length)
 
 const tabs = [
   { label: '全部', value: 'all' },
@@ -223,6 +254,8 @@ const statusLabel = (s: string) => statusLabels[s] || s
 
 const switchTab = (tab: string) => {
   activeTab.value = tab
+  page.value = 1
+  runningPage.value = 1
   sessionStorage.setItem('taskListTab', tab)
   router.replace({ query: tab !== 'running' ? { tab } : {} })
   loadAll()
@@ -240,25 +273,50 @@ const loadAll = async () => {
   try {
     if (activeTab.value === 'running') {
       const [running, queue] = await Promise.all([
-        listTasks({ status: 'running' }),
+        listTasks({ status: 'running', page: runningPage.value, page_size: runningPageSize.value }),
         getQueue().catch(() => []),
       ])
-      runningTasks.value = running
+      runningTasks.value = running.items
+      runningTotal.value = running.total
       queueItems.value = queue
     } else {
+      const status = activeTab.value !== 'all' ? activeTab.value : undefined
       const [filtered, running, queue] = await Promise.all([
-        listTasks({ status: activeTab.value !== 'all' ? activeTab.value : undefined }),
-        listTasks({ status: 'running' }),
+        listTasks({ status, page: page.value, page_size: pageSize.value }),
+        listTasks({ status: 'running', page: 1, page_size: 100 }),
         getQueue().catch(() => []),
       ])
-      tasks.value = filtered
-      runningTasks.value = running
+      tasks.value = filtered.items
+      total.value = filtered.total
+      runningTotal.value = running.total
       queueItems.value = queue
     }
   } finally {
     loading.value = false
     initialLoad.value = false
   }
+}
+
+const handlePageChange = (p: number) => {
+  page.value = p
+  loadAll()
+}
+
+const handlePageSizeChange = (s: number) => {
+  pageSize.value = s
+  page.value = 1
+  loadAll()
+}
+
+const handleRunningPageChange = (p: number) => {
+  runningPage.value = p
+  loadAll()
+}
+
+const handleRunningPageSizeChange = (s: number) => {
+  runningPageSize.value = s
+  runningPage.value = 1
+  loadAll()
 }
 
 const moveUp = async (idx: number) => {
@@ -480,6 +538,11 @@ html.dark .btn-primary:hover {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+.table-pagination {
+  margin-top: 12px;
+  justify-content: flex-end;
 }
 
 .pos-badge {
