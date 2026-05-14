@@ -15,6 +15,7 @@ declare module 'vue' {
     CommandPreview: typeof import('./src/components/task/CommandPreview.vue')['default']
     DatasetMetadataPanel: typeof import('./src/components/task/DatasetMetadataPanel.vue')['default']
     ElButton: typeof import('element-plus/es')['ElButton']
+    ElConfigProvider: typeof import('element-plus/es')['ElConfigProvider']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElDrawer: typeof import('element-plus/es')['ElDrawer']
     ElInput: typeof import('element-plus/es')['ElInput']
