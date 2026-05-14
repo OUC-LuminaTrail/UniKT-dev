@@ -1,17 +1,21 @@
 <template>
-  <div class="app-layout">
-    <Sidebar />
-    <div class="right-panel">
-      <header class="app-header">
-        <span class="header-title">{{ currentTitle }}</span>
+  <el-container class="app-layout">
+    <el-aside :width="isCollapsed ? '64px' : '220px'" class="app-aside">
+      <Sidebar :collapsed="isCollapsed" @toggle-collapse="isCollapsed = !isCollapsed" />
+    </el-aside>
+    <el-container>
+      <el-header class="app-header">
+        <div class="header-left">
+          <span class="header-title">{{ currentTitle }}</span>
+        </div>
         <div class="header-right">
           <span class="header-time">{{ currentTime }}</span>
         </div>
-      </header>
-      <main class="main-content" :class="{ 'main-content--flush': flushContent }">
+      </el-header>
+      <el-main class="main-content" :class="{ 'main-content--flush': flushContent }">
         <slot :flushContent="flushContent" />
-      </main>
-      <footer class="app-footer">
+      </el-main>
+      <el-footer class="app-footer">
         <div class="status-bar">
           <div class="status-item">
             <span class="status-dot" :style="{ background: progressColor(sys.cpu_percent) }"></span>
@@ -56,9 +60,9 @@
             <span class="status-value-sub">{{ sys.load_15m.toFixed(2) }}</span>
           </div>
         </div>
-      </footer>
-    </div>
-  </div>
+      </el-footer>
+    </el-container>
+  </el-container>
 </template>
 
 <script setup lang="ts">
@@ -68,6 +72,8 @@ import Sidebar from './Sidebar.vue'
 import { getSystemStatus, type SystemStatus } from '@/api/gpu'
 
 const route = useRoute()
+
+const isCollapsed = ref(false)
 
 const flushContent = computed(() => !!route.meta?.flush)
 
@@ -115,28 +121,21 @@ onUnmounted(() => {
 
 <style scoped>
 .app-layout {
-  display: flex;
   height: 100vh;
-  overflow: hidden;
   background: var(--bg-base);
 }
 
-.right-panel {
-  margin-left: 220px;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
+.app-aside {
+  transition: width 0.3s ease;
   overflow: hidden;
 }
 
 .app-header {
-  height: 48px;
-  flex-shrink: 0;
+  --el-header-padding: 0 24px;
+  --el-header-height: 48px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-muted);
 }
@@ -147,6 +146,12 @@ onUnmounted(() => {
   color: var(--text-primary);
   font-family: var(--font-sans);
   letter-spacing: -0.01em;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .header-right {
@@ -163,25 +168,22 @@ onUnmounted(() => {
 }
 
 .main-content {
-  flex: 1;
-  padding: 24px;
-  overflow-y: auto;
+  --el-main-padding: 24px;
   background: var(--bg-base);
 }
 
 .main-content--flush {
-  padding: 0;
+  --el-main-padding: 0;
   overflow: hidden;
 }
 
 .app-footer {
-  flex-shrink: 0;
-  height: 32px;
-  background: var(--bg-surface);
-  border-top: 1px solid var(--border-muted);
+  --el-footer-padding: 0 16px;
+  --el-footer-height: 32px;
   display: flex;
   align-items: center;
-  padding: 0 16px;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-muted);
 }
 
 .status-bar {

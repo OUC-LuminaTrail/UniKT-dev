@@ -135,7 +135,7 @@ find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
 [feature.web.dependencies]
 python = "3.12.*"
 python-dotenv = ">=1.2.1,<2"
-nodejs = "20.*"
+nodejs = "24.*"
 [feature.web.pypi-dependencies]
 fastapi = ">=0.115.0"
 uvicorn = { version = ">=0.34.0", extras = ["standard"] }
