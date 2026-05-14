@@ -27,12 +27,6 @@ const router = createRouter({
       },
     },
     {
-      path: '/experiments',
-      name: 'experiments',
-      component: () => import('@/views/ExperimentBrowser.vue'),
-      meta: { title: '实验日志' },
-    },
-    {
       path: '/gpu',
       name: 'gpu',
       component: () => import('@/views/GPUMonitor.vue'),

@@ -8,7 +8,6 @@ from middleware import MessageMiddleware
 from routers import (
     datasets,
     environments,
-    experiments,
     gpu,
     logs,
     preprocess,
@@ -58,7 +57,6 @@ app.include_router(tasks.router)
 app.include_router(logs.router)
 app.include_router(environments.router)
 app.include_router(schemas_api.router)
-app.include_router(experiments.router)
 app.include_router(gpu.router)
 app.include_router(preprocess.router)
 app.include_router(datasets.router)
