@@ -23,6 +23,8 @@ declare module 'vue' {
     ElOptionGroup: typeof import('element-plus/es')['ElOptionGroup']
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
+    ElTable: typeof import('element-plus/es')['ElTable']
+    ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
     LogCard: typeof import('./src/components/task/LogCard.vue')['default']
     LogTerminal: typeof import('./src/components/task/LogTerminal.vue')['default']
     ParamForm: typeof import('./src/components/task/ParamForm.vue')['default']
@@ -31,5 +33,8 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     SelectionStep: typeof import('./src/components/task/SelectionStep.vue')['default']
     Sidebar: typeof import('./src/components/layout/Sidebar.vue')['default']
+  }
+  export interface GlobalDirectives {
+    vLoading: typeof import('element-plus/es')['ElLoadingDirective']
   }
 }

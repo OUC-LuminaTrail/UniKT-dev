@@ -22,33 +22,8 @@
       </button>
     </div>
 
-    <!-- Loading skeleton -->
-    <template v-if="loading">
-      <div class="table-wrapper">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th class="col-id">ID</th>
-              <th class="col-name">名称</th>
-              <th class="col-model">模型</th>
-              <th class="col-dataset">数据集</th>
-              <th class="col-env">环境</th>
-              <th class="col-status">状态</th>
-              <th class="col-time">创建时间</th>
-              <th class="col-actions">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="i in 5" :key="i">
-              <td v-for="c in 8" :key="c"><div class="sk-bar" /></td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </template>
-
     <!-- Active tab: running tasks + queued tasks -->
-    <template v-else-if="activeTab === 'running'">
+    <template v-if="activeTab === 'running'">
       <div v-if="runningTasks.length === 0 && queueItems.length === 0" class="empty-state">
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="3" width="18" height="18" rx="2" />
@@ -63,54 +38,46 @@
           <span class="divider-label">运行中</span>
           <span class="divider-count">{{ runningTasks.length }}</span>
         </div>
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th class="col-id">ID</th>
-                <th class="col-name">名称</th>
-                <th class="col-model">模型</th>
-                <th class="col-dataset">数据集</th>
-                <th class="col-env">环境</th>
-                <th class="col-status">状态</th>
-                <th class="col-time">创建时间</th>
-                <th class="col-actions">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="task in runningTasks" :key="task.id">
-                <td class="col-id">{{ task.id }}</td>
-                <td class="col-name">
-                  <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="task-name-link">{{ task.name }}</router-link>
-                </td>
-                <td class="col-model">{{ task.model_name }}</td>
-                <td class="col-dataset">{{ task.dataset_name }}</td>
-                <td class="col-env">
-                  <span class="env-tag">{{ task.env_name }}</span>
-                </td>
-                <td class="col-status">
-                  <span class="status-cell">
-                    <span class="status-dot status-running" />
-                    <span class="status-text">运行中</span>
-                  </span>
-                </td>
-                <td class="col-time">
-                  <span class="mono-time">{{ formatTime(task.created_at) }}</span>
-                </td>
-                <td class="col-actions">
-                  <div class="action-group">
-                    <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="action-btn" title="查看详情">
-                      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
-                    </router-link>
-                    <button class="action-btn action-stop" title="停止任务" @click="handleStop(task.id)">
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <el-table :data="runningTasks" size="small" class="task-table">
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column label="名称" min-width="160">
+            <template #default="{ row }">
+              <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
+            </template>
+          </el-table-column>
+          <el-table-column prop="model_name" label="模型" width="110" />
+          <el-table-column prop="dataset_name" label="数据集" width="110" />
+          <el-table-column label="环境" width="100">
+            <template #default="{ row }">
+              <span class="env-tag">{{ row.env_name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default>
+              <span class="status-cell">
+                <span class="status-dot status-running" />
+                <span class="status-text">运行中</span>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="170">
+            <template #default="{ row }">
+              <span class="mono-time">{{ formatTime(row.created_at) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="90" align="right">
+            <template #default="{ row }">
+              <div class="action-group">
+                <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" title="查看详情">
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
+                </router-link>
+                <button class="action-btn action-stop" title="停止任务" @click="handleStop(row.id)">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+                </button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
       </template>
 
       <template v-if="queueItems.length > 0">
@@ -118,50 +85,41 @@
           <span class="divider-label">排队中</span>
           <span class="divider-count">{{ queueItems.length }}</span>
         </div>
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th class="col-pos">位置</th>
-                <th class="col-id">ID</th>
-                <th class="col-name">名称</th>
-                <th class="col-model">模型</th>
-                <th class="col-dataset">数据集</th>
-                <th class="col-time">创建时间</th>
-                <th class="col-actions">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(task, idx) in queueItems" :key="task.id">
-                <td class="col-pos">
-                  <span class="pos-badge">#{{ idx + 1 }}</span>
-                </td>
-                <td class="col-id">{{ task.id }}</td>
-                <td class="col-name">
-                  <span class="task-name-text">{{ task.name }}</span>
-                </td>
-                <td class="col-model">{{ task.model_name }}</td>
-                <td class="col-dataset">{{ task.dataset_name }}</td>
-                <td class="col-time">
-                  <span class="mono-time">{{ formatTime(task.created_at) }}</span>
-                </td>
-                <td class="col-actions">
-                  <div class="action-group">
-                    <button v-if="idx > 0" class="action-btn" title="上移" @click="moveUp(idx)">
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 1 .354.146l4 4a.5.5 0 0 1-.708.708L8 4.707 4.354 8.354a.5.5 0 1 1-.708-.708l4-4A.5.5 0 0 1 8 3.5z"/></svg>
-                    </button>
-                    <button v-if="idx < queueItems.length - 1" class="action-btn" title="下移" @click="moveDown(idx)">
-                      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12.5a.5.5 0 0 1-.354-.146l-4-4a.5.5 0 1 1 .708-.708L8 11.293l3.646-3.647a.5.5 0 0 1 .708.708l-4 4A.5.5 0 0 1 8 12.5z"/></svg>
-                    </button>
-                    <button class="action-btn action-delete" title="取消任务" @click="handleCancelQueue(task.id)">
-                      <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <el-table :data="queueItems" size="small" class="task-table">
+          <el-table-column label="位置" width="70">
+            <template #default="{ $index }">
+              <span class="pos-badge">#{{ $index + 1 }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column label="名称" min-width="160">
+            <template #default="{ row }">
+              <span class="task-name-text">{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="model_name" label="模型" width="110" />
+          <el-table-column prop="dataset_name" label="数据集" width="110" />
+          <el-table-column label="创建时间" width="170">
+            <template #default="{ row }">
+              <span class="mono-time">{{ formatTime(row.created_at) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="110" align="right">
+            <template #default="{ row, $index }">
+              <div class="action-group">
+                <button v-if="$index > 0" class="action-btn" title="上移" @click="moveUp($index)">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 1 .354.146l4 4a.5.5 0 0 1-.708.708L8 4.707 4.354 8.354a.5.5 0 1 1-.708-.708l4-4A.5.5 0 0 1 8 3.5z"/></svg>
+                </button>
+                <button v-if="$index < queueItems.length - 1" class="action-btn" title="下移" @click="moveDown($index)">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12.5a.5.5 0 0 1-.354-.146l-4-4a.5.5 0 1 1 .708-.708L8 11.293l3.646-3.647a.5.5 0 0 1 .708.708l-4 4A.5.5 0 0 1 8 12.5z"/></svg>
+                </button>
+                <button class="action-btn action-delete" title="取消任务" @click="handleCancelQueue(row.id)">
+                  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
+                </button>
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
       </template>
     </template>
 
@@ -176,59 +134,51 @@
         <span>开始训练后任务将显示在这里</span>
       </div>
 
-      <div v-else class="table-wrapper">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th class="col-id">ID</th>
-              <th class="col-name">名称</th>
-              <th class="col-model">模型</th>
-              <th class="col-dataset">数据集</th>
-              <th class="col-env">环境</th>
-              <th class="col-status">状态</th>
-              <th class="col-time">创建时间</th>
-              <th class="col-actions">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="task in tasks" :key="task.id">
-              <td class="col-id">{{ task.id }}</td>
-              <td class="col-name">
-                <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="task-name-link">{{ task.name }}</router-link>
-              </td>
-              <td class="col-model">{{ task.model_name }}</td>
-              <td class="col-dataset">{{ task.dataset_name }}</td>
-              <td class="col-env">
-                <span class="env-tag">{{ task.env_name }}</span>
-              </td>
-              <td class="col-status">
-                <span class="status-cell">
-                  <span :class="['status-dot', `status-${task.status}`]" />
-                  <span class="status-text">{{ statusLabel(task.status) }}</span>
-                </span>
-              </td>
-              <td class="col-time">
-                <span class="mono-time">{{ formatTime(task.created_at) }}</span>
-              </td>
-              <td class="col-actions">
-                <div class="action-group">
-                  <router-link :to="{ name: 'task-detail', params: { id: task.id } }" class="action-btn" title="查看详情">
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
-                  </router-link>
-                  <button
-                    v-if="task.status !== 'running'"
-                    class="action-btn action-delete"
-                    title="删除任务"
-                    @click="handleDelete(task.id)"
-                  >
-                    <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
-                  </button>
-                </div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <el-table v-else :data="tasks" size="small" class="task-table" v-loading="loading">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column label="名称" min-width="160">
+          <template #default="{ row }">
+            <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="model_name" label="模型" width="110" />
+        <el-table-column prop="dataset_name" label="数据集" width="110" />
+        <el-table-column label="环境" width="100">
+          <template #default="{ row }">
+            <span class="env-tag">{{ row.env_name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <span class="status-cell">
+              <span :class="['status-dot', `status-${row.status}`]" />
+              <span class="status-text">{{ statusLabel(row.status) }}</span>
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="170">
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatTime(row.created_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" align="right">
+          <template #default="{ row }">
+            <div class="action-group">
+              <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" title="查看详情">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
+              </router-link>
+              <button
+                v-if="row.status !== 'running'"
+                class="action-btn action-delete"
+                title="删除任务"
+                @click="handleDelete(row.id)"
+              >
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
+              </button>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
     </template>
   </div>
 </template>
@@ -526,88 +476,10 @@ html.dark .btn-primary:hover {
   font-size: 13px;
 }
 
-.table-wrapper {
+.task-table {
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   overflow: hidden;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-
-.data-table thead {
-  background: var(--bg-elevated);
-}
-
-.data-table th {
-  padding: 8px 12px;
-  text-align: left;
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border-default);
-  white-space: nowrap;
-}
-
-.data-table td {
-  padding: 8px 12px;
-  color: var(--text-primary);
-  border-bottom: 1px solid var(--border-muted);
-  white-space: nowrap;
-}
-
-.data-table tbody tr {
-  transition: background 0.1s;
-}
-
-.data-table tbody tr:hover {
-  background: var(--bg-overlay);
-}
-
-.data-table tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.col-pos {
-  width: 60px;
-}
-
-.col-id {
-  width: 56px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-.col-name {
-  min-width: 180px;
-}
-
-.col-model,
-.col-dataset {
-  width: 120px;
-}
-
-.col-env {
-  width: 100px;
-}
-
-.col-status {
-  width: 110px;
-}
-
-.col-time {
-  width: 170px;
-}
-
-.col-actions {
-  width: 100px;
-  text-align: right;
 }
 
 .pos-badge {
