@@ -28,7 +28,7 @@
         <div class="section-header">
           <div class="section-title-row">
             <span class="section-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              <el-icon :size="16"><Monitor /></el-icon>
             </span>
             <span class="section-title">任务队列</span>
           </div>
@@ -65,6 +65,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Monitor } from '@element-plus/icons-vue'
 import Cookies from 'universal-cookie'
 import { getSettings, updateSettings } from '@/api/settings'
 

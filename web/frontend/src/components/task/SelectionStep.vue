@@ -72,7 +72,7 @@
             @click="onDatasetClick(name)"
           >
             <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + name) }">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              <el-icon :size="18"><Coin /></el-icon>
             </div>
             <div class="card-name" :title="name">{{ name }}</div>
           </div>
@@ -92,6 +92,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { Coin } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
 import { getDatasetMetadata, type DatasetMetadata } from '@/api/datasets'
 import DatasetMetadataPanel from './DatasetMetadataPanel.vue'

@@ -28,9 +28,7 @@
   <div class="task-detail" v-else-if="task">
     <header class="detail-header">
       <button class="back-btn" @click="goBack">
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
-          <path d="M10 3L5 8L10 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+        <el-icon :size="18"><ArrowLeft /></el-icon>
       </button>
 
       <h1 class="task-name">{{ task.name }}</h1>
@@ -42,13 +40,11 @@
 
       <div class="header-actions" v-if="task.status === 'running'">
         <button class="action-btn stop" :disabled="stopping" @click="handleStop">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+          <el-icon :size="14"><SwitchButton /></el-icon>
           <span>{{ stopping ? '停止中…' : '停止' }}</span>
         </button>
         <button class="action-btn kill" :disabled="killing" @click="handleKill">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <path d="M4 4L12 12M12 4L4 12"/>
-          </svg>
+          <el-icon :size="14"><Bottom /></el-icon>
           <span>{{ killing ? '终止中…' : '强制终止' }}</span>
         </button>
       </div>
@@ -97,6 +93,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, SwitchButton, Bottom } from '@element-plus/icons-vue'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
 

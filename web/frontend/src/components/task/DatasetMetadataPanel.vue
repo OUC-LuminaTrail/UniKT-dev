@@ -2,7 +2,7 @@
   <div class="metadata-panel" v-if="metadata">
     <div class="metadata-header">
       <div class="metadata-icon" :style="{ background: iconGradient }">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        <el-icon :size="14"><Coin /></el-icon>
       </div>
       <span class="metadata-title">{{ dataset }}</span>
       <span v-if="metadata.sampled" class="sampled-badge">采样</span>
@@ -35,22 +35,23 @@
   </div>
 
   <div class="metadata-panel metadata-no-data" v-else-if="dataset && !loading">
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    <el-icon :size="32"><Coin /></el-icon>
     <span class="no-data-text">该数据集尚未预处理</span>
     <router-link v-if="showPreprocessLink" :to="{ name: 'preprocess', query: { dataset } }" class="preprocess-link">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <el-icon :size="14"><Download /></el-icon>
       去预处理
     </router-link>
   </div>
 
   <div class="metadata-panel metadata-placeholder" v-else>
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+    <el-icon :size="32"><Coin /></el-icon>
     <span>选择数据集以查看详细信息</span>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { Coin, Download } from '@element-plus/icons-vue'
 import { type DatasetMetadata } from '@/api/datasets'
 
 const HIDDEN_KEYS = new Set([

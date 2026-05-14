@@ -8,9 +8,7 @@
       <div class="group-header" @click="toggleGroup(group.group_name)">
         <div class="group-header-left">
           <span class="group-chevron" :class="{ expanded: isExpanded(group.group_name) }">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
+            <el-icon :size="12"><ArrowRight /></el-icon>
           </span>
           <span class="group-name">{{ group.group_name }}</span>
           <span class="group-count">{{ visibleParams(group).length }}</span>
@@ -78,6 +76,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { ArrowRight } from '@element-plus/icons-vue'
 import type { ModelSchema, ParamField } from '@/api/schemas'
 
 interface FieldEntry {

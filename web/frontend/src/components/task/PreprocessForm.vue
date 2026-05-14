@@ -4,7 +4,7 @@
       <div class="group-header" @click="toggleGroup('sequence')">
         <div class="group-header-left">
           <span class="group-chevron" :class="{ expanded: expandedGroups.includes('sequence') }">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <el-icon :size="12"><ArrowRight /></el-icon>
           </span>
           <span class="group-name">序列参数</span>
           <span class="group-count">4</span>
@@ -66,7 +66,7 @@
       <div class="group-header" @click="toggleGroup('sampling')">
         <div class="group-header-left">
           <span class="group-chevron" :class="{ expanded: expandedGroups.includes('sampling') }">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <el-icon :size="12"><ArrowRight /></el-icon>
           </span>
           <span class="group-name">采样参数</span>
           <span class="group-count">{{ samplingVisibleCount }}</span>
@@ -145,7 +145,7 @@
       <div class="group-header" @click="toggleGroup('extra')">
         <div class="group-header-left">
           <span class="group-chevron" :class="{ expanded: expandedGroups.includes('extra') }">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <el-icon :size="12"><ArrowRight /></el-icon>
           </span>
           <span class="group-name">额外选项</span>
           <span class="group-count">1</span>
@@ -174,7 +174,7 @@
       <div class="group-header" @click="toggleGroup('download')">
         <div class="group-header-left">
           <span class="group-chevron" :class="{ expanded: expandedGroups.includes('download') }">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4.5 2L8.5 6L4.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <el-icon :size="12"><ArrowRight /></el-icon>
           </span>
           <span class="group-name">下载选项</span>
           <span class="group-count">3</span>
@@ -225,6 +225,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { ArrowRight } from '@element-plus/icons-vue'
 
 const props = defineProps<{
   action: 'download' | 'process'

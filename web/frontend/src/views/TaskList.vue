@@ -3,9 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">训练任务</h1>
       <router-link :to="{ name: 'task-new' }" class="btn-primary">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
-          <path d="M8 2a.75.75 0 0 1 .75.75v4.5h4.5a.75.75 0 0 1 0 1.5h-4.5v4.5a.75.75 0 0 1-1.5 0v-4.5h-4.5a.75.75 0 0 1 0-1.5h4.5v-4.5A.75.75 0 0 1 8 2Z" />
-        </svg>
+        <el-icon :size="14"><Plus /></el-icon>
         新建任务
       </router-link>
     </div>
@@ -25,10 +23,7 @@
     <!-- Active tab: running tasks + queued tasks -->
     <template v-if="activeTab === 'running'">
       <div v-if="runningTasks.length === 0 && queueItems.length === 0" class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M9 9h6M9 13h6M9 17h4" />
-        </svg>
+        <el-icon :size="48"><Document /></el-icon>
         <p>暂无活跃任务</p>
         <span>新建的训练任务会显示在这里</span>
       </div>
@@ -69,10 +64,10 @@
             <template #default="{ row }">
               <div class="action-group">
                 <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" title="查看详情">
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
+                  <el-icon :size="15"><View /></el-icon>
                 </router-link>
                 <button class="action-btn action-stop" title="停止任务" @click="handleStop(row.id)">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+                  <el-icon :size="14"><SwitchButton /></el-icon>
                 </button>
               </div>
             </template>
@@ -120,13 +115,13 @@
             <template #default="{ row, $index }">
               <div class="action-group">
                 <button v-if="$index > 0" class="action-btn" title="上移" @click="moveUp($index)">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5a.5.5 0 0 1 .354.146l4 4a.5.5 0 0 1-.708.708L8 4.707 4.354 8.354a.5.5 0 1 1-.708-.708l4-4A.5.5 0 0 1 8 3.5z"/></svg>
+                  <el-icon :size="14"><ArrowUp /></el-icon>
                 </button>
                 <button v-if="$index < queueItems.length - 1" class="action-btn" title="下移" @click="moveDown($index)">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 12.5a.5.5 0 0 1-.354-.146l-4-4a.5.5 0 1 1 .708-.708L8 11.293l3.646-3.647a.5.5 0 0 1 .708.708l-4 4A.5.5 0 0 1 8 12.5z"/></svg>
+                  <el-icon :size="14"><ArrowDown /></el-icon>
                 </button>
                 <button class="action-btn action-delete" title="取消任务" @click="handleCancelQueue(row.id)">
-                  <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
+                  <el-icon :size="15"><Delete /></el-icon>
                 </button>
               </div>
             </template>
@@ -138,10 +133,7 @@
     <!-- Other tabs -->
     <template v-else>
       <div v-if="tasks.length === 0" class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2" />
-          <path d="M9 9h6M9 13h6M9 17h4" />
-        </svg>
+        <el-icon :size="48"><Document /></el-icon>
         <p>暂无任务</p>
         <span>开始训练后任务将显示在这里</span>
       </div>
@@ -177,7 +169,7 @@
           <template #default="{ row }">
             <div class="action-group">
               <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" title="查看详情">
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 3.5c-3.8 0-6.5 3.07-7.35 4.24a.5.5 0 0 0 0 .52C1.5 9.43 4.2 12.5 8 12.5s6.5-3.07 7.35-4.24a.5.5 0 0 0 0-.52C14.5 6.57 11.8 3.5 8 3.5ZM8 11c-2.76 0-5-2.24-5-5h1c0 2.21 1.79 4 4 4s4-1.79 4-4h1c0 2.76-2.24 5-5 5ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg>
+                <el-icon :size="15"><View /></el-icon>
               </router-link>
               <button
                 v-if="row.status !== 'running'"
@@ -185,7 +177,7 @@
                 title="删除任务"
                 @click="handleDelete(row.id)"
               >
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 0 1 .25-.25h2.5a.25.25 0 0 1 .25.25V3h3.75a.75.75 0 0 1 0 1.5h-.75l-.62 8.97A1.75 1.75 0 0 1 10.14 15H5.86a1.75 1.75 0 0 1-1.74-1.53L3.5 4.5H2.75a.75.75 0 0 1 0-1.5H6.5V1.75ZM5.08 4.5l.59 8.81a.25.25 0 0 0 .25.19h4.16a.25.25 0 0 0 .25-.19l.59-8.81H5.08ZM8 7a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 7Z"/></svg>
+                <el-icon :size="15"><Delete /></el-icon>
               </button>
             </div>
           </template>
@@ -211,6 +203,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document } from '@element-plus/icons-vue'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
 

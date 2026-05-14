@@ -2,17 +2,11 @@
   <section class="log-card" :style="cardStyle">
     <div class="log-card-header">
       <div class="log-card-title">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="2 4 2 12 14 12 14 4"/>
-          <line x1="5" y1="7" x2="11" y2="7"/>
-          <line x1="5" y1="9.5" x2="9" y2="9.5"/>
-        </svg>
+        <el-icon :size="16"><Tickets /></el-icon>
         <span>运行日志</span>
       </div>
       <button class="scroll-btn" @click="scrollToBottom">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M3 6L8 11L13 6"/>
-        </svg>
+        <el-icon :size="14"><Bottom /></el-icon>
         跳到底部
       </button>
     </div>
@@ -25,6 +19,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Terminal } from '@xterm/xterm'
+import { Tickets, Bottom } from '@element-plus/icons-vue'
 import LogTerminal from './LogTerminal.vue'
 
 const props = defineProps<{

@@ -13,12 +13,12 @@
           <div class="radio-group">
             <label class="radio-item" :class="{ active: action === 'download' }">
               <input type="radio" v-model="action" value="download" />
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <el-icon :size="14"><Download /></el-icon>
               <span>下载</span>
             </label>
             <label class="radio-item" :class="{ active: action === 'process' }">
               <input type="radio" v-model="action" value="process" />
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 4 16 8 20 8"/><line x1="14" y1="2" x2="20" y2="8"/><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/></svg>
+              <el-icon :size="14"><Upload /></el-icon>
               <span>处理</span>
             </label>
           </div>
@@ -42,7 +42,7 @@
                 @click="onDatasetClick(ds.name)"
               >
                 <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                  <el-icon :size="18"><Coin /></el-icon>
                 </div>
                 <div class="card-name" :title="ds.name">{{ ds.name }}</div>
               </div>
@@ -82,7 +82,7 @@
     <template v-if="phase === 'running' && taskInfo">
       <div class="running-header">
         <button v-if="taskInfo.status !== 'running'" class="back-btn" @click="onBack">
-          <svg width="14" height="14" viewBox="0 0 12 12" fill="none"><path d="M7.5 2L3.5 6L7.5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <el-icon :size="14"><ArrowLeft /></el-icon>
           返回
         </button>
         <span class="running-command mono">{{ taskInfo.command }}</span>
@@ -101,6 +101,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { Coin, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
 import { listDatasets, getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
 import { startPreprocess, getPreprocess, stopPreprocess, listPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
 import CommandPreview from '@/components/task/CommandPreview.vue'
