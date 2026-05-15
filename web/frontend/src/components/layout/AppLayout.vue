@@ -107,6 +107,7 @@ const progressColor = (pct: number) => {
 }
 
 const loadStatus = async () => {
+  if (!hasGpu.value) return
   try { sys.value = await getSystemStatus() } catch {}
 }
 
