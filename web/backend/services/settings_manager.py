@@ -49,12 +49,16 @@ class SettingsManager:
     def get_custom_python_path(self) -> str | None:
         return self.load().get("custom_python_path")
 
-    def set_default_env(self, env_id: str, custom_python_path: str | None = None) -> None:
-        self.save({
-            "default_env_id": env_id,
-            "custom_python_path": custom_python_path,
-            "setup_completed": True,
-        })
+    def set_default_env(
+        self, env_id: str, custom_python_path: str | None = None
+    ) -> None:
+        self.save(
+            {
+                "default_env_id": env_id,
+                "custom_python_path": custom_python_path,
+                "setup_completed": True,
+            }
+        )
 
     def is_setup_completed(self) -> bool:
         return bool(self.load().get("setup_completed"))

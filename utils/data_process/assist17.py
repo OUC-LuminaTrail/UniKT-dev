@@ -236,9 +236,9 @@ class Assistments2017Data(DataSource):
 
         # Convert response time from seconds to milliseconds
         data = data.with_columns(
-            (pl.col("ms_first_response") * 1000).cast(pl.Int64).alias(
-                "ms_first_response"
-            )
+            (pl.col("ms_first_response") * 1000)
+            .cast(pl.Int64)
+            .alias("ms_first_response")
         )
 
         # Convert to global relative time (dataset-wise earliest timestamp as zero)

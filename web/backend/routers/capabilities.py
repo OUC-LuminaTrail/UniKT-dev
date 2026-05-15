@@ -31,7 +31,9 @@ def _detect_gpu() -> CapabilitiesResponse:
                 has_gpu=False, gpu_count=0, gpu_names=[]
             )
             return _cached_capabilities
-        names = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
+        names = [
+            line.strip() for line in result.stdout.strip().split("\n") if line.strip()
+        ]
         _cached_capabilities = CapabilitiesResponse(
             has_gpu=len(names) > 0, gpu_count=len(names), gpu_names=names
         )

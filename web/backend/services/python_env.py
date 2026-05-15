@@ -5,6 +5,7 @@ import shutil
 import subprocess
 
 from schemas import EnvironmentInfo
+
 from services.settings_manager import SettingsManager
 
 
@@ -87,7 +88,9 @@ class PythonEnvManager:
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, "-c", "print('ok')",
+                *cmd,
+                "-c",
+                "print('ok')",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -101,7 +104,10 @@ class PythonEnvManager:
                 if proc.returncode == 0:
                     python_available = True
                 else:
-                    error = stderr.decode(errors="replace").strip() or f"exit code {proc.returncode}"
+                    error = (
+                        stderr.decode(errors="replace").strip()
+                        or f"exit code {proc.returncode}"
+                    )
         except FileNotFoundError:
             error = "Python executable not found"
         except Exception as e:
@@ -110,7 +116,9 @@ class PythonEnvManager:
         if python_available:
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    *cmd, "-c", "import sys; print(sys.version)",
+                    *cmd,
+                    "-c",
+                    "import sys; print(sys.version)",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -121,7 +129,9 @@ class PythonEnvManager:
 
             try:
                 proc = await asyncio.create_subprocess_exec(
-                    *cmd, "-c", "import torch; print(torch.__version__)",
+                    *cmd,
+                    "-c",
+                    "import torch; print(torch.__version__)",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

@@ -36,7 +36,9 @@ def start_preprocess(
         raise HTTPException(400, "action must be 'download' or 'process'")
     if not body.dataset:
         raise HTTPException(400, "dataset is required")
-    task = pm.start(body.action, body.dataset, body.params, body.env_id, body.custom_python_path)
+    task = pm.start(
+        body.action, body.dataset, body.params, body.env_id, body.custom_python_path
+    )
     return {
         "id": task.id,
         "command": " ".join(task.command),

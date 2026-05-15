@@ -13,6 +13,7 @@ from datetime import datetime
 from config import PROJECT_ROOT
 from database import SessionLocal
 from models import LogChunk
+
 from services.python_env import PythonEnvManager
 
 
@@ -55,9 +56,13 @@ class PreprocessManager:
         task_id = self._next_id
         self._next_id += 1
 
-        command = self._build_command(action, dataset, params, env_id, custom_python_path)
+        command = self._build_command(
+            action, dataset, params, env_id, custom_python_path
+        )
 
-        task = PreprocessTask(task_id, command, env_id=env_id, custom_python_path=custom_python_path)
+        task = PreprocessTask(
+            task_id, command, env_id=env_id, custom_python_path=custom_python_path
+        )
         self._tasks[task_id] = task
 
         master_fd, slave_fd = pty.openpty()

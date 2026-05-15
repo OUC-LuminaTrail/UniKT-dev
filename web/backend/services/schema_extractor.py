@@ -5,9 +5,7 @@ import sys
 from config import PROJECT_ROOT
 from schemas import ModelSchemaResponse, ParamField, ParamGroup
 
-HELPER_SCRIPT = str(
-    PROJECT_ROOT / "web" / "backend" / "services" / "_schema_helper.py"
-)
+HELPER_SCRIPT = str(PROJECT_ROOT / "web" / "backend" / "services" / "_schema_helper.py")
 
 
 def _parse_group(data: dict) -> ParamGroup:
