@@ -1,27 +1,20 @@
+import json
+import subprocess
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
-
+from config import PROJECT_ROOT
 from schemas import ModelSchemaResponse, ParamField, ParamGroup
 
+HELPER_SCRIPT = str(
+    PROJECT_ROOT / "web" / "backend" / "services" / "_schema_helper.py"
+)
 
-def _extract_group(group_name: str, params: dict) -> ParamGroup:
+
+def _parse_group(data: dict) -> ParamGroup:
     fields = {}
-    for name, cfg in params.items():
-        ptype = cfg.get("type")
-        if ptype is bool:
-            type_str = "bool"
-        elif ptype is int:
-            type_str = "int"
-        elif ptype is float:
-            type_str = "float"
-        elif ptype is str:
-            type_str = "str"
-        else:
-            type_str = "str"
+    for name, cfg in data["params"].items():
         fields[name] = ParamField(
-            type=type_str,
+            type=cfg.get("type", "str"),
             default=cfg.get("default"),
             help=cfg.get("help", ""),
             required=cfg.get("required", False),
@@ -29,32 +22,57 @@ def _extract_group(group_name: str, params: dict) -> ParamGroup:
             short=cfg.get("short"),
             nargs=cfg.get("nargs"),
         )
-    return ParamGroup(group_name=group_name, params=fields)
+    return ParamGroup(group_name=data["group_name"], params=fields)
 
 
 class SchemaExtractor:
-    def __init__(self):
-        import model  # noqa: F401
-        from utils.config import DataParams, EarlyStoppingParams, GeneralParams
-        from utils.core import PARAM_CONFIGS
+    def __init__(self, resolver=None, settings_manager=None):
+        self._resolver = resolver
+        self._settings_manager = settings_manager
+        self._models: list[str] | None = None
+        self._schemas: dict[str, list[dict]] = {}
 
-        self._param_configs = PARAM_CONFIGS
-        self._general = GeneralParams
-        self._data = DataParams
-        self._early_stopping = EarlyStoppingParams
+    def _resolve_base_cmd(self) -> list[str]:
+        if self._resolver and self._settings_manager:
+            default_env = self._settings_manager.get_default_env()
+            if default_env:
+                custom_path = self._settings_manager.get_custom_python_path()
+                return self._resolver.resolve_command(default_env, custom_path)
+        return [sys.executable]
+
+    def _run_helper(self) -> None:
+        if self._models is not None:
+            return
+        base = self._resolve_base_cmd()
+        cmd = base + [HELPER_SCRIPT]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
+        )
+        all_models: list[str] = []
+        errored: set[str] = set()
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry["type"] == "models":
+                all_models = entry["data"]
+            elif entry["type"] == "schema":
+                self._schemas[entry["model"]] = entry["data"]
+            elif entry["type"] == "error":
+                errored.add(entry["model"])
+        self._models = [m for m in all_models if m not in errored]
 
     def list_models(self) -> list[str]:
-        return list(self._param_configs.keys())
+        self._run_helper()
+        return self._models
 
     def get_model_schema(self, model_name: str) -> ModelSchemaResponse:
-        model_cls = self._param_configs.get(model_name)
-        if model_cls is None:
+        self._run_helper()
+        raw_groups = self._schemas.get(model_name)
+        if raw_groups is None:
             raise KeyError(f"Model '{model_name}' not found")
-
-        groups: list[ParamGroup] = []
-
-        for cls in [self._general, self._data, self._early_stopping, model_cls]:
-            inst = cls()
-            groups.append(_extract_group(inst.group_name, inst.params))
-
+        groups = [_parse_group(g) for g in raw_groups]
         return ModelSchemaResponse(model_name=model_name, param_groups=groups)
