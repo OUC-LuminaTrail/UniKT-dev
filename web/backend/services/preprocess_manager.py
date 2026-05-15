@@ -13,12 +13,21 @@ from datetime import datetime
 from config import PROJECT_ROOT
 from database import SessionLocal
 from models import LogChunk
+from services.python_env import PythonEnvManager
 
 
 class PreprocessTask:
-    def __init__(self, task_id: int, command: list[str]):
+    def __init__(
+        self,
+        task_id: int,
+        command: list[str],
+        env_id: str | None = None,
+        custom_python_path: str | None = None,
+    ):
         self.id = task_id
         self.command = command
+        self.env_id = env_id
+        self.custom_python_path = custom_python_path
         self.status: str = "running"
         self.exit_code: int | None = None
         self.started_at: datetime = datetime.now()
@@ -27,22 +36,28 @@ class PreprocessTask:
 
 
 class PreprocessManager:
-    def __init__(self, resolver=None, settings_manager=None):
-        self._resolver = resolver
-        self._settings_manager = settings_manager
+    def __init__(self, env_manager: PythonEnvManager):
+        self._env_manager = env_manager
         self._tasks: dict[int, PreprocessTask] = {}
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
         self._next_id = 1
 
-    def start(self, action: str, dataset: str, params: dict) -> PreprocessTask:
+    def start(
+        self,
+        action: str,
+        dataset: str,
+        params: dict,
+        env_id: str | None = None,
+        custom_python_path: str | None = None,
+    ) -> PreprocessTask:
         task_id = self._next_id
         self._next_id += 1
 
-        command = self._build_command(action, dataset, params)
+        command = self._build_command(action, dataset, params, env_id, custom_python_path)
 
-        task = PreprocessTask(task_id, command)
+        task = PreprocessTask(task_id, command, env_id=env_id, custom_python_path=custom_python_path)
         self._tasks[task_id] = task
 
         master_fd, slave_fd = pty.openpty()
@@ -144,16 +159,18 @@ class PreprocessManager:
                 os.killpg(pgid, signal.SIGINT)
         return True
 
-    def _resolve_base_cmd(self) -> list[str]:
-        if self._resolver and self._settings_manager:
-            default_env = self._settings_manager.get_default_env()
-            if default_env:
-                custom_path = self._settings_manager.get_custom_python_path()
-                return self._resolver.resolve_command(default_env, custom_path)
-        return ["python"]
-
-    def _build_command(self, action: str, dataset: str, params: dict) -> list[str]:
-        base = self._resolve_base_cmd()
+    def _build_command(
+        self,
+        action: str,
+        dataset: str,
+        params: dict,
+        env_id: str | None = None,
+        custom_python_path: str | None = None,
+    ) -> list[str]:
+        if env_id:
+            base = self._env_manager.resolve_command(env_id, custom_python_path)
+        else:
+            base = self._env_manager.resolve_default_command()
         cmd = base + ["data_process.py", action, "-d", dataset]
         if action == "download":
             if params.get("force"):

@@ -29,7 +29,7 @@ class TaskResponse(BaseModel):
     dataset_name: str
     env_type: str
     env_name: str
-    python_path: str
+    python_path: str | None = None
     status: str
     pid: int | None
     exp_dir: str
@@ -49,6 +49,20 @@ class EnvironmentInfo(BaseModel):
     name: str
     display_name: str
     python_path: str | None = None
+
+
+class EnvHealthCheckRequest(BaseModel):
+    env_id: str
+    custom_python_path: str | None = None
+
+
+class EnvHealthResult(BaseModel):
+    env_id: str
+    python_available: bool
+    python_version: str | None = None
+    torch_available: bool
+    torch_version: str | None = None
+    error: str | None = None
 
 
 class ParamField(BaseModel):

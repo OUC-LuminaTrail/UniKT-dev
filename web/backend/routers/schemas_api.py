@@ -1,30 +1,29 @@
-from dependencies import get_settings_manager
+from dependencies import get_python_env_manager, get_settings_manager
 from fastapi import APIRouter, Depends, HTTPException
 from schemas import ModelSchemaResponse
 from services.schema_extractor import SchemaExtractor
-from services.settings_manager import SettingsManager
+from services.python_env import PythonEnvManager
 
 router = APIRouter(prefix="/api/schemas", tags=["schemas"])
 
 _extractor: SchemaExtractor | None = None
 
 
-def _get_extractor(sm: SettingsManager = Depends(get_settings_manager)) -> SchemaExtractor:
+def _get_extractor(mgr: PythonEnvManager = Depends(get_python_env_manager)) -> SchemaExtractor:
     global _extractor
     if _extractor is None:
-        from services.environment_resolver import EnvironmentResolver
-        _extractor = SchemaExtractor(resolver=EnvironmentResolver(), settings_manager=sm)
+        _extractor = SchemaExtractor(env_manager=mgr)
     return _extractor
 
 
 @router.get("/models", response_model=list[str])
-def list_models():
-    return _get_extractor().list_models()
+def list_models(mgr: PythonEnvManager = Depends(get_python_env_manager)):
+    return _get_extractor(mgr).list_models()
 
 
 @router.get("/models/{model_name}/params", response_model=ModelSchemaResponse)
-def get_model_params(model_name: str):
+def get_model_params(model_name: str, mgr: PythonEnvManager = Depends(get_python_env_manager)):
     try:
-        return _get_extractor().get_model_schema(model_name)
+        return _get_extractor(mgr).get_model_schema(model_name)
     except KeyError:
         raise HTTPException(404, f"Model '{model_name}' not found")

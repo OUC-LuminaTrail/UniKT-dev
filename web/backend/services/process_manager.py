@@ -16,12 +16,12 @@ import psutil
 from database import SessionLocal
 from models import LogChunk, Task
 
-from services.environment_resolver import EnvironmentResolver
+from services.python_env import PythonEnvManager
 
 
 class ProcessManager:
-    def __init__(self):
-        self._resolver = EnvironmentResolver()
+    def __init__(self, env_manager: PythonEnvManager):
+        self._env_manager = env_manager
         self._monitors: dict[int, threading.Thread] = {}
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
@@ -72,7 +72,7 @@ class ProcessManager:
             if not task:
                 return
 
-            base_cmd = self._resolver.resolve_command(env_id, custom_python_path)
+            base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             cli_args = self._build_cli_args(model_name, params)
             cmd = base_cmd + cli_args
 
@@ -131,7 +131,7 @@ class ProcessManager:
             if not task:
                 return
 
-            base_cmd = self._resolver.resolve_command(env_id, custom_python_path)
+            base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             cli_args = self._build_cli_args(model_name, params)
             cmd = base_cmd + cli_args
 

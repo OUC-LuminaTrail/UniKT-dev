@@ -23,23 +23,25 @@ async def lifespan(app: FastAPI):
     import dependencies as deps
 
     init_db()
+    deps.settings_manager = __import__(
+        "services.settings_manager", fromlist=["SettingsManager"]
+    ).SettingsManager()
+    deps.python_env_manager = __import__(
+        "services.python_env", fromlist=["PythonEnvManager"]
+    ).PythonEnvManager(settings_manager=deps.settings_manager)
     deps.process_manager = __import__(
         "services.process_manager", fromlist=["ProcessManager"]
-    ).ProcessManager()
+    ).ProcessManager(env_manager=deps.python_env_manager)
     deps.process_manager.recover_tasks()
     deps.gpu_monitor = __import__(
         "services.gpu_monitor", fromlist=["GpuMonitor"]
     ).GpuMonitor()
-    deps.settings_manager = __import__(
-        "services.settings_manager", fromlist=["SettingsManager"]
-    ).SettingsManager()
-    resolver = __import__(
-        "services.environment_resolver", fromlist=["EnvironmentResolver"]
-    ).EnvironmentResolver()
     deps.preprocess_manager = __import__(
         "services.preprocess_manager", fromlist=["PreprocessManager"]
-    ).PreprocessManager(resolver=resolver, settings_manager=deps.settings_manager)
+    ).PreprocessManager(env_manager=deps.python_env_manager)
     yield
+    if deps.preprocess_manager:
+        deps.preprocess_manager.shutdown()
     if deps.process_manager:
         deps.process_manager.shutdown()
 

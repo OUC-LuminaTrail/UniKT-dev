@@ -26,18 +26,14 @@ def _parse_group(data: dict) -> ParamGroup:
 
 
 class SchemaExtractor:
-    def __init__(self, resolver=None, settings_manager=None):
-        self._resolver = resolver
-        self._settings_manager = settings_manager
+    def __init__(self, env_manager):
+        self._env_manager = env_manager
         self._models: list[str] | None = None
         self._schemas: dict[str, list[dict]] = {}
 
     def _resolve_base_cmd(self) -> list[str]:
-        if self._resolver and self._settings_manager:
-            default_env = self._settings_manager.get_default_env()
-            if default_env:
-                custom_path = self._settings_manager.get_custom_python_path()
-                return self._resolver.resolve_command(default_env, custom_path)
+        if self._env_manager:
+            return self._env_manager.resolve_default_command()
         return [sys.executable]
 
     def _run_helper(self) -> None:
