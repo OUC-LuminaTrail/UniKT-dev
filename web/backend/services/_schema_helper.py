@@ -3,6 +3,8 @@ import sys
 
 sys.path.insert(0, ".")
 
+import model
+
 from utils.config.param_config import DataParams, EarlyStoppingParams, GeneralParams
 from utils.core import PARAM_CONFIGS
 
