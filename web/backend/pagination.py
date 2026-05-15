@@ -2,12 +2,12 @@ from collections.abc import Sequence
 from typing import Generic, TypeVar
 
 from fastapi_pagination.bases import AbstractPage, AbstractParams, RawParams
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 T = TypeVar("T")
 
 
-class Params(AbstractParams):
+class Params(BaseModel, AbstractParams):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 
