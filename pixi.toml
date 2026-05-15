@@ -153,7 +153,7 @@ dhg-cpu = { features = ["dhg-cpu"] }
 dhg-gpu = { features = ["dhg-gpu"] }
 cpu = { features = ["cpu"] }
 mamba = { features = ["mamba"] }
-web = { features = ["gpu", "web"] }
+web = { features = ["web"] }
 default = { features = ["gpu"] }
 
 [tasks]
