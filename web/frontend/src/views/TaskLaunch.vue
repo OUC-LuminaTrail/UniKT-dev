@@ -324,7 +324,7 @@ watch(() => initDataQuery.data.value, async (data) => {
   if (savedDataset && datasets.value.includes(savedDataset)) {
     dataset.value = savedDataset
   }
-}, { once: true })
+}, { immediate: true })
 </script>
 
 <style scoped>
