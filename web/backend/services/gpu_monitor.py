@@ -1,3 +1,4 @@
+import contextlib
 import os
 import time
 
@@ -59,10 +60,8 @@ class GpuMonitor:
             pynvml.nvmlShutdown()
             return gpus
         except (pynvml.NVMLError, Exception):
-            try:
+            with contextlib.suppress(Exception):
                 pynvml.nvmlShutdown()
-            except Exception:
-                pass
             return []
 
     def get_system_status(self) -> SystemStatusResponse:

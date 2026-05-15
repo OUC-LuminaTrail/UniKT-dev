@@ -23,9 +23,13 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links', '@xterm/addon-search'],
-          'vue-vendor': ['vue', 'vue-router'],
+        manualChunks(id) {
+          if (id.includes('@xterm/xterm') || id.includes('@xterm/addon-fit') || id.includes('@xterm/addon-web-links') || id.includes('@xterm/addon-search')) {
+            return 'xterm'
+          }
+          if (id.includes('node_modules/vue/') || id.includes('node_modules/vue-router/')) {
+            return 'vue-vendor'
+          }
         }
       }
     }
