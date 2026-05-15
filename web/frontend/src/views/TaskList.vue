@@ -138,8 +138,30 @@
         <span>开始训练后任务将显示在这里</span>
       </div>
 
-      <el-table v-else :data="tasks" size="small" class="task-table" v-loading="loading" :default-sort="{ prop: 'id', order: 'ascending' }">
-        <el-table-column prop="id" label="ID" width="70" sortable />
+      <template v-else>
+        <transition name="batch-bar">
+          <div v-if="selectedTasks.length > 0" class="batch-bar">
+            <span class="batch-info">已选择 <strong>{{ selectedTasks.length }}</strong> 项</span>
+            <button class="batch-delete-btn" @click="handleBatchDelete">
+              <el-icon :size="14"><Delete /></el-icon>
+              批量删除
+            </button>
+            <button class="batch-clear-btn" @click="clearSelection">取消选择</button>
+          </div>
+        </transition>
+
+        <el-table
+          ref="otherTableRef"
+          :data="tasks"
+          row-key="id"
+          size="small"
+          class="task-table"
+          v-loading="loading"
+          :default-sort="{ prop: 'id', order: 'ascending' }"
+          @selection-change="handleSelectionChange"
+        >
+          <el-table-column type="selection" width="45" reserve-selection />
+          <el-table-column prop="id" label="ID" width="70" sortable />
         <el-table-column label="名称" min-width="160">
           <template #default="{ row }">
             <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
@@ -196,6 +218,7 @@
           @size-change="handlePageSizeChange"
         />
       </template>
+    </template>
   </div>
 </template>
 
@@ -203,6 +226,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { ElTable } from 'element-plus'
 import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document } from '@element-plus/icons-vue'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
@@ -227,6 +251,9 @@ const runningTotal = ref(0)
 
 const activeCount = computed(() => runningTotal.value + queueItems.value.length)
 
+const selectedTasks = ref<TaskInfo[]>([])
+const otherTableRef = ref<InstanceType<typeof ElTable>>()
+
 const tabs = [
   { label: '全部', value: 'all' },
   { label: '活跃', value: 'running' },
@@ -249,6 +276,7 @@ const switchTab = (tab: string) => {
   activeTab.value = tab
   page.value = 1
   runningPage.value = 1
+  selectedTasks.value = []
   sessionStorage.setItem('taskListTab', tab)
   router.replace({ query: tab !== 'running' ? { tab } : {} })
   loadAll()
@@ -361,6 +389,32 @@ const handleDelete = async (id: number) => {
   })
   await deleteTask(id)
   ElMessage.success('已删除')
+  loadAll()
+}
+
+const handleSelectionChange = (rows: TaskInfo[]) => {
+  selectedTasks.value = rows
+}
+
+const clearSelection = () => {
+  otherTableRef.value?.clearSelection()
+}
+
+const handleBatchDelete = async () => {
+  const count = selectedTasks.value.length
+  const runningSelected = selectedTasks.value.filter(t => t.status === 'running')
+  if (runningSelected.length > 0) {
+    ElMessage.warning(`选中项包含 ${runningSelected.length} 个运行中的任务，无法删除`)
+    return
+  }
+  await ElMessageBox.confirm(`确定删除选中的 ${count} 个任务？此操作不可撤销。`, '批量删除', {
+    confirmButtonText: '删除',
+    cancelButtonText: '取消',
+    type: 'warning',
+  })
+  await Promise.all(selectedTasks.value.map(t => deleteTask(t.id)))
+  ElMessage.success(`已删除 ${count} 个任务`)
+  clearSelection()
   loadAll()
 }
 
@@ -661,5 +715,71 @@ html.dark .btn-primary:hover {
 .action-delete:hover {
   color: var(--accent-red);
   background: rgba(248, 81, 73, 0.12);
+}
+
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.batch-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.batch-info strong {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.batch-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--accent-red);
+  border: 1px solid rgba(248, 81, 73, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.batch-delete-btn:hover {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.batch-clear-btn {
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.batch-clear-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+.batch-bar-enter-active,
+.batch-bar-leave-active {
+  transition: all 0.2s ease;
+}
+
+.batch-bar-enter-from,
+.batch-bar-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
 }
 </style>
