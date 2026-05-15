@@ -91,10 +91,10 @@ class UniversalRegistry:
         if name in self._lazy_registry:
             import importlib
 
-            module_path, attr_name = self._lazy_registry.pop(name)
+            module_path, attr_name = self._lazy_registry[name]
             module = importlib.import_module(module_path)
             cls = getattr(module, attr_name) if attr_name else module
-            # 注册到实际注册表
+            self._lazy_registry.pop(name)
             self._registry[name] = cls
             return cls
 
