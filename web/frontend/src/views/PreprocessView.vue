@@ -24,6 +24,47 @@
           </div>
         </div>
 
+        <div class="section" v-if="environments.length">
+          <div class="section-label">运行环境</div>
+          <el-select
+            v-model="selectedEnvId"
+            placeholder="使用默认环境"
+            clearable
+            class="env-select"
+          >
+            <el-option-group label="Pixi">
+              <el-option
+                v-for="env in pixiEnvs"
+                :key="env.id"
+                :label="env.display_name"
+                :value="env.id"
+              />
+            </el-option-group>
+            <el-option-group label="Conda" v-if="condaEnvs.length">
+              <el-option
+                v-for="env in condaEnvs"
+                :key="env.id"
+                :label="env.display_name"
+                :value="env.id"
+              />
+            </el-option-group>
+            <el-option-group label="Other" v-if="otherEnvs.length">
+              <el-option
+                v-for="env in otherEnvs"
+                :key="env.id"
+                :label="env.display_name"
+                :value="env.id"
+              />
+            </el-option-group>
+          </el-select>
+          <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
+            <el-input
+              v-model="customPythonPath"
+              placeholder="/path/to/python"
+            />
+          </div>
+        </div>
+
         <div class="section">
           <div class="section-label">数据集</div>
           <div class="dataset-layout">
@@ -70,49 +111,6 @@
           @update:process-opts="onProcessOptsUpdate"
         />
 
-        <div class="section" v-if="environments.length">
-          <div class="section-label">运行环境</div>
-          <div class="env-row">
-            <el-select
-              v-model="selectedEnvId"
-              placeholder="使用默认环境"
-              clearable
-              class="env-select"
-            >
-              <el-option-group label="Pixi">
-                <el-option
-                  v-for="env in pixiEnvs"
-                  :key="env.id"
-                  :label="env.display_name"
-                  :value="env.id"
-                />
-              </el-option-group>
-              <el-option-group label="Conda" v-if="condaEnvs.length">
-                <el-option
-                  v-for="env in condaEnvs"
-                  :key="env.id"
-                  :label="env.display_name"
-                  :value="env.id"
-                />
-              </el-option-group>
-              <el-option-group label="Other" v-if="otherEnvs.length">
-                <el-option
-                  v-for="env in otherEnvs"
-                  :key="env.id"
-                  :label="env.display_name"
-                  :value="env.id"
-                />
-              </el-option-group>
-            </el-select>
-          </div>
-          <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
-            <el-input
-              v-model="customPythonPath"
-              placeholder="/path/to/python"
-              style="max-width: 400px"
-            />
-          </div>
-        </div>
       </div>
 
       <CommandPreview :command="previewCommand">
@@ -607,17 +605,12 @@ const onBack = () => {
   cursor: not-allowed;
 }
 
-.env-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
 .env-select {
   max-width: 400px;
 }
 
 .custom-path-row {
   margin-top: 8px;
+  max-width: 400px;
 }
 </style>
