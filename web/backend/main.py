@@ -3,8 +3,11 @@ from contextlib import asynccontextmanager
 from database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_pagination import add_pagination
+from fastapi_pagination.api import set_page
 from fastapi_problem.handler import add_exception_handler, new_exception_handler
 from middleware import MessageMiddleware
+from pagination import Page
 from routers import (
     capabilities,
     datasets,
@@ -61,6 +64,9 @@ app.add_middleware(
 )
 
 app.add_middleware(MessageMiddleware)
+
+set_page(Page)
+add_pagination(app)
 
 app.include_router(tasks.router)
 app.include_router(logs.router)

@@ -4,10 +4,11 @@ from database import SessionLocal
 from dependencies import get_process_manager
 from fastapi import APIRouter, Depends, HTTPException
 from models import Task
+from pagination import Page, Params
 from pydantic import BaseModel
-from schemas import PaginatedResponse, TaskCreate, TaskResponse
+from schemas import TaskCreate, TaskResponse
 from services.process_manager import ProcessManager
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -45,19 +46,18 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         return task
 
 
-@router.get("", response_model=PaginatedResponse[TaskResponse])
+@router.get("", response_model=Page[TaskResponse])
 def list_tasks(
     status: str | None = None,
-    page: int = 1,
-    page_size: int = 20,
+    params: Params = Depends(),
 ):
+    from fastapi_pagination.ext.sqlalchemy import paginate
+
     with SessionLocal() as session:
-        q = session.query(Task).order_by(desc(Task.created_at))
+        stmt = select(Task).order_by(desc(Task.created_at))
         if status:
-            q = q.filter(Task.status == status)
-        total = q.count()
-        tasks = q.offset((page - 1) * page_size).limit(page_size).all()
-        return {"items": tasks, "total": total, "page": page, "page_size": page_size}
+            stmt = stmt.where(Task.status == status)
+        return paginate(session, stmt, params=params)
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
