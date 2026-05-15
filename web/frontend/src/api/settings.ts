@@ -32,10 +32,12 @@ export interface InitStatus {
 
 export interface DefaultEnv {
   default_env_id: string | null
+  custom_python_path: string | null
 }
 
 export interface DefaultEnvUpdate {
   env_id: string
+  custom_python_path?: string | null
 }
 
 export const getInitStatus = () =>
@@ -44,5 +46,5 @@ export const getInitStatus = () =>
 export const getDefaultEnv = () =>
   api.get<DefaultEnv>('/settings/default-env').then(r => r.data)
 
-export const setDefaultEnv = (env_id: string) =>
-  api.post<DefaultEnvUpdate & { ok: boolean }>('/settings/default-env', { env_id }).then(r => r.data)
+export const setDefaultEnv = (data: DefaultEnvUpdate) =>
+  api.post<DefaultEnvUpdate & { ok: boolean }>('/settings/default-env', data).then(r => r.data)

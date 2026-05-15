@@ -23,6 +23,12 @@
           <div class="env-type-badge">{{ env.type }}</div>
           <div class="env-name">{{ env.display_name }}</div>
         </div>
+        <div v-if="selected === 'custom:0'" class="custom-path-row">
+          <el-input
+            v-model="customPath"
+            placeholder="/path/to/python"
+          />
+        </div>
       </div>
 
       <div class="wizard-empty" v-else>
@@ -58,6 +64,7 @@ const emit = defineEmits<{
 
 const envs = ref<EnvironmentInfo[]>([])
 const selected = ref<string | null>(null)
+const customPath = ref('')
 const loading = ref(true)
 const submitting = ref(false)
 
@@ -73,7 +80,10 @@ const onComplete = async () => {
   if (!selected.value) return
   submitting.value = true
   try {
-    await setDefaultEnv(selected.value)
+    await setDefaultEnv({
+      env_id: selected.value,
+      custom_python_path: selected.value === 'custom:0' ? customPath.value || null : null,
+    })
     emit('done')
   } catch {} finally {
     submitting.value = false
@@ -218,5 +228,9 @@ const onComplete = async () => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.custom-path-row {
+  margin-top: 4px;
 }
 </style>

@@ -7,7 +7,11 @@ from config import DATABASE_PATH
 
 SETTINGS_PATH = DATABASE_PATH.parent / "settings.json"
 
-_DEFAULT_SETTINGS = {"default_env_id": None, "setup_completed": False}
+_DEFAULT_SETTINGS = {
+    "default_env_id": None,
+    "custom_python_path": None,
+    "setup_completed": False,
+}
 
 
 class SettingsManager:
@@ -40,8 +44,15 @@ class SettingsManager:
     def get_default_env(self) -> str | None:
         return self.load().get("default_env_id")
 
-    def set_default_env(self, env_id: str) -> None:
-        self.save({"default_env_id": env_id, "setup_completed": True})
+    def get_custom_python_path(self) -> str | None:
+        return self.load().get("custom_python_path")
+
+    def set_default_env(self, env_id: str, custom_python_path: str | None = None) -> None:
+        self.save({
+            "default_env_id": env_id,
+            "custom_python_path": custom_python_path,
+            "setup_completed": True,
+        })
 
     def is_setup_completed(self) -> bool:
         return bool(self.load().get("setup_completed"))

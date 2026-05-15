@@ -93,6 +93,18 @@
             </el-select>
           </div>
         </div>
+        <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
+          <div class="setting-info">
+            <span class="setting-key">Python 路径</span>
+            <span class="setting-help">自定义 Python 解释器的完整路径</span>
+          </div>
+          <el-input
+            v-model="customPythonPath"
+            placeholder="/path/to/python"
+            style="max-width: 400px"
+            @blur="onCustomPathBlur"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -116,6 +128,7 @@ const saved = ref(false)
 const loading = ref(true)
 
 const selectedEnvId = ref<string | null>(null)
+const customPythonPath = ref('')
 const envList = ref<EnvironmentInfo[]>([])
 
 onMounted(async () => {
@@ -128,6 +141,7 @@ onMounted(async () => {
     maxConcurrent.value = settings.max_concurrent
     envList.value = envs
     selectedEnvId.value = envRes.default_env_id
+    customPythonPath.value = envRes.custom_python_path || ''
   } catch {
     const cached = cookies.get<{ max_concurrent: number }>(COOKIE_KEY)
     if (cached?.max_concurrent) {
@@ -155,8 +169,21 @@ const onSave = async () => {
 
 const onEnvChange = async (envId: string) => {
   try {
-    await setDefaultEnv(envId)
+    await setDefaultEnv({
+      env_id: envId,
+      custom_python_path: envId === 'custom:0' ? customPythonPath.value || null : null,
+    })
     ElMessage.success('默认环境已更新')
+  } catch {}
+}
+
+const onCustomPathBlur = async () => {
+  if (selectedEnvId.value !== 'custom:0') return
+  try {
+    await setDefaultEnv({
+      env_id: selectedEnvId.value,
+      custom_python_path: customPythonPath.value || null,
+    })
   } catch {}
 }
 </script>
@@ -262,5 +289,14 @@ const onEnvChange = async (envId: string) => {
 .saved-hint {
   font-size: 12px;
   color: var(--accent-green);
+}
+
+.custom-path-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
 }
 </style>

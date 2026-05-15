@@ -30,18 +30,22 @@ def update_settings(
 
 class DefaultEnvUpdate(BaseModel):
     env_id: str
+    custom_python_path: str | None = None
 
 
 @router.get("/default-env")
 def get_default_env(sm: SettingsManager = Depends(get_settings_manager)):
-    return {"default_env_id": sm.get_default_env()}
+    return {
+        "default_env_id": sm.get_default_env(),
+        "custom_python_path": sm.get_custom_python_path(),
+    }
 
 
 @router.post("/default-env")
 def set_default_env(
     body: DefaultEnvUpdate, sm: SettingsManager = Depends(get_settings_manager)
 ):
-    sm.set_default_env(body.env_id)
+    sm.set_default_env(body.env_id, body.custom_python_path)
     return {"ok": True, "default_env_id": body.env_id}
 
 
