@@ -262,19 +262,24 @@ onMounted(async () => {
     const [envs, modelList, defaultEnv] = await Promise.all([
       listEnvironments(),
       listModels(),
-      getDefaultEnv().catch(() => ({ default_env_id: null })),
+      getDefaultEnv().catch(() => ({ default_env_id: null, custom_python_path: null, remember_last_env: false })),
     ])
     environments.value = envs
     models.value = modelList
 
     const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
-    if (savedEnv && envs.some(e => e.id === savedEnv)) {
+    if (defaultEnv.remember_last_env && savedEnv && envs.some(e => e.id === savedEnv)) {
       envId.value = savedEnv
+      if (savedEnv === 'custom:0' && defaultEnv.custom_python_path) {
+        customPythonPath.value = defaultEnv.custom_python_path
+      }
     } else if (defaultEnv.default_env_id && envs.some(e => e.id === defaultEnv.default_env_id)) {
       envId.value = defaultEnv.default_env_id
       if (defaultEnv.custom_python_path) {
         customPythonPath.value = defaultEnv.custom_python_path
       }
+    } else if (savedEnv && envs.some(e => e.id === savedEnv)) {
+      envId.value = savedEnv
     }
 
     const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)

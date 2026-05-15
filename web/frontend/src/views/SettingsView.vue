@@ -91,6 +91,39 @@
                 :value="env.id"
               />
             </el-select>
+            <el-button
+              size="small"
+              :loading="healthChecking"
+              :disabled="!selectedEnvId"
+              @click="onHealthCheck"
+              style="margin-left: 8px"
+            >
+              {{ healthChecking ? '检测中...' : '检测环境' }}
+            </el-button>
+          </div>
+        </div>
+        <div v-if="healthResult" class="health-result">
+          <div class="health-item">
+            <span class="health-label">Python</span>
+            <span v-if="healthResult.python_available" class="health-ok">
+              <el-icon :size="12"><CircleCheck /></el-icon>
+              {{ healthResult.python_version || '可用' }}
+            </span>
+            <span v-else class="health-fail">
+              <el-icon :size="12"><CircleClose /></el-icon>
+              {{ healthResult.error || '不可用' }}
+            </span>
+          </div>
+          <div class="health-item">
+            <span class="health-label">PyTorch</span>
+            <span v-if="healthResult.torch_available" class="health-ok">
+              <el-icon :size="12"><CircleCheck /></el-icon>
+              {{ healthResult.torch_version }}
+            </span>
+            <span v-else class="health-fail">
+              <el-icon :size="12"><CircleClose /></el-icon>
+              不可用
+            </span>
           </div>
         </div>
         <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
@@ -105,6 +138,19 @@
             @blur="onCustomPathBlur"
           />
         </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-key">记住上次使用的环境</span>
+            <span class="setting-help">开启后，新建训练任务时默认使用上次选择的环境，而非此处的默认环境</span>
+          </div>
+          <div class="setting-control">
+            <el-switch
+              v-model="rememberLastEnv"
+              @change="onRememberLastEnvChange"
+            />
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -114,9 +160,10 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Monitor, Cpu } from '@element-plus/icons-vue'
+import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import Cookies from 'universal-cookie'
 import { getSettings, updateSettings, getDefaultEnv, setDefaultEnv } from '@/api/settings'
-import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
+import { listEnvironments, healthCheckEnv, type EnvironmentInfo, type EnvHealthResult } from '@/api/environments'
 
 const cookies = new Cookies()
 
@@ -129,7 +176,10 @@ const loading = ref(true)
 
 const selectedEnvId = ref<string | null>(null)
 const customPythonPath = ref('')
+const rememberLastEnv = ref(false)
 const envList = ref<EnvironmentInfo[]>([])
+const healthChecking = ref(false)
+const healthResult = ref<EnvHealthResult | null>(null)
 
 onMounted(async () => {
   try {
@@ -142,6 +192,7 @@ onMounted(async () => {
     envList.value = envs
     selectedEnvId.value = envRes.default_env_id
     customPythonPath.value = envRes.custom_python_path || ''
+    rememberLastEnv.value = envRes.remember_last_env
   } catch {
     const cached = cookies.get<{ max_concurrent: number }>(COOKIE_KEY)
     if (cached?.max_concurrent) {
@@ -183,6 +234,31 @@ const onCustomPathBlur = async () => {
     await setDefaultEnv({
       env_id: selectedEnvId.value,
       custom_python_path: customPythonPath.value || null,
+    })
+  } catch {}
+}
+
+const onHealthCheck = async () => {
+  if (!selectedEnvId.value) return
+  healthChecking.value = true
+  healthResult.value = null
+  try {
+    healthResult.value = await healthCheckEnv({
+      env_id: selectedEnvId.value,
+      custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
+    })
+  } catch {
+    healthResult.value = null
+  } finally {
+    healthChecking.value = false
+  }
+}
+
+const onRememberLastEnvChange = async (val: boolean) => {
+  try {
+    await setDefaultEnv({
+      env_id: selectedEnvId.value || '',
+      remember_last_env: val,
     })
   } catch {}
 }
@@ -275,10 +351,6 @@ const onCustomPathBlur = async () => {
   color: var(--text-tertiary);
 }
 
-.setting-control {
-  flex-shrink: 0;
-}
-
 .card-footer {
   display: flex;
   align-items: center;
@@ -298,5 +370,46 @@ const onCustomPathBlur = async () => {
   padding: 12px 16px;
   background: var(--bg-elevated);
   border-radius: var(--radius-md);
+}
+
+.setting-control {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+
+.health-result {
+  display: flex;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  margin-top: 8px;
+}
+
+.health-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.health-label {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.health-ok {
+  color: var(--accent-green);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.health-fail {
+  color: var(--accent-red);
+  display: flex;
+  align-items: center;
+  gap: 3px;
 }
 </style>

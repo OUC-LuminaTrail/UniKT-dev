@@ -11,6 +11,7 @@ _DEFAULT_SETTINGS = {
     "default_env_id": None,
     "custom_python_path": None,
     "setup_completed": False,
+    "remember_last_env": False,
 }
 
 
@@ -30,7 +31,8 @@ class SettingsManager:
 
     def save(self, data: dict) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        merged = {**_DEFAULT_SETTINGS, **data}
+        current = self.load()
+        merged = {**current, **data}
         fd, tmp = tempfile.mkstemp(dir=str(self._path.parent))
         try:
             with os.fdopen(fd, "w") as f:
@@ -56,3 +58,9 @@ class SettingsManager:
 
     def is_setup_completed(self) -> bool:
         return bool(self.load().get("setup_completed"))
+
+    def get_remember_last_env(self) -> bool:
+        return bool(self.load().get("remember_last_env"))
+
+    def set_remember_last_env(self, value: bool) -> None:
+        self.save({"remember_last_env": value})

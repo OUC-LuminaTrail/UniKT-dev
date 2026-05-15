@@ -33,11 +33,13 @@ export interface InitStatus {
 export interface DefaultEnv {
   default_env_id: string | null
   custom_python_path: string | null
+  remember_last_env: boolean
 }
 
 export interface DefaultEnvUpdate {
   env_id: string
   custom_python_path?: string | null
+  remember_last_env?: boolean | null
 }
 
 export const getInitStatus = () =>

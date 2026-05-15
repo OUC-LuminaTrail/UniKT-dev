@@ -31,6 +31,7 @@ def update_settings(
 class DefaultEnvUpdate(BaseModel):
     env_id: str
     custom_python_path: str | None = None
+    remember_last_env: bool | None = None
 
 
 @router.get("/default-env")
@@ -38,6 +39,7 @@ def get_default_env(sm: SettingsManager = Depends(get_settings_manager)):
     return {
         "default_env_id": sm.get_default_env(),
         "custom_python_path": sm.get_custom_python_path(),
+        "remember_last_env": sm.get_remember_last_env(),
     }
 
 
@@ -46,6 +48,8 @@ def set_default_env(
     body: DefaultEnvUpdate, sm: SettingsManager = Depends(get_settings_manager)
 ):
     sm.set_default_env(body.env_id, body.custom_python_path)
+    if body.remember_last_env is not None:
+        sm.set_remember_last_env(body.remember_last_env)
     return {"ok": True, "default_env_id": body.env_id}
 
 
