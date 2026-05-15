@@ -148,8 +148,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { ref, computed, watch } from 'vue'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Coin, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
@@ -164,22 +164,15 @@ import { getGradient } from '@/composables/useGradient'
 
 type Phase = 'config' | 'running'
 const route = useRoute()
+const queryClient = useQueryClient()
 const phase = ref<Phase>('config')
 const submitting = ref(false)
-const stopping = ref(false)
 
 const action = ref<'download' | 'process'>('process')
 const dataset = ref('')
-const datasets = ref<DatasetInfo[]>([])
-const loading = ref(true)
 
-const environments = ref<EnvironmentInfo[]>([])
 const selectedEnvId = ref<string | null>(null)
 const customPythonPath = ref('')
-
-const pixiEnvs = computed(() => environments.value.filter(e => e.type === 'pixi'))
-const condaEnvs = computed(() => environments.value.filter(e => e.type === 'conda'))
-const otherEnvs = computed(() => environments.value.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
 
 const preprocessFormRef = ref<InstanceType<typeof PreprocessForm> | null>(null)
 
@@ -210,13 +203,73 @@ const onProcessOptsUpdate = (opts: typeof currentProcessOpts.value) => {
   currentProcessOpts.value = opts
 }
 
-const datasetMetadata = ref<DatasetMetadata | null>(null)
-const metadataLoading = ref(false)
-const metadataCache = ref<Record<string, DatasetMetadata>>({})
-
-const taskInfo = ref<PreprocessTaskInfo | null>(null)
 const taskId = ref(0)
+const taskInfo = ref<PreprocessTaskInfo | null>(null)
 
+const activeTasksQuery = useQuery({
+  queryKey: ['preprocess-active-tasks'],
+  queryFn: listPreprocess,
+})
+
+const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: listDatasets })
+const envsQuery = useQuery({ queryKey: ['environments'], queryFn: listEnvironments })
+
+const datasets = computed<DatasetInfo[]>(() => datasetsQuery.data.value ?? [])
+const environments = computed<EnvironmentInfo[]>(() => envsQuery.data.value ?? [])
+const loading = computed(() =>
+  activeTasksQuery.isPending.value ||
+  datasetsQuery.isPending.value ||
+  envsQuery.isPending.value
+)
+
+const pixiEnvs = computed(() => environments.value.filter(e => e.type === 'pixi'))
+const condaEnvs = computed(() => environments.value.filter(e => e.type === 'conda'))
+const otherEnvs = computed(() => environments.value.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
+
+const preprocessTaskQuery = useQuery({
+  queryKey: computed(() => ['preprocess-task', taskId.value]),
+  queryFn: () => getPreprocess(taskId.value),
+  enabled: computed(() => phase.value === 'running' && taskId.value > 0),
+  refetchInterval: (query) => {
+    const data = query.state.data as PreprocessTaskInfo | undefined
+    return data?.status === 'running' ? 3000 : false
+  },
+})
+
+watch(() => preprocessTaskQuery.data.value, (data) => {
+  if (data) taskInfo.value = data
+})
+
+const datasetMetadataQuery = useQuery({
+  queryKey: computed(() => ['dataset-metadata', dataset.value]),
+  queryFn: () => getDatasetMetadata(dataset.value),
+  enabled: computed(() => !!dataset.value),
+})
+
+const datasetMetadata = computed<DatasetMetadata | null>(() => datasetMetadataQuery.data.value ?? null)
+const metadataLoading = computed(() => datasetMetadataQuery.isPending.value && !!dataset.value)
+
+function onDatasetClick(name: string) {
+  dataset.value = name
+}
+
+watch(() => activeTasksQuery.data.value, (tasks) => {
+  if (!tasks) return
+  const activeTask = tasks.find(t => t.status === 'running')
+  if (activeTask) {
+    taskId.value = activeTask.id
+    taskInfo.value = activeTask
+    phase.value = 'running'
+  }
+}, { once: true })
+
+watch(() => datasetsQuery.data.value, (data) => {
+  if (!data) return
+  const q = route.query.dataset as string
+  if (q && data.some(d => d.name === q)) {
+    dataset.value = q
+  }
+}, { once: true })
 
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
@@ -257,27 +310,14 @@ const previewCommand = computed(() => {
   return parts.join(' ')
 })
 
-async function loadMetadata(name: string) {
-  metadataLoading.value = true
-  try {
-    const data = await getDatasetMetadata(name)
-    metadataCache.value[name] = data
-    datasetMetadata.value = data
-  } catch {
-    datasetMetadata.value = null
-  } finally {
-    metadataLoading.value = false
-  }
-}
-
-function onDatasetClick(name: string) {
-  dataset.value = name
-}
-
-watch(dataset, (name) => {
-  if (!name) { datasetMetadata.value = null; return }
-  if (metadataCache.value[name]) { datasetMetadata.value = metadataCache.value[name]; return }
-  loadMetadata(name)
+const startMutation = useMutation({
+  mutationFn: startPreprocess,
+  onSuccess: (result) => {
+    taskId.value = result.id
+    taskInfo.value = result
+    phase.value = 'running'
+    queryClient.invalidateQueries({ queryKey: ['preprocess-active-tasks'] })
+  },
 })
 
 const onStart = async () => {
@@ -303,64 +343,36 @@ const onStart = async () => {
       if (o.sample_correct_bins) params.sample_correct_bins = o.sample_correct_bins
       if (o.extra) params.extra = o.extra
     }
-    const result = await startPreprocess({
+    startMutation.mutate({
       action: action.value,
       dataset: dataset.value,
       params,
       env_id: selectedEnvId.value,
       custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
     })
-    taskId.value = result.id
-    taskInfo.value = result
-    phase.value = 'running'
-    resumePolling()
-  } catch {
   } finally {
     submitting.value = false
   }
 }
 
-const onStop = async () => {
-  stopping.value = true
-  try {
-    await stopPreprocess(taskId.value)
+const stopMutation = useMutation({
+  mutationFn: (id: number) => stopPreprocess(id),
+  onSuccess: () => {
     ElMessage.success('已发送停止信号')
-  } finally {
-    stopping.value = false
-  }
+    queryClient.invalidateQueries({ queryKey: ['preprocess-task', taskId.value] })
+  },
+})
+
+const stopping = computed(() => stopMutation.isPending.value)
+
+const onStop = () => {
+  stopMutation.mutate(taskId.value)
 }
 
 const onBack = () => {
   phase.value = 'config'
   taskInfo.value = null
-  pausePolling()
 }
-
-const { pause: pausePolling, resume: resumePolling } = useIntervalFn(async () => {
-  if (!taskInfo.value || taskInfo.value.status !== 'running') return
-  try { taskInfo.value = await getPreprocess(taskId.value) } catch {}
-}, 3000, { immediate: false })
-
-onMounted(async () => {
-  try {
-    const allTasks = await listPreprocess()
-    const activeTask = allTasks.find(t => t.status === 'running')
-    if (activeTask) {
-      taskId.value = activeTask.id
-      taskInfo.value = activeTask
-      phase.value = 'running'
-      resumePolling()
-    }
-  } catch {}
-
-  try { datasets.value = await listDatasets() } catch {}
-  try { environments.value = await listEnvironments() } catch {}
-  loading.value = false
-  const q = route.query.dataset as string
-  if (q && datasets.value.some(d => d.name === q)) {
-    dataset.value = q
-  }
-})
 </script>
 
 <style scoped>

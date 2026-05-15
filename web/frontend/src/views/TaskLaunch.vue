@@ -115,8 +115,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, h } from 'vue'
+import { ref, computed, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
+import { useQuery } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { createTask } from '@/api/tasks'
@@ -131,13 +132,7 @@ import ParamForm from '@/components/task/ParamForm.vue'
 const router = useRouter()
 const step = ref<'select' | 'params'>('select')
 const submitting = ref(false)
-const loading = ref(true)
-const selectionSchema = ref<ModelSchema | null>(null)
 const params = ref<Record<string, any>>({})
-
-const environments = ref<EnvironmentInfo[]>([])
-const models = ref<string[]>([])
-const datasets = ref<string[]>([])
 
 const envId = ref('')
 const customPythonPath = ref('')
@@ -151,6 +146,32 @@ const showKfoldSelector = computed(() => (kfoldCount.value ?? 0) >= 2)
 const STORAGE_KEY_ENV = 'kt-web:last-env-id'
 const STORAGE_KEY_MODEL = 'kt-web:last-model-name'
 const STORAGE_KEY_DATASET = 'kt-web:last-dataset'
+
+const initDataQuery = useQuery({
+  queryKey: ['task-launch-init'],
+  queryFn: async () => {
+    const [envs, modelList, defaultEnv] = await Promise.all([
+      listEnvironments(),
+      listModels(),
+      getDefaultEnv().catch(() => ({ default_env_id: null, custom_python_path: null, remember_last_env: false })),
+    ])
+    return { envs, modelList, defaultEnv }
+  },
+})
+
+const environments = computed<EnvironmentInfo[]>(() => initDataQuery.data.value?.envs ?? [])
+const models = computed(() => initDataQuery.data.value?.modelList ?? [])
+const loading = computed(() => initDataQuery.isPending.value)
+
+const datasets = ref<string[]>([])
+
+const modelParamsQuery = useQuery({
+  queryKey: computed(() => ['model-params', modelName.value]),
+  queryFn: () => getModelParams(modelName.value),
+  enabled: computed(() => !!modelName.value),
+})
+
+const selectionSchema = computed<ModelSchema | null>(() => modelParamsQuery.data.value ?? null)
 
 const schemaDefaultParams = computed(() => {
   if (!selectionSchema.value) return {}
@@ -167,7 +188,6 @@ async function onModelChange(val: string) {
   modelName.value = val
   if (!val) return
   localStorage.setItem(STORAGE_KEY_MODEL, val)
-  selectionSchema.value = await getModelParams(val)
 }
 
 function onSelectConfirm() {
@@ -177,21 +197,21 @@ function onSelectConfirm() {
   step.value = 'params'
 }
 
-watch(dataset, async (name) => {
-  if (!name) {
+const datasetMetaQuery = useQuery({
+  queryKey: computed(() => ['dataset-metadata', dataset.value]),
+  queryFn: () => getDatasetMetadata(dataset.value),
+  enabled: computed(() => !!dataset.value),
+})
+
+watch(() => datasetMetaQuery.data.value, (meta) => {
+  if (!meta) {
     kfoldCount.value = null
     selectedFolds.value = []
     return
   }
-  try {
-    const meta = await getDatasetMetadata(name)
-    const kfold = typeof meta.kfold_n_splits === 'number' ? meta.kfold_n_splits : null
-    kfoldCount.value = kfold
-    selectedFolds.value = kfold && kfold >= 2 ? [0] : []
-  } catch {
-    kfoldCount.value = null
-    selectedFolds.value = []
-  }
+  const kfold = typeof meta.kfold_n_splits === 'number' ? meta.kfold_n_splits : null
+  kfoldCount.value = kfold
+  selectedFolds.value = kfold && kfold >= 2 ? [0] : []
 })
 
 function buildTaskName(fold?: number) {
@@ -261,56 +281,50 @@ async function onStartTraining() {
   }
 }
 
-onMounted(async () => {
-  try {
-    const [envs, modelList, defaultEnv] = await Promise.all([
-      listEnvironments(),
-      listModels(),
-      getDefaultEnv().catch(() => ({ default_env_id: null, custom_python_path: null, remember_last_env: false })),
-    ])
-    environments.value = envs
-    models.value = modelList
+const initDone = ref(false)
+watch(() => initDataQuery.data.value, async (data) => {
+  if (!data || initDone.value) return
+  initDone.value = true
 
-    const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
-    if (defaultEnv.remember_last_env && savedEnv && envs.some(e => e.id === savedEnv)) {
-      envId.value = savedEnv
-      if (savedEnv === 'custom:0' && defaultEnv.custom_python_path) {
-        customPythonPath.value = defaultEnv.custom_python_path
-      }
-    } else if (defaultEnv.default_env_id && envs.some(e => e.id === defaultEnv.default_env_id)) {
-      envId.value = defaultEnv.default_env_id
-      if (defaultEnv.custom_python_path) {
-        customPythonPath.value = defaultEnv.custom_python_path
-      }
-    } else if (savedEnv && envs.some(e => e.id === savedEnv)) {
-      envId.value = savedEnv
-    }
+  const { envs, modelList, defaultEnv } = data
 
-    const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)
-    if (savedModel && modelList.includes(savedModel)) {
-      modelName.value = savedModel
-      onModelChange(savedModel)
+  const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
+  if (defaultEnv.remember_last_env && savedEnv && envs.some(e => e.id === savedEnv)) {
+    envId.value = savedEnv
+    if (savedEnv === 'custom:0' && defaultEnv.custom_python_path) {
+      customPythonPath.value = defaultEnv.custom_python_path
     }
-
-    const anyModel = modelList[0]
-    if (anyModel) {
-      const s = await getModelParams(anyModel)
-      for (const g of s.param_groups) {
-        if (g.params['dataset']?.choices?.length) {
-          datasets.value = g.params['dataset'].choices as string[]
-          break
-        }
-      }
+  } else if (defaultEnv.default_env_id && envs.some(e => e.id === defaultEnv.default_env_id)) {
+    envId.value = defaultEnv.default_env_id
+    if (defaultEnv.custom_python_path) {
+      customPythonPath.value = defaultEnv.custom_python_path
     }
-
-    const savedDataset = localStorage.getItem(STORAGE_KEY_DATASET)
-    if (savedDataset && datasets.value.includes(savedDataset)) {
-      dataset.value = savedDataset
-    }
-  } finally {
-    loading.value = false
+  } else if (savedEnv && envs.some(e => e.id === savedEnv)) {
+    envId.value = savedEnv
   }
-})
+
+  const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)
+  if (savedModel && modelList.includes(savedModel)) {
+    modelName.value = savedModel
+    onModelChange(savedModel)
+  }
+
+  const anyModel = modelList[0]
+  if (anyModel) {
+    const s = await getModelParams(anyModel)
+    for (const g of s.param_groups) {
+      if (g.params['dataset']?.choices?.length) {
+        datasets.value = g.params['dataset'].choices as string[]
+        break
+      }
+    }
+  }
+
+  const savedDataset = localStorage.getItem(STORAGE_KEY_DATASET)
+  if (savedDataset && datasets.value.includes(savedDataset)) {
+    dataset.value = savedDataset
+  }
+}, { once: true })
 </script>
 
 <style scoped>

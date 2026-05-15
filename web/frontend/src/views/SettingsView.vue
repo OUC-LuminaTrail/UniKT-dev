@@ -162,7 +162,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage } from 'element-plus'
 import { Monitor, Cpu } from '@element-plus/icons-vue'
 import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
@@ -170,102 +171,115 @@ import Cookies from 'universal-cookie'
 import { getSettings, updateSettings, getDefaultEnv, setDefaultEnv } from '@/api/settings'
 import { listEnvironments, healthCheckEnv, type EnvironmentInfo, type EnvHealthResult } from '@/api/environments'
 
+const queryClient = useQueryClient()
 const cookies = new Cookies()
 
 const COOKIE_KEY = 'kt-settings'
 
 const maxConcurrent = ref(1)
-const saving = ref(false)
 const saved = ref(false)
-const loading = ref(true)
 
 const selectedEnvId = ref<string | null>(null)
 const customPythonPath = ref('')
 const rememberLastEnv = ref(false)
-const envList = ref<EnvironmentInfo[]>([])
-const healthChecking = ref(false)
 const healthResult = ref<EnvHealthResult | null>(null)
 
-onMounted(async () => {
-  try {
-    const [settings, envs, envRes] = await Promise.all([
-      getSettings(),
-      listEnvironments(),
-      getDefaultEnv(),
-    ])
-    maxConcurrent.value = settings.max_concurrent
-    envList.value = envs
-    selectedEnvId.value = envRes.default_env_id
-    customPythonPath.value = envRes.custom_python_path || ''
-    rememberLastEnv.value = envRes.remember_last_env
-  } catch {
+const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+const envsQuery = useQuery({ queryKey: ['environments'], queryFn: listEnvironments })
+const defaultEnvQuery = useQuery({ queryKey: ['default-env'], queryFn: getDefaultEnv })
+
+const loading = computed(() => settingsQuery.isPending.value || envsQuery.isPending.value || defaultEnvQuery.isPending.value)
+const envList = computed(() => envsQuery.data.value ?? [])
+
+const initDone = ref(false)
+watch(
+  () => ({ s: settingsQuery.data.value, e: defaultEnvQuery.data.value }),
+  ({ s, e }) => {
+    if (initDone.value) return
+    if (s && e) {
+      maxConcurrent.value = s.max_concurrent
+      selectedEnvId.value = e.default_env_id
+      customPythonPath.value = e.custom_python_path || ''
+      rememberLastEnv.value = e.remember_last_env
+      initDone.value = true
+    }
+  },
+)
+
+watch(() => settingsQuery.isError.value, (isError) => {
+  if (isError && !initDone.value) {
     const cached = cookies.get<{ max_concurrent: number }>(COOKIE_KEY)
     if (cached?.max_concurrent) {
       maxConcurrent.value = cached.max_concurrent
     }
-  } finally {
-    loading.value = false
+    initDone.value = true
   }
 })
 
-const onSave = async () => {
-  saving.value = true
-  saved.value = false
-  try {
-    await updateSettings({ max_concurrent: maxConcurrent.value })
+const updateSettingsMutation = useMutation({
+  mutationFn: (data: Parameters<typeof updateSettings>[0]) => updateSettings(data),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['settings'] })
     cookies.set(COOKIE_KEY, { max_concurrent: maxConcurrent.value }, { maxAge: 365 * 86400, path: '/' })
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
     ElMessage.success('设置已保存')
-  } catch {
-  } finally {
-    saving.value = false
-  }
+  },
+})
+
+const saving = computed(() => updateSettingsMutation.isPending.value)
+
+const onSave = () => {
+  saved.value = false
+  updateSettingsMutation.mutate({ max_concurrent: maxConcurrent.value })
 }
 
-const onEnvChange = async (envId: string) => {
-  try {
-    await setDefaultEnv({
-      env_id: envId,
-      custom_python_path: envId === 'custom:0' ? customPythonPath.value || null : null,
-    })
-    ElMessage.success('默认环境已更新')
-  } catch {}
+const setDefaultEnvMutation = useMutation({
+  mutationFn: (data: Parameters<typeof setDefaultEnv>[0]) => setDefaultEnv(data),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['default-env'] })
+  },
+})
+
+const onEnvChange = (envId: string) => {
+  setDefaultEnvMutation.mutate({
+    env_id: envId,
+    custom_python_path: envId === 'custom:0' ? customPythonPath.value || null : null,
+  })
+  ElMessage.success('默认环境已更新')
 }
 
-const onCustomPathBlur = async () => {
+const onCustomPathBlur = () => {
   if (selectedEnvId.value !== 'custom:0') return
-  try {
-    await setDefaultEnv({
-      env_id: selectedEnvId.value,
-      custom_python_path: customPythonPath.value || null,
-    })
-  } catch {}
+  setDefaultEnvMutation.mutate({
+    env_id: selectedEnvId.value,
+    custom_python_path: customPythonPath.value || null,
+  })
 }
 
-const onHealthCheck = async () => {
+const healthCheckMutation = useMutation({
+  mutationFn: (data: Parameters<typeof healthCheckEnv>[0]) => healthCheckEnv(data),
+  onSuccess: (result) => {
+    healthResult.value = result
+  },
+})
+
+const healthChecking = computed(() => healthCheckMutation.isPending.value)
+
+const onHealthCheck = () => {
   if (!selectedEnvId.value) return
-  healthChecking.value = true
   healthResult.value = null
-  try {
-    healthResult.value = await healthCheckEnv({
-      env_id: selectedEnvId.value,
-      custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
-    })
-  } catch {
-    healthResult.value = null
-  } finally {
-    healthChecking.value = false
-  }
+  healthCheckMutation.mutate({
+    env_id: selectedEnvId.value,
+    custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
+  })
 }
 
-const onRememberLastEnvChange = async (val: boolean) => {
-  try {
-    await setDefaultEnv({
-      env_id: selectedEnvId.value || '',
-      remember_last_env: val,
-    })
-  } catch {}
+const onRememberLastEnvChange = (val: boolean) => {
+  setDefaultEnvMutation.mutate({
+    env_id: selectedEnvId.value || '',
+    remember_last_env: val,
+  })
 }
 </script>
 

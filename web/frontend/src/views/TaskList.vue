@@ -223,8 +223,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { ref, computed } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
@@ -235,23 +235,14 @@ import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
 
 const route = useRoute()
 const router = useRouter()
+const queryClient = useQueryClient()
 
-const tasks = ref<TaskInfo[]>([])
-const runningTasks = ref<TaskInfo[]>([])
-const queueItems = ref<QueueItem[]>([])
 const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
-
-const loading = ref(true)
-const initialLoad = ref(true)
 
 const page = ref(1)
 const pageSize = ref(20)
-const total = ref(0)
 const runningPage = ref(1)
 const runningPageSize = ref(20)
-const runningTotal = ref(0)
-
-const activeCount = computed(() => runningTotal.value + queueItems.value.length)
 
 const selectedTasks = ref<TaskInfo[]>([])
 const otherTableRef = ref<InstanceType<typeof ElTable>>()
@@ -274,29 +265,36 @@ const statusLabels: Record<string, string> = {
 
 const statusLabel = (s: string) => statusLabels[s] || s
 
-const switchTab = (tab: string) => {
-  activeTab.value = tab
-  page.value = 1
-  runningPage.value = 1
-  selectedTasks.value = []
-  sessionStorage.setItem('taskListTab', tab)
-  router.replace({ query: tab !== 'running' ? { tab } : {} })
-  loadAll()
+interface TasksData {
+  tasks: TaskInfo[]
+  total: number
+  runningTasks: TaskInfo[]
+  runningTotal: number
+  queueItems: QueueItem[]
 }
 
-const loadAll = async () => {
-  if (initialLoad.value) {
-    loading.value = true
-  }
-  try {
+const allDataQuery = useQuery({
+  queryKey: computed(() => [
+    'tasks-list',
+    activeTab.value,
+    page.value,
+    pageSize.value,
+    runningPage.value,
+    runningPageSize.value,
+  ]),
+  queryFn: async (): Promise<TasksData> => {
     if (activeTab.value === 'running') {
       const [running, queue] = await Promise.all([
         listTasks({ status: 'running', page: runningPage.value, page_size: runningPageSize.value }),
         getQueue().catch(() => []),
       ])
-      runningTasks.value = running.items
-      runningTotal.value = running.total
-      queueItems.value = queue
+      return {
+        tasks: [],
+        total: 0,
+        runningTasks: running.items,
+        runningTotal: running.total,
+        queueItems: queue,
+      }
     } else {
       const status = activeTab.value !== 'all' ? activeTab.value : undefined
       const [filtered, running, queue] = await Promise.all([
@@ -304,37 +302,54 @@ const loadAll = async () => {
         listTasks({ status: 'running', page: 1, page_size: 100 }),
         getQueue().catch(() => []),
       ])
-      tasks.value = filtered.items
-      total.value = filtered.total
-      runningTotal.value = running.total
-      queueItems.value = queue
+      return {
+        tasks: filtered.items,
+        total: filtered.total,
+        runningTasks: running.items,
+        runningTotal: running.total,
+        queueItems: queue,
+      }
     }
-  } finally {
-    loading.value = false
-    initialLoad.value = false
-  }
+  },
+  refetchInterval: 5000,
+})
+
+const tasks = computed(() => allDataQuery.data.value?.tasks ?? [])
+const runningTasks = computed(() => allDataQuery.data.value?.runningTasks ?? [])
+const queueItems = computed(() => allDataQuery.data.value?.queueItems ?? [])
+const total = computed(() => allDataQuery.data.value?.total ?? 0)
+const runningTotal = computed(() => allDataQuery.data.value?.runningTotal ?? 0)
+const loading = computed(() => allDataQuery.isPending.value)
+
+const activeCount = computed(() => runningTotal.value + queueItems.value.length)
+
+const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+
+const switchTab = (tab: string) => {
+  activeTab.value = tab
+  page.value = 1
+  runningPage.value = 1
+  selectedTasks.value = []
+  sessionStorage.setItem('taskListTab', tab)
+  router.replace({ query: tab !== 'running' ? { tab } : {} })
 }
 
 const handlePageChange = (p: number) => {
   page.value = p
-  loadAll()
 }
 
 const handlePageSizeChange = (s: number) => {
   pageSize.value = s
   page.value = 1
-  loadAll()
 }
 
 const handleRunningPageChange = (p: number) => {
   runningPage.value = p
-  loadAll()
 }
 
 const handleRunningPageSizeChange = (s: number) => {
   runningPageSize.value = s
   runningPage.value = 1
-  loadAll()
 }
 
 const moveUp = async (idx: number) => {
@@ -342,8 +357,8 @@ const moveUp = async (idx: number) => {
   const tmp = items[idx]
   items[idx] = items[idx - 1]
   items[idx - 1] = tmp
-  queueItems.value = items
   await reorderQueue(items.map(t => t.id))
+  invalidateTasks()
 }
 
 const moveDown = async (idx: number) => {
@@ -351,8 +366,8 @@ const moveDown = async (idx: number) => {
   const tmp = items[idx]
   items[idx] = items[idx + 1]
   items[idx + 1] = tmp
-  queueItems.value = items
   await reorderQueue(items.map(t => t.id))
+  invalidateTasks()
 }
 
 const handleStop = async (id: number) => {
@@ -364,7 +379,7 @@ const handleStop = async (id: number) => {
   ElMessage.success('已发送停止信号')
   await stopTask(id)
   ElMessage.success('任务已停止')
-  setTimeout(loadAll, 2000)
+  setTimeout(invalidateTasks, 2000)
 }
 
 const handleCancelQueue = async (id: number) => {
@@ -375,7 +390,7 @@ const handleCancelQueue = async (id: number) => {
   })
   await stopTask(id)
   ElMessage.success('已取消')
-  loadAll()
+  invalidateTasks()
 }
 
 const handleDelete = async (id: number) => {
@@ -386,7 +401,7 @@ const handleDelete = async (id: number) => {
   })
   await deleteTask(id)
   ElMessage.success('已删除')
-  loadAll()
+  invalidateTasks()
 }
 
 const handleSelectionChange = (rows: TaskInfo[]) => {
@@ -412,11 +427,8 @@ const handleBatchDelete = async () => {
   await Promise.all(selectedTasks.value.map(t => deleteTask(t.id)))
   ElMessage.success(`已删除 ${count} 个任务`)
   clearSelection()
-  loadAll()
+  invalidateTasks()
 }
-
-onMounted(() => { loadAll() })
-useIntervalFn(loadAll, 5000)
 </script>
 
 <style scoped>

@@ -99,13 +99,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { useQuery } from '@tanstack/vue-query'
 import { getGpuStatus, type GpuStatus } from '@/api/gpu'
 
-const status = ref<GpuStatus | null>(null)
-const loading = ref(true)
-
+const { data: status, isPending: loading } = useQuery({
+  queryKey: ['gpu-status'],
+  queryFn: getGpuStatus,
+  refetchInterval: 3000,
+})
 
 const progressColor = (pct: number) => {
   if (pct > 90) return 'var(--accent-red)'
@@ -118,14 +119,6 @@ const tempColor = (temp: number) => {
   if (temp > 70) return 'var(--accent-orange)'
   return 'var(--accent-green)'
 }
-
-const loadStatus = async () => {
-  try { status.value = await getGpuStatus() } catch {}
-  loading.value = false
-}
-
-onMounted(() => { loadStatus() })
-useIntervalFn(loadStatus, 3000)
 </script>
 
 <style scoped>

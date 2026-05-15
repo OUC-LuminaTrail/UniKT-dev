@@ -97,8 +97,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useIntervalFn } from '@vueuse/core'
+import { ref, computed } from 'vue'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, SwitchButton, Bottom } from '@element-plus/icons-vue'
@@ -108,6 +108,7 @@ import LogCard from '@/components/task/LogCard.vue'
 
 const route = useRoute()
 const router = useRouter()
+const queryClient = useQueryClient()
 const taskId = Number(route.params.id)
 
 const goBack = () => {
@@ -117,11 +118,18 @@ const goBack = () => {
     router.replace({ name: 'tasks' })
   }
 }
-const task = ref<TaskInfo | null>(null)
-const loading = ref(true)
+
+const { data: task, isPending: loading, refetch } = useQuery({
+  queryKey: ['task', taskId],
+  queryFn: () => getTask(taskId),
+  refetchInterval: (query) => {
+    const data = query.state.data as TaskInfo | undefined
+    return data?.status === 'running' ? 5000 : false
+  },
+})
+
 const stopping = ref(false)
 const killing = ref(false)
-
 
 const statusMap: Record<string, { color: string; label: string }> = {
   running: { color: 'var(--accent-blue)', label: '运行中' },
@@ -138,11 +146,6 @@ const exitCodeClass = computed(() => {
 
 const copyCommand = () => {
   if (task.value) navigator.clipboard.writeText(task.value.command)
-}
-
-const loadTask = async () => {
-  task.value = await getTask(taskId)
-  loading.value = false
 }
 
 const handleStop = async () => {
@@ -172,15 +175,10 @@ const handleKill = async () => {
 const pollUntilDone = async () => {
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 500))
-    await loadTask()
+    await refetch()
     if (task.value && task.value.status !== 'running' && task.value.status !== 'stopping') break
   }
 }
-
-onMounted(() => { loadTask() })
-useIntervalFn(async () => {
-  if (task.value?.status === 'running') await loadTask()
-}, 5000)
 </script>
 
 <style scoped>
