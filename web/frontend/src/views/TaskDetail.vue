@@ -97,7 +97,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, SwitchButton, Bottom } from '@element-plus/icons-vue'
@@ -119,7 +120,7 @@ const task = ref<TaskInfo | null>(null)
 const loading = ref(true)
 const stopping = ref(false)
 const killing = ref(false)
-let pollTimer: ReturnType<typeof setInterval> | null = null
+
 
 const statusMap: Record<string, { color: string; label: string }> = {
   running: { color: 'var(--accent-blue)', label: '运行中' },
@@ -177,14 +178,10 @@ const pollUntilDone = async () => {
   }
 }
 
-onMounted(() => {
-  loadTask()
-  pollTimer = setInterval(async () => {
-    if (task.value?.status === 'running') await loadTask()
-  }, 5000)
-})
-
-onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
+onMounted(() => { loadTask() })
+useIntervalFn(async () => {
+  if (task.value?.status === 'running') await loadTask()
+}, 5000)
 </script>
 
 <style scoped>

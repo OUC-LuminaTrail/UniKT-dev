@@ -99,12 +99,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { getGpuStatus, type GpuStatus } from '@/api/gpu'
 
 const status = ref<GpuStatus | null>(null)
 const loading = ref(true)
-let timer: ReturnType<typeof setInterval> | null = null
+
 
 const progressColor = (pct: number) => {
   if (pct > 90) return 'var(--accent-red)'
@@ -123,8 +124,8 @@ const loadStatus = async () => {
   loading.value = false
 }
 
-onMounted(() => { loadStatus(); timer = setInterval(loadStatus, 3000) })
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onMounted(() => { loadStatus() })
+useIntervalFn(loadStatus, 3000)
 </script>
 
 <style scoped>

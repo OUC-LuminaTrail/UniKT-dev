@@ -148,7 +148,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Coin, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
@@ -214,7 +215,7 @@ const metadataCache = ref<Record<string, DatasetMetadata>>({})
 
 const taskInfo = ref<PreprocessTaskInfo | null>(null)
 const taskId = ref(0)
-let pollTimer: ReturnType<typeof setInterval> | null = null
+
 
 const PALETTE = [
   ['#58a6ff', '#1f6feb'],
@@ -336,7 +337,7 @@ const onStart = async () => {
     taskId.value = result.id
     taskInfo.value = result
     phase.value = 'running'
-    startPolling()
+    resumePolling()
   } catch {
   } finally {
     submitting.value = false
@@ -356,19 +357,13 @@ const onStop = async () => {
 const onBack = () => {
   phase.value = 'config'
   taskInfo.value = null
-  stopPolling()
+  pausePolling()
 }
 
-const startPolling = () => {
-  pollTimer = setInterval(async () => {
-    if (!taskInfo.value || taskInfo.value.status !== 'running') return
-    try { taskInfo.value = await getPreprocess(taskId.value) } catch {}
-  }, 3000)
-}
-
-const stopPolling = () => {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
-}
+const { pause: pausePolling, resume: resumePolling } = useIntervalFn(async () => {
+  if (!taskInfo.value || taskInfo.value.status !== 'running') return
+  try { taskInfo.value = await getPreprocess(taskId.value) } catch {}
+}, 3000, { immediate: false })
 
 onMounted(async () => {
   try {
@@ -378,7 +373,7 @@ onMounted(async () => {
       taskId.value = activeTask.id
       taskInfo.value = activeTask
       phase.value = 'running'
-      startPolling()
+      resumePolling()
     }
   } catch {}
 
@@ -390,8 +385,6 @@ onMounted(async () => {
     dataset.value = q
   }
 })
-
-onUnmounted(() => { stopPolling() })
 </script>
 
 <style scoped>

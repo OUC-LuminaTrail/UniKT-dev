@@ -223,7 +223,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { useIntervalFn } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
@@ -418,18 +419,8 @@ const handleBatchDelete = async () => {
   loadAll()
 }
 
-let pollTimer: ReturnType<typeof setInterval> | null = null
-
-onMounted(() => {
-  loadAll()
-  pollTimer = setInterval(() => {
-    loadAll()
-  }, 5000)
-})
-
-onUnmounted(() => {
-  if (pollTimer) clearInterval(pollTimer)
-})
+onMounted(() => { loadAll() })
+useIntervalFn(loadAll, 5000)
 </script>
 
 <style scoped>
