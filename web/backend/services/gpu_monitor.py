@@ -1,8 +1,8 @@
 import os
-import subprocess
 import time
 
 import psutil
+import pynvml
 from schemas import GpuInfo, GpuStatusResponse, SystemStatusResponse
 
 
@@ -17,7 +17,7 @@ class GpuMonitor:
         if self._cached and (now - self._last_update) < self._cache_seconds:
             return self._cached
 
-        gpus = self._query_nvidia_smi()
+        gpus = self._query_nvml()
         self._cached = GpuStatusResponse(
             gpus=gpus,
             updated_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -25,42 +25,44 @@ class GpuMonitor:
         self._last_update = now
         return self._cached
 
-    def _query_nvidia_smi(self) -> list[GpuInfo]:
+    def _query_nvml(self) -> list[GpuInfo]:
         try:
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw",
-                    "--format=csv,noheader,nounits",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode != 0:
-                return []
-
+            pynvml.nvmlInit()
+            device_count = pynvml.nvmlDeviceGetCount()
             gpus = []
-            for line in result.stdout.strip().split("\n"):
-                if not line.strip():
-                    continue
-                parts = [p.strip() for p in line.split(",")]
-                if len(parts) < 7:
-                    continue
+            for i in range(device_count):
+                handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+                name = pynvml.nvmlDeviceGetName(handle)
+                if isinstance(name, bytes):
+                    name = name.decode()
+                util = pynvml.nvmlDeviceGetUtilizationRates(handle)
+                mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                temp = pynvml.nvmlDeviceGetTemperature(
+                    handle, pynvml.NVML_TEMPERATURE_GPU
+                )
+                try:
+                    power = pynvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
+                except pynvml.NVMLError:
+                    power = 0.0
                 gpus.append(
                     GpuInfo(
-                        index=int(parts[0]),
-                        name=parts[1],
-                        utilization_percent=float(parts[2]),
-                        memory_used_mb=float(parts[3]),
-                        memory_total_mb=float(parts[4]),
-                        temperature_c=float(parts[5]),
-                        power_usage_w=float(parts[6]),
+                        index=i,
+                        name=name,
+                        utilization_percent=float(util.gpu),
+                        memory_used_mb=round(mem.used / (1024 * 1024), 1),
+                        memory_total_mb=round(mem.total / (1024 * 1024), 1),
+                        temperature_c=float(temp),
+                        power_usage_w=round(power, 1),
                         processes=[],
                     )
                 )
+            pynvml.nvmlShutdown()
             return gpus
-        except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        except (pynvml.NVMLError, Exception):
+            try:
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
             return []
 
     def get_system_status(self) -> SystemStatusResponse:
