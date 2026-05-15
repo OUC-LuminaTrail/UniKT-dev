@@ -59,15 +59,52 @@
         </div>
       </div>
     </div>
+
+    <div class="settings-card" v-if="!loading">
+      <div class="card-section">
+        <div class="section-header">
+          <div class="section-title-row">
+            <span class="section-icon">
+              <el-icon :size="16"><Cpu /></el-icon>
+            </span>
+            <span class="section-title">训练环境</span>
+          </div>
+          <span class="section-desc">选择提交训练任务时使用的默认 Python 环境。环境列表由系统自动检测。</span>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-key">默认训练环境</span>
+            <span class="setting-help">训练任务将通过此环境执行</span>
+          </div>
+          <div class="setting-control">
+            <el-select
+              v-model="selectedEnvId"
+              placeholder="选择环境"
+              style="width: 220px"
+              @change="onEnvChange"
+            >
+              <el-option
+                v-for="env in envList"
+                :key="env.id"
+                :label="env.display_name"
+                :value="env.id"
+              />
+            </el-select>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Monitor } from '@element-plus/icons-vue'
+import { Monitor, Cpu } from '@element-plus/icons-vue'
 import Cookies from 'universal-cookie'
-import { getSettings, updateSettings } from '@/api/settings'
+import { getSettings, updateSettings, getDefaultEnv, setDefaultEnv } from '@/api/settings'
+import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 
 const cookies = new Cookies()
 
@@ -78,10 +115,19 @@ const saving = ref(false)
 const saved = ref(false)
 const loading = ref(true)
 
+const selectedEnvId = ref<string | null>(null)
+const envList = ref<EnvironmentInfo[]>([])
+
 onMounted(async () => {
   try {
-    const s = await getSettings()
-    maxConcurrent.value = s.max_concurrent
+    const [settings, envs, envRes] = await Promise.all([
+      getSettings(),
+      listEnvironments(),
+      getDefaultEnv(),
+    ])
+    maxConcurrent.value = settings.max_concurrent
+    envList.value = envs
+    selectedEnvId.value = envRes.default_env_id
   } catch {
     const cached = cookies.get<{ max_concurrent: number }>(COOKIE_KEY)
     if (cached?.max_concurrent) {
@@ -105,6 +151,13 @@ const onSave = async () => {
   } finally {
     saving.value = false
   }
+}
+
+const onEnvChange = async (envId: string) => {
+  try {
+    await setDefaultEnv(envId)
+    ElMessage.success('默认环境已更新')
+  } catch {}
 }
 </script>
 
