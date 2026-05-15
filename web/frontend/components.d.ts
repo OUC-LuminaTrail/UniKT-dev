@@ -43,6 +43,7 @@ declare module 'vue' {
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SelectionStep: typeof import('./src/components/task/SelectionStep.vue')['default']
+    SetupWizard: typeof import('./src/components/setup/SetupWizard.vue')['default']
     Sidebar: typeof import('./src/components/layout/Sidebar.vue')['default']
   }
   export interface GlobalDirectives {

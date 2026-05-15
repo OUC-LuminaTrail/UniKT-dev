@@ -8,7 +8,7 @@ export interface TaskInfo {
   dataset_name: string
   env_type: string
   env_name: string
-  python_path: string
+  python_path: string | null
   status: string
   pid: number | null
   exp_dir: string

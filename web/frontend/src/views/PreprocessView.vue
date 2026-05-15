@@ -63,6 +63,50 @@
           @update:download-opts="onDownloadOptsUpdate"
           @update:process-opts="onProcessOptsUpdate"
         />
+
+        <div class="section" v-if="environments.length">
+          <div class="section-label">运行环境</div>
+          <div class="env-row">
+            <el-select
+              v-model="selectedEnvId"
+              placeholder="使用默认环境"
+              clearable
+              class="env-select"
+            >
+              <el-option-group label="Pixi">
+                <el-option
+                  v-for="env in pixiEnvs"
+                  :key="env.id"
+                  :label="env.display_name"
+                  :value="env.id"
+                />
+              </el-option-group>
+              <el-option-group label="Conda" v-if="condaEnvs.length">
+                <el-option
+                  v-for="env in condaEnvs"
+                  :key="env.id"
+                  :label="env.display_name"
+                  :value="env.id"
+                />
+              </el-option-group>
+              <el-option-group label="Other" v-if="otherEnvs.length">
+                <el-option
+                  v-for="env in otherEnvs"
+                  :key="env.id"
+                  :label="env.display_name"
+                  :value="env.id"
+                />
+              </el-option-group>
+            </el-select>
+          </div>
+          <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
+            <el-input
+              v-model="customPythonPath"
+              placeholder="/path/to/python"
+              style="max-width: 400px"
+            />
+          </div>
+        </div>
       </div>
 
       <CommandPreview :command="previewCommand">
@@ -104,6 +148,7 @@ import { ElMessage } from 'element-plus'
 import { Coin, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
 import { listDatasets, getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
 import { startPreprocess, getPreprocess, stopPreprocess, listPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
+import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import CommandPreview from '@/components/task/CommandPreview.vue'
 import LogCard from '@/components/task/LogCard.vue'
 import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
@@ -119,6 +164,14 @@ const action = ref<'download' | 'process'>('process')
 const dataset = ref('')
 const datasets = ref<DatasetInfo[]>([])
 const loading = ref(true)
+
+const environments = ref<EnvironmentInfo[]>([])
+const selectedEnvId = ref<string | null>(null)
+const customPythonPath = ref('')
+
+const pixiEnvs = computed(() => environments.value.filter(e => e.type === 'pixi'))
+const condaEnvs = computed(() => environments.value.filter(e => e.type === 'conda'))
+const otherEnvs = computed(() => environments.value.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
 
 const preprocessFormRef = ref<InstanceType<typeof PreprocessForm> | null>(null)
 
@@ -190,7 +243,16 @@ const statusLabel = computed(() => {
 })
 
 const previewCommand = computed(() => {
-  const parts = ['python', 'data_process.py', action.value, '-d', dataset.value || '<dataset>']
+  let envPrefix = 'python'
+  if (selectedEnvId.value) {
+    const env = environments.value.find(e => e.id === selectedEnvId.value)
+    if (env) {
+      if (env.type === 'pixi') envPrefix = `pixi run --environment ${env.name} python`
+      else if (env.type === 'conda') envPrefix = `conda run -n ${env.name} --no-banner python`
+      else if (customPythonPath.value) envPrefix = customPythonPath.value
+    }
+  }
+  const parts = [envPrefix, 'data_process.py', action.value, '-d', dataset.value || '<dataset>']
   if (action.value === 'download') {
     const o = currentDownloadOpts.value
     if (o.force) parts.push('--force')
@@ -258,7 +320,13 @@ const onStart = async () => {
       if (o.sample_correct_bins) params.sample_correct_bins = o.sample_correct_bins
       if (o.extra) params.extra = o.extra
     }
-    const result = await startPreprocess({ action: action.value, dataset: dataset.value, params })
+    const result = await startPreprocess({
+      action: action.value,
+      dataset: dataset.value,
+      params,
+      env_id: selectedEnvId.value,
+      custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
+    })
     taskId.value = result.id
     taskInfo.value = result
     phase.value = 'running'
@@ -309,6 +377,7 @@ onMounted(async () => {
   } catch {}
 
   try { datasets.value = await listDatasets() } catch {}
+  try { environments.value = await listEnvironments() } catch {}
   loading.value = false
   const q = route.query.dataset as string
   if (q && datasets.value.some(d => d.name === q)) {
@@ -553,5 +622,19 @@ onUnmounted(() => { stopPolling() })
 
 .sk-card-skel {
   cursor: default;
+}
+
+.env-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.env-select {
+  max-width: 400px;
+}
+
+.custom-path-row {
+  margin-top: 8px;
 }
 </style>

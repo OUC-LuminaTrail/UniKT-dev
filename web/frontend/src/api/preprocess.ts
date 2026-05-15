@@ -13,6 +13,8 @@ export interface PreprocessStartRequest {
   action: string
   dataset: string
   params: Record<string, any>
+  env_id?: string | null
+  custom_python_path?: string | null
 }
 
 export const listPreprocess = () =>
