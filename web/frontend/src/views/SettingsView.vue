@@ -5,25 +5,28 @@
       <p class="page-subtitle">配置训练任务的全局参数</p>
     </div>
 
-    <div class="settings-card" v-if="loading">
-      <div class="card-section">
-        <div class="section-header">
-          <div class="section-title-row">
-            <div class="sk-bar" style="width:140px;height:16px;border-radius:4px" />
+    <el-skeleton :loading="loading" animated>
+      <template #template>
+        <div class="settings-card">
+          <div class="card-section">
+            <div class="section-header">
+              <div class="section-title-row">
+                <el-skeleton-item variant="text" style="width:140px;height:16px" />
+              </div>
+              <el-skeleton-item variant="text" style="width:80%;height:12px;margin-top:6px" />
+            </div>
+            <div class="setting-row">
+              <div class="setting-info">
+                <el-skeleton-item variant="text" style="width:100px;height:13px" />
+                <el-skeleton-item variant="text" style="width:160px;height:11px;margin-top:3px" />
+              </div>
+              <el-skeleton-item variant="rect" style="width:140px;height:32px;border-radius:var(--radius-sm)" />
+            </div>
           </div>
-          <div class="sk-bar" style="width:80%;height:12px;border-radius:4px;margin-top:6px" />
         </div>
-        <div class="setting-row">
-          <div class="setting-info">
-            <div class="sk-bar" style="width:100px;height:13px;border-radius:4px" />
-            <div class="sk-bar" style="width:160px;height:11px;border-radius:4px;margin-top:3px" />
-          </div>
-          <div class="sk-bar" style="width:140px;height:32px;border-radius:var(--radius-sm)" />
-        </div>
-      </div>
-    </div>
-
-    <div class="settings-card" v-else>
+      </template>
+      <template #default>
+    <div class="settings-card">
       <div class="card-section">
         <div class="section-header">
           <div class="section-title-row">
@@ -59,6 +62,8 @@
         </div>
       </div>
     </div>
+      </template>
+    </el-skeleton>
 
     <div class="settings-card" v-if="!loading">
       <div class="card-section">

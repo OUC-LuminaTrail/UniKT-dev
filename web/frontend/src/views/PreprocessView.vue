@@ -27,26 +27,32 @@
         <div class="section">
           <div class="section-label">数据集</div>
           <div class="dataset-layout">
-            <div class="dataset-cards sk-dataset-cards" v-if="loading">
-              <div class="select-card sk-card-skel" v-for="i in 4" :key="i">
-                <div class="sk-bar" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
-                <div class="sk-bar" style="width:60%;height:12px;border-radius:4px" />
-              </div>
-            </div>
-            <div class="dataset-cards" v-else-if="datasets.length">
-              <div
-                v-for="ds in datasets"
-                :key="ds.name"
-                class="select-card"
-                :class="{ active: dataset === ds.name }"
-                @click="onDatasetClick(ds.name)"
-              >
-                <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
-                  <el-icon :size="18"><Coin /></el-icon>
+            <el-skeleton :loading="loading" animated style="flex:1;min-width:0">
+              <template #template>
+                <div class="dataset-cards">
+                  <div class="select-card" v-for="i in 4" :key="i">
+                    <el-skeleton-item variant="rect" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
+                    <el-skeleton-item variant="text" style="width:60%" />
+                  </div>
                 </div>
-                <div class="card-name" :title="ds.name">{{ ds.name }}</div>
-              </div>
-            </div>
+              </template>
+              <template #default>
+                <div class="dataset-cards" v-if="datasets.length">
+                  <div
+                    v-for="ds in datasets"
+                    :key="ds.name"
+                    class="select-card"
+                    :class="{ active: dataset === ds.name }"
+                    @click="onDatasetClick(ds.name)"
+                  >
+                    <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
+                      <el-icon :size="18"><Coin /></el-icon>
+                    </div>
+                    <div class="card-name" :title="ds.name">{{ ds.name }}</div>
+                  </div>
+                </div>
+              </template>
+            </el-skeleton>
 
             <DatasetMetadataPanel
               :dataset="dataset"
@@ -618,10 +624,6 @@ onUnmounted(() => { stopPolling() })
 .stop-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.sk-card-skel {
-  cursor: default;
 }
 
 .env-row {

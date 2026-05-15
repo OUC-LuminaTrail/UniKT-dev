@@ -8,21 +8,25 @@
       </div>
     </div>
 
-    <div class="gpu-grid" v-if="loading">
-      <div class="gpu-card" v-for="i in 2" :key="i">
-        <div class="gpu-card-header">
-          <div class="sk-bar" style="width:50px;height:18px;border-radius:var(--radius-sm)" />
-          <div class="sk-bar" style="width:120px;height:14px;border-radius:4px" />
-        </div>
-        <div class="stats-grid">
-          <div class="stat-block" v-for="j in 4" :key="j">
-            <div class="sk-bar" style="width:40px;height:10px;border-radius:4px" />
-            <div class="sk-bar" style="width:70%;height:12px;border-radius:4px;margin-top:4px" />
+    <el-skeleton :loading="loading" animated>
+      <template #template>
+        <div class="gpu-grid">
+          <div class="gpu-card" v-for="i in 2" :key="i">
+            <div class="gpu-card-header">
+              <el-skeleton-item variant="text" style="width:50px;height:18px" />
+              <el-skeleton-item variant="text" style="width:120px;height:14px" />
+            </div>
+            <div class="stats-grid">
+              <div class="stat-block" v-for="j in 4" :key="j">
+                <el-skeleton-item variant="text" style="width:40px;height:10px" />
+                <el-skeleton-item variant="text" style="width:70%;height:12px;margin-top:4px" />
+              </div>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-    <div class="gpu-grid" v-else-if="status && status.gpus.length > 0">
+      </template>
+      <template #default>
+    <div class="gpu-grid" v-if="status && status.gpus.length > 0">
       <div class="gpu-card" v-for="gpu in status.gpus" :key="gpu.index">
         <div class="gpu-card-header">
           <span class="gpu-index">GPU {{ gpu.index }}</span>
@@ -85,6 +89,8 @@
       <div class="empty-text">未检测到 GPU</div>
       <div class="empty-sub">请确保已安装 NVIDIA 驱动和 nvidia-smi</div>
     </div>
+      </template>
+    </el-skeleton>
 
     <div class="updated-at" v-if="status">
       更新时间: {{ status.updated_at }}

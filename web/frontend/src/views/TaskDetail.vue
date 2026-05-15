@@ -1,31 +1,36 @@
 <template>
-  <div class="task-detail" v-if="loading && !task">
-    <header class="detail-header">
-      <div class="sk-bar" style="width:32px;height:32px;border-radius:var(--radius-sm);flex-shrink:0"></div>
-      <div class="sk-bar" style="width:180px;height:20px;border-radius:4px"></div>
-      <div class="sk-bar" style="width:72px;height:24px;border-radius:20px"></div>
-    </header>
+  <el-skeleton :loading="loading && !task" animated>
+    <template #template>
+      <div class="task-detail">
+        <header class="detail-header">
+          <el-skeleton-item variant="rect" style="width:32px;height:32px;border-radius:var(--radius-sm);flex-shrink:0" />
+          <el-skeleton-item variant="text" style="width:180px;height:20px" />
+          <el-skeleton-item variant="rect" style="width:72px;height:24px;border-radius:20px" />
+        </header>
 
-    <section class="meta-grid">
-      <div class="meta-cell" v-for="i in 6" :key="i">
-        <div class="sk-bar" style="width:40px;height:10px;border-radius:4px" />
-        <div class="sk-bar" style="width:70%;height:13px;border-radius:4px;margin-top:2px" />
+        <section class="meta-grid">
+          <div class="meta-cell" v-for="i in 6" :key="i">
+            <el-skeleton-item variant="text" style="width:40px;height:10px" />
+            <el-skeleton-item variant="text" style="width:70%;height:13px;margin-top:2px" />
+          </div>
+        </section>
+
+        <div class="command-block">
+          <div class="command-bar">
+            <span class="command-label">命令</span>
+          </div>
+          <div style="padding:12px 14px">
+            <el-skeleton-item variant="text" style="width:90%;height:14px" />
+          </div>
+        </div>
+
+        <div style="min-height:200px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface)">
+          <el-skeleton-item variant="text" style="margin:16px;width:60%;height:14px" />
+        </div>
       </div>
-    </section>
-
-    <div class="command-block">
-      <div class="command-bar">
-        <span class="command-label">命令</span>
-      </div>
-      <div style="padding:12px 14px"><div class="sk-bar" style="width:90%;height:14px;border-radius:4px" /></div>
-    </div>
-
-    <div style="min-height:200px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface)">
-      <div class="sk-bar" style="margin:16px;width:60%;height:14px;border-radius:4px" />
-    </div>
-  </div>
-
-  <div class="task-detail" v-else-if="task">
+    </template>
+    <template #default>
+  <div class="task-detail" v-if="task">
     <header class="detail-header">
       <button class="back-btn" @click="goBack">
         <el-icon :size="18"><ArrowLeft /></el-icon>
@@ -87,6 +92,8 @@
 
     <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
   </div>
+    </template>
+  </el-skeleton>
 </template>
 
 <script setup lang="ts">

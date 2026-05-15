@@ -6,62 +6,66 @@
         <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
       </div>
 
-      <div v-if="loading" class="selection-step-skeleton">
-        <div class="sk-section">
-          <div class="sk-bar" style="width:80px;height:14px;border-radius:4px;margin-bottom:10px" />
-          <div class="sk-bar" style="width:240px;height:32px;border-radius:var(--radius-sm)" />
-        </div>
-        <div class="sk-section">
-          <div class="sk-bar" style="width:48px;height:14px;border-radius:4px;margin-bottom:10px" />
-          <div class="sk-card-grid">
-            <div class="sk-card" v-for="i in 6" :key="'m'+i">
-              <div class="sk-bar" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
-              <div class="sk-bar" style="width:50px;height:12px;border-radius:4px" />
+      <el-skeleton :loading="loading" animated>
+        <template #template>
+          <div class="selection-step-skeleton">
+            <div class="sk-section">
+              <el-skeleton-item variant="text" style="width:80px;margin-bottom:10px" />
+              <el-skeleton-item variant="text" style="width:240px;height:32px" />
+            </div>
+            <div class="sk-section">
+              <el-skeleton-item variant="text" style="width:48px;margin-bottom:10px" />
+              <div class="sk-card-grid">
+                <div class="sk-card" v-for="i in 6" :key="'m'+i">
+                  <el-skeleton-item variant="rect" style="width:40px;height:40px" />
+                  <el-skeleton-item variant="text" style="width:50px" />
+                </div>
+              </div>
+            </div>
+            <div class="sk-section">
+              <el-skeleton-item variant="text" style="width:60px;margin-bottom:10px" />
+              <div class="sk-card-grid">
+                <div class="sk-card" v-for="i in 4" :key="'d'+i">
+                  <el-skeleton-item variant="rect" style="width:40px;height:40px" />
+                  <el-skeleton-item variant="text" style="width:70px" />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-        <div class="sk-section">
-          <div class="sk-bar" style="width:60px;height:14px;border-radius:4px;margin-bottom:10px" />
-          <div class="sk-card-grid">
-            <div class="sk-card" v-for="i in 4" :key="'d'+i">
-              <div class="sk-bar" style="width:40px;height:40px;border-radius:var(--radius-sm)" />
-              <div class="sk-bar" style="width:70px;height:12px;border-radius:4px" />
-            </div>
-          </div>
-        </div>
-      </div>
-      <template v-else>
-        <SelectionStep
-          v-if="step === 'select'"
-          :envId="envId"
-          :customPythonPath="customPythonPath"
-          :modelName="modelName"
-          :dataset="dataset"
-          :environments="environments"
-          :models="models"
-          :datasets="datasets"
-          @update:envId="envId = $event"
-          @update:customPythonPath="customPythonPath = $event"
-          @update:modelName="onModelChange"
-          @update:dataset="dataset = $event"
-          @confirm="onSelectConfirm"
-        />
-
-        <div v-if="step === 'params'" class="params-step">
-          <div class="params-header">
-            <el-button class="back-btn" @click="step = 'select'">
-              <el-icon :size="14" style="margin-right:4px"><ArrowLeft /></el-icon>
-              返回选择
-            </el-button>
-          </div>
-
-          <ParamForm
-            v-if="selectionSchema"
-            :schema="selectionSchema"
-            @update:params="params = $event"
+        </template>
+        <template #default>
+          <SelectionStep
+            v-if="step === 'select'"
+            :envId="envId"
+            :customPythonPath="customPythonPath"
+            :modelName="modelName"
+            :dataset="dataset"
+            :environments="environments"
+            :models="models"
+            :datasets="datasets"
+            @update:envId="envId = $event"
+            @update:customPythonPath="customPythonPath = $event"
+            @update:modelName="onModelChange"
+            @update:dataset="dataset = $event"
+            @confirm="onSelectConfirm"
           />
-        </div>
-      </template>
+
+          <div v-if="step === 'params'" class="params-step">
+            <div class="params-header">
+              <el-button class="back-btn" @click="step = 'select'">
+                <el-icon :size="14" style="margin-right:4px"><ArrowLeft /></el-icon>
+                返回选择
+              </el-button>
+            </div>
+
+            <ParamForm
+              v-if="selectionSchema"
+              :schema="selectionSchema"
+              @update:params="params = $event"
+            />
+          </div>
+        </template>
+      </el-skeleton>
 
     </div>
 
