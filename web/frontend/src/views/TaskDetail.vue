@@ -74,7 +74,7 @@
       </div>
       <div class="meta-cell">
         <span class="meta-key">开始时间</span>
-        <span class="meta-val mono">{{ formatTime(task.started_at) }}</span>
+        <span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span>
       </div>
       <div class="meta-cell">
         <span class="meta-key">退出码</span>
@@ -102,6 +102,7 @@ import { useIntervalFn } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, SwitchButton, Bottom } from '@element-plus/icons-vue'
+import { formatDateTime } from '@/utils/date'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
 
@@ -129,8 +130,6 @@ const statusMap: Record<string, { color: string; label: string }> = {
   stopped: { color: 'var(--accent-orange)', label: '已停止' },
   pending: { color: 'var(--text-tertiary)', label: '等待中' },
 }
-
-const formatTime = (t: string | null) => t ? new Date(t).toLocaleString('zh-CN') : '-'
 
 const exitCodeClass = computed(() => {
   if (task.value?.exit_code == null) return ''

@@ -57,7 +57,7 @@
           </el-table-column>
           <el-table-column prop="created_at" label="创建时间" width="170" sortable>
             <template #default="{ row }">
-              <span class="mono-time">{{ formatTime(row.created_at) }}</span>
+              <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="90" align="right">
@@ -108,7 +108,7 @@
           <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
           <el-table-column prop="created_at" label="创建时间" width="170" sortable>
             <template #default="{ row }">
-              <span class="mono-time">{{ formatTime(row.created_at) }}</span>
+              <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="110" align="right">
@@ -184,7 +184,7 @@
         </el-table-column>
         <el-table-column prop="created_at" label="创建时间" width="170" sortable>
           <template #default="{ row }">
-            <span class="mono-time">{{ formatTime(row.created_at) }}</span>
+            <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="90" align="right">
@@ -229,6 +229,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document } from '@element-plus/icons-vue'
+import { formatDateTime } from '@/utils/date'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
 
@@ -281,11 +282,6 @@ const switchTab = (tab: string) => {
   sessionStorage.setItem('taskListTab', tab)
   router.replace({ query: tab !== 'running' ? { tab } : {} })
   loadAll()
-}
-
-const formatTime = (t: string | null) => {
-  if (!t) return '-'
-  return new Date(t).toLocaleString('zh-CN')
 }
 
 const loadAll = async () => {
