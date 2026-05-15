@@ -240,7 +240,7 @@ async function onStartTraining() {
   try {
     const taskParams = { ...params.value, dataset: dataset.value }
 
-    if (showKfoldSelector.value && selectedFolds.value.length > 0) {
+    if (showKfoldSelector.value && selectedFolds.value.length > 1) {
       await confirmMultiFold()
       let created = 0
       for (const fold of selectedFolds.value) {
@@ -255,6 +255,25 @@ async function onStartTraining() {
       }
       ElMessage.success(`已创建 ${created} 个任务`)
       router.replace({ name: 'tasks' })
+      return
+    }
+
+    if (showKfoldSelector.value && selectedFolds.value.length === 1) {
+      const fold = selectedFolds.value[0]
+      const task = await createTask({
+        name: buildTaskName(fold),
+        env_id: envId.value,
+        custom_python_path: customPythonPath.value || null,
+        model_name: modelName.value,
+        params: { ...taskParams, fold },
+      })
+      if (task.status === 'pending') {
+        ElMessage.success('任务已加入队列')
+        router.replace({ name: 'tasks' })
+      } else {
+        ElMessage.success('任务已创建')
+        router.replace({ name: 'task-detail', params: { id: task.id } })
+      }
       return
     }
 
