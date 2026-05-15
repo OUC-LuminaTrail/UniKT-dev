@@ -119,6 +119,7 @@ import { createTask } from '@/api/tasks'
 import { getDatasetMetadata } from '@/api/datasets'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
+import { getDefaultEnv } from '@/api/settings'
 import CommandPreview from '@/components/task/CommandPreview.vue'
 import SelectionStep from '@/components/task/SelectionStep.vue'
 import ParamForm from '@/components/task/ParamForm.vue'
@@ -258,12 +259,23 @@ async function onStartTraining() {
 
 onMounted(async () => {
   try {
-    const [envs, modelList] = await Promise.all([listEnvironments(), listModels()])
+    const [envs, modelList, defaultEnv] = await Promise.all([
+      listEnvironments(),
+      listModels(),
+      getDefaultEnv().catch(() => ({ default_env_id: null })),
+    ])
     environments.value = envs
     models.value = modelList
 
     const savedEnv = localStorage.getItem(STORAGE_KEY_ENV)
-    if (savedEnv && envs.some(e => e.id === savedEnv)) envId.value = savedEnv
+    if (savedEnv && envs.some(e => e.id === savedEnv)) {
+      envId.value = savedEnv
+    } else if (defaultEnv.default_env_id && envs.some(e => e.id === defaultEnv.default_env_id)) {
+      envId.value = defaultEnv.default_env_id
+      if (defaultEnv.custom_python_path) {
+        customPythonPath.value = defaultEnv.custom_python_path
+      }
+    }
 
     const savedModel = localStorage.getItem(STORAGE_KEY_MODEL)
     if (savedModel && modelList.includes(savedModel)) {

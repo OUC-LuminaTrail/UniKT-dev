@@ -27,7 +27,9 @@ class PreprocessTask:
 
 
 class PreprocessManager:
-    def __init__(self):
+    def __init__(self, resolver=None, settings_manager=None):
+        self._resolver = resolver
+        self._settings_manager = settings_manager
         self._tasks: dict[int, PreprocessTask] = {}
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
@@ -142,8 +144,17 @@ class PreprocessManager:
                 os.killpg(pgid, signal.SIGINT)
         return True
 
+    def _resolve_base_cmd(self) -> list[str]:
+        if self._resolver and self._settings_manager:
+            default_env = self._settings_manager.get_default_env()
+            if default_env:
+                custom_path = self._settings_manager.get_custom_python_path()
+                return self._resolver.resolve_command(default_env, custom_path)
+        return ["python"]
+
     def _build_command(self, action: str, dataset: str, params: dict) -> list[str]:
-        cmd = ["python", "data_process.py", action, "-d", dataset]
+        base = self._resolve_base_cmd()
+        cmd = base + ["data_process.py", action, "-d", dataset]
         if action == "download":
             if params.get("force"):
                 cmd.append("--force")

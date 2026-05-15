@@ -30,12 +30,15 @@ async def lifespan(app: FastAPI):
     deps.gpu_monitor = __import__(
         "services.gpu_monitor", fromlist=["GpuMonitor"]
     ).GpuMonitor()
-    deps.preprocess_manager = __import__(
-        "services.preprocess_manager", fromlist=["PreprocessManager"]
-    ).PreprocessManager()
     deps.settings_manager = __import__(
         "services.settings_manager", fromlist=["SettingsManager"]
     ).SettingsManager()
+    resolver = __import__(
+        "services.environment_resolver", fromlist=["EnvironmentResolver"]
+    ).EnvironmentResolver()
+    deps.preprocess_manager = __import__(
+        "services.preprocess_manager", fromlist=["PreprocessManager"]
+    ).PreprocessManager(resolver=resolver, settings_manager=deps.settings_manager)
     yield
     if deps.process_manager:
         deps.process_manager.shutdown()
