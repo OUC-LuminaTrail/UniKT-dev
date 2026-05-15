@@ -25,3 +25,24 @@ export const getQueue = () =>
 
 export const reorderQueue = (task_ids: number[]) =>
   api.put('/tasks/queue/reorder', { task_ids }).then(r => r.data)
+
+export interface InitStatus {
+  initialized: boolean
+}
+
+export interface DefaultEnv {
+  default_env_id: string | null
+}
+
+export interface DefaultEnvUpdate {
+  env_id: string
+}
+
+export const getInitStatus = () =>
+  api.get<InitStatus>('/settings/initialized').then(r => r.data)
+
+export const getDefaultEnv = () =>
+  api.get<DefaultEnv>('/settings/default-env').then(r => r.data)
+
+export const setDefaultEnv = (env_id: string) =>
+  api.post<DefaultEnvUpdate & { ok: boolean }>('/settings/default-env', { env_id }).then(r => r.data)
