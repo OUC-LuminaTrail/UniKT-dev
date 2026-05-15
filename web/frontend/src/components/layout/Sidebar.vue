@@ -56,6 +56,7 @@ import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useDark, useToggle } from '@vueuse/core'
 import { Upload, Monitor, Grid, Setting, Sunny, Moon, Expand, Fold } from '@element-plus/icons-vue'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 defineProps<{
   collapsed: boolean
@@ -70,11 +71,18 @@ const route = useRoute()
 const isDark = useDark()
 const toggleDark = useToggle(isDark)
 
-const navItems = [
-  { path: '/preprocess', label: '数据预处理', icon: Upload },
-  { path: '/tasks', label: '训练任务', icon: Monitor },
-  { path: '/gpu', label: 'GPU 监控', icon: Grid },
-]
+const { hasGpu } = useSystemCapabilities()
+
+const navItems = computed(() => {
+  const items = [
+    { path: '/preprocess', label: '数据预处理', icon: Upload },
+    { path: '/tasks', label: '训练任务', icon: Monitor },
+  ]
+  if (hasGpu.value) {
+    items.push({ path: '/gpu', label: 'GPU 监控', icon: Grid })
+  }
+  return items
+})
 
 const activeIndex = computed(() => {
   const path = route.path

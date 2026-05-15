@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -31,6 +32,10 @@ const router = createRouter({
       name: 'gpu',
       component: () => import('@/views/GPUMonitor.vue'),
       meta: { title: 'GPU 监控' },
+      beforeEnter: () => {
+        const { hasGpu } = useSystemCapabilities()
+        if (!hasGpu.value) return { name: 'tasks' }
+      },
     },
     {
       path: '/preprocess',

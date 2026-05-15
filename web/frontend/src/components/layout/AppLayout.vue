@@ -34,24 +34,26 @@
             </div>
             <span class="status-value">{{ sys.memory_used_gb.toFixed(1) }}/{{ sys.memory_total_gb.toFixed(0) }}G</span>
           </div>
-          <div class="status-sep"></div>
-          <div class="status-item">
-            <span class="status-dot" :style="{ background: progressColor(sys.gpu_utilization) }"></span>
-            <span class="status-label">GPU</span>
-            <div class="status-bar-track">
-              <div class="status-bar-fill" :style="{ width: sys.gpu_utilization + '%', background: progressColor(sys.gpu_utilization) }"></div>
+          <template v-if="hasGpu">
+            <div class="status-sep"></div>
+            <div class="status-item">
+              <span class="status-dot" :style="{ background: progressColor(sys.gpu_utilization) }"></span>
+              <span class="status-label">GPU</span>
+              <div class="status-bar-track">
+                <div class="status-bar-fill" :style="{ width: sys.gpu_utilization + '%', background: progressColor(sys.gpu_utilization) }"></div>
+              </div>
+              <span class="status-value">{{ sys.gpu_utilization.toFixed(0) }}%</span>
             </div>
-            <span class="status-value">{{ sys.gpu_utilization.toFixed(0) }}%</span>
-          </div>
-          <div class="status-sep"></div>
-          <div class="status-item">
-            <span class="status-dot" :style="{ background: progressColor(sys.gpu_memory_percent) }"></span>
-            <span class="status-label">VRAM</span>
-            <div class="status-bar-track">
-              <div class="status-bar-fill" :style="{ width: sys.gpu_memory_percent + '%', background: progressColor(sys.gpu_memory_percent) }"></div>
+            <div class="status-sep"></div>
+            <div class="status-item">
+              <span class="status-dot" :style="{ background: progressColor(sys.gpu_memory_percent) }"></span>
+              <span class="status-label">VRAM</span>
+              <div class="status-bar-track">
+                <div class="status-bar-fill" :style="{ width: sys.gpu_memory_percent + '%', background: progressColor(sys.gpu_memory_percent) }"></div>
+              </div>
+              <span class="status-value">{{ sys.gpu_memory_percent.toFixed(0) }}%</span>
             </div>
-            <span class="status-value">{{ sys.gpu_memory_percent.toFixed(0) }}%</span>
-          </div>
+          </template>
           <div class="status-sep"></div>
           <div class="status-item status-load">
             <span class="status-label">LOAD</span>
@@ -70,10 +72,12 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import Sidebar from './Sidebar.vue'
 import { getSystemStatus, type SystemStatus } from '@/api/gpu'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const route = useRoute()
 
 const isCollapsed = ref(false)
+const { hasGpu } = useSystemCapabilities()
 
 const flushContent = computed(() => !!route.meta?.flush)
 
