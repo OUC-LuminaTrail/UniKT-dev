@@ -32,6 +32,9 @@ async def lifespan(app: FastAPI):
     deps.preprocess_manager = __import__(
         "services.preprocess_manager", fromlist=["PreprocessManager"]
     ).PreprocessManager()
+    deps.settings_manager = __import__(
+        "services.settings_manager", fromlist=["SettingsManager"]
+    ).SettingsManager()
     yield
     if deps.process_manager:
         deps.process_manager.shutdown()

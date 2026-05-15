@@ -22,3 +22,13 @@ preprocess_manager: PreprocessManager | None = None
 def get_preprocess_manager() -> PreprocessManager:
     assert preprocess_manager is not None
     return preprocess_manager
+
+
+from services.settings_manager import SettingsManager
+
+settings_manager: SettingsManager | None = None
+
+
+def get_settings_manager() -> SettingsManager:
+    assert settings_manager is not None
+    return settings_manager
