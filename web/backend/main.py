@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi_problem.handler import add_exception_handler, new_exception_handler
 from middleware import MessageMiddleware
 from routers import (
+    capabilities,
     datasets,
     environments,
     gpu,
@@ -64,3 +65,4 @@ app.include_router(gpu.router)
 app.include_router(preprocess.router)
 app.include_router(datasets.router)
 app.include_router(settings_api.router)
+app.include_router(capabilities.router)
