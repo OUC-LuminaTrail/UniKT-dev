@@ -4,6 +4,7 @@ import argparse
 
 import model  # noqa: F401
 from utils.config import (
+    CompileParams,
     DataParams,
     EarlyStoppingParams,
     GeneralParams,
@@ -32,6 +33,7 @@ def parse_args():
     GeneralParams.add_args(parser)
     DataParams.add_args(parser)
     EarlyStoppingParams.add_args(parser)
+    CompileParams.add_args(parser)
 
     # 添加模型选择参数
     available_models = list(TRAINERS.keys())

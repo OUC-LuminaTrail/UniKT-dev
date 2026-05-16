@@ -11,6 +11,7 @@ from .data_config import (
 )
 from .param_config import (
     BaseParamConfig,
+    CompileParams,
     DataParams,
     EarlyStoppingParams,
     GeneralParams,
@@ -31,6 +32,7 @@ from .training_config import (
 __all__ = [
     # Param Config
     "BaseParamConfig",
+    "CompileParams",
     "DataParams",
     "EarlyStoppingParams",
     "GeneralParams",

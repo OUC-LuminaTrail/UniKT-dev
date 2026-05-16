@@ -81,6 +81,7 @@ class BaseTrainer(ABC):
 
         # Internal state
         self._built = False
+        self._compile_config: dict | None = None
         self.device_: torch.device | None = None
         self.epochs: int | None = None
         self.seed: int | None = None
@@ -125,6 +126,32 @@ class BaseTrainer(ABC):
             device=device,
             checkpoint_path=checkpoint_path,
         )
+        return self
+
+    def with_compile(
+        self,
+        mode: str = "default",
+        fullgraph: bool = False,
+        dynamic: bool | None = None,
+        backend: str = "inductor",
+    ) -> "BaseTrainer":
+        """配置 torch.compile 编译优化。
+
+        Args:
+            mode: 编译模式 ("default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs")
+            fullgraph: 是否要求将整个函数捕获为单一计算图
+            dynamic: 是否使用动态形状追踪。None 表示自动检测，True 强制动态，False 强制静态
+            backend: 编译后端
+
+        Returns:
+            Self for method chaining
+        """
+        self._compile_config = {
+            "mode": mode,
+            "fullgraph": fullgraph,
+            "dynamic": dynamic,
+            "backend": backend,
+        }
         return self
 
     def with_callbacks(
@@ -387,6 +414,9 @@ class BaseTrainer(ABC):
         if self._training_config.checkpoint_path:
             self._load_checkpoint(self._training_config.checkpoint_path)
 
+        # 12. Apply torch.compile if configured
+        self._apply_compile()
+
         self._built = True
         logger.info("Trainer built successfully")
         return self
@@ -424,6 +454,44 @@ class BaseTrainer(ABC):
             if early_stopping_cfg is not None
             else None
         )
+
+    def _apply_compile(self):
+        """如果已配置，则将 torch.compile 应用于模型。
+
+        支持两种配置方式：
+        1. 通过 with_compile() 链式调用显式配置
+        2. 通过 args（hyperparams）中的 compile 参数自动配置
+        """
+        # 如果没有通过 with_compile 显式配置，尝试从 hyperparams 读取
+        if self._compile_config is None:
+            hyperparams = None
+            if self._experiment_config is not None:
+                hyperparams = self._experiment_config.hyperparams
+            if hyperparams is not None and getattr(hyperparams, "compile", False):
+                self._compile_config = {
+                    "mode": getattr(hyperparams, "compile_mode", "default"),
+                    "fullgraph": getattr(hyperparams, "compile_fullgraph", False),
+                    "dynamic": getattr(hyperparams, "compile_dynamic", None),
+                    "backend": getattr(hyperparams, "compile_backend", "inductor"),
+                }
+
+        if self._compile_config is None:
+            return
+
+        logger.info(
+            f"Applying torch.compile: mode={self._compile_config['mode']}, "
+            f"backend={self._compile_config['backend']}, "
+            f"fullgraph={self._compile_config['fullgraph']}, "
+            f"dynamic={self._compile_config['dynamic']}"
+        )
+        self.model = torch.compile(
+            self.model,
+            mode=self._compile_config["mode"],
+            fullgraph=self._compile_config["fullgraph"],
+            dynamic=self._compile_config["dynamic"],
+            backend=self._compile_config["backend"],
+        )
+        logger.info("torch.compile applied successfully")
 
     @abstractmethod
     def forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
