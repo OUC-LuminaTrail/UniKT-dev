@@ -36,6 +36,7 @@
         <template #default>
           <SelectionStep
             v-if="step === 'select'"
+            ref="selectionStepRef"
             :envId="envId"
             :customPythonPath="customPythonPath"
             :modelName="modelName"
@@ -43,11 +44,13 @@
             :environments="environments"
             :models="models"
             :datasets="datasets"
+            :refreshing="loading"
             @update:envId="envId = $event"
             @update:customPythonPath="customPythonPath = $event"
             @update:modelName="onModelChange"
             @update:dataset="dataset = $event"
             @confirm="onSelectConfirm"
+            @refresh="refreshAll"
           />
 
           <div v-if="step === 'params'" class="params-step">
@@ -117,7 +120,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { createTask } from '@/api/tasks'
@@ -130,6 +133,7 @@ import SelectionStep from '@/components/task/SelectionStep.vue'
 import ParamForm from '@/components/task/ParamForm.vue'
 
 const router = useRouter()
+const queryClient = useQueryClient()
 const step = ref<'select' | 'params'>('select')
 const submitting = ref(false)
 const params = ref<Record<string, any>>({})
@@ -161,7 +165,8 @@ const initDataQuery = useQuery({
 
 const environments = computed<EnvironmentInfo[]>(() => initDataQuery.data.value?.envs ?? [])
 const models = computed(() => initDataQuery.data.value?.modelList ?? [])
-const loading = computed(() => initDataQuery.isPending.value)
+const refreshing = ref(false)
+const loading = computed(() => initDataQuery.isPending.value || refreshing.value)
 
 const datasets = ref<string[]>([])
 
@@ -301,6 +306,21 @@ async function onStartTraining() {
 }
 
 const initDone = ref(false)
+const selectionStepRef = ref<InstanceType<typeof SelectionStep> | null>(null)
+
+async function refreshAll() {
+  refreshing.value = true
+  initDone.value = false
+  selectionStepRef.value?.clearCache()
+
+  await queryClient.refetchQueries({ queryKey: ['task-launch-init'] })
+  await queryClient.refetchQueries({ queryKey: ['model-params'] })
+  await queryClient.refetchQueries({ queryKey: ['dataset-metadata'] })
+
+  refreshing.value = false
+  ElMessage.success('已刷新模型和数据集')
+}
+
 watch(() => initDataQuery.data.value, async (data) => {
   if (!data || initDone.value) return
   initDone.value = true

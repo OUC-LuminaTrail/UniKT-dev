@@ -43,7 +43,17 @@
     </div>
 
     <div class="section">
-      <div class="section-label">模型</div>
+      <div class="section-label-row">
+        <div class="section-label">模型</div>
+        <el-button
+          class="refresh-btn"
+          :loading="refreshing"
+          @click="emit('refresh')"
+        >
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </div>
       <div class="card-grid">
         <div
           v-for="name in models"
@@ -92,7 +102,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Coin } from '@element-plus/icons-vue'
+import { Coin, Refresh } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
 import { getDatasetMetadata, type DatasetMetadata } from '@/api/datasets'
 import DatasetMetadataPanel from './DatasetMetadataPanel.vue'
@@ -106,6 +116,7 @@ const props = defineProps<{
   environments: EnvironmentInfo[]
   models: string[]
   datasets: string[]
+  refreshing: boolean
 }>()
 
 const emit = defineEmits<{
@@ -114,6 +125,7 @@ const emit = defineEmits<{
   (e: 'update:modelName', val: string): void
   (e: 'update:dataset', val: string): void
   (e: 'confirm'): void
+  (e: 'refresh'): void
 }>()
 
 const metadata = ref<DatasetMetadata | null>(null)
@@ -147,6 +159,13 @@ watch(() => props.dataset, (name) => {
   if (metadataCache.value[name]) { metadata.value = metadataCache.value[name]; return }
   loadMetadata(name)
 }, { immediate: true })
+
+function clearCache() {
+  metadataCache.value = {}
+  if (props.dataset) loadMetadata(props.dataset)
+}
+
+defineExpose({ clearCache })
 </script>
 
 <style scoped>
@@ -161,6 +180,21 @@ watch(() => props.dataset, (name) => {
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 12px;
+}
+
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.section-label-row .section-label {
+  margin-bottom: 0;
+}
+
+.refresh-btn {
+  font-size: 13px;
 }
 
 .env-select {
