@@ -282,6 +282,42 @@ class GeneralParams(BaseParamConfig):
         return group_name, params
 
 
+class CompileParams(BaseParamConfig):
+    """torch.compile 编译参数配置。"""
+
+    def define_params(self) -> tuple[str, dict]:
+        group_name = "Compile Parameters"
+        params = {
+            "compile": {
+                "type": bool,
+                "default": False,
+                "help": "Enable torch.compile for model optimization (default: False)",
+            },
+            "compile_mode": {
+                "type": str,
+                "default": "default",
+                "choices": ["default", "reduce-overhead", "auto"],
+                "help": "Compilation mode (choices: default, reduce-overhead, auto, default: default)",
+            },
+            "compile_fullgraph": {
+                "type": bool,
+                "default": False,
+                "help": "Whether to compile the entire graph (default: False)",
+            },
+            "compile_dynamic": {
+                "type": bool,
+                "default": False,
+                "help": "Use dynamic shape tracing (default: False)",
+            },
+            "compile_backend": {
+                "type": str,
+                "default": "inductor",
+                "help": "Compilation backend (default: inductor)",
+            },
+        }
+        return group_name, params
+
+
 class SamplingParams(BaseParamConfig):
     """数据抽样参数配置。"""
 
@@ -322,6 +358,7 @@ class SamplingParams(BaseParamConfig):
 
 __all__ = [
     "BaseParamConfig",
+    "CompileParams",
     "DataParams",
     "EarlyStoppingParams",
     "GeneralParams",
