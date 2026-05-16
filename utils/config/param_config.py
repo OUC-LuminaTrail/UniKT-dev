@@ -296,18 +296,23 @@ class CompileParams(BaseParamConfig):
             "compile_mode": {
                 "type": str,
                 "default": "default",
-                "choices": ["default", "reduce-overhead", "auto"],
-                "help": "Compilation mode (choices: default, reduce-overhead, auto, default: default)",
+                "choices": [
+                    "default",
+                    "reduce-overhead",
+                    "max-autotune",
+                    "max-autotune-no-cudagraphs",
+                ],
+                "help": "Compilation mode (choices: default, reduce-overhead, max-autotune, max-autotune-no-cudagraphs, default: default)",
             },
             "compile_fullgraph": {
                 "type": bool,
                 "default": False,
-                "help": "Whether to compile the entire graph (default: False)",
+                "help": "Require the entire function be capturable into a single graph, raises error on graph breaks (default: False)",
             },
             "compile_dynamic": {
                 "type": bool,
-                "default": False,
-                "help": "Use dynamic shape tracing (default: False)",
+                "default": None,
+                "help": "Use dynamic shape tracing to avoid recompilations when sizes change (default: None, PyTorch auto-detects dynamism)",
             },
             "compile_backend": {
                 "type": str,

@@ -132,15 +132,15 @@ class BaseTrainer(ABC):
         self,
         mode: str = "default",
         fullgraph: bool = False,
-        dynamic: bool = False,
+        dynamic: bool | None = None,
         backend: str = "inductor",
     ) -> "BaseTrainer":
         """配置 torch.compile 编译优化。
 
         Args:
-            mode: 编译模式 ("default", "reduce-overhead", "auto")
-            fullgraph: 是否编译整个计算图
-            dynamic: 是否使用动态形状追踪
+            mode: 编译模式 ("default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs")
+            fullgraph: 是否要求将整个函数捕获为单一计算图
+            dynamic: 是否使用动态形状追踪。None 表示自动检测，True 强制动态，False 强制静态
             backend: 编译后端
 
         Returns:
@@ -471,7 +471,7 @@ class BaseTrainer(ABC):
                 self._compile_config = {
                     "mode": getattr(hyperparams, "compile_mode", "default"),
                     "fullgraph": getattr(hyperparams, "compile_fullgraph", False),
-                    "dynamic": getattr(hyperparams, "compile_dynamic", False),
+                    "dynamic": getattr(hyperparams, "compile_dynamic", None),
                     "backend": getattr(hyperparams, "compile_backend", "inductor"),
                 }
 
