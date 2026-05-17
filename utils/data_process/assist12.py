@@ -77,9 +77,10 @@ class Assistments2012Data(DataSource):
         )
 
         # Build question_data
+        # Preserve all question-assignment pairs (a question can belong to multiple assignments)
         question_meta = mapped_data.select(
             ["question", "assignment", "template"]
-        ).unique(subset=["question"])
+        ).unique(subset=["question", "assignment"])
         logger.debug(f"Question metadata shape: {question_meta.shape}")
 
         # Build base data with question-skill pairs
