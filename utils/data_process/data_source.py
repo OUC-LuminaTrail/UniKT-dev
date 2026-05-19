@@ -47,11 +47,14 @@ class DataSource(ABC):
         # ID mapping storage
         self._id_mappings: dict = {}
 
+        # Normalized relation tables: each key is "question_{entity}"
+        # e.g., "question_skill", "question_assignment", "question_template"
+        self.relation_data: dict[str, pl.DataFrame] = {}
+
         # 数据缓存
         self._data_cache: dict[str, pl.DataFrame | pl.LazyFrame] = {}
         self._data_config: dict[str, dict] = {
             "sequence": {"lazy": False},
-            "question": {"lazy": False},
             "split_question_sequence": {"lazy": False},
             "split_skill_sequence": {"lazy": False},
             "windowlate": {"lazy": True},
@@ -120,14 +123,21 @@ class DataSource(ABC):
         }
 
     def save_data(self):
-        """Save processed question and sequence data with metadata."""
-        # Validate and return processed data
-        self._validate_data(self.question_data, self.sequence_data)
+        """Save processed relation tables, sequence data, and metadata."""
+        # Validate
+        self._validate_data(self.relation_data, self.sequence_data)
 
-        # Save to files
-        question_data_path = os.path.join(
-            self.data_folder, f"{self.dataset}_question.parquet"
-        )
+        # Save relation tables
+        relation_md5s = {}
+        for name, df in self.relation_data.items():
+            path = os.path.join(
+                self.data_folder, f"{self.dataset}_relation_{name}.parquet"
+            )
+            df.write_parquet(path)
+            relation_md5s[f"relation_{name}_md5"] = self.compute_md5(path)
+            logger.debug(f"Saved relation {name} to: {path}")
+
+        # Save sequence data
         sequence_data_path = os.path.join(
             self.data_folder, f"{self.dataset}_sequence.parquet"
         )
@@ -141,7 +151,6 @@ class DataSource(ABC):
             self.data_folder, f"{self.dataset}_windowlate.parquet"
         )
 
-        self.question_data.write_parquet(question_data_path)
         self.sequence_data.write_parquet(sequence_data_path)
         self.split_question_sequence_data.write_parquet(split_question_sequence_path)
         self.split_skill_sequence_data.write_parquet(split_skill_sequence_path)
@@ -151,7 +160,6 @@ class DataSource(ABC):
             "min_seq_len": self.args.min_seq_len,
             "max_seq_len": self.args.max_seq_len,
             "random_seed": self.seed,
-            "question_data_md5": self.compute_md5(question_data_path),
             "sequence_data_md5": self.compute_md5(sequence_data_path),
             "split_question_sequence_data_md5": self.compute_md5(
                 split_question_sequence_path
@@ -161,18 +169,25 @@ class DataSource(ABC):
             ),
             "num_users": self.sequence_data["user"].n_unique(),
             "num_questions": self.sequence_data["question"].n_unique(),
-            "num_skills": self.question_data["skill"].n_unique(),
-            "num_assignments": self.question_data["assignment"].n_unique(),
+            "num_skills": self.relation_data["question_skill"]["skill"].n_unique(),
             "num_split_question_users": self.split_question_sequence_data[
                 "user"
             ].n_unique(),
             "num_split_skill_users": self.split_skill_sequence_data["user"].n_unique(),
         }
 
-        if "template" in self.question_data.columns:
-            metadata["num_templates"] = self.question_data["template"].n_unique()
+        # Optional entity counts from their relation tables
+        if "question_assignment" in self.relation_data:
+            metadata["num_assignments"] = self.relation_data["question_assignment"][
+                "assignment"
+            ].n_unique()
+        if "question_template" in self.relation_data:
+            metadata["num_templates"] = self.relation_data["question_template"][
+                "template"
+            ].n_unique()
 
-        logger.debug(f"Saved question_data to: {question_data_path}")
+        metadata.update(relation_md5s)
+
         logger.debug(f"Saved sequence_data to: {sequence_data_path}")
         logger.debug(
             f"Saved split question sequences to: {split_question_sequence_path}"
@@ -187,45 +202,56 @@ class DataSource(ABC):
         self.save_metadata()
 
     @staticmethod
-    def _validate_data(question_data: pl.DataFrame, sequence_data: pl.DataFrame):
-        """Validate consistency between question_data and sequence_data."""
-        # Validate question_data columns
-        expected_question_cols = {"question", "skill"}
-        actual_question_cols = set(question_data.columns)
-        assert expected_question_cols.issubset(actual_question_cols), (
-            f"question_data columns mismatch. "
-            f"Expected to contain: {expected_question_cols}, Got: {actual_question_cols}"
+    def _validate_data(
+        relation_data: dict[str, pl.DataFrame], sequence_data: pl.DataFrame
+    ):
+        """Validate consistency between relation tables and sequence_data."""
+        assert "question_skill" in relation_data, (
+            "question_skill relation is required"
+        )
+        question_skill = relation_data["question_skill"]
+
+        # Validate question_skill columns
+        assert set(question_skill.columns) == {"question", "skill"}, (
+            f"question_skill columns mismatch. "
+            f"Expected: {{question, skill}}, Got: {set(question_skill.columns)}"
         )
 
-        # Validate sequence_data doesn't contain skill
-        for col in ["skill"]:
-            assert col not in sequence_data.columns, (
-                f"sequence_data should not contain '{col}' column"
+        # Validate each relation has exactly 2 columns and is unique
+        for name, df in relation_data.items():
+            assert len(df.columns) == 2, (
+                f"Relation '{name}' should have exactly 2 columns, got {df.columns}"
+            )
+            assert df.unique(subset=df.columns).shape[0] == df.shape[0], (
+                f"Relation '{name}' has duplicate rows"
             )
 
+        # Validate sequence_data doesn't contain skill
+        assert "skill" not in sequence_data.columns, (
+            "sequence_data should not contain 'skill' column"
+        )
+
         # Validate question_id consistency
-        q_questions = set(question_data["question"].unique().to_list())
+        q_questions = set(question_skill["question"].unique().to_list())
         s_questions = set(sequence_data["question"].unique().to_list())
 
-        # All sequence_data questions must exist in question_data
         missing_questions = s_questions - q_questions
         if missing_questions:
             raise AssertionError(
                 f"question_id mismatch: {len(missing_questions)} questions in sequence_data "
-                f"not found in question_data"
+                f"not found in question_skill relation"
             )
 
-        # Extra questions in question_data are allowed (e.g., multi-skill questions)
         assert q_questions == s_questions, (
-            f"question_id mismatch: question_data has {len(q_questions)} unique, "
+            f"question_id mismatch: question_skill has {len(q_questions)} unique, "
             f"sequence_data has {len(s_questions)} unique"
         )
 
         # Validate ID range consistency
-        q_max = question_data["question"].max()
+        q_max = question_skill["question"].max()
         s_max = sequence_data["question"].max()
         assert q_max == s_max, (
-            f"question_id range mismatch: question_data max={q_max}, "
+            f"question_id range mismatch: question_skill max={q_max}, "
             f"sequence_data max={s_max}"
         )
 
@@ -490,10 +516,10 @@ class DataSource(ABC):
 
         if actual_md5 != expected_md5:
             data_type = (
-                "sequence"
+                "relation"
+                if "relation" in md5_key
+                else "sequence"
                 if "sequence" in md5_key
-                else "question"
-                if "question" in md5_key
                 else "split_sequence"
             )
             raise ValueError(
@@ -565,9 +591,45 @@ class DataSource(ABC):
         """Get user sequence data."""
         return self._load_data("sequence")
 
-    def get_question_data(self) -> pl.DataFrame:
-        """Get question metadata."""
-        return self._load_data("question")
+    def get_relation(self, name: str) -> pl.DataFrame:
+        """Get a normalized relation table by name (e.g., "question_skill").
+
+        Each relation is a 2-column DataFrame unique on (src, dst).
+        """
+        if name in self._data_cache:
+            return self._data_cache[name]
+        if self.relation_data and name in self.relation_data:
+            return self.relation_data[name]
+        # Try loading from disk
+        path = os.path.join(
+            self.data_folder, f"{self.dataset}_relation_{name}.parquet"
+        )
+        if not os.path.exists(path):
+            raise ValueError(
+                f"Relation '{name}' not found at {path}. "
+                f"Please re-run: python data_process.py process -d {self.dataset}"
+            )
+        logger.info(f"Loading relation {name} from: {path}")
+        data = pl.read_parquet(path)
+        self._data_cache[name] = data
+        return data
+
+    def get_available_relations(self) -> list[str]:
+        """Return names of available relation tables."""
+        if self.relation_data:
+            return list(self.relation_data.keys())
+        # Scan disk for relation files
+        import glob
+
+        pattern = os.path.join(
+            self.data_folder, f"{self.dataset}_relation_*.parquet"
+        )
+        paths = glob.glob(pattern)
+        return [
+            p.split("_relation_")[1].replace(".parquet", "")
+            for p in paths
+            if "_relation_" in p
+        ]
 
     def get_split_question_sequence_data(self) -> pl.DataFrame:
         """Get split user sequence data."""
@@ -718,8 +780,8 @@ class DataSource(ABC):
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
-        if self.question_data is None:
-            raise ValueError("Question data not available.")
+        if not self.relation_data or "question_skill" not in self.relation_data:
+            raise ValueError("question_skill relation not available.")
 
         logger.info(
             f"Building split skill sequences (max_len={max_seq_len}, min_len={min_seq_len})"
@@ -727,7 +789,8 @@ class DataSource(ABC):
 
         # Step 1: 展开问题序列为技能序列
         # 构建 question -> skills 映射
-        question_skills = self.question_data.group_by("question").agg(
+        question_skill = self.relation_data["question_skill"]
+        question_skills = question_skill.group_by("question").agg(
             pl.col("skill").alias("skills")
         )
 
@@ -808,8 +871,8 @@ class DataSource(ABC):
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
-        if self.question_data is None:
-            raise ValueError("Question data not available.")
+        if not self.relation_data or "question_skill" not in self.relation_data:
+            raise ValueError("question_skill relation not available.")
         if "fold" not in self.sequence_data.columns:
             raise ValueError(
                 "K-fold labels not found in data. Please call add_kfold_labels() first."
@@ -835,7 +898,7 @@ class DataSource(ABC):
         # 构建并直接保存到文件
         WindowlateProcessor.build(
             test_data=test_data,
-            question_data=self.question_data,
+            question_data=self.relation_data["question_skill"],
             max_seq_len=max_seq_len,
             output_path=output_path,
             users_per_batch=users_per_batch,
@@ -924,7 +987,7 @@ class DataSource(ABC):
         )
 
         user_skill = self.sequence_data.select(["user", "question"]).join(
-            self.question_data.select(["question", "skill"]),
+            self.relation_data["question_skill"].select(["question", "skill"]),
             on="question",
             how="left",
         )
@@ -1111,8 +1174,9 @@ class DataSource(ABC):
         self._remap_question_ids()
 
         num_users = self.sequence_data.select(pl.col("user").n_unique()).item()
-        num_questions = self.question_data.select(pl.col("question").n_unique()).item()
-        num_skills = self.question_data.select(pl.col("skill").n_unique()).item()
+        qs = self.relation_data["question_skill"]
+        num_questions = qs.select(pl.col("question").n_unique()).item()
+        num_skills = qs.select(pl.col("skill").n_unique()).item()
         sampled_records = len(self.sequence_data)
 
         sampling_config = {
@@ -1163,8 +1227,9 @@ class DataSource(ABC):
         self._remap_question_ids()
 
         num_users = self.sequence_data.select(pl.col("user").n_unique()).item()
-        num_questions = self.question_data.select(pl.col("question").n_unique()).item()
-        num_skills = self.question_data.select(pl.col("skill").n_unique()).item()
+        qs = self.relation_data["question_skill"]
+        num_questions = qs.select(pl.col("question").n_unique()).item()
+        num_skills = qs.select(pl.col("skill").n_unique()).item()
         sampled_records = len(self.sequence_data)
 
         sampling_config = {
@@ -1209,43 +1274,57 @@ class DataSource(ABC):
         )
 
     def _remap_question_ids(self):
-        """Filter and remap question IDs and skill IDs to consecutive integers."""
-        self.question_data = self.question_data.join(
-            self.sequence_data.select(pl.col("question").unique()),
-            on="question",
-            how="semi",
-        )
+        """Filter and remap question IDs and entity IDs to consecutive integers."""
+        active_questions = self.sequence_data.select(pl.col("question").unique())
 
-        # Remap question IDs
+        # Step 1: Filter all relations to only active questions
+        for name in list(self.relation_data.keys()):
+            df = self.relation_data[name]
+            if "question" in df.columns:
+                self.relation_data[name] = df.join(
+                    active_questions, on="question", how="semi"
+                )
+
+        # Step 2: Remap question IDs (consistent across all relations)
         question_id_map = (
-            self.question_data.select(pl.col("question").unique())
-            .sort("question")
+            active_questions.sort("question")
             .with_row_index("new_question_id")
             .select([pl.col("question"), pl.col("new_question_id").cast(pl.Int32)])
         )
-        self.question_data = (
-            self.question_data.join(question_id_map, on="question", how="left")
-            .drop("question")
-            .rename({"new_question_id": "question"})
-        )
+        for name in list(self.relation_data.keys()):
+            df = self.relation_data[name]
+            if "question" in df.columns:
+                self.relation_data[name] = (
+                    df.join(question_id_map, on="question", how="left")
+                    .drop("question")
+                    .rename({"new_question_id": "question"})
+                )
         self.sequence_data = (
             self.sequence_data.join(question_id_map, on="question", how="left")
             .drop("question")
             .rename({"new_question_id": "question"})
         )
 
-        # Remap skill IDs
-        skill_id_map = (
-            self.question_data.select(pl.col("skill").unique())
-            .sort("skill")
-            .with_row_index("new_skill_id")
-            .select([pl.col("skill"), pl.col("new_skill_id").cast(pl.Int32)])
-        )
-        self.question_data = (
-            self.question_data.join(skill_id_map, on="skill", how="left")
-            .drop("skill")
-            .rename({"new_skill_id": "skill"})
-        )
+        # Step 3: Remap entity IDs in each relation
+        for name in list(self.relation_data.keys()):
+            df = self.relation_data[name]
+            entity_col = [c for c in df.columns if c != "question"][0]
+            entity_id_map = (
+                df.select(pl.col(entity_col).unique())
+                .sort(entity_col)
+                .with_row_index(f"new_{entity_col}")
+                .select(
+                    [
+                        pl.col(entity_col),
+                        pl.col(f"new_{entity_col}").cast(pl.Int32),
+                    ]
+                )
+            )
+            self.relation_data[name] = (
+                df.join(entity_id_map, on=entity_col, how="left")
+                .drop(entity_col)
+                .rename({f"new_{entity_col}": entity_col})
+            )
 
     def _compute_strata_distribution(
         self, sampled_users: list, user_stats: pl.DataFrame

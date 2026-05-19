@@ -116,34 +116,37 @@ class Junyi2015Data(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Build question_data from exercise metadata
+        # Build normalized relation tables from exercise metadata
         valid_questions = set(self.cleaned_raw_data["question"].unique().to_list())
 
-        question_data = (
+        exercise_renamed = (
             self.exercise_data.rename(
                 {"name": "question", "topic": "skill", "area": "assignment"}
             )
             .select(["question", "skill", "assignment"])
             .filter(pl.col("question").is_in(valid_questions))
             .unique(subset=["question"])
+            .with_columns(
+                pl.col("question").replace(question_map).cast(pl.Int32).alias("question")
+            )
         )
+        logger.debug(f"Exercise metadata shape: {exercise_renamed.shape}")
 
-        # Apply question mapping to question_data
-        question_data = question_data.with_columns(
-            pl.col("question").replace(question_map).cast(pl.Int32).alias("question")
-        )
-        logger.debug(f"Question metadata shape: {question_data.shape}")
+        question_skill = exercise_renamed.select(["question", "skill"])
+        question_assignment = exercise_renamed.select(["question", "assignment"])
 
-        # Build ID mappings for skill and assignment
-        self._build_id_mapping(question_data, ["skill", "assignment"])
+        # Build ID mappings from each relation
+        self._build_id_mapping(question_skill, ["skill"])
+        self._build_id_mapping(question_assignment, ["assignment"])
         logger.debug(
             f"ID mappings: skills={self._get_mapped_count('skill')}, "
             f"assignments={self._get_mapped_count('assignment')}"
         )
 
-        # Apply ID mappings to question_data
-        question_data = self._apply_id_mapping(
-            question_data, columns=["skill", "assignment"]
+        # Apply ID mappings
+        question_skill = self._apply_id_mapping(question_skill, columns=["skill"])
+        question_assignment = self._apply_id_mapping(
+            question_assignment, columns=["assignment"]
         )
 
         # Build final sequence_data
@@ -164,8 +167,11 @@ class Junyi2015Data(DataSource):
         sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
         logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
 
-        # Store processed data in instance variables
-        self.question_data = question_data
+        # Store processed data
+        self.relation_data = {
+            "question_skill": question_skill,
+            "question_assignment": question_assignment,
+        }
         self.sequence_data = sequence_data
 
     @override

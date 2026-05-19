@@ -76,36 +76,39 @@ class Assistments2012Data(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Build question_data
-        # Preserve all question-assignment pairs (a question can belong to multiple assignments)
-        question_meta = mapped_data.select(
-            ["question", "assignment", "template"]
-        ).unique(subset=["question", "assignment"])
-        logger.debug(f"Question metadata shape: {question_meta.shape}")
-
-        # Build base data with question-skill pairs
-        base_question_data = mapped_data.select(["question", "skill"]).unique(
+        # Build normalized relation tables
+        question_skill = mapped_data.select(["question", "skill"]).unique(
             subset=["question", "skill"], keep="first"
         )
-        logger.debug(f"Base question_data shape: {base_question_data.shape}")
+        logger.debug(f"question_skill shape: {question_skill.shape}")
 
-        # Join with question metadata to preserve all questions
-        question_data = question_meta.join(
-            base_question_data, on="question", how="left"
+        question_assignment = mapped_data.select(["question", "assignment"]).unique(
+            subset=["question", "assignment"]
         )
-        logger.debug(f"question_data shape: {question_data.shape}")
+        logger.debug(f"question_assignment shape: {question_assignment.shape}")
 
-        # Build ID mappings for skill/assignment/template
-        self._build_id_mapping(question_data, ["skill", "assignment", "template"])
+        question_template = mapped_data.select(["question", "template"]).unique(
+            subset=["question", "template"]
+        )
+        logger.debug(f"question_template shape: {question_template.shape}")
+
+        # Build ID mappings from each relation
+        self._build_id_mapping(question_skill, ["skill"])
+        self._build_id_mapping(question_assignment, ["assignment"])
+        self._build_id_mapping(question_template, ["template"])
         logger.info(
             f"ID mappings: skills={self._get_mapped_count('skill')}, "
             f"assignments={self._get_mapped_count('assignment')}, "
             f"templates={self._get_mapped_count('template')}"
         )
 
-        # Apply ID mappings to question_data
-        question_data = self._apply_id_mapping(
-            question_data, columns=["skill", "assignment", "template"]
+        # Apply ID mappings
+        question_skill = self._apply_id_mapping(question_skill, columns=["skill"])
+        question_assignment = self._apply_id_mapping(
+            question_assignment, columns=["assignment"]
+        )
+        question_template = self._apply_id_mapping(
+            question_template, columns=["template"]
         )
 
         # Build final sequence_data
@@ -126,8 +129,12 @@ class Assistments2012Data(DataSource):
         sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
         logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
 
-        # Store processed data in instance variables
-        self.question_data = question_data
+        # Store processed data
+        self.relation_data = {
+            "question_skill": question_skill,
+            "question_assignment": question_assignment,
+            "question_template": question_template,
+        }
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):
