@@ -10,7 +10,11 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
-            - uses: astral-sh/ruff-action@v3
+            - uses: astral-sh/ruff-action@v4.0.0
               with:
                   args: check
+                  src: .
+            - uses: astral-sh/ruff-action@v4.0.0
+              with:
+                  args: format --check --diff
                   src: .
