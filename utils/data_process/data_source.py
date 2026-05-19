@@ -799,8 +799,8 @@ class DataSource(ABC):
             question_skills, on="question", how="inner"
         ).explode("skills")
 
-        # 保留原始sequence_data中除question外的所有数据列（question被展开为skill）
-        select_cols = [pl.col(c) for c in self.sequence_data.columns if c != "question"]
+        # 保留原始 sequence_data 列，并将技能列表展开为 skill。
+        select_cols = [pl.col(c) for c in self.sequence_data.columns]
         select_cols.append(pl.col("skills").alias("skill"))
         expanded_data = expanded_data.select(select_cols)
 
@@ -848,8 +848,8 @@ class DataSource(ABC):
             ]
         )
 
-        # 数据列 = 原始sequence_data列（除question） + skill
-        data_cols = [c for c in self.sequence_data.columns if c != "question"]
+        # 数据列 = 原始 sequence_data 列 + 展开的 skill；保留 question 供 AKT Rasch 使用。
+        data_cols = list(self.sequence_data.columns)
         data_cols.append("skill")
         final_cols = [pl.col(c) for c in data_cols]
         final_cols.append(pl.col("relative_pos").alias("seq_pos"))

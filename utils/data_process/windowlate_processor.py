@@ -30,6 +30,7 @@ class WindowlateProcessor:
         "sample_id": pl.Int64,
         "position": pl.Int32,
         "skill": pl.Int32,
+        "question": pl.Int32,
         "response": pl.Int8,
         "mask": pl.Int8,
         "user_id": pl.Int32,
@@ -63,6 +64,7 @@ class WindowlateProcessor:
         user_id: int,
         labels: list[int],
         skills_list: list[list[int]],
+        questions: list[int],
         sample_id_start: int,
         group_id_start: int,
         max_seq_len: int,
@@ -73,6 +75,7 @@ class WindowlateProcessor:
             user_id: 用户ID
             labels: 每个交互的正确性标签
             skills_list: 每个交互的技能列表
+            questions: 每个交互的题目ID
             sample_id_start: 起始样本ID
             group_id_start: 起始组ID
             max_seq_len: 最大序列长度
@@ -82,13 +85,16 @@ class WindowlateProcessor:
         """
         # 展开技能和标签
         expanded_skills = []
+        expanded_questions = []
         expanded_labels = []
         expanded_group_ids = []
         inter_boundaries = [0]
 
         for i, (q_skills, label) in enumerate(zip(skills_list, labels)):
+            question_id = questions[i]
             for skill in q_skills:
                 expanded_skills.append(skill)
+                expanded_questions.append(question_id)
                 expanded_labels.append(label)
                 expanded_group_ids.append(group_id_start + i)
             inter_boundaries.append(inter_boundaries[-1] + len(q_skills))
@@ -105,11 +111,13 @@ class WindowlateProcessor:
             for skill_offset in range(n_skills):
                 current_skill_pos = inter_boundaries[inter_idx] + skill_offset
                 current_skill = expanded_skills[current_skill_pos]
+                current_question = expanded_questions[current_skill_pos]
                 current_label = expanded_labels[current_skill_pos]
                 current_group_id = expanded_group_ids[current_skill_pos]
 
                 # 统一构建预测序列：历史 + 当前技能（目标位 response 置 0 防泄漏）
                 full_skills = expanded_skills[:history_end] + [current_skill]
+                full_questions = expanded_questions[:history_end] + [current_question]
                 full_labels = expanded_labels[:history_end] + [0]
                 full_group_ids = expanded_group_ids[:history_end] + [current_group_id]
                 full_true_labels = expanded_labels[:history_end] + [current_label]
@@ -117,11 +125,13 @@ class WindowlateProcessor:
                 # 仅保留“以目标位结尾”的窗口
                 if len(full_skills) > max_seq_len:
                     win_skills = full_skills[-max_seq_len:]
+                    win_questions = full_questions[-max_seq_len:]
                     win_labels = full_labels[-max_seq_len:]
                     win_group_ids = full_group_ids[-max_seq_len:]
                     win_true_labels = full_true_labels[-max_seq_len:]
                 else:
                     win_skills = full_skills
+                    win_questions = full_questions
                     win_labels = full_labels
                     win_group_ids = full_group_ids
                     win_true_labels = full_true_labels
@@ -132,6 +142,7 @@ class WindowlateProcessor:
                         sample_id,
                         pos,
                         win_skills[pos],
+                        win_questions[pos],
                         win_labels[pos],
                         1 if pos == target_pos else 0,
                         user_id,
@@ -174,6 +185,7 @@ class WindowlateProcessor:
                 user_id,
                 labels,
                 skills_list,
+                questions,
                 sample_id_start,
                 group_id_start,
             ) in batch_users:
@@ -181,6 +193,7 @@ class WindowlateProcessor:
                     user_id,
                     labels,
                     skills_list,
+                    questions,
                     sample_id_start,
                     group_id_start,
                     max_seq_len,
@@ -220,6 +233,7 @@ class WindowlateProcessor:
                 "sample_id": np.asarray(buffers["sample_id"], dtype=np.int64),
                 "position": np.asarray(buffers["position"], dtype=np.int32),
                 "skill": np.asarray(buffers["skill"], dtype=np.int32),
+                "question": np.asarray(buffers["question"], dtype=np.int32),
                 "response": np.asarray(buffers["response"], dtype=np.int8),
                 "mask": np.asarray(buffers["mask"], dtype=np.int8),
                 "user_id": np.asarray(buffers["user_id"], dtype=np.int32),
@@ -330,10 +344,11 @@ class WindowlateProcessor:
             user = _normalize_group_key(group_key)
             labels = user_df["label"].to_list()
             skills_list = user_df["skills"].to_list()
+            questions = user_df["question"].to_list()
 
             sample_count = cls.count_user_samples(skills_list, max_seq_len)
             user_records.append(
-                (user, labels, skills_list, global_sample_id, global_group_id)
+                (user, labels, skills_list, questions, global_sample_id, global_group_id)
             )
             global_sample_id += sample_count
             global_group_id += len(skills_list)

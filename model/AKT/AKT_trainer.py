@@ -210,6 +210,17 @@ class AKTTrainer(BaseTrainer):
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
+    def _build_pid_data(
+        self,
+        question: torch.Tensor | None,
+        sequence: torch.Tensor,
+        valid_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Build AKT Rasch pid data with 0 reserved for padding."""
+        source = question if question is not None else sequence
+        pid_data = source.clone() + 1
+        return pid_data.masked_fill(~valid_mask.bool(), 0)
+
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
@@ -226,18 +237,19 @@ class AKTTrainer(BaseTrainer):
             包含 y_hat, y_label, y_predict 的字典
         """
         # 解包数据并移动到设备
-        sequence, response, mask = batch_data
+        if len(batch_data) == 4:
+            sequence, response, mask, question = batch_data
+            question = self._move_tensor_to_device(question)
+        else:
+            sequence, response, mask = batch_data
+            question = None
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        # 检查模型是否使用Problem ID
+        # AKT 的 Rasch pid 应是题目ID；0 保留给 padding，有效题目 ID 右移一位。
         use_pid = self.model.n_pid > 0
-
-        # 如果使用Problem ID，需要从sequence中获取problem_id
-        # 注意：当前数据集中sequence是skill_id，需要额外传递problem_id
-        # 如果数据集没有problem_id，传入None
-        pid_data = sequence if use_pid else None
+        pid_data = self._build_pid_data(question, sequence, mask) if use_pid else None
 
         # 模型前向传播
         y_hat_full, c_reg_loss = self.model(
@@ -283,7 +295,12 @@ class AKTTrainer(BaseTrainer):
         - y_hat[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
         - 模型直接输出对齐的预测，无需额外对齐
         """
-        sequence, response, mask, late_group_id, true_labels = batch_data
+        if len(batch_data) == 6:
+            sequence, response, mask, late_group_id, true_labels, question = batch_data
+            question = self._move_tensor_to_device(question)
+        else:
+            sequence, response, mask, late_group_id, true_labels = batch_data
+            question = None
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
@@ -291,9 +308,10 @@ class AKTTrainer(BaseTrainer):
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
 
-        # 检查模型是否使用Problem ID
+        # AKT 的 Rasch pid 应是题目ID；0 保留给 padding，有效题目 ID 右移一位。
         use_pid = self.model.n_pid > 0
-        pid_data = sequence if use_pid else None
+        valid_mask = late_group_id >= 0
+        pid_data = self._build_pid_data(question, sequence, valid_mask) if use_pid else None
 
         # 模型前向传播
         y_hat_full, _ = self.model(sequence, response, mask, pid_data)  # [B, S]

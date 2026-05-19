@@ -33,13 +33,20 @@ class AKTDataset(Dataset):
     """
 
     def __init__(
-        self, sequences, responses, masks, late_group_ids=None, true_labels=None
+        self,
+        sequences,
+        responses,
+        masks,
+        late_group_ids=None,
+        true_labels=None,
+        questions=None,
     ):
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
         self.late_group_ids = late_group_ids
         self.true_labels = true_labels
+        self.questions = questions
 
         # 判断是否为窗口测试模式
         self._is_window_mode = late_group_ids is not None and true_labels is not None
@@ -60,8 +67,14 @@ class AKTDataset(Dataset):
         if self._is_window_mode:
             late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
             true_labels = torch.tensor(self.true_labels[idx], dtype=torch.long)
+            if self.questions is not None:
+                question = torch.tensor(self.questions[idx], dtype=torch.long)
+                return sequence, response, mask, late_group_id, true_labels, question
             return sequence, response, mask, late_group_id, true_labels
 
+        if self.questions is not None:
+            question = torch.tensor(self.questions[idx], dtype=torch.long)
+            return sequence, response, mask, question
         return sequence, response, mask
 
 
@@ -90,8 +103,10 @@ class AKTModelData(SkillModelData):
         """
         fold_idx = args.fold if args.fold >= 0 else None
 
-        # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data()
+        # 构建用户答题序列，保留 question 作为 AKT Rasch 的 pid。
+        user_sequence, user_response, user_mask, _, user_question = (
+            self.build_sequence_data_with_question()
+        )
 
         # 划分训练集和验证集
         if fold_idx is not None:
@@ -106,14 +121,23 @@ class AKTModelData(SkillModelData):
             train_data, val_data, _ = self.split_kfold_data(
                 user_sequence, user_response, user_mask, fold_idx=fold_idx
             )
+            train_question, val_question, _ = self.split_kfold_data(
+                user_question, user_response, user_mask, fold_idx=fold_idx
+            )
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        window_test_data = self.create_windowlate_iterable_dataset(
+            args.max_seq_len, include_question=True
+        )
 
         # 构建模型数据集
-        train_dataset = AKTDataset(train_data[0], train_data[1], train_data[2])
-        val_dataset = AKTDataset(val_data[0], val_data[1], val_data[2])
+        train_dataset = AKTDataset(
+            train_data[0], train_data[1], train_data[2], questions=train_question[0]
+        )
+        val_dataset = AKTDataset(
+            val_data[0], val_data[1], val_data[2], questions=val_question[0]
+        )
         test_dataset = DataLoader(
             window_test_data,
             batch_size=args.batch_size,
