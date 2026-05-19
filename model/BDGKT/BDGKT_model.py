@@ -117,6 +117,7 @@ class BDGKT(nn.Module):
             q_abs_h = layer.question_abs_layer(q_abs_raw)  # [B, l_s, H]
 
             # Step 1: question attention (peer students → history questions)
+            hq_dynamic_prev = hq_dynamic
             hq_dynamic = layer.update_questions(
                 hq_dynamic,
                 q_abs_h,
@@ -128,8 +129,7 @@ class BDGKT(nn.Module):
 
             # Step 2: student RNN (history → knowledge state)
             s_dynamic = layer.update_student(
-                s_dynamic,
-                hq_dynamic,
+                hq_dynamic_prev,
                 q_abs_h,
                 hr_emb,
                 hist_mask_f,
@@ -254,12 +254,10 @@ class BDGKTLayer(nn.Module):
         B, l_s, H = hq_dynamic.shape
         l_q = ans_s_emb.size(2)
 
-        # projections
         hq_proj = self.question_weight(self.feature_dropout(hq_dynamic))
+        ans_s_proj = self.student_weight(self.feature_dropout(ans_s_emb))
 
-        # attention over all B*l_s questions
-        # flatten to [B*l_s, l_q, H] for parallel attention
-        ans_s_flat = ans_s_emb.reshape(B * l_s, l_q, H)
+        ans_s_flat = ans_s_proj.reshape(B * l_s, l_q, H)
         ans_r_flat = ans_r_emb.reshape(B * l_s, l_q, H)
         ans_mask_flat = ans_mask_f.reshape(B * l_s, l_q, 1)
         q_abs_flat = q_abs.reshape(B * l_s, 1, H).expand(-1, l_q, -1)
@@ -290,7 +288,6 @@ class BDGKTLayer(nn.Module):
 
     def update_student(
         self,
-        s_dynamic,
         hq_dynamic,
         q_abs,
         hr_emb,
@@ -298,15 +295,12 @@ class BDGKTLayer(nn.Module):
     ):
         """Student RNN: iterate through history questions, update knowledge state.
 
-        s_dynamic:  [B, H]
         hq_dynamic: [B, l_s, H]
         q_abs:      [B, l_s, H]
         hr_emb:     [B, l_s, H]
         hist_mask_f:[B, l_s, 1]
         """
-        B, l_s, H = hq_dynamic.shape
-
-        s_proj = self.student_weight(self.feature_dropout(s_dynamic))  # [B, H]
+        B, L, H = hq_dynamic.shape
 
         # Precompute time-invariant Linear projections as batched matmuls.
         # question_transform: Linear(3H, H), split into 3 parts
@@ -330,7 +324,7 @@ class BDGKTLayer(nn.Module):
         # RNN loop
         knowledge = self.knowledge_init.expand(B, -1).clone()
 
-        for t in range(l_s):
+        for t in range(L):
             mask_t = hist_mask_f[:, t]  # [B, 1]
             prev_knowledge = knowledge
             q_t = hq_dynamic[:, t]  # [B, H]
@@ -363,7 +357,4 @@ class BDGKTLayer(nn.Module):
             # keep original knowledge for invalid positions
             knowledge = torch.where(mask_t.bool(), knowledge, prev_knowledge)
 
-        # mixed projection
-        result = s_proj + knowledge
-
-        return result
+        return knowledge
