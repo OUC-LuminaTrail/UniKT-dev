@@ -263,7 +263,9 @@ def _build_dataset(user_indices, edges, response_map, l_s, l_q):
     q_ans_r = np.zeros((N, l_s, l_q), dtype=np.int64)
     q_ans_mask = np.zeros((N, l_s, l_q), dtype=np.bool_)
 
-    for target_s, sample_indices in tqdm(student_to_samples.items(), desc="Computing jaccard similarity"):
+    for target_s, sample_indices in tqdm(
+        student_to_samples.items(), desc="Computing jaccard similarity"
+    ):
         # precompute Jaccard with all relevant students
         target_qr = student_qr_sets[target_s]
         target_q_set = set(student_q_sets[target_s])
