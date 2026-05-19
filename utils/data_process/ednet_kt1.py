@@ -239,31 +239,50 @@ class EdNetKT1Data(DataSource):
         )
         logger.debug(f"Question metadata shape: {question_meta.shape}")
 
-        # Split multi-skills
+        # Build normalized relation tables
+        # Relation 1: question_skill
         # EdNet skill format: "algebra;geometry" -> ["algebra", "geometry"]
-        split_question_data = (
+        question_skill = (
             question_meta.with_columns(
                 pl.col("skill").map_elements(_canonicalize_tags, return_dtype=pl.Utf8)
             )
             .with_columns(pl.col("skill").str.split(";").alias("skill_parts"))
             .explode("skill_parts")
             .with_columns(pl.col("skill_parts").cast(pl.String).alias("skill"))
-            .select(["question", "skill", "assignment", "template"])
+            .select(["question", "skill"])
             .unique(subset=["question", "skill"], keep="first")
         )
-        logger.debug(f"Split question_data shape: {split_question_data.shape}")
+        logger.debug(f"question_skill shape: {question_skill.shape}")
 
-        # Build ID mappings
-        self._build_id_mapping(split_question_data, ["skill", "assignment", "template"])
+        # Relation 2: question_assignment
+        question_assignment = question_meta.select(["question", "assignment"]).unique(
+            subset=["question", "assignment"]
+        )
+        logger.debug(f"question_assignment shape: {question_assignment.shape}")
+
+        # Relation 3: question_template
+        question_template = question_meta.select(["question", "template"]).unique(
+            subset=["question", "template"]
+        )
+        logger.debug(f"question_template shape: {question_template.shape}")
+
+        # Build ID mappings from each relation independently
+        self._build_id_mapping(question_skill, ["skill"])
+        self._build_id_mapping(question_assignment, ["assignment"])
+        self._build_id_mapping(question_template, ["template"])
         logger.debug(
             f"ID mappings: skills={self._get_mapped_count('skill')}, "
             f"assignments={self._get_mapped_count('assignment')}, "
             f"templates={self._get_mapped_count('template')}"
         )
 
-        # Apply ID mappings to question_data
-        question_data = self._apply_id_mapping(
-            split_question_data, columns=["skill", "assignment", "template"]
+        # Apply ID mappings independently
+        question_skill = self._apply_id_mapping(question_skill, columns=["skill"])
+        question_assignment = self._apply_id_mapping(
+            question_assignment, columns=["assignment"]
+        )
+        question_template = self._apply_id_mapping(
+            question_template, columns=["template"]
         )
 
         # Build final sequence_data
@@ -294,8 +313,12 @@ class EdNetKT1Data(DataSource):
         sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
         logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
 
-        # Store processed data in instance variables
-        self.question_data = question_data
+        # Store processed data
+        self.relation_data = {
+            "question_skill": question_skill,
+            "question_assignment": question_assignment,
+            "question_template": question_template,
+        }
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):

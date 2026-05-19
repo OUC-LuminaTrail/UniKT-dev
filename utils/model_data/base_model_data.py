@@ -504,9 +504,23 @@ class BaseModelData(ABC):
         import numpy as np
         from tqdm import tqdm
 
-        data = self.data_src.get_question_data().to_pandas()
-
         src_type, _, dst_type = edge_type
+
+        # Route to the correct relation table based on edge type
+        if src_type == "question":
+            data = self.data_src.get_relation(f"question_{dst_type}").to_pandas()
+        elif dst_type == "question":
+            data = self.data_src.get_relation(f"{src_type}_question").to_pandas()
+        else:
+            # Derived relation (e.g., skill-assignment): compute via question join
+            qs = self.data_src.get_relation("question_skill")
+            other = self.data_src.get_relation(f"question_{dst_type}")
+            data = (
+                qs.join(other, on="question", how="inner")
+                .select([pl.col(src_type), pl.col(dst_type)])
+                .unique(subset=[src_type, dst_type])
+                .to_pandas()
+            )
 
         # 直接使用节点类型作为列名
         src_col = src_type

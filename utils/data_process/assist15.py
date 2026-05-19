@@ -81,11 +81,18 @@ class Assistments2015Data(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Build question_data: sequence_id serves as both question and skill
-        question_data = mapped_data.select(["question"]).unique(subset=["question"])
-        question_data = question_data.with_columns(
-            pl.col("question").alias("skill"),
-            pl.col("question").alias("assignment"),
+        # Build normalized relation tables
+        # assist15 has no real skill/assignment — use identity mapping
+        question_skill = mapped_data.select(["question"]).unique(subset=["question"])
+        question_skill = question_skill.with_columns(
+            pl.col("question").alias("skill")
+        )
+
+        question_assignment = mapped_data.select(["question"]).unique(
+            subset=["question"]
+        )
+        question_assignment = question_assignment.with_columns(
+            pl.col("question").alias("assignment")
         )
 
         # Build sequence_data
@@ -97,7 +104,10 @@ class Assistments2015Data(DataSource):
         self._build_id_mapping(sequence_data, ["user"])
         sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
 
-        self.question_data = question_data
+        self.relation_data = {
+            "question_skill": question_skill,
+            "question_assignment": question_assignment,
+        }
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):

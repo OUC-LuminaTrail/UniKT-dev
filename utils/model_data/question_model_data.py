@@ -133,11 +133,14 @@ class QuestionModelData(BaseModelData):
             try:
                 node_counts[node_type] = self.data_src.get_metadata(meta_key)
             except (KeyError, AttributeError):
-                # 如果元数据中没有，从数据中计算
-                data = self.data_src.get_question_data()
-                if node_type in data.columns:
-                    node_counts[node_type] = data[node_type].nunique()
-                else:
+                # 从 relation tables 中查找
+                found = False
+                for rel_df in self.data_src.relation_data.values():
+                    if node_type in rel_df.columns:
+                        node_counts[node_type] = rel_df[node_type].n_unique()
+                        found = True
+                        break
+                if not found:
                     raise ValueError(
                         f"Cannot determine node count for type '{node_type}'"
                     )

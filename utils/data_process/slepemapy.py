@@ -190,7 +190,7 @@ class SlepemapyData(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Extract unique question-skill-assignment pairs and apply question mapping
+        # Build normalized relation tables
         question_data = (
             self.cleaned_raw_data.select(["question", "skill", "assignment"])
             .unique(subset=["question"])
@@ -200,16 +200,21 @@ class SlepemapyData(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Build ID mappings for skill and assignment
-        self._build_id_mapping(question_data, ["skill", "assignment"])
+        question_skill = question_data.select(["question", "skill"])
+        question_assignment = question_data.select(["question", "assignment"])
+
+        # Build ID mappings from each relation
+        self._build_id_mapping(question_skill, ["skill"])
+        self._build_id_mapping(question_assignment, ["assignment"])
         logger.debug(
             f"ID mappings: skills={self._get_mapped_count('skill')}, "
             f"assignments={self._get_mapped_count('assignment')}"
         )
 
-        # Apply ID mappings to question_data
-        question_data = self._apply_id_mapping(
-            question_data, columns=["skill", "assignment"]
+        # Apply ID mappings
+        question_skill = self._apply_id_mapping(question_skill, columns=["skill"])
+        question_assignment = self._apply_id_mapping(
+            question_assignment, columns=["assignment"]
         )
 
         # Build sequence_data
@@ -221,7 +226,10 @@ class SlepemapyData(DataSource):
         logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
 
         # Store processed data
-        self.question_data = question_data
+        self.relation_data = {
+            "question_skill": question_skill,
+            "question_assignment": question_assignment,
+        }
         self.sequence_data = sequence_data
 
 

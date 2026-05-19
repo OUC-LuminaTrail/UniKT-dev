@@ -79,53 +79,49 @@ class Assistments2009Data(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Build question_data
-        # First, get unique question-assignment-template combos (preserving all
-        # question-assignment pairs so that a question can belong to multiple assignments)
-        question_meta = mapped_data.select(
-            ["question", "assignment", "template"]
-        ).unique(subset=["question", "assignment"])
-        logger.debug(f"Question metadata shape: {question_meta.shape}")
-
-        # Build base data with question-skill pairs
-        base_question_data = mapped_data.select(["question", "skill"]).unique(
-            subset=["question", "skill"], keep="first"
-        )
-        logger.debug(f"Base question_data shape: {base_question_data.shape}")
-
-        # Split multi-skills
+        # Build normalized relation tables
+        # Relation 1: question_skill
         # ASSISTments 09 skill format: "2_37_70" -> ["2", "37", "70"]
-        split_skills = (
-            base_question_data.with_columns(
-                pl.col("skill").str.split("_").alias("skill_parts")
-            )
+        question_skill = (
+            mapped_data.select(["question", "skill"])
+            .unique(subset=["question", "skill"], keep="first")
+            .with_columns(pl.col("skill").str.split("_").alias("skill_parts"))
             .explode("skill_parts")
             .with_columns(pl.col("skill_parts").cast(pl.String).alias("skill"))
             .select(["question", "skill"])
             .unique(subset=["question", "skill"], keep="first")
         )
-        logger.debug(f"Split skills shape: {split_skills.shape}")
+        logger.debug(f"question_skill shape: {question_skill.shape}")
 
-        # Join with question metadata to preserve all questions
-        split_question_data = question_meta.join(
-            split_skills, on="question", how="left"
+        # Relation 2: question_assignment
+        question_assignment = mapped_data.select(["question", "assignment"]).unique(
+            subset=["question", "assignment"]
         )
-        logger.debug(
-            f"Split question_data shape (after join): {split_question_data.shape}"
-        )
+        logger.debug(f"question_assignment shape: {question_assignment.shape}")
 
-        # Build ID mappings for skill/assignment/template ===
-        # Note: question IDs are already mapped, so we don't remap them
-        self._build_id_mapping(split_question_data, ["skill", "assignment", "template"])
+        # Relation 3: question_template
+        question_template = mapped_data.select(["question", "template"]).unique(
+            subset=["question", "template"]
+        )
+        logger.debug(f"question_template shape: {question_template.shape}")
+
+        # Build ID mappings from each relation independently
+        self._build_id_mapping(question_skill, ["skill"])
+        self._build_id_mapping(question_assignment, ["assignment"])
+        self._build_id_mapping(question_template, ["template"])
         logger.debug(
             f"ID mappings: skills={self._get_mapped_count('skill')}, "
             f"assignments={self._get_mapped_count('assignment')}, "
             f"templates={self._get_mapped_count('template')}"
         )
 
-        # Apply ID mappings to question_data
-        question_data = self._apply_id_mapping(
-            split_question_data, columns=["skill", "assignment", "template"]
+        # Apply ID mappings independently
+        question_skill = self._apply_id_mapping(question_skill, columns=["skill"])
+        question_assignment = self._apply_id_mapping(
+            question_assignment, columns=["assignment"]
+        )
+        question_template = self._apply_id_mapping(
+            question_template, columns=["template"]
         )
 
         # Build final sequence_data
@@ -145,8 +141,12 @@ class Assistments2009Data(DataSource):
         self._build_id_mapping(sequence_data, ["user"])
         sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
 
-        # Store processed data in instance variables
-        self.question_data = question_data
+        # Store processed data
+        self.relation_data = {
+            "question_skill": question_skill,
+            "question_assignment": question_assignment,
+            "question_template": question_template,
+        }
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):
