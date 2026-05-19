@@ -77,7 +77,7 @@ class ClusterKTModelData(QuestionModelData):
 
         Questions sharing the same set of skills map to the same skill_group.
         """
-        question_data = self.data_src.get_question_data()
+        question_data = self.data_src.get_relation("question_skill")
         question_skills = question_data.group_by("question").agg(
             pl.col("skill").sort().alias("skill_list")
         )

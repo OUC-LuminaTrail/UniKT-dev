@@ -54,7 +54,7 @@ class HawkesKTModelData(QuestionModelData):
         num_users = q_data["user"].n_unique()
 
         # 2. Get first skill per question from question_data
-        question_data = self.data_src.get_question_data()
+        question_data = self.data_src.get_relation("question_skill")
         question_skill_map = question_data.group_by("question").agg(
             pl.col("skill").first().alias("skill")
         )

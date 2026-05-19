@@ -591,10 +591,6 @@ class DataSource(ABC):
         """Get user sequence data."""
         return self._load_data("sequence")
 
-    def get_question_data(self) -> pl.DataFrame:
-        """Backward compatible: returns the question_skill relation."""
-        return self.get_relation("question_skill")
-
     def get_relation(self, name: str) -> pl.DataFrame:
         """Get a normalized relation table by name (e.g., "question_skill").
 

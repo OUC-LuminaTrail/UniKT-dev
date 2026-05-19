@@ -147,7 +147,7 @@ class GKTModelData(SkillModelData):
 
         for row in data.itertuples():
             # 获取问题到技能的映射
-            question_data = self.data_src.get_question_data()
+            question_data = self.data_src.get_relation("question_skill")
             q_to_skills = (
                 question_data.groupby("question")["skill"].apply(list).to_dict()
             )

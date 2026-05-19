@@ -32,7 +32,7 @@ class ReKTDataset(Dataset):
 
 def build_combined_skill_mapping(data_src: DataSource):
     """构建组合技能映射：每个多技能组合视为一个新的技能。"""
-    question_data = data_src.get_question_data()
+    question_data = data_src.get_relation("question_skill")
     if isinstance(question_data, pl.LazyFrame):
         question_data = question_data.collect()
 
