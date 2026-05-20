@@ -1,26 +1,12 @@
-"""SimpleKT 模型实现
-
-基于 Transformer 的简单知识追踪模型，从 pykt-toolkit 迁移并适配 kt-exp 框架。
-
-参考论文: A Self-Attentive model for Knowledge Tracing
-"""
+"""SimpleKT 模型实现"""
 
 import math
-from enum import IntEnum
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn.init import constant_, xavier_uniform_
-
-
-class Dim(IntEnum):
-    """维度索引枚举"""
-
-    batch = 0
-    seq = 1
-    feature = 2
 
 
 def attention(q, k, v, d_k, mask, dropout, zero_pad):
@@ -171,7 +157,7 @@ class CosinePositionalEmbedding(nn.Module):
         self.weight = nn.Parameter(pe, requires_grad=False)
 
     def forward(self, x):
-        return self.weight[:, : x.size(Dim.seq), :]
+        return self.weight[:, : x.size(1), :]
 
 
 class Architecture(nn.Module):
@@ -222,6 +208,7 @@ class SimpleKT(nn.Module):
 
     Args:
         num_skills: 技能（概念）数量
+        n_pid: Problem ID数量
         d_model: 模型维度
         n_blocks: Transformer 块数量
         dropout: Dropout 概率
@@ -237,6 +224,7 @@ class SimpleKT(nn.Module):
     def __init__(
         self,
         num_skills: int,
+        n_pid: int,
         d_model: int = 256,
         n_blocks: int = 2,
         dropout: float = 0.1,
@@ -245,15 +233,21 @@ class SimpleKT(nn.Module):
         seq_len: int = 200,
         kq_same: int = 1,
         separate_qa: bool = False,
-        final_fc_dim: int = 256,
+        final_fc_dim: int = 512,
         final_fc_dim2: int = 256,
     ):
         super().__init__()
         self.num_skills = num_skills
+        self.n_pid = n_pid
         self.dropout = dropout
         self.kq_same = kq_same
         self.separate_qa = separate_qa
         embed_l = d_model
+
+        # Problem ID相关嵌入（Rasch模型）
+        self.difficult_param = nn.Embedding(self.n_pid + 1, embed_l)
+        self.q_embed_diff = nn.Embedding(self.num_skills + 1, embed_l)
+        self.qa_embed_diff = nn.Embedding(2 * self.num_skills + 1, embed_l)
 
         # 技能嵌入层
         self.q_embed = nn.Embedding(num_skills, embed_l)
@@ -287,6 +281,14 @@ class SimpleKT(nn.Module):
             nn.Linear(final_fc_dim2, 1),
         )
 
+        self.reset()
+
+    def reset(self):
+        if self.n_pid > 0:
+            for p in self.parameters():
+                if p.size(0) == self.n_pid + 1:
+                    torch.nn.init.constant_(p, 0.0)
+
     def base_emb(self, q_data, target):
         """基础嵌入
 
@@ -306,8 +308,12 @@ class SimpleKT(nn.Module):
         return q_embed_data, qa_embed_data
 
     def forward(
-        self, sequence: torch.Tensor, response: torch.Tensor, mask: torch.Tensor
-    ) -> torch.Tensor:
+        self,
+        sequence: torch.Tensor,
+        response: torch.Tensor,
+        mask: torch.Tensor,
+        pid_data: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """前向传播
 
         SimpleKT 预测语义：
@@ -318,15 +324,21 @@ class SimpleKT(nn.Module):
             sequence: 技能ID序列，形状为 [batch_size, seq_len]
             response: 响应序列，形状为 [batch_size, seq_len]
             mask: 有效位置掩码，形状为 [batch_size, seq_len]
+            pid_data: Problem ID序列，形状为 [batch_size, seq_len]
 
         Returns:
-            预测结果，形状为 [batch_size, seq_len]
-            y_hat[:, t] 预测 response[t]
+            preds: 预测结果，形状为 [batch_size, seq_len]
         """
-        target = torch.cat([response[:, 0:1], response[:, :-1]], dim=1)
+        target = response
 
-        # 获取嵌入
+        # 获取基础嵌入
         q_embed_data, qa_embed_data = self.base_emb(sequence, target)
+
+        # Problem ID嵌入和Rasch难度调节
+        if self.n_pid > 0:
+            pid_embed_data = self.difficult_param(pid_data)
+            q_embed_diff_data = self.q_embed_diff(sequence)
+            q_embed_data = q_embed_data + pid_embed_data * q_embed_diff_data
 
         # 通过 Transformer
         d_output = self.model(q_embed_data, qa_embed_data)
