@@ -76,6 +76,11 @@ class SimpleKTModelParams(BaseParamConfig):
                 "default": 256,
                 "help": "Second fully connected layer dimension in output",
             },
+            "l2": {
+                "type": float,
+                "default": 1e-5,
+                "help": "L2 regularization for Rasch model",
+            },
             "epochs": {
                 "type": int,
                 "default": 100,
@@ -135,8 +140,12 @@ class SimpleKTTrainer(BaseTrainer):
 
         logger.info("Initializing SimpleKT model...")
         metadata = data_src.get_metadata()
+        n_pid = metadata["num_questions"]
+        logger.info(f"SimpleKT: Using Problem ID (Rasch model) with {n_pid} questions")
+
         model = SimpleKT(
             num_skills=metadata["num_skills"],
+            n_pid=n_pid,
             d_model=args.d_model,
             n_blocks=args.n_blocks,
             dropout=args.dropout,
@@ -147,6 +156,7 @@ class SimpleKTTrainer(BaseTrainer):
             separate_qa=bool(args.separate_qa),
             final_fc_dim=args.final_fc_dim,
             final_fc_dim2=args.final_fc_dim2,
+            l2=args.l2,
         )
 
         # 创建优化器和损失函数
@@ -199,6 +209,14 @@ class SimpleKTTrainer(BaseTrainer):
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
+    def _build_pid_data(
+        self,
+        question: torch.Tensor,
+        valid_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        pid_data = question.clone() + 1
+        return pid_data.masked_fill(~valid_mask.bool(), 0)
+
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
@@ -210,19 +228,22 @@ class SimpleKTTrainer(BaseTrainer):
         - y_hat[:, t] 直接对应 response[t]，需要对齐
 
         Args:
-            batch_data: 包含 (sequence, response, mask) 的元组
+            batch_data: 包含 (sequence, response, mask, question) 的元组（question 必选，用于Rasch pid）
 
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
         # 解包数据并移动到设备
-        sequence, response, mask = batch_data
+        sequence, response, mask, question = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
+        question = self._move_tensor_to_device(question)
+
+        pid_data = self._build_pid_data(question, mask)
 
         # 模型前向传播
-        y_hat_full = self.model(sequence, response, mask)  # [B, S]
+        y_hat_full, c_reg_loss = self.model(sequence, response, mask, pid_data)
 
         # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
@@ -241,6 +262,7 @@ class SimpleKTTrainer(BaseTrainer):
             "y_predict": y_predict,
             "y_score": y_hat,
             "y_prob": y_hat,
+            "c_reg_loss": c_reg_loss,
         }
 
     def test_forward_pass(self, batch_data):
@@ -252,22 +274,27 @@ class SimpleKTTrainer(BaseTrainer):
         - mask: [0, ..., 0, 1]  # 只有最后一个位置需要预测
         - late_group_id: [g1, ..., gN]  # 最后一个位置是当前题目的 group_id
         - true_labels: [历史标签, 真实标签]  # 用于评估
+        - question: [题目历史, 目标题目]  # 用于Rasch pid
 
         SimpleKT 预测语义：
         - y_hat[:, t] 基于 sequence[0:t+1] 和 response[0:t] 预测 response[t]
         - 模型内部已经使用移位后的 response 作为 target，所以 y_hat[:, t] 直接对应 response[t]
         - 测试时 response[:, -1] = 0（占位），模型会忽略（使用移位后的目标）
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, question = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
+        question = self._move_tensor_to_device(question)
+
+        valid_mask = late_group_id >= 0
+        pid_data = self._build_pid_data(question, valid_mask)
 
         # 模型前向传播
-        y_hat_full = self.model(sequence, response, mask)  # [B, S]
+        y_hat_full, c_reg_loss = self.model(sequence, response, mask, pid_data)
 
         # SimpleKT 预测对齐
         # y_hat[:, t] 预测的是 response[t]
@@ -283,4 +310,10 @@ class SimpleKTTrainer(BaseTrainer):
             "y_score": y_hat,
             "y_prob": y_hat,
             "group_id": group_ids,
+            "c_reg_loss": c_reg_loss,
         }
+
+    def _compute_loss(self, outputs: dict) -> torch.Tensor:
+        y_hat = outputs["y_hat"]
+        y_label = outputs["y_label"]
+        return self.loss(y_hat, y_label) + outputs["c_reg_loss"]

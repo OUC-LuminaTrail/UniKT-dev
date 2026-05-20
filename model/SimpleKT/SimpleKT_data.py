@@ -22,22 +22,30 @@ class SimpleKTDataset(Dataset):
         sequences: 技能ID序列
         responses: 响应序列
         masks: 掩码序列
+        questions: 题目ID序列
         late_group_ids: 题目级分组ID（可选，窗口测试时使用）
         true_labels: 真实标签序列（可选，窗口测试时使用）
 
     Returns:
-        训练/验证模式 (无 late_group_ids/true_labels):
-            (sequence, response, mask) 元组
-        窗口测试模式 (有 late_group_ids/true_labels):
-            (sequence, response, mask, late_group_id, true_labels) 元组
+        训练/验证模式：
+            (sequence, response, mask, question) 元组
+        窗口测试模式：
+            (sequence, response, mask, late_group_id, true_labels, question) 元组
     """
 
     def __init__(
-        self, sequences, responses, masks, late_group_ids=None, true_labels=None
+        self,
+        sequences,
+        responses,
+        masks,
+        questions,
+        late_group_ids=None,
+        true_labels=None,
     ):
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
+        self.questions = questions
         self.late_group_ids = late_group_ids
         self.true_labels = true_labels
 
@@ -45,20 +53,20 @@ class SimpleKTDataset(Dataset):
         self._is_window_mode = late_group_ids is not None and true_labels is not None
 
     def __len__(self) -> int:
-        """返回数据集长度"""
         return len(self.sequences)
 
     def __getitem__(self, idx: int):
         sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
         response = torch.tensor(self.responses[idx], dtype=torch.long)
         mask = torch.tensor(self.masks[idx], dtype=torch.bool)
+        question = torch.tensor(self.questions[idx], dtype=torch.long)
 
         if self._is_window_mode:
             late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
             true_labels = torch.tensor(self.true_labels[idx], dtype=torch.long)
-            return sequence, response, mask, late_group_id, true_labels
+            return sequence, response, mask, late_group_id, true_labels, question
 
-        return sequence, response, mask
+        return sequence, response, mask, question
 
 
 class SimpleKTModelData(SkillModelData):
@@ -87,7 +95,9 @@ class SimpleKTModelData(SkillModelData):
         fold_idx = args.fold if args.fold >= 0 else None
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _, _ = self.build_sequence_data()
+        user_sequence, user_response, user_mask, _, user_question = (
+            self.build_sequence_data()
+        )
 
         # 划分训练集和验证集
         if fold_idx is not None:
@@ -100,7 +110,7 @@ class SimpleKTModelData(SkillModelData):
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
             train_data, val_data, _ = self.split_kfold_data(
-                user_sequence, user_response, user_mask, fold_idx=fold_idx
+                user_sequence, user_response, user_mask, user_question, fold_idx=fold_idx
             )
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
@@ -109,8 +119,12 @@ class SimpleKTModelData(SkillModelData):
         stream_dataset = self.create_windowlate_iterable_dataset(args.max_seq_len)
 
         # 构建模型数据集
-        train_dataset = SimpleKTDataset(train_data[0], train_data[1], train_data[2])
-        val_dataset = SimpleKTDataset(val_data[0], val_data[1], val_data[2])
+        train_dataset = SimpleKTDataset(
+            train_data[0], train_data[1], train_data[2], train_data[3]
+        )
+        val_dataset = SimpleKTDataset(
+            val_data[0], val_data[1], val_data[2], val_data[3]
+        )
         test_dataset = DataLoader(
             stream_dataset,
             batch_size=args.batch_size,
