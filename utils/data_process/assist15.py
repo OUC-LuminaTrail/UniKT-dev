@@ -84,9 +84,7 @@ class Assistments2015Data(DataSource):
         # Build normalized relation tables
         # assist15 has no real skill/assignment — use identity mapping
         question_skill = mapped_data.select(["question"]).unique(subset=["question"])
-        question_skill = question_skill.with_columns(
-            pl.col("question").alias("skill")
-        )
+        question_skill = question_skill.with_columns(pl.col("question").alias("skill"))
 
         question_assignment = mapped_data.select(["question"]).unique(
             subset=["question"]

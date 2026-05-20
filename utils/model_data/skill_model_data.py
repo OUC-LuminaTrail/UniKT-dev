@@ -20,13 +20,11 @@ class WindowlateIterableDataset(IterableDataset):
         parquet_path: str,
         max_seq_len: int,
         batch_read_rows: int = 200_000,
-        include_question: bool = False,
     ):
         super().__init__()
         self.parquet_path = parquet_path
         self.max_seq_len = max_seq_len
         self.batch_read_rows = batch_read_rows
-        self.include_question = include_question
         self._num_samples = None
         self._num_row_groups = None
 
@@ -50,8 +48,15 @@ class WindowlateIterableDataset(IterableDataset):
 
     def _build_single_tensor(
         self, sample: dict[str, np.ndarray]
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """构建单个样本张量"""
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        """构建单个样本张量，返回 (sequence, response, mask, late_group_id, label, question)"""
         positions = sample["position"]
 
         sequence = np.zeros(self.max_seq_len, dtype=np.int64)
@@ -66,34 +71,29 @@ class WindowlateIterableDataset(IterableDataset):
         mask[positions] = sample["mask"].astype(np.bool_)
         late_group_id[positions] = sample["group_id"]
         label[positions] = sample["true_label"]
-        if self.include_question and "question" in sample:
-            question[positions] = sample["question"]
+        question[positions] = sample["question"]
 
-        base = (
+        return (
             torch.from_numpy(sequence),
             torch.from_numpy(response),
             torch.from_numpy(mask),
             torch.from_numpy(late_group_id),
             torch.from_numpy(label),
+            torch.from_numpy(question),
         )
-        if self.include_question and "question" in sample:
-            return (*base, torch.from_numpy(question))
-        return base
 
     def _read_batch_arrays(self, table: pa.Table) -> dict[str, np.ndarray]:
         """读取 Table 为 numpy 数组"""
-        arrays = {
+        return {
             "sample_id": table.column("sample_id").to_numpy(),
             "position": table.column("position").to_numpy(),
             "skill": table.column("skill").to_numpy(),
+            "question": table.column("question").to_numpy(),
             "response": table.column("response").to_numpy(),
             "mask": table.column("mask").to_numpy(),
             "group_id": table.column("group_id").to_numpy(),
             "true_label": table.column("true_label").to_numpy(),
         }
-        if self.include_question and "question" in table.column_names:
-            arrays["question"] = table.column("question").to_numpy()
-        return arrays
 
     def _iter_row_groups(
         self, row_group_indices: list[int]
@@ -108,39 +108,42 @@ class WindowlateIterableDataset(IterableDataset):
     def _process_batch(
         self, batch: dict[str, np.ndarray]
     ) -> Iterator[
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+        ]
     ]:
         """处理一个批量数据，逐个 yield 样本"""
         sample_ids = batch["sample_id"]
         if sample_ids.size == 0:
             return
 
-        # 找到 sample_id 变化的边界
         boundaries = np.flatnonzero(sample_ids[1:] != sample_ids[:-1]) + 1
         starts = np.concatenate(([0], boundaries))
         ends = np.concatenate((boundaries, [sample_ids.size]))
 
-        # 预分配样本数据字典
         sample_data = {
             "position": None,
             "skill": None,
+            "question": None,
             "response": None,
             "mask": None,
             "group_id": None,
             "true_label": None,
         }
-        if "question" in batch:
-            sample_data["question"] = None
 
         for start, end in zip(starts, ends, strict=False):
             sample_data["position"] = batch["position"][start:end]
             sample_data["skill"] = batch["skill"][start:end]
+            sample_data["question"] = batch["question"][start:end]
             sample_data["response"] = batch["response"][start:end]
             sample_data["mask"] = batch["mask"][start:end]
             sample_data["group_id"] = batch["group_id"][start:end]
             sample_data["true_label"] = batch["true_label"][start:end]
-            if "question" in batch:
-                sample_data["question"] = batch["question"][start:end]
 
             yield self._build_single_tensor(sample_data)
 
@@ -148,18 +151,14 @@ class WindowlateIterableDataset(IterableDataset):
         self._init_metadata()
         worker_info = get_worker_info()
 
-        # 确定要处理的 row groups
         if worker_info is not None and worker_info.num_workers > 0:
-            # 多进程模式：每个 worker 处理部分 row groups
             worker_id = worker_info.id
             num_workers = worker_info.num_workers
             all_row_groups = list(range(self._num_row_groups))
             row_group_indices = all_row_groups[worker_id::num_workers]
         else:
-            # 单进程模式：处理所有 row groups
             row_group_indices = list(range(self._num_row_groups))
 
-        # 迭代处理分配的 row groups
         for batch in self._iter_row_groups(row_group_indices):
             yield from self._process_batch(batch)
 
@@ -183,30 +182,26 @@ class SkillModelData(BaseModelData):
         r"""
         从切分后的技能序列数据加载用户技能序列
 
-        与 build_sequence_data 的区别:
-        - build_sequence_data: 从原始序列数据构建，在内存中展开技能
-        - load_split_sequence_data: 直接加载预处理的切分技能序列数据
-
         返回:
             user_sequence: 用户技能ID序列，shape为(num_split_users, max_seq_len)
             user_response: 用户响应序列，shape为(num_split_users, max_seq_len)
             user_mask: 用户掩码序列，shape为(num_split_users, max_seq_len)
             user_id_sequence: 用户ID序列，shape为(num_split_users, max_seq_len)
+            user_question: 用户题目ID序列，shape为(num_split_users, max_seq_len)
         """
         import numpy as np
 
         self.logger.info("Building skill sequences from split data...")
 
-        # 加载切分后的技能序列数据
         data = self.data_src.get_split_skill_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_users = data["user"].nunique()
 
-        # 构建序列数组
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_response = np.zeros((num_users, max_seq_len), dtype=int)
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
+        user_question = np.zeros((num_users, max_seq_len), dtype=int)
 
         user_indices = data["user"].values
         seq_positions = data["seq_pos"].values
@@ -215,28 +210,12 @@ class SkillModelData(BaseModelData):
         user_id_sequence[user_indices, seq_positions] = user_indices
         user_response[user_indices, seq_positions] = data["label"].values
         user_mask[user_indices, seq_positions] = 1
+        user_question[user_indices, seq_positions] = data["question"].values
 
         self.logger.debug(
             f"Built split skill sequences for {num_users} split users, max_len={max_seq_len}"
         )
 
-        return user_sequence, user_response, user_mask, user_id_sequence
-
-    def build_sequence_data_with_question(self):
-        """Build skill sequences plus aligned question IDs for models that need pids."""
-        import numpy as np
-
-        user_sequence, user_response, user_mask, user_id_sequence = self.build_sequence_data()
-        data = self.data_src.get_split_skill_sequence_data().to_pandas()
-        if "question" not in data.columns:
-            raise ValueError("split_skill_sequence_data must include question for pid-aware skill models")
-
-        max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].nunique()
-        user_question = np.zeros((num_users, max_seq_len), dtype=int)
-        user_indices = data["user"].values
-        seq_positions = data["seq_pos"].values
-        user_question[user_indices, seq_positions] = data["question"].values
         return user_sequence, user_response, user_mask, user_id_sequence, user_question
 
     def load_windowlate_data(self, max_seq_len: int):
@@ -255,11 +234,11 @@ class SkillModelData(BaseModelData):
             user_id_sequence: 用户ID序列，shape=(num_samples, max_seq_len)
             late_group_id: 题目级分组ID，shape=(num_samples, max_seq_len)
             user_true_labels: 真实标签序列，shape=(num_samples, max_seq_len)
+            user_question: 题目ID序列，shape=(num_samples, max_seq_len)
         """
         import numpy as np
         import polars as pl
 
-        # 从预处理文件加载长格式数据
         data = self.data_src.get_windowlate_data()
 
         if data is None:
@@ -271,6 +250,7 @@ class SkillModelData(BaseModelData):
             "sample_id",
             "position",
             "skill",
+            "question",
             "response",
             "mask",
             "user_id",
@@ -291,13 +271,13 @@ class SkillModelData(BaseModelData):
                 "No windowlate data available. Please re-run preprocessing with K-fold labels."
             )
 
-        # 初始化数组
         user_sequence = np.zeros((num_samples, max_seq_len), dtype=np.int32)
         user_response = np.zeros((num_samples, max_seq_len), dtype=np.int8)
         user_mask = np.zeros((num_samples, max_seq_len), dtype=np.int8)
         user_id_sequence = np.zeros((num_samples, max_seq_len), dtype=np.int32)
         late_group_id = np.full((num_samples, max_seq_len), -1, dtype=np.int64)
         user_true_labels = np.zeros((num_samples, max_seq_len), dtype=np.int8)
+        user_question = np.zeros((num_samples, max_seq_len), dtype=np.int32)
 
         sample_pos = lazy_data.select(["sample_id", "position"]).collect(
             engine="streaming"
@@ -331,6 +311,11 @@ class SkillModelData(BaseModelData):
             .collect(engine="streaming")["true_label"]
             .to_numpy()
         )
+        user_question[sample_ids, positions] = (
+            lazy_data.select("question")
+            .collect(engine="streaming")["question"]
+            .to_numpy()
+        )
 
         self.logger.debug(
             f"Loaded windowlate data: samples={num_samples}, max_seq_len={max_seq_len}"
@@ -343,13 +328,13 @@ class SkillModelData(BaseModelData):
             user_id_sequence,
             late_group_id,
             user_true_labels,
+            user_question,
         )
 
     def create_windowlate_iterable_dataset(
         self,
         max_seq_len: int,
         batch_read_rows: int = 200_000,
-        include_question: bool = False,
     ) -> WindowlateIterableDataset:
         parquet_path = os.path.join(
             self.data_src.data_folder, f"{self.data_src.dataset}_windowlate.parquet"
@@ -359,5 +344,4 @@ class SkillModelData(BaseModelData):
             parquet_path=parquet_path,
             max_seq_len=max_seq_len,
             batch_read_rows=batch_read_rows,
-            include_question=include_question,
         )

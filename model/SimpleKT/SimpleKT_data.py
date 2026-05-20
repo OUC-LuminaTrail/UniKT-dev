@@ -87,7 +87,7 @@ class SimpleKTModelData(SkillModelData):
         fold_idx = args.fold if args.fold >= 0 else None
 
         # 构建用户答题序列
-        user_sequence, user_response, user_mask, _ = self.build_sequence_data()
+        user_sequence, user_response, user_mask, _, _ = self.build_sequence_data()
 
         # 划分训练集和验证集
         if fold_idx is not None:

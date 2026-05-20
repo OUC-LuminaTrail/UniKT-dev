@@ -122,7 +122,7 @@ def cmd_process(args):
 
     dp.build_split_question_sequence_data()
     dp.build_split_skill_sequence_data()
-    if "windowlate" in args.extra or "windowslate" in args.extra:
+    if "windowlate" in args.extra:
         dp.build_windowlate_data()
 
     dp.save_data()

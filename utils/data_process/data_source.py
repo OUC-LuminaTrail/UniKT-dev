@@ -206,9 +206,7 @@ class DataSource(ABC):
         relation_data: dict[str, pl.DataFrame], sequence_data: pl.DataFrame
     ):
         """Validate consistency between relation tables and sequence_data."""
-        assert "question_skill" in relation_data, (
-            "question_skill relation is required"
-        )
+        assert "question_skill" in relation_data, "question_skill relation is required"
         question_skill = relation_data["question_skill"]
 
         # Validate question_skill columns
@@ -601,9 +599,7 @@ class DataSource(ABC):
         if self.relation_data and name in self.relation_data:
             return self.relation_data[name]
         # Try loading from disk
-        path = os.path.join(
-            self.data_folder, f"{self.dataset}_relation_{name}.parquet"
-        )
+        path = os.path.join(self.data_folder, f"{self.dataset}_relation_{name}.parquet")
         if not os.path.exists(path):
             raise ValueError(
                 f"Relation '{name}' not found at {path}. "
@@ -621,9 +617,7 @@ class DataSource(ABC):
         # Scan disk for relation files
         import glob
 
-        pattern = os.path.join(
-            self.data_folder, f"{self.dataset}_relation_*.parquet"
-        )
+        pattern = os.path.join(self.data_folder, f"{self.dataset}_relation_*.parquet")
         paths = glob.glob(pattern)
         return [
             p.split("_relation_")[1].replace(".parquet", "")

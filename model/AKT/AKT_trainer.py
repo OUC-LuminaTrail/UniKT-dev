@@ -212,13 +212,11 @@ class AKTTrainer(BaseTrainer):
 
     def _build_pid_data(
         self,
-        question: torch.Tensor | None,
-        sequence: torch.Tensor,
+        question: torch.Tensor,
         valid_mask: torch.Tensor,
     ) -> torch.Tensor:
         """Build AKT Rasch pid data with 0 reserved for padding."""
-        source = question if question is not None else sequence
-        pid_data = source.clone() + 1
+        pid_data = question.clone() + 1
         return pid_data.masked_fill(~valid_mask.bool(), 0)
 
     def forward_pass(
@@ -231,25 +229,19 @@ class AKTTrainer(BaseTrainer):
         - y_hat[:, t] 直接对应 response[t]，需要对齐
 
         Args:
-            batch_data: 包含 (sequence, response, mask) 的元组
+            batch_data: 包含 (sequence, response, mask, question) 的元组
 
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
-        # 解包数据并移动到设备
-        if len(batch_data) == 4:
-            sequence, response, mask, question = batch_data
-            question = self._move_tensor_to_device(question)
-        else:
-            sequence, response, mask = batch_data
-            question = None
+        sequence, response, mask, question = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
+        question = self._move_tensor_to_device(question)
 
-        # AKT 的 Rasch pid 应是题目ID；0 保留给 padding，有效题目 ID 右移一位。
         use_pid = self.model.n_pid > 0
-        pid_data = self._build_pid_data(question, sequence, mask) if use_pid else None
+        pid_data = self._build_pid_data(question, mask) if use_pid else None
 
         # 模型前向传播
         y_hat_full, c_reg_loss = self.model(
@@ -284,41 +276,27 @@ class AKTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data):
         """测试前向传播，支持 windowlateauc_mean 评估。
 
-        数据格式说明：
-        - sequence: [技能历史, 目标技能]
-        - response: [历史标签, 0]  # 目标位置 response=0 占位
-        - mask: [0, ..., 0, 1]  # 只有最后一个位置需要预测
-        - late_group_id: [g1, ..., gN]  # 最后一个位置是当前题目的 group_id
-        - true_labels: [历史标签, 真实标签]  # 用于评估
-
-        AKT 预测语义：
-        - y_hat[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
-        - 模型直接输出对齐的预测，无需额外对齐
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question)
         """
-        if len(batch_data) == 6:
-            sequence, response, mask, late_group_id, true_labels, question = batch_data
-            question = self._move_tensor_to_device(question)
-        else:
-            sequence, response, mask, late_group_id, true_labels = batch_data
-            question = None
+        sequence, response, mask, late_group_id, true_labels, question = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
+        question = self._move_tensor_to_device(question)
 
-        # AKT 的 Rasch pid 应是题目ID；0 保留给 padding，有效题目 ID 右移一位。
         use_pid = self.model.n_pid > 0
         valid_mask = late_group_id >= 0
-        pid_data = self._build_pid_data(question, sequence, valid_mask) if use_pid else None
+        pid_data = self._build_pid_data(question, valid_mask) if use_pid else None
 
         # 模型前向传播
         y_hat_full, _ = self.model(sequence, response, mask, pid_data)  # [B, S]
 
         # AKT 预测对齐
-        # y_hat[:, t] 直接预测 response[t]，无需额外对齐
-        # 使用 mask 筛选需要预测的位置（只有 mask=1 的位置）
+        # y_hat[:, t] 直接预测 response[t]
+        # 使用 mask 筛选需要预测的位置
         y_hat = torch.masked_select(y_hat_full, mask)
         y_label = torch.masked_select(true_labels, mask).float()
         group_ids = torch.masked_select(late_group_id, mask)
@@ -333,7 +311,7 @@ class AKTTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
-        """计算损失，包含BCE损失和Rasch正则化损失（如果使用Problem ID）"""
+        """计算损失，包含BCE损失和Rasch正则化损失"""
         y_hat = outputs["y_hat"]
         y_label = outputs["y_label"]
         bce_loss = self.loss(y_hat, y_label)

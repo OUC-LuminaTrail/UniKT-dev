@@ -16,20 +16,10 @@ logger = get_logger(__name__)
 class AKTDataset(Dataset):
     """AKT 数据集
 
-    处理输入数据，将其转换为模型所需的格式。
-
-    Args:
-        sequences: 概念ID序列
-        responses: 响应序列
-        masks: 掩码序列
-        late_group_ids: 题目级分组ID（可选，窗口测试时使用）
-        true_labels: 真实标签序列（可选，窗口测试时使用）
-
-    Returns:
-        训练/验证模式 (无 late_group_ids/true_labels):
-            (sequence, response, mask) 元组
-        窗口测试模式 (有 late_group_ids/true_labels):
-            (sequence, response, mask, late_group_id, true_labels) 元组
+    训练/验证模式:
+        (sequence, response, mask, question)
+    窗口测试模式:
+        (sequence, response, mask, late_group_id, true_labels, question)
     """
 
     def __init__(
@@ -37,45 +27,34 @@ class AKTDataset(Dataset):
         sequences,
         responses,
         masks,
+        questions,
         late_group_ids=None,
         true_labels=None,
-        questions=None,
     ):
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
+        self.questions = questions
         self.late_group_ids = late_group_ids
         self.true_labels = true_labels
-        self.questions = questions
 
-        # 判断是否为窗口测试模式
         self._is_window_mode = late_group_ids is not None and true_labels is not None
 
     def __len__(self) -> int:
-        """返回数据集长度
-
-        Returns:
-            数据集的样本数量
-        """
         return len(self.sequences)
 
     def __getitem__(self, idx: int):
         sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
         response = torch.tensor(self.responses[idx], dtype=torch.long)
         mask = torch.tensor(self.masks[idx], dtype=torch.bool)
+        question = torch.tensor(self.questions[idx], dtype=torch.long)
 
         if self._is_window_mode:
             late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
             true_labels = torch.tensor(self.true_labels[idx], dtype=torch.long)
-            if self.questions is not None:
-                question = torch.tensor(self.questions[idx], dtype=torch.long)
-                return sequence, response, mask, late_group_id, true_labels, question
-            return sequence, response, mask, late_group_id, true_labels
+            return sequence, response, mask, late_group_id, true_labels, question
 
-        if self.questions is not None:
-            question = torch.tensor(self.questions[idx], dtype=torch.long)
-            return sequence, response, mask, question
-        return sequence, response, mask
+        return sequence, response, mask, question
 
 
 class AKTModelData(SkillModelData):
@@ -103,12 +82,10 @@ class AKTModelData(SkillModelData):
         """
         fold_idx = args.fold if args.fold >= 0 else None
 
-        # 构建用户答题序列，保留 question 作为 AKT Rasch 的 pid。
         user_sequence, user_response, user_mask, _, user_question = (
-            self.build_sequence_data_with_question()
+            self.build_sequence_data()
         )
 
-        # 划分训练集和验证集
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -127,17 +104,12 @@ class AKTModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        window_test_data = self.create_windowlate_iterable_dataset(
-            args.max_seq_len, include_question=True
-        )
+        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
 
-        # 构建模型数据集
         train_dataset = AKTDataset(
-            train_data[0], train_data[1], train_data[2], questions=train_question[0]
+            train_data[0], train_data[1], train_data[2], train_question[0]
         )
-        val_dataset = AKTDataset(
-            val_data[0], val_data[1], val_data[2], questions=val_question[0]
-        )
+        val_dataset = AKTDataset(val_data[0], val_data[1], val_data[2], val_question[0])
         test_dataset = DataLoader(
             window_test_data,
             batch_size=args.batch_size,

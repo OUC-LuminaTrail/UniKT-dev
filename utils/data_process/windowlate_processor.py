@@ -348,7 +348,14 @@ class WindowlateProcessor:
 
             sample_count = cls.count_user_samples(skills_list, max_seq_len)
             user_records.append(
-                (user, labels, skills_list, questions, global_sample_id, global_group_id)
+                (
+                    user,
+                    labels,
+                    skills_list,
+                    questions,
+                    global_sample_id,
+                    global_group_id,
+                )
             )
             global_sample_id += sample_count
             global_group_id += len(skills_list)
