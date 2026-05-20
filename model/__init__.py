@@ -9,6 +9,7 @@ from utils.core import PARAM_CONFIGS, TRAINERS
 # =============================================================================
 # 训练器延迟注册
 # =============================================================================
+TRAINERS.register_lazy("BDGKT", "model.BDGKT.BDGKT_trainer", "BDGKTTrainer")
 TRAINERS.register_lazy("ABKT", "model.ABKT.ABKT_trainer", "ABKTTrainer")
 TRAINERS.register_lazy("AKT", "model.AKT.AKT_trainer", "AKTTrainer")
 TRAINERS.register_lazy(
@@ -83,6 +84,7 @@ TRAINERS.register_lazy(
 # =============================================================================
 # 参数配置延迟注册
 # =============================================================================
+PARAM_CONFIGS.register_lazy("BDGKT", "model.BDGKT.BDGKT_trainer", "BDGKTModelParams")
 PARAM_CONFIGS.register_lazy("ABKT", "model.ABKT.ABKT_trainer", "ABKTModelParams")
 PARAM_CONFIGS.register_lazy("AKT", "model.AKT.AKT_trainer", "AKTModelParams")
 PARAM_CONFIGS.register_lazy(
