@@ -219,7 +219,6 @@ class SimpleKT(nn.Module):
         separate_qa: 是否使用独立的交互嵌入
         final_fc_dim: 第一层全连接层维度
         final_fc_dim2: 第二层全连接层维度
-        l2: L2正则化系数（用于Rasch模型）
     """
 
     def __init__(
@@ -234,9 +233,8 @@ class SimpleKT(nn.Module):
         seq_len: int = 200,
         kq_same: int = 1,
         separate_qa: bool = False,
-        final_fc_dim: int = 256,
+        final_fc_dim: int = 512,
         final_fc_dim2: int = 256,
-        l2: float = 1e-5,
     ):
         super().__init__()
         self.num_skills = num_skills
@@ -244,11 +242,10 @@ class SimpleKT(nn.Module):
         self.dropout = dropout
         self.kq_same = kq_same
         self.separate_qa = separate_qa
-        self.l2 = l2
         embed_l = d_model
 
         # Problem ID相关嵌入（Rasch模型）
-        self.difficult_param = nn.Embedding(self.n_pid + 1, 1)
+        self.difficult_param = nn.Embedding(self.n_pid + 1, embed_l)
         self.q_embed_diff = nn.Embedding(self.num_skills + 1, embed_l)
         self.qa_embed_diff = nn.Embedding(2 * self.num_skills + 1, embed_l)
 
@@ -287,9 +284,10 @@ class SimpleKT(nn.Module):
         self.reset()
 
     def reset(self):
-        for p in self.parameters():
-            if p.size(0) == self.n_pid + 1:
-                torch.nn.init.constant_(p, 0.0)
+        if self.n_pid > 0:
+            for p in self.parameters():
+                if p.size(0) == self.n_pid + 1:
+                    torch.nn.init.constant_(p, 0.0)
 
     def base_emb(self, q_data, target):
         """基础嵌入
@@ -330,7 +328,6 @@ class SimpleKT(nn.Module):
 
         Returns:
             preds: 预测结果，形状为 [batch_size, seq_len]
-            c_reg_loss: Rasch模型正则化损失
         """
         target = response
 
@@ -338,20 +335,10 @@ class SimpleKT(nn.Module):
         q_embed_data, qa_embed_data = self.base_emb(sequence, target)
 
         # Problem ID嵌入和Rasch难度调节
-        pid_embed_data = self.difficult_param(pid_data)
-        q_embed_diff_data = self.q_embed_diff(sequence)
-        qa_embed_diff_data = self.qa_embed_diff(target)
-
-        q_embed_data = q_embed_data + pid_embed_data * q_embed_diff_data
-
-        if self.separate_qa:
-            qa_embed_data = qa_embed_data + pid_embed_data * qa_embed_diff_data
-        else:
-            qa_embed_data = qa_embed_data + pid_embed_data * (
-                qa_embed_diff_data + q_embed_diff_data
-            )
-
-        c_reg_loss = (pid_embed_data**2).sum() * self.l2
+        if self.n_pid > 0:
+            pid_embed_data = self.difficult_param(pid_data)
+            q_embed_diff_data = self.q_embed_diff(sequence)
+            q_embed_data = q_embed_data + pid_embed_data * q_embed_diff_data
 
         # 通过 Transformer
         d_output = self.model(q_embed_data, qa_embed_data)
@@ -363,4 +350,4 @@ class SimpleKT(nn.Module):
         # Sigmoid 激活
         preds = torch.sigmoid(output)
 
-        return preds, c_reg_loss
+        return preds

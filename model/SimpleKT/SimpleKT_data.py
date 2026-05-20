@@ -110,7 +110,11 @@ class SimpleKTModelData(SkillModelData):
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
             train_data, val_data, _ = self.split_kfold_data(
-                user_sequence, user_response, user_mask, user_question, fold_idx=fold_idx
+                user_sequence,
+                user_response,
+                user_mask,
+                user_question,
+                fold_idx=fold_idx,
             )
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
