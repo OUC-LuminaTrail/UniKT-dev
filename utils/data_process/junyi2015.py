@@ -127,7 +127,10 @@ class Junyi2015Data(DataSource):
             .filter(pl.col("question").is_in(valid_questions))
             .unique(subset=["question"])
             .with_columns(
-                pl.col("question").replace(question_map).cast(pl.Int32).alias("question")
+                pl.col("question")
+                .replace(question_map)
+                .cast(pl.Int32)
+                .alias("question")
             )
         )
         logger.debug(f"Exercise metadata shape: {exercise_renamed.shape}")

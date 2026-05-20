@@ -206,9 +206,7 @@ class DataSource(ABC):
         relation_data: dict[str, pl.DataFrame], sequence_data: pl.DataFrame
     ):
         """Validate consistency between relation tables and sequence_data."""
-        assert "question_skill" in relation_data, (
-            "question_skill relation is required"
-        )
+        assert "question_skill" in relation_data, "question_skill relation is required"
         question_skill = relation_data["question_skill"]
 
         # Validate question_skill columns
@@ -601,9 +599,7 @@ class DataSource(ABC):
         if self.relation_data and name in self.relation_data:
             return self.relation_data[name]
         # Try loading from disk
-        path = os.path.join(
-            self.data_folder, f"{self.dataset}_relation_{name}.parquet"
-        )
+        path = os.path.join(self.data_folder, f"{self.dataset}_relation_{name}.parquet")
         if not os.path.exists(path):
             raise ValueError(
                 f"Relation '{name}' not found at {path}. "
@@ -621,9 +617,7 @@ class DataSource(ABC):
         # Scan disk for relation files
         import glob
 
-        pattern = os.path.join(
-            self.data_folder, f"{self.dataset}_relation_*.parquet"
-        )
+        pattern = os.path.join(self.data_folder, f"{self.dataset}_relation_*.parquet")
         paths = glob.glob(pattern)
         return [
             p.split("_relation_")[1].replace(".parquet", "")
@@ -764,14 +758,12 @@ class DataSource(ABC):
         self.split_question_sequence_data = data
 
     def build_split_skill_sequence_data(self):
-        """构建切分后的技能序列数据
+        """构建切分后的技能序列数据。
 
-        1. 先将问题序列展开为技能序列（一个问题可能对应多个技能）
-        2. 然后对展开后的技能序列进行切分
+        将问题序列展开为技能序列（一个问题可能对应多个技能），保留 question 列，
+        然后按 max_seq_len 切分长序列。
 
-        说明:
-            - 将长度大于 max_seq_len 的用户技能序列切分成多个子序列
-            - 返回切分后的数据及统计信息
+        输出列: sequence_data 原始列 + skill + seq_pos
         """
         max_seq_len = self.args.max_seq_len
         min_seq_len = self.args.min_seq_len
@@ -787,35 +779,31 @@ class DataSource(ABC):
             f"Building split skill sequences (max_len={max_seq_len}, min_len={min_seq_len})"
         )
 
-        # Step 1: 展开问题序列为技能序列
-        # 构建 question -> skills 映射
-        question_skill = self.relation_data["question_skill"]
-        question_skills = question_skill.group_by("question").agg(
-            pl.col("skill").alias("skills")
+        # Step 1: 展开问题到技能，保留 question 列
+        question_skills = (
+            self.relation_data["question_skill"]
+            .group_by("question")
+            .agg(pl.col("skill").alias("skills"))
         )
 
-        # 将技能列表展开并与 sequence_data 关联
-        expanded_data = self.sequence_data.join(
-            question_skills, on="question", how="inner"
-        ).explode("skills")
+        expanded = (
+            self.sequence_data.join(question_skills, on="question", how="inner")
+            .explode("skills")
+            .rename({"skills": "skill"})
+        )
 
-        # 保留原始sequence_data中除question外的所有数据列（question被展开为skill）
-        select_cols = [pl.col(c) for c in self.sequence_data.columns if c != "question"]
-        select_cols.append(pl.col("skills").alias("skill"))
-        expanded_data = expanded_data.select(select_cols)
-
-        # Step 2: 添加序列位置列，并计算每个用户的技能序列长度
-        expanded_data = expanded_data.with_columns(
+        # Step 2: 计算序列位置和长度
+        expanded = expanded.with_columns(
             pl.int_range(pl.len()).over("user").alias("seq_pos")
         ).join(
-            expanded_data.group_by("user").agg(pl.len().alias("seq_len")),
+            expanded.group_by("user").agg(pl.len().alias("seq_len")),
             on="user",
             how="left",
         )
 
-        # Step 3: 计算每条记录所属的切分及其长度
-        expanded_data = expanded_data.with_columns(
-            [(pl.col("seq_pos") // max_seq_len).alias("split_idx")]
+        # Step 3: 计算切分索引和每段长度
+        expanded = expanded.with_columns(
+            (pl.col("seq_pos") // max_seq_len).alias("split_idx")
         ).with_columns(
             pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
             .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
@@ -823,44 +811,32 @@ class DataSource(ABC):
             .alias("split_len"),
         )
 
-        # Step 4: 过滤长度不足的切分
+        # Step 4: 过滤短切分，分配新用户ID
         valid_splits = (
-            expanded_data.filter(pl.col("split_len") >= min_seq_len)
+            expanded.filter(pl.col("split_len") >= min_seq_len)
             .select(["user", "split_idx"])
             .unique()
+            .with_row_index("new_user_id")
+            .sort("user", "split_idx")
         )
 
-        # Step 5: 为每个有效切分分配新的用户ID
-        valid_splits = valid_splits.with_row_index("new_user_id").sort(
-            "user", "split_idx"
-        )
-
-        # Step 6: 合并回数据，过滤无效切分的记录
-        expanded_data = expanded_data.join(
+        # Step 5: 应用有效切分，重映射用户ID和位置
+        expanded = expanded.join(
             valid_splits, on=["user", "split_idx"], how="inner"
+        ).with_columns(
+            pl.col("new_user_id").cast(pl.Int32).alias("user"),
+            (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
         )
 
-        # Step 7: 更新用户ID和位置
-        expanded_data = expanded_data.with_columns(
-            [
-                pl.col("new_user_id").cast(pl.Int32).alias("user"),
-                (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
-            ]
-        )
+        # Step 6: 输出列 = sequence_data 原始列 + skill + seq_pos
+        output_cols = [pl.col(c) for c in self.sequence_data.columns]
+        output_cols.append(pl.col("skill"))
+        output_cols.append(pl.col("relative_pos").alias("seq_pos"))
+        expanded = expanded.select(output_cols)
 
-        # 数据列 = 原始sequence_data列（除question） + skill
-        data_cols = [c for c in self.sequence_data.columns if c != "question"]
-        data_cols.append("skill")
-        final_cols = [pl.col(c) for c in data_cols]
-        final_cols.append(pl.col("relative_pos").alias("seq_pos"))
-        expanded_data = expanded_data.select(final_cols)
+        logger.debug(f"Split into {expanded['user'].n_unique()} skill sub-sequences")
 
-        # 统计切分信息
-        final_num_users = expanded_data["user"].n_unique()
-
-        logger.debug(f"Split into {final_num_users} skill sub-sequences")
-
-        self.split_skill_sequence_data = expanded_data
+        self.split_skill_sequence_data = expanded
 
     def build_windowlate_data(self):
         """构建用于 windowlate_auc_mean 评估的样本数据。

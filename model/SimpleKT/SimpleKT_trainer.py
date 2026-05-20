@@ -258,7 +258,7 @@ class SimpleKTTrainer(BaseTrainer):
         - 模型内部已经使用移位后的 response 作为 target，所以 y_hat[:, t] 直接对应 response[t]
         - 测试时 response[:, -1] = 0（占位），模型会忽略（使用移位后的目标）
         """
-        sequence, response, mask, late_group_id, true_labels = batch_data
+        sequence, response, mask, late_group_id, true_labels, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
