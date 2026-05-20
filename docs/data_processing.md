@@ -104,7 +104,7 @@ python data_process.py process -d assistments09 --sample_size 500 --sample_strat
 
 | Parameter | Description |
 |-----------|-------------|
-| `--extra windowslate` | Build windowlate data for sliding window training |
+| `--extra windowlate` | Build windowlate data for sliding window training |
 
 ## Output Structure
 
@@ -140,22 +140,52 @@ data/{dataset}/
 > | **Skill Sequence** | One skill = one timestep | Predict skill mastery (multi-skill questions expanded) |
 >
 > For multi-skill questions (e.g., a question tagged with skills `2`, `37`, `70`):
-> - **Question sequence**: Single entry with `question_id=123`
-> - **Skill sequence**: Three entries with `skill_id=[2, 37, 70]`, same `label` and other fields
+> - **Question sequence**: Single entry with `question=123`
+> - **Skill sequence**: Three entries with `skill=[2, 37, 70]` and `question=123`, same `label` and other fields
 >
+> The skill sequence preserves the `question` column so models that need problem IDs (e.g., AKT Rasch) can use it directly.
 > The skill sequence is longer than the question sequence when multi-skill questions exist.
 
 ### Sequence Data Fields
 
-Each sequence file contains the following fields:
+**Split Question Sequence** (`*_split_question_sequence.parquet`):
 
-| Field | Shape | Description |
-|-------|-------|-------------|
-| `user` | `[B]` | User identifiers |
-| `question_id` | `[B, S]` | Question IDs |
-| `response` | `[B, S]` | Correctness (0/1) |
-| `mask` | `[B, S]` | Valid position mask |
-| `fold` | `[B]` | Fold label for K-Fold cross-validation |
+| Field | Type | Description |
+|-------|------|-------------|
+| `user` | `Int32` | User identifier (remapped, split into sub-sequences) |
+| `question` | `Int32` | Question identifier |
+| `label` | `Int8` | Response correctness (0 or 1) |
+| `timestamp` | `Int64` | Unix timestamp (milliseconds) |
+| `fold` | `Int32` | K-fold label (-1 = test, 0..n_splits-1 = train/val) |
+| `seq_pos` | `Int32` | Position within the sub-sequence |
+| `attempt_count` | `Int32` | Number of attempts on this question (if available) |
+| `hint_count` | `Int32` | Number of hints used (if available) |
+
+**Split Skill Sequence** (`*_split_skill_sequence.parquet`):
+
+All columns from question sequence above, plus:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `skill` | `Int32` | Skill/concept identifier (multi-skill questions expanded) |
+| `question` | `Int32` | Original question identifier (preserved from expansion) |
+
+**Windowlate Data** (`*_windowlate.parquet`):
+
+Long-format data with one row per (sample, position) pair:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sample_id` | `Int64` | Unique sample identifier |
+| `position` | `Int32` | Position within the window |
+| `skill` | `Int32` | Skill/concept identifier |
+| `question` | `Int32` | Question identifier |
+| `response` | `Int8` | Correctness (0 = incorrect, 1 = correct, target position = 0) |
+| `mask` | `Int8` | Prediction mask (1 = predict this position) |
+| `user_id` | `Int32` | Original user identifier |
+| `group_id` | `Int64` | Question-level grouping ID |
+| `true_label` | `Int8` | True label for evaluation |
+| `fold` | `Int32` | K-fold assignment |
 
 ## Column Mapping
 
