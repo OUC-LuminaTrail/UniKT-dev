@@ -86,6 +86,23 @@ def test_smooth_is_causal():
     assert torch.allclose(out[:, :4, :], changed_out[:, :4, :], atol=1e-6)
 
 
+def test_layernorm_state_dict_backward_compatibility():
+    robustkt = RobustKT(_args(), {"num_skills": 5, "num_questions": 20})
+    smooth = robustkt.model.smooth
+
+    legacy_state = {}
+    for name, param in smooth.state_dict().items():
+        legacy_state[name.replace("gamma", "weight").replace("beta", "bias")] = (
+            param.clone()
+        )
+
+    restored = Smooth(dropout=0.0, hidden_size=8, kernel_size=5)
+    restored.load_state_dict(legacy_state)
+
+    assert torch.allclose(restored.layer_norm.gamma, smooth.layer_norm.gamma)
+    assert torch.allclose(restored.layer_norm.beta, smooth.layer_norm.beta)
+
+
 def test_robustkt_pid_padding():
     robustkt = RobustKT(_args(), {"num_skills": 5, "num_questions": 20})
     question = torch.tensor([[10, 11, 12]])
