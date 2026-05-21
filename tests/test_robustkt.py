@@ -87,14 +87,13 @@ def test_smooth_is_causal():
 
 
 def test_layernorm_state_dict_backward_compatibility():
-    robustkt = RobustKT(_args(), {"num_skills": 5, "num_questions": 20})
-    smooth = robustkt.model.smooth
-
-    legacy_state = {}
-    for name, param in smooth.state_dict().items():
-        legacy_state[name.replace("gamma", "weight").replace("beta", "bias")] = (
-            param.clone()
-        )
+    smooth = Smooth(dropout=0.0, hidden_size=8, kernel_size=5)
+    legacy_state = {
+        name.replace("layer_norm.gamma", "layer_norm.weight").replace(
+            "layer_norm.beta", "layer_norm.bias"
+        ): param.clone()
+        for name, param in smooth.state_dict().items()
+    }
 
     restored = Smooth(dropout=0.0, hidden_size=8, kernel_size=5)
     restored.load_state_dict(legacy_state)
