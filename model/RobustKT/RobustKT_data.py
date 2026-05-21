@@ -70,9 +70,10 @@ class RobustKTModelData(SkillModelData):
             val_data[0], val_data[1], val_data[2], val_question[0]
         )
         window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        test_batch_size = getattr(args, "test_batch_size", args.batch_size)
         test_dataset = DataLoader(
             window_test_data,
-            batch_size=args.batch_size,
+            batch_size=test_batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,

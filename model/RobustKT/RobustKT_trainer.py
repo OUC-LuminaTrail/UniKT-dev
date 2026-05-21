@@ -97,6 +97,11 @@ class RobustKTModelParams(BaseParamConfig):
                 "short": "bs",
                 "help": "Batch size for training",
             },
+            "test_batch_size": {
+                "type": int,
+                "default": 512,
+                "help": "Batch size for windowlate test evaluation",
+            },
         }
         return group_name, params
 
