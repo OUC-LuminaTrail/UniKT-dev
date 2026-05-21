@@ -50,7 +50,7 @@ class Smooth(nn.Module):
     def __init__(self, dropout: float, hidden_size: int, kernel_size: int) -> None:
         super().__init__()
         self.out_dropout = nn.Dropout(dropout)
-        self.layer_norm = nn.LayerNorm(hidden_size, eps=1e-12)
+        self.layer_norm = LayerNorm(hidden_size, eps=1e-12)
         self.causal_conv = CausalTemporalConv(hidden_size, hidden_size, kernel_size)
         self.sqrt_beta = nn.Parameter(torch.randn(1, 1, hidden_size))
 
@@ -61,6 +61,22 @@ class Smooth(nn.Module):
         smoothed = trend + (self.sqrt_beta**2) * random
         hidden_states = self.out_dropout(smoothed)
         return self.layer_norm(hidden_states + input_tensor)
+
+
+class LayerNorm(nn.Module):
+    """Custom LayerNorm matching the pyKT implementation."""
+
+    def __init__(self, hidden_size: int, eps: float = 1e-12) -> None:
+        super().__init__()
+        self.gamma = nn.Parameter(torch.ones(hidden_size))
+        self.beta = nn.Parameter(torch.zeros(hidden_size))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mean = x.mean(-1, keepdim=True)
+        var = ((x - mean) ** 2).mean(-1, keepdim=True)
+        normed = (x - mean) / torch.sqrt(var + self.eps)
+        return self.gamma * normed + self.beta
 
 
 def attention(
