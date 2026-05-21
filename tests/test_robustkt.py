@@ -68,8 +68,8 @@ def test_robustkt_forward_pass_skips_first_position():
         )
     )
 
-    assert outputs["y_hat"].tolist() == [0.2, 0.3]
-    assert outputs["y_label"].tolist() == [0.0, 1.0]
+    assert torch.allclose(outputs["y_hat"], torch.tensor([0.2, 0.3]))
+    assert torch.equal(outputs["y_label"], torch.tensor([0.0, 1.0]))
 
 
 def test_smooth_is_causal():
