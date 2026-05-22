@@ -5,6 +5,7 @@ ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PY="${PY:-python}"
 DATA="$ROOT/data"
 LOG_ROOT="${LOG_ROOT:-$ROOT/exp_logs}"
+RUN_LABEL="${RUN_LABEL:-default}"
 DATASETS="${DATASETS:-assistments12 assistments15 assistments17 slepemapy ednet_kt1 junyi2015 assistments09}"
 FOLDS="${FOLDS:-0 1 2 3 4}"
 EPOCHS="${EPOCHS:-150}"
@@ -21,7 +22,7 @@ EDNET_KT1_RAW_DIR="${EDNET_KT1_RAW_DIR:-/root/autodl-tmp/pykt-toolkit/data/ednet
 
 cd "$ROOT"
 mkdir -p "$DATA" "$LOG_ROOT"
-LOGDIR="$LOG_ROOT/robustkt_fresh_$(date +%Y%m%d_%H%M%S)"
+LOGDIR="$LOG_ROOT/robustkt_fresh_${RUN_LABEL}_$(date +%Y%m%d_%H%M%S)_$$"
 mkdir -p "$LOGDIR"
 
 log() {
@@ -42,6 +43,18 @@ require_dir() {
     echo "Required directory missing: $path" >&2
     return 1
   fi
+}
+
+copy_raw_file() {
+  local src=$1
+  local dst_dir=$2
+  mkdir -p "$dst_dir"
+  local dst="$dst_dir/$(basename "$src")"
+  if [[ -f "$dst" && "$(realpath "$src")" == "$(realpath "$dst")" ]]; then
+    log "RAW_REUSE source=$src"
+    return
+  fi
+  cp "$src" "$dst_dir/"
 }
 
 clean_archives_and_raw() {
@@ -72,15 +85,15 @@ copy_or_download_raw() {
   case "$ds" in
     assistments09)
       require_file "$ASSIST09_RAW"
-      cp "$ASSIST09_RAW" "$DATA/$ds/raw/"
+      copy_raw_file "$ASSIST09_RAW" "$DATA/$ds/raw"
       ;;
     assistments12)
       require_file "$ASSIST12_RAW"
-      cp "$ASSIST12_RAW" "$DATA/$ds/raw/"
+      copy_raw_file "$ASSIST12_RAW" "$DATA/$ds/raw"
       ;;
     assistments15)
       require_file "$ASSIST15_RAW"
-      cp "$ASSIST15_RAW" "$DATA/$ds/raw/"
+      copy_raw_file "$ASSIST15_RAW" "$DATA/$ds/raw"
       ;;
     ednet_kt1)
       require_file "$EDNET_CONTENTS_RAW"
@@ -192,6 +205,7 @@ log "ROOT=$ROOT"
 log "DATA=$DATA"
 log "LOGDIR=$LOGDIR"
 log "COMMIT=$(git rev-parse HEAD)"
+log "RUN_LABEL=$RUN_LABEL"
 log "DATASETS=$DATASETS"
 log "FOLDS=$FOLDS"
 log "EPOCHS=$EPOCHS BATCH_SIZE=$BATCH_SIZE TEST_BATCH_SIZE=$TEST_BATCH_SIZE"
