@@ -177,6 +177,37 @@ class ExperimentManager:
             tags=tags,
         )
 
+    @staticmethod
+    def from_run_dir(run_dir: str | Path) -> "ExperimentManager":
+        """Create an ExperimentManager wrapping an existing run directory.
+
+        Unlike the normal constructor, this does NOT create a new timestamped
+        directory. Used for evaluation/inference on already-trained models.
+
+        Args:
+            run_dir: Path to an existing run directory.
+
+        Returns:
+            ExperimentManager pointing to the existing directory.
+
+        Raises:
+            FileNotFoundError: If the directory does not exist.
+        """
+        run_path = Path(run_dir).resolve()
+        if not run_path.exists():
+            raise FileNotFoundError(f"Run directory not found: {run_dir}")
+
+        manager = ExperimentManager.__new__(ExperimentManager)
+        manager.exp_type = ExperimentType.NORMAL
+        manager.model_name = ""
+        manager.dataset_name = ""
+        manager.base_dir = run_path.parent.parent
+        manager.tags = []
+        manager.exp_dir = run_path
+
+        logger.debug(f"ExperimentManager bound to existing dir: {run_path}")
+        return manager
+
     def get_experiment_info(self) -> dict:
         """获取实验信息字典
 

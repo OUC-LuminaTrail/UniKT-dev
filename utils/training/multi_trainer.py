@@ -20,20 +20,11 @@ from typing import Any
 import torch
 from rich.console import Group
 from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
-from rich.table import Column
 from rich.text import Text
 
 from ..config import EarlyStopping
 from ..core import get_logger, seed_everything
+from ..progress import create_progress
 from .callbacks import (
     Callback,
     CallbackManager,
@@ -499,15 +490,7 @@ class MultiTrainer:
         )
 
         # 创建进度条
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            TaskProgressColumn(),
-            MofNCompleteColumn(table_column=Column(justify="right")),
-            TimeRemainingColumn(),
-            expand=True,
-        )
+        progress = create_progress()
 
         # 创建最佳指标显示
         best_metric_text = None
