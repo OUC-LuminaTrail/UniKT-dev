@@ -1050,14 +1050,22 @@ class DataSource(ABC):
                 .to_list()
             )
             self._apply_sampling_to_data(
-                sampled_users, n_samples, total_users, original_records
+                sampled_users,
+                n_samples,
+                total_users,
+                original_records,
+                sample_strategy,
             )
         elif sample_strategy == "stratified":
             sampled_users = self._sample_users_stratified(
                 user_stats, n_samples, attempts_bins, correct_bins
             )
             self._apply_sampling_to_data(
-                sampled_users, n_samples, total_users, original_records
+                sampled_users,
+                n_samples,
+                total_users,
+                original_records,
+                sample_strategy,
             )
         elif sample_strategy == "time":
             self._apply_time_sampling(n_samples, total_users, original_records)
@@ -1135,6 +1143,7 @@ class DataSource(ABC):
         n_samples: int,
         total_users: int,
         original_records: int,
+        sample_strategy: str,
     ):
         """Apply sampled users to sequence and question data with ID remapping."""
         user_stats = self.get_user_stats()
@@ -1158,8 +1167,11 @@ class DataSource(ABC):
         sampling_config = {
             "n_samples_requested": n_samples,
             "n_samples_actual": len(sampled_users),
+            "sample_size": n_samples,
+            "sample_ratio": None,
+            "sample_strategy": sample_strategy,
             "sampling_ratio": len(sampled_users) / total_users,
-            "stratify": True,
+            "stratify": sample_strategy == "stratified",
             "attempts_bins": [20, 100],
             "correct_bins": [0.4, 0.8],
         }
@@ -1173,6 +1185,8 @@ class DataSource(ABC):
         }
 
         self.update_metadata("sampled", True)
+        self.update_metadata("sample_size", int(n_samples))
+        self.update_metadata("sample_strategy", sample_strategy)
         self.update_metadata("sampling_config", sampling_config)
         self.update_metadata("sampling_stats", sampling_stats)
         self.update_metadata("num_users", int(num_users))
@@ -1223,6 +1237,8 @@ class DataSource(ABC):
         }
 
         self.update_metadata("sampled", True)
+        self.update_metadata("sample_size", int(n_samples))
+        self.update_metadata("sample_strategy", "time")
         self.update_metadata("sampling_config", sampling_config)
         self.update_metadata("sampling_stats", sampling_stats)
         self.update_metadata("num_users", int(num_users))

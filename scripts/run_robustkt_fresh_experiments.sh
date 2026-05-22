@@ -3,14 +3,15 @@ set -euo pipefail
 
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 PY="${PY:-python}"
-DATA="${DATA:-$ROOT/data}"
+DATA="$ROOT/data"
 LOG_ROOT="${LOG_ROOT:-$ROOT/exp_logs}"
-DATASETS="${DATASETS:-assistments09 assistments12 assistments15 assistments17 slepemapy ednet_kt1 junyi2015}"
+DATASETS="${DATASETS:-assistments12 assistments15 assistments17 slepemapy ednet_kt1 junyi2015 assistments09}"
 FOLDS="${FOLDS:-0 1 2 3 4}"
 EPOCHS="${EPOCHS:-150}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
 TEST_BATCH_SIZE="${TEST_BATCH_SIZE:-512}"
 DOWNLOAD_THREADS="${DOWNLOAD_THREADS:-4}"
+EDNET_RAW_LIMIT="${EDNET_RAW_LIMIT:-12000}"
 
 ASSIST09_RAW="${ASSIST09_RAW:-/root/autodl-tmp/kt-exp-graph/data/assistments09/raw/skill_builder_data_corrected_collapsed.csv}"
 ASSIST12_RAW="${ASSIST12_RAW:-/root/autodl-tmp/kt-exp-graph/data/assistments12/raw/2012-2013-data-with-predictions-4-final.csv}"
@@ -51,9 +52,21 @@ clean_archives_and_raw() {
     -delete 2>/dev/null || true
 }
 
+clean_processed_files() {
+  local ds=$1
+  mkdir -p "$DATA/$ds"
+  rm -f "$DATA/$ds"/*_sequence.parquet \
+        "$DATA/$ds"/*_split_question_sequence.parquet \
+        "$DATA/$ds"/*_split_skill_sequence.parquet \
+        "$DATA/$ds"/*_windowlate.parquet \
+        "$DATA/$ds"/*_relation_*.parquet \
+        "$DATA/$ds"/*_question.parquet \
+        "$DATA/$ds"/metadata.json
+}
+
 copy_or_download_raw() {
   local ds=$1
-  rm -rf "$DATA/$ds"
+  clean_processed_files "$ds"
   mkdir -p "$DATA/$ds/raw"
 
   case "$ds" in
@@ -72,13 +85,17 @@ copy_or_download_raw() {
     ednet_kt1)
       require_file "$EDNET_CONTENTS_RAW"
       require_dir "$EDNET_KT1_RAW_DIR"
+      rm -rf "$DATA/$ds/raw"
       mkdir -p "$DATA/$ds/raw/EdNet-Contents" "$DATA/$ds/raw/EdNet-KT1/KT1"
       cp "$EDNET_CONTENTS_RAW" "$DATA/$ds/raw/EdNet-Contents/questions.csv"
       find "$EDNET_KT1_RAW_DIR" -maxdepth 1 -type f -name "u*.csv" \
-        | sort | head -5000 | xargs -r -I{} cp {} "$DATA/$ds/raw/EdNet-KT1/KT1/"
+        | sort | sed -n "1,${EDNET_RAW_LIMIT}p" \
+        | while IFS= read -r file; do
+            cp "$file" "$DATA/$ds/raw/EdNet-KT1/KT1/"
+          done
+      log "EDNET_RAW_FILES=$(find "$DATA/$ds/raw/EdNet-KT1/KT1" -maxdepth 1 -type f -name 'u*.csv' | wc -l)"
       ;;
     assistments17|slepemapy|junyi2015)
-      rm -rf "$DATA/$ds"
       "$PY" data_process.py download \
         -d "$ds" \
         --force \
@@ -96,11 +113,12 @@ copy_or_download_raw() {
 process_dataset() {
   local ds=$1
   local sample_args=()
-  if [[ "$ds" == "ednet_kt1" || "$ds" == "junyi2015" ]]; then
+  if [[ "$ds" == "slepemapy" || "$ds" == "ednet_kt1" || "$ds" == "junyi2015" ]]; then
     sample_args=(--sample_size 5000 --sample_strategy random)
   fi
 
   log "PROCESS_START dataset=$ds sample_args=${sample_args[*]-}"
+  log "PROCESS_COMMAND $PY data_process.py process -d $ds --extra windowlate --data_base_path $DATA ${sample_args[*]-}"
   copy_or_download_raw "$ds"
   du -h -d 1 "$DATA/$ds" | tee -a "$LOGDIR/summary.log"
 
@@ -129,6 +147,8 @@ keys = [
     "sampled",
     "sample_size",
     "sample_strategy",
+    "sampling_config",
+    "sampling_stats",
     "windowlate_data_md5",
 ]
 print("METADATA", "$ds", {key: metadata.get(key) for key in keys})
@@ -144,6 +164,7 @@ train_fold() {
   local ds=$1
   local fold=$2
   log "TRAIN_START dataset=$ds fold=$fold"
+  log "TRAIN_COMMAND $PY train.py -m RobustKT -d $ds --fold $fold --epochs $EPOCHS --batch_size $BATCH_SIZE --test_batch_size $TEST_BATCH_SIZE --deterministic --data_base_path $DATA"
   "$PY" train.py \
     -m RobustKT \
     -d "$ds" \
@@ -163,8 +184,7 @@ run_dataset() {
   for fold in $FOLDS; do
     train_fold "$ds" "$fold"
   done
-  log "CLEAN_DATA dataset=$ds"
-  rm -rf "$DATA/$ds"
+  log "DATASET_DONE dataset=$ds"
   df -h / /root/autodl-tmp 2>/dev/null | tee -a "$LOGDIR/summary.log" || df -h "$DATA" | tee -a "$LOGDIR/summary.log"
 }
 
