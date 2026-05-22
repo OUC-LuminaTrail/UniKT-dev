@@ -8,19 +8,11 @@ from typing import Any
 
 import torch
 from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
 from typing_extensions import override
 
 from ..config import DataConfig, TrainingConfig, create_optimized_dataloader
 from ..core import get_logger
+from ..progress import create_progress
 from ..training import BaseTrainer
 from .result_collector import ResultCollector
 
@@ -78,13 +70,9 @@ class BaseCaseAnalyzer(BaseTrainer):
         else:
             self.val_data = val_data
 
-        logger.info(f"Loading checkpoint from {self.checkpoint_path}...")
-        checkpoint = torch.load(self.checkpoint_path, map_location=self.device_)
-        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
-            self.model.load_state_dict(checkpoint["model_state_dict"])
-        else:
-            self.model.load_state_dict(checkpoint)
-        logger.info("Checkpoint loaded successfully")
+        from utils.training.checkpoint import CheckpointManager
+
+        CheckpointManager.load_weights(self.checkpoint_path, self.model, self.device_)
 
         self.model.to(self.device_)
         self.model.eval()
@@ -122,15 +110,7 @@ class BaseCaseAnalyzer(BaseTrainer):
 
         logger.info("Running inference...")
 
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            TaskProgressColumn(),
-            MofNCompleteColumn(),
-            TimeRemainingColumn(),
-            expand=True,
-        )
+        progress = create_progress()
 
         with Live(progress):
             inference_task = progress.add_task(

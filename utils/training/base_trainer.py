@@ -11,16 +11,6 @@ from typing import Any
 import torch
 from rich.console import Group
 from rich.live import Live
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
-from rich.table import Column
 from rich.text import Text
 
 from ..config import (
@@ -33,6 +23,7 @@ from ..config import (
     create_optimized_dataloader,
 )
 from ..core import get_logger, seed_everything
+from ..progress import create_progress
 from .callbacks import (
     Callback,
     CallbackManager,
@@ -947,15 +938,7 @@ class BaseTrainer(ABC):
         self.callback_manager.on_train_begin(self.epochs, trainer=self)
 
         # 创建进度条
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            TaskProgressColumn(),
-            MofNCompleteColumn(table_column=Column(justify="right")),
-            TimeRemainingColumn(),
-            expand=True,
-        )
+        progress = create_progress()
 
         # 创建最佳指标显示
         best_metric_text = None
@@ -1179,15 +1162,7 @@ class BaseTrainer(ABC):
         self.model.eval()
 
         # 创建测试阶段进度条
-        test_progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(bar_width=None),
-            TaskProgressColumn(),
-            MofNCompleteColumn(),
-            TimeRemainingColumn(),
-            expand=True,
-        )
+        test_progress = create_progress()
 
         total_loss = 0.0
         with test_progress:
@@ -1210,6 +1185,68 @@ class BaseTrainer(ABC):
 
         if current_state is not None:
             self.model.load_state_dict(current_state)
+
+        return metrics
+
+    def load_weights(self, checkpoint_path: str) -> None:
+        """Load model weights from a checkpoint file.
+
+        Handles both plain state_dict files (``best_model.pth``) and full
+        checkpoint files (``last_checkpoint.pth``).  Delegates to
+        :meth:`CheckpointManager.load_weights`.
+
+        Args:
+            checkpoint_path: Path to the checkpoint file.
+
+        Raises:
+            FileNotFoundError: If the checkpoint file does not exist.
+        """
+        self.checkpoint_manager.load_weights(checkpoint_path, self.model, self.device_)
+        self.model.to(self.device_)
+
+    @torch.inference_mode()
+    def evaluate(self) -> dict[str, float]:
+        """Run evaluation on the test set and return metrics.
+
+        Call ``load_weights()`` first to load trained weights.
+
+        Returns:
+            Dictionary with metric names and values (auc, acc, rmse).
+            Empty dict if test data is not available.
+        """
+        if not self._built:
+            raise RuntimeError("Trainer has not been built. Call build() first.")
+        if self.test_data is None:
+            logger.warning(
+                "Test data not available. Ensure the trainer was initialized "
+                "with test_data in with_data()."
+            )
+            return {}
+
+        self.model.eval()
+        self.metrics_accumulator.reset("test")
+
+        eval_progress = create_progress()
+
+        total_loss = 0.0
+        with eval_progress:
+            eval_task = eval_progress.add_task(
+                "[bold magenta]Evaluating", total=len(self.test_data)
+            )
+            for batch_data in self.test_data:
+                loss = self._run_test_batch(batch_data)
+                total_loss += loss
+                eval_progress.advance(eval_task)
+
+        metrics = self.metrics_accumulator.compute("test")
+
+        if metrics:
+            metrics_str = ", ".join(
+                f"{name.upper()}={value:.4f}" for name, value in metrics.items()
+            )
+            logger.info(f"Evaluation results: {metrics_str}")
+        else:
+            logger.warning("No metrics computed during evaluation.")
 
         return metrics
 
