@@ -61,7 +61,7 @@ class KDDCup2010Base(DataSource):
                 pl.col("Correct First Attempt").cast(pl.Int32).alias("label"),
                 pl.col(skill_col).alias("skill"),
             ]
-        )
+        ).with_row_index("row_idx")
 
         data = data.filter(
             pl.col("user").is_not_null()
@@ -82,12 +82,12 @@ class KDDCup2010Base(DataSource):
 
         min_ts = data.select(pl.col("timestamp").min()).item()
         data = data.with_columns(
-            ((pl.col("timestamp") - min_ts) / 1_000_000)
+            ((pl.col("timestamp") - min_ts) / 1_000)
             .cast(pl.Int64)
             .alias("timestamp")
         )
 
-        data = data.sort(["user", "timestamp"])
+        data = data.sort(["user", "timestamp", "row_idx"]).drop("row_idx")
 
         data = exclude_short_sequences(data, self.args.min_seq_len)
 
