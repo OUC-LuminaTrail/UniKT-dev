@@ -15,8 +15,9 @@ SUPPORTED_DATASETS = [
     "assistments15",
     "assistments17",
     "ednet_kt1",
-    "slepemapy",
     "junyi2015",
+    "nips2020_t34",
+    "slepemapy",
 ]
 
 
