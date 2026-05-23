@@ -29,7 +29,7 @@ class KDDCup2010Base(DataSource):
             seed=args.seed,
         )
         self.args = args
-        self.raw_data_path = os.path.join(self.data_folder, raw_filename)
+        self.raw_data_path = os.path.join(self.data_folder, "raw", raw_filename)
 
     @override
     def load_src_data(self):
