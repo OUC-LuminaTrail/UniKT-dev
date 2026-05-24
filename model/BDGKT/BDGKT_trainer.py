@@ -87,7 +87,7 @@ class BDGKTTrainer(BaseTrainer):
         logger.info("Initializing BDGKT model...")
 
         # 1. prepare data
-        model_data = BDGKTModelData(data_src)
+        model_data = BDGKTModelData(data_src, cache=args.cache)
         (
             train_dataset,
             val_dataset,
