@@ -42,7 +42,7 @@ class DataSource(ABC):
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
-        self.set_random_seed()
+        self._init_rng()
 
         # ID mapping storage
         self._id_mappings: dict = {}
@@ -60,12 +60,12 @@ class DataSource(ABC):
             "windowlate": {"lazy": True},
         }
 
-    def set_random_seed(self):
-        """Set random seeds for reproducibility."""
+    def _init_rng(self):
+        """Initialize dedicated RNG instances for reproducibility."""
         seed = self.seed if self.seed is not None else 42
-        random.seed(seed)
-        np.random.seed(seed)
-        logger.debug(f"Random seed set to {seed}")
+        self._py_rng = random.Random(seed)
+        self._np_rng = np.random.RandomState(seed)
+        logger.debug(f"Dedicated RNGs initialized with seed {seed}")
 
     def _build_id_mapping(self, data: pl.DataFrame, columns: list[str]):
         """Build ID mappings from data.
@@ -122,18 +122,24 @@ class DataSource(ABC):
             f"id_mapping_{col}": mapping for col, mapping in self._id_mappings.items()
         }
 
+    def _sort_columns(self, primary: list[str] | None = None) -> list[str]:
+        """Get column sort order with primary keys first, remaining columns as tie-breakers."""
+        if primary is None:
+            primary = ["user", "timestamp"]
+        return primary + [c for c in self.sequence_data.columns if c not in primary]
+
     def save_data(self):
         """Save processed relation tables, sequence data, and metadata."""
         # Validate
         self._validate_data(self.relation_data, self.sequence_data)
 
-        # Save relation tables
+        # Save relation tables with deterministic row order
         relation_md5s = {}
         for name, df in self.relation_data.items():
             path = os.path.join(
                 self.data_folder, f"{self.dataset}_relation_{name}.parquet"
             )
-            df.write_parquet(path)
+            df.sort(df.columns).write_parquet(path)
             relation_md5s[f"relation_{name}_md5"] = self.compute_md5(path)
             logger.debug(f"Saved relation {name} to: {path}")
 
@@ -151,7 +157,7 @@ class DataSource(ABC):
             self.data_folder, f"{self.dataset}_windowlate.parquet"
         )
 
-        self.sequence_data.write_parquet(sequence_data_path)
+        self.sequence_data.sort(self._sort_columns()).write_parquet(sequence_data_path)
         self.split_question_sequence_data.write_parquet(split_question_sequence_path)
         self.split_skill_sequence_data.write_parquet(split_skill_sequence_path)
 
@@ -701,7 +707,10 @@ class DataSource(ABC):
             f"Building split question sequences (max_len={max_seq_len}, min_len={min_seq_len})"
         )
 
-        # 添加序列位置列，并计算每个用户的序列长度
+        # Ensure chronological order within each user, break timestamp ties with remaining columns
+        self.sequence_data = self.sequence_data.sort(self._sort_columns())
+
+        # Add sequence position and compute per-user sequence length
         data = self.sequence_data.with_columns(
             pl.int_range(pl.len()).over("user").alias("seq_pos")
         ).join(
@@ -727,12 +736,11 @@ class DataSource(ABC):
             data.filter(pl.col("split_len") >= min_seq_len)
             .select(["user", "split_idx"])
             .unique()
+            .sort("user", "split_idx")
         )
 
         # 为每个有效切分分配新的用户ID
-        valid_splits = valid_splits.with_row_index("new_user_id").sort(
-            "user", "split_idx"
-        )
+        valid_splits = valid_splits.with_row_index("new_user_id")
 
         # 合并回数据，过滤无效切分的记录
         data = data.join(valid_splits, on=["user", "split_idx"], how="inner")
@@ -748,7 +756,7 @@ class DataSource(ABC):
         # 保留原始sequence_data中的所有数据列，并添加seq_pos
         select_cols = [pl.col(c) for c in self.sequence_data.columns]
         select_cols.append(pl.col("relative_pos").alias("seq_pos"))
-        data = data.select(select_cols)
+        data = data.select(select_cols).sort("user", "seq_pos")
 
         # 统计切分信息
         final_num_users = data["user"].n_unique()
@@ -779,11 +787,15 @@ class DataSource(ABC):
             f"Building split skill sequences (max_len={max_seq_len}, min_len={min_seq_len})"
         )
 
-        # Step 1: 展开问题到技能，保留 question 列
+        # Ensure chronological order within each user, break timestamp ties with remaining columns
+        self.sequence_data = self.sequence_data.sort(self._sort_columns())
+
+        # Step 1: Expand questions to skills, preserving the question column
         question_skills = (
             self.relation_data["question_skill"]
+            .sort("question", "skill")
             .group_by("question")
-            .agg(pl.col("skill").alias("skills"))
+            .agg(pl.col("skill").sort().alias("skills"))
         )
 
         expanded = (
@@ -816,8 +828,8 @@ class DataSource(ABC):
             expanded.filter(pl.col("split_len") >= min_seq_len)
             .select(["user", "split_idx"])
             .unique()
-            .with_row_index("new_user_id")
             .sort("user", "split_idx")
+            .with_row_index("new_user_id")
         )
 
         # Step 5: 应用有效切分，重映射用户ID和位置
@@ -832,7 +844,7 @@ class DataSource(ABC):
         output_cols = [pl.col(c) for c in self.sequence_data.columns]
         output_cols.append(pl.col("skill"))
         output_cols.append(pl.col("relative_pos").alias("seq_pos"))
-        expanded = expanded.select(output_cols)
+        expanded = expanded.select(output_cols).sort("user", "seq_pos")
 
         logger.debug(f"Split into {expanded['user'].n_unique()} skill sub-sequences")
 
@@ -910,13 +922,13 @@ class DataSource(ABC):
             )
 
         # 获取唯一用户ID
-        unique_users = self.sequence_data["user"].unique()
+        unique_users = self.sequence_data["user"].unique().sort()
         num_users = len(unique_users)
         num_test_users = int(num_users * test_ratio)
 
         # 随机打乱用户ID顺序
         user_indices = np.arange(num_users)
-        np.random.shuffle(user_indices)
+        self._np_rng.shuffle(user_indices)
         # 打乱后取非测试集用户的索引
         non_test_indices = user_indices[num_test_users:]
         # 初始化折标签
@@ -1044,7 +1056,8 @@ class DataSource(ABC):
 
         if sample_strategy == "random":
             sampled_users = (
-                user_stats.sample(n=n_samples, seed=self.seed)
+                user_stats.sort("user")
+                .sample(n=n_samples, seed=self.seed)
                 .select("user")
                 .to_series()
                 .to_list()
@@ -1197,7 +1210,9 @@ class DataSource(ABC):
                 f"Requested sample size ({n_samples}) exceeds total records ({original_records})"
             )
 
-        self.sequence_data = self.sequence_data.sort("timestamp").head(n_samples)
+        self.sequence_data = self.sequence_data.sort(
+            self._sort_columns(["timestamp", "user"])
+        ).head(n_samples)
 
         self._remap_user_ids()
         self._remap_question_ids()
