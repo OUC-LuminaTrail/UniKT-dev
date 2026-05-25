@@ -795,7 +795,7 @@ class DataSource(ABC):
             self.relation_data["question_skill"]
             .sort("question", "skill")
             .group_by("question")
-            .agg(pl.col("skill").alias("skills"))
+            .agg(pl.col("skill").sort().alias("skills"))
         )
 
         expanded = (
@@ -922,7 +922,7 @@ class DataSource(ABC):
             )
 
         # 获取唯一用户ID
-        unique_users = self.sequence_data["user"].unique()
+        unique_users = self.sequence_data["user"].unique().sort()
         num_users = len(unique_users)
         num_test_users = int(num_users * test_ratio)
 

@@ -278,7 +278,7 @@ class WindowlateProcessor:
         q_skill_map = (
             question_data.sort("question", "skill")
             .group_by("question")
-            .agg(pl.col("skill").alias("skills"))
+            .agg(pl.col("skill").sort().alias("skills"))
         )
 
         # 将技能列表映射到测试数据
