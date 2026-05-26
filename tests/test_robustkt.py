@@ -5,7 +5,7 @@ import torch
 import model  # noqa: F401
 from model.RobustKT.RobustKT_data import RobustKTModelData
 from model.RobustKT.RobustKT_model import RobustKT, Smooth
-from model.RobustKT.RobustKT_trainer import RobustKTTrainer
+from model.RobustKT.RobustKT_trainer import RobustKTModelParams, RobustKTTrainer
 from utils.core import PARAM_CONFIGS, TRAINERS
 from utils.model_data import SkillModelData
 
@@ -47,6 +47,27 @@ def test_robustkt_forward_shape():
 
     assert preds.shape == sequence.shape
     assert c_reg_loss.shape == torch.Size([])
+
+
+def test_robustkt_defaults_match_pykt_reference():
+    _, params = RobustKTModelParams().define_params()
+
+    assert params["n_blocks"]["default"] == 4
+    assert params["d_ff"]["default"] == 256
+    assert params["final_fc_dim"]["default"] == 512
+    assert params["kernel_size"]["default"] == 5
+
+
+def test_robustkt_reset_only_zeros_difficulty_embedding():
+    robustkt = RobustKT(
+        _args(d_model=8, num_attn_heads=4, d_ff=8, final_fc_dim=21),
+        {"num_skills": 20, "num_questions": 20},
+    )
+
+    assert torch.all(robustkt.difficult_param.weight == 0)
+    assert torch.any(robustkt.q_embed_diff.weight != 0)
+    assert torch.any(robustkt.out[0].weight != 0)
+    assert torch.any(robustkt.out[0].bias != 0)
 
 
 def test_robustkt_forward_pass_skips_first_position():

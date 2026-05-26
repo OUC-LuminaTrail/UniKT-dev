@@ -25,7 +25,7 @@ class RobustKTModelParams(BaseParamConfig):
             },
             "n_blocks": {
                 "type": int,
-                "default": 2,
+                "default": 4,
                 "help": "Number of transformer blocks",
             },
             "num_attn_heads": {

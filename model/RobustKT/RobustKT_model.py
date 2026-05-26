@@ -449,9 +449,7 @@ class RobustKT(nn.Module):
 
     def reset(self) -> None:
         if self.num_questions > 0:
-            for parameter in self.parameters():
-                if parameter.size(0) == self.num_questions + 1:
-                    torch.nn.init.constant_(parameter, 0.0)
+            torch.nn.init.constant_(self.difficult_param.weight, 0.0)
 
     def build_pid_data(
         self, question: torch.Tensor | None, valid_mask: torch.Tensor

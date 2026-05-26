@@ -79,25 +79,29 @@ clean_processed_files() {
 
 copy_or_download_raw() {
   local ds=$1
-  clean_processed_files "$ds"
-  mkdir -p "$DATA/$ds/raw"
-
   case "$ds" in
     assistments09)
       require_file "$ASSIST09_RAW"
+      clean_processed_files "$ds"
+      mkdir -p "$DATA/$ds/raw"
       copy_raw_file "$ASSIST09_RAW" "$DATA/$ds/raw"
       ;;
     assistments12)
       require_file "$ASSIST12_RAW"
+      clean_processed_files "$ds"
+      mkdir -p "$DATA/$ds/raw"
       copy_raw_file "$ASSIST12_RAW" "$DATA/$ds/raw"
       ;;
     assistments15)
       require_file "$ASSIST15_RAW"
+      clean_processed_files "$ds"
+      mkdir -p "$DATA/$ds/raw"
       copy_raw_file "$ASSIST15_RAW" "$DATA/$ds/raw"
       ;;
     ednet_kt1)
       require_file "$EDNET_CONTENTS_RAW"
       require_dir "$EDNET_KT1_RAW_DIR"
+      clean_processed_files "$ds"
       rm -rf "$DATA/$ds/raw"
       mkdir -p "$DATA/$ds/raw/EdNet-Contents" "$DATA/$ds/raw/EdNet-KT1/KT1"
       cp "$EDNET_CONTENTS_RAW" "$DATA/$ds/raw/EdNet-Contents/questions.csv"
@@ -109,6 +113,8 @@ copy_or_download_raw() {
       log "EDNET_RAW_FILES=$(find "$DATA/$ds/raw/EdNet-KT1/KT1" -maxdepth 1 -type f -name 'u*.csv' | wc -l)"
       ;;
     assistments17|slepemapy|junyi2015)
+      clean_processed_files "$ds"
+      mkdir -p "$DATA/$ds/raw"
       "$PY" data_process.py download \
         -d "$ds" \
         --force \
