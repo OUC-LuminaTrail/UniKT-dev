@@ -170,8 +170,8 @@ class SkillModelData(BaseModelData):
     用于构建基于技能（skill/concept）的知识追踪模型数据
     """
 
-    def __init__(self, data_src: DataSource):
-        super().__init__(data_src)
+    def __init__(self, data_src: DataSource, cache: bool = False):
+        super().__init__(data_src, cache=cache)
         self.logger = get_logger(__name__)
 
     def _get_kfold_data(self):
