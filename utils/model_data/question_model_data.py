@@ -10,8 +10,8 @@ class QuestionModelData(BaseModelData):
     问题级模型数据基类
     """
 
-    def __init__(self, data_src: DataSource):
-        super().__init__(data_src)
+    def __init__(self, data_src: DataSource, cache: bool = False):
+        super().__init__(data_src, cache=cache)
         self.logger = get_logger(__name__)
 
     def _get_kfold_data(self):
