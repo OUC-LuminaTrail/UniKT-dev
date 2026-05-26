@@ -1,7 +1,6 @@
 import math
 from typing import Any
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -81,30 +80,26 @@ def attention(
     zero_pad: bool,
     gamma: torch.Tensor | None = None,
     pdiff: torch.Tensor | None = None,
+    pos_effect: torch.Tensor | None = None,
 ) -> torch.Tensor:
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     batch_size, heads, seq_len = scores.size(0), scores.size(1), scores.size(2)
-    device = q.device
-
-    x1 = torch.arange(seq_len, device=device).expand(seq_len, -1)
-    x2 = x1.transpose(0, 1).contiguous()
 
     with torch.no_grad():
         masked_scores = scores.masked_fill(mask == 0, -1e32)
         masked_scores = F.softmax(masked_scores, dim=-1)
-        masked_scores = masked_scores * mask.float().to(device)
+        masked_scores = masked_scores * mask.float()
         distcum_scores = torch.cumsum(masked_scores, dim=-1)
         disttotal_scores = torch.sum(masked_scores, dim=-1, keepdim=True)
-        position_effect = torch.abs(x1 - x2)[None, None, :, :].float()
         dist_scores = torch.clamp(
-            (disttotal_scores - distcum_scores) * position_effect,
+            (disttotal_scores - distcum_scores) * pos_effect,
             min=0.0,
         )
-        dist_scores = dist_scores.sqrt().detach()
+        dist_scores = dist_scores.sqrt()
 
     if gamma is None:
-        gamma = torch.zeros(heads, 1, 1, device=device)
-    gamma = -1.0 * nn.Softplus()(gamma).unsqueeze(0)
+        gamma = torch.zeros(heads, 1, 1, device=q.device)
+    gamma = -1.0 * F.softplus(gamma).unsqueeze(0)
     if pdiff is None:
         total_effect = torch.clamp(
             torch.clamp((dist_scores * gamma).exp(), min=1e-5),
@@ -124,7 +119,7 @@ def attention(
     scores.masked_fill_(mask == 0, -1e32)
     scores = F.softmax(scores, dim=-1)
     if zero_pad:
-        pad_zero = torch.zeros(batch_size, heads, 1, seq_len, device=device)
+        pad_zero = torch.zeros(batch_size, heads, 1, seq_len, device=q.device)
         scores = torch.cat([pad_zero, scores[:, :, 1:, :]], dim=2)
     scores = dropout(scores)
     return torch.matmul(scores, v)
@@ -182,6 +177,7 @@ class MultiHeadAttention(nn.Module):
         mask: torch.Tensor,
         zero_pad: bool,
         pdiff: torch.Tensor | None = None,
+        pos_effect: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size = q.size(0)
 
@@ -207,6 +203,7 @@ class MultiHeadAttention(nn.Module):
             zero_pad,
             self.gammas,
             pdiff,
+            pos_effect=pos_effect,
         )
         concat = scores.transpose(1, 2).contiguous().view(batch_size, -1, self.d_model)
         return self.out_proj(concat)
@@ -245,24 +242,23 @@ class TransformerLayer(nn.Module):
 
     def forward(
         self,
-        mask: int,
+        causal_mask: torch.Tensor,
         query: torch.Tensor,
         key: torch.Tensor,
         values: torch.Tensor,
+        zero_pad: bool,
         apply_pos: bool = True,
+        pos_effect: torch.Tensor | None = None,
         pdiff: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        seq_len = query.size(1)
-        nopeek_mask = np.triu(np.ones((1, 1, seq_len, seq_len)), k=mask).astype("uint8")
-        src_mask = (torch.from_numpy(nopeek_mask) == 0).to(query.device)
-
         query2 = self.masked_attn_head(
             query,
             key,
             values,
-            mask=src_mask,
-            zero_pad=mask == 0,
+            mask=causal_mask,
+            zero_pad=zero_pad,
             pdiff=pdiff,
+            pos_effect=pos_effect,
         )
 
         query = query + self.dropout1(query2)
@@ -287,6 +283,7 @@ class Architecture(nn.Module):
         kq_same: int,
         emb_type: str,
         kernel_size: int,
+        max_seq_len: int,
     ) -> None:
         super().__init__()
         self.blocks_1 = nn.ModuleList(
@@ -319,6 +316,25 @@ class Architecture(nn.Module):
         )
         self.smooth = Smooth(dropout, d_model, kernel_size)
 
+        # Precompute causal masks to eliminate per-forward numpy->torch allocation
+        self.register_buffer(
+            "_mask_incl_diag",
+            torch.tril(torch.ones(1, 1, max_seq_len, max_seq_len, dtype=torch.bool)),
+        )
+        self.register_buffer(
+            "_mask_excl_diag",
+            torch.tril(
+                torch.ones(1, 1, max_seq_len, max_seq_len, dtype=torch.bool),
+                diagonal=-1,
+            ),
+        )
+        # Precompute |i-j| position distance matrix
+        idx = torch.arange(max_seq_len)
+        self.register_buffer(
+            "_pos_effect",
+            torch.abs(idx.unsqueeze(1) - idx.unsqueeze(0)).float()[None, None, :, :],
+        )
+
     def forward(
         self,
         q_embed_data: torch.Tensor,
@@ -328,28 +344,45 @@ class Architecture(nn.Module):
         y = self.smooth(qa_embed_data)
         x = self.smooth(q_embed_data)
 
+        seq_len = q_embed_data.size(1)
+        mask_incl = self._mask_incl_diag[:, :, :seq_len, :seq_len]
+        mask_excl = self._mask_excl_diag[:, :, :seq_len, :seq_len]
+        pos_effect = self._pos_effect[:, :, :seq_len, :seq_len]
+
         for block in self.blocks_1:
-            y = block(mask=1, query=y, key=y, values=y, pdiff=pid_embed_data)
+            y = block(
+                causal_mask=mask_incl,
+                query=y,
+                key=y,
+                values=y,
+                zero_pad=False,
+                pos_effect=pos_effect,
+                pdiff=pid_embed_data,
+            )
 
         flag_first = True
         for block in self.blocks_2:
             if flag_first:
                 x = block(
-                    mask=1,
+                    causal_mask=mask_incl,
                     query=x,
                     key=x,
                     values=x,
+                    zero_pad=False,
                     apply_pos=False,
+                    pos_effect=pos_effect,
                     pdiff=pid_embed_data,
                 )
                 flag_first = False
             else:
                 x = block(
-                    mask=0,
+                    causal_mask=mask_excl,
                     query=x,
                     key=x,
                     values=y,
+                    zero_pad=True,
                     apply_pos=True,
+                    pos_effect=pos_effect,
                     pdiff=pid_embed_data,
                 )
                 flag_first = True
@@ -392,6 +425,7 @@ class RobustKT(nn.Module):
             kq_same=args.kq_same,
             emb_type=self.emb_type,
             kernel_size=args.kernel_size,
+            max_seq_len=args.max_seq_len,
         )
         self.out = nn.Sequential(
             nn.Linear(args.d_model + embed_l, args.final_fc_dim),
