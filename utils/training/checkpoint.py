@@ -90,6 +90,48 @@ class CheckpointManager:
         torch.save(model.state_dict(), filepath)
         logger.info(f"Model weights saved to {filepath}")
 
+    @staticmethod
+    def load_weights(
+        path: str,
+        model: torch.nn.Module,
+        device: torch.device | None = None,
+    ) -> dict | None:
+        """Load model weights from a checkpoint file.
+
+        Handles both formats:
+        - Plain state_dict (saved by ``save_weights``)
+        - Full checkpoint dict with ``"model_state_dict"`` key (saved by ``save_checkpoint``)
+
+        Args:
+            path: Path to the checkpoint file.
+            model: PyTorch model to load weights into.
+            device: Target device for ``map_location`` (optional).
+
+        Returns:
+            The full checkpoint dict if the file was a full checkpoint,
+            ``None`` if it was a plain state_dict.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+        """
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+        map_kw = {"map_location": device} if device is not None else {}
+        logger.info(f"Loading model weights from {path}...")
+        raw = torch.load(path, **map_kw)
+
+        if isinstance(raw, dict) and "model_state_dict" in raw:
+            model.load_state_dict(raw["model_state_dict"])
+            logger.info(
+                f"Loaded from full checkpoint (epoch {raw.get('epoch', 'unknown')})"
+            )
+            return raw
+
+        model.load_state_dict(raw)
+        logger.debug("Loaded from plain state_dict")
+        return None
+
     def load_checkpoint(
         self,
         checkpoint_path: str,

@@ -278,6 +278,12 @@ class GeneralParams(BaseParamConfig):
                 "short": "st",
                 "help": "Skip test set evaluation after training (default: False)",
             },
+            "cache": {
+                "type": bool,
+                "default": False,
+                "short": "ca",
+                "help": "Enable disk cache for model data preparation (default: False)",
+            },
         }
         return group_name, params
 

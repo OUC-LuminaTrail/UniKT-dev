@@ -19,7 +19,7 @@ class BaseModelData(ABC):
         data_src: 数据源对象
     """
 
-    def __init__(self, data_src: DataSource, cache: bool = True):
+    def __init__(self, data_src: DataSource, cache: bool = False):
         self.data_src = data_src
         self._cache = cache
 
