@@ -7,16 +7,13 @@ from torch.utils.data import DataLoader, Dataset
 from typing_extensions import override
 
 from utils.core import get_logger
-from utils.data_process import DataSource
 from utils.model_data import SkillModelData
 
 logger = get_logger(__name__)
 
 
 class RobustKTDataset(Dataset):
-    """Dataset returning AKT-style skill, response, mask, and question batches."""
-
-    def __init__(self, sequences, responses, masks, questions) -> None:
+    def __init__(self, sequences, responses, masks, questions):
         self.sequences = sequences
         self.responses = responses
         self.masks = masks
@@ -34,11 +31,6 @@ class RobustKTDataset(Dataset):
 
 
 class RobustKTModelData(SkillModelData):
-    """Skill-level data loader for RobustKT."""
-
-    def __init__(self, data_src: DataSource) -> None:
-        super().__init__(data_src)
-
     @override
     def prepare_data(self, args: Any) -> tuple:
         fold_idx = args.fold if args.fold >= 0 else None

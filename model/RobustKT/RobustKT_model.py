@@ -1,11 +1,3 @@
-"""RobustKT model implementation.
-
-This ports the official pyKT RobustKT implementation into the local training
-framework. The smoothing module follows pyKT's causal convolution smoothing and
-residual decomposition; despite the original variable name, it does not perform
-an FFT.
-"""
-
 import math
 from typing import Any
 
@@ -77,38 +69,6 @@ class LayerNorm(nn.Module):
         var = ((x - mean) ** 2).mean(-1, keepdim=True)
         normed = (x - mean) / torch.sqrt(var + self.eps)
         return self.gamma * normed + self.beta
-
-    def _load_from_state_dict(
-        self,
-        state_dict: dict[str, torch.Tensor],
-        prefix: str,
-        local_metadata: dict[str, object],
-        strict: bool,
-        missing_keys: list[str],
-        unexpected_keys: list[str],
-        error_msgs: list[str],
-    ) -> None:
-        # Backward compatibility for checkpoints saved before the custom
-        # LayerNorm switch, where the parameter names were weight/bias.
-        weight_key = prefix + "weight"
-        gamma_key = prefix + "gamma"
-        if weight_key in state_dict and gamma_key not in state_dict:
-            state_dict[gamma_key] = state_dict.pop(weight_key)
-
-        bias_key = prefix + "bias"
-        beta_key = prefix + "beta"
-        if bias_key in state_dict and beta_key not in state_dict:
-            state_dict[beta_key] = state_dict.pop(bias_key)
-
-        super()._load_from_state_dict(
-            state_dict,
-            prefix,
-            local_metadata,
-            strict,
-            missing_keys,
-            unexpected_keys,
-            error_msgs,
-        )
 
 
 def attention(
@@ -403,7 +363,7 @@ class RobustKT(nn.Module):
         super().__init__()
         self.model_name = "robustkt"
         self.num_skills = data_metadata["num_skills"]
-        self.num_questions = data_metadata.get("num_questions", 0)
+        self.num_questions = data_metadata["num_questions"]
         self.n_pid = self.num_questions
         self.dropout = args.dropout
         self.kq_same = args.kq_same

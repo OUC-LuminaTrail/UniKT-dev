@@ -128,7 +128,7 @@ class RobustKTTrainer(BaseTrainer):
                 f"{metadata['num_questions']} questions"
             )
         else:
-            logger.info("RobustKT: Problem ID not available, using skill-only model")
+            logger.warning("RobustKT: Problem ID not available, using skill-only model")
 
         model = RobustKT(args=args, data_metadata=metadata)
         loss_fn = torch.nn.BCELoss()
@@ -192,8 +192,7 @@ class RobustKTTrainer(BaseTrainer):
             mask,
             question=question,
         )
-        # pyKT trains RobustKT with y[:, 1:] against rshft, so the first
-        # prediction is not supervised.
+
         valid_mask = mask[:, 1:] & mask[:, :-1]
         y_hat = torch.masked_select(y_hat_full[:, 1:], valid_mask)
         y_label = torch.masked_select(response.float()[:, 1:], valid_mask)
