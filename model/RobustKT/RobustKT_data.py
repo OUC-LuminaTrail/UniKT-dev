@@ -51,7 +51,9 @@ class RobustKTModelData(SkillModelData):
 
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         if fold_idx < 0 or fold_idx >= kfold_n_splits:
-            raise ValueError(f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})")
+            raise ValueError(
+                f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
+            )
 
         logger.info(
             f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"

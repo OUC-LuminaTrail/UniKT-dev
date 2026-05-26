@@ -158,22 +158,6 @@ class ExperimentManager:
         Returns:
             ExperimentManager 实例
         """
-        log_dir = getattr(args, "log_dir", None)
-        if log_dir:
-            run_path = Path(log_dir)
-            run_path.mkdir(parents=True, exist_ok=True)
-
-            manager = ExperimentManager.__new__(ExperimentManager)
-            manager.exp_type = exp_type
-            manager.model_name = getattr(args, "model", "unknown")
-            manager.dataset_name = getattr(args, "dataset", "unknown")
-            manager.base_dir = run_path.parent
-            manager.tags = []
-            manager.exp_dir = run_path
-
-            logger.debug(f"ExperimentManager bound to CLI log_dir: {run_path}")
-            return manager
-
         model = getattr(args, "model", "unknown")
         dataset = getattr(args, "dataset", "unknown")
 

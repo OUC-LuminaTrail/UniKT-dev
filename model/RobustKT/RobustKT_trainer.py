@@ -177,7 +177,9 @@ class RobustKTTrainer(BaseTrainer):
             skip_test=getattr(args, "skip_test", False),
         ).build()
 
-    def forward_pass(self, batch_data: tuple[torch.Tensor, ...]) -> dict[str, torch.Tensor]:
+    def forward_pass(
+        self, batch_data: tuple[torch.Tensor, ...]
+    ) -> dict[str, torch.Tensor]:
         sequence, response, mask, question = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

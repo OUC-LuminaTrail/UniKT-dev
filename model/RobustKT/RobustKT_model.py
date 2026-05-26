@@ -293,9 +293,7 @@ class TransformerLayer(nn.Module):
         pdiff: torch.Tensor | None = None,
     ) -> torch.Tensor:
         seq_len = query.size(1)
-        nopeek_mask = np.triu(np.ones((1, 1, seq_len, seq_len)), k=mask).astype(
-            "uint8"
-        )
+        nopeek_mask = np.triu(np.ones((1, 1, seq_len, seq_len)), k=mask).astype("uint8")
         src_mask = (torch.from_numpy(nopeek_mask) == 0).to(query.device)
 
         query2 = self.masked_attn_head(
@@ -483,7 +481,9 @@ class RobustKT(nn.Module):
         q_embed_data, qa_embed_data = self.base_emb(sequence, response)
         c_reg_loss = torch.tensor(0.0, device=sequence.device)
         pid_embed_data = None
-        valid_mask = torch.ones_like(sequence, dtype=torch.bool) if mask is None else mask
+        valid_mask = (
+            torch.ones_like(sequence, dtype=torch.bool) if mask is None else mask
+        )
         pid_data = self.build_pid_data(question, valid_mask)
 
         if self.num_questions > 0 and pid_data is not None:

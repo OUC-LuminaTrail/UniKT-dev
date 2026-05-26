@@ -29,11 +29,6 @@ data/
 *.pth
 .env
 
-# AI config (local only, do not commit)
-CLAUDE.md
-.claude/
-.opencode/
-.kilo/
 # Cache
 .cache/
 
