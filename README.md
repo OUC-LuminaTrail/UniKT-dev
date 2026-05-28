@@ -229,10 +229,13 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 
 | Dataset | Source |
 |---------|--------|
-| ASSISTments 2009 | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2009-2010-assistment-data) |
-| ASSISTments 2012 | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2012-13-school-data-with-affect) |
-| ASSISTments 2017 | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2017-assistments-data) |
+| ASSISTments 2009 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| ASSISTments 2012 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| ASSISTments 2015 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| ASSISTments 2017 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
 | EdNet-KT1 | [GitHub](https://github.com/riiid/ednet) |
+| Junyi 2015 | [Junyi Academy](https://pslcdatashop.web.cmu.edu/Files?datasetId=1198) |
+| Slepemapy | [SLEP](https://www.fi.muni.cz/adaptivelearning/) |
 
 ## 📚 Documentation
 
