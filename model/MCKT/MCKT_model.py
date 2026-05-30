@@ -122,7 +122,7 @@ class MCKT(nn.Module):
         temperature: float = 0.8,
         sim_threshold: float = 0.8,
         cl_batch_size: int = 10000,
-        cl_exp_mode: str = "paper",
+        cl_exp_mode: str = "source",
         pro_loss_weight: float = 1.0,
         react_loss_weight: float = 1.0,
         state_loss_weight: float = 0.0001,

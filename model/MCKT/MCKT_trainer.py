@@ -48,11 +48,11 @@ class MCKTModelParams(BaseParamConfig):
             },
             "cl_exp_mode": {
                 "type": str,
-                "default": "paper",
+                "default": "source",
                 "choices": ["paper", "source"],
                 "help": (
-                    "Use 'paper' for exp(cos/tau), or 'source' for the released "
-                    "MCKT code path's double-exp question/interaction CL"
+                    "Use 'source' for the released MCKT code path's double-exp "
+                    "question/interaction CL, or 'paper' for exp(cos/tau)"
                 ),
             },
             "pro_loss_weight": {
