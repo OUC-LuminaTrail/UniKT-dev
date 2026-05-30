@@ -32,6 +32,7 @@ TRAINERS.register_lazy("HGIKT", "model.HGIKT.HGIKT_trainer", "HGIKTTrainer")
 TRAINERS.register_lazy("SGKT", "model.SGKT.SGKT_trainer", "SGKTTrainer")
 TRAINERS.register_lazy("SimpleKT", "model.SimpleKT.SimpleKT_trainer", "SimpleKTTrainer")
 TRAINERS.register_lazy("SQGKT", "model.SQGKT.SQGKT_trainer", "SQGKTTrainer")
+TRAINERS.register_lazy("StableKT", "model.StableKT.StableKT_trainer", "StableKTTrainer")
 TRAINERS.register_lazy("UKT", "model.UKT.UKT_trainer", "UKTTrainer")
 TRAINERS.register_lazy("QIKT", "model.QIKT.QIKT_trainer", "QIKTTrainer")
 TRAINERS.register_lazy("MCKT", "model.MCKT.MCKT_trainer", "MCKTTrainer")
@@ -121,6 +122,9 @@ PARAM_CONFIGS.register_lazy(
     "SimpleKT", "model.SimpleKT.SimpleKT_trainer", "SimpleKTModelParams"
 )
 PARAM_CONFIGS.register_lazy("SQGKT", "model.SQGKT.SQGKT_trainer", "SQGKTModelParams")
+PARAM_CONFIGS.register_lazy(
+    "StableKT", "model.StableKT.StableKT_trainer", "StableKTModelParams"
+)
 PARAM_CONFIGS.register_lazy("UKT", "model.UKT.UKT_trainer", "UKTModelParams")
 PARAM_CONFIGS.register_lazy("QIKT", "model.QIKT.QIKT_trainer", "QIKTModelParams")
 PARAM_CONFIGS.register_lazy("MCKT", "model.MCKT.MCKT_trainer", "MCKTModelParams")
