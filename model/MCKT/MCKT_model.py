@@ -262,12 +262,14 @@ class MCKT(nn.Module):
         pro_mask = (pro_sim < self.sim_threshold).unsqueeze(1)
 
         future_mask = (
-            torch.triu(torch.ones((seq, seq), device=device), 1).bool()
+            torch.triu(torch.ones((seq, seq), device=device), 1)
+            .bool()
             .unsqueeze(0)
             .unsqueeze(0)
         )
         future_or_current_mask = (
-            torch.triu(torch.ones((seq, seq), device=device), 0).bool()
+            torch.triu(torch.ones((seq, seq), device=device), 0)
+            .bool()
             .unsqueeze(0)
             .unsqueeze(0)
         )
