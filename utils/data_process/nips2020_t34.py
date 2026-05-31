@@ -70,7 +70,7 @@ class NIPS2020T34Data(DataSource):
         logger.info(f"Level 3 subjects: {len(level3_ids)}")
 
         # Join primary with answer metadata to get timestamp
-        data = primary.join(
+        data = primary.with_row_index("_row_id").join(
             answer_meta.select(["AnswerId", "DateAnswered"]),
             on="AnswerId",
             how="left",
@@ -82,6 +82,7 @@ class NIPS2020T34Data(DataSource):
                 pl.col("QuestionId").alias("question"),
                 pl.col("IsCorrect").cast(pl.Int32).alias("label"),
                 pl.col("DateAnswered").alias("timestamp"),
+                pl.col("_row_id"),
             ]
         )
 
@@ -89,28 +90,28 @@ class NIPS2020T34Data(DataSource):
             pl.col("user").is_not_null()
             & pl.col("question").is_not_null()
             & pl.col("label").is_not_null()
+            & pl.col("label").is_in([0, 1])
             & pl.col("timestamp").is_not_null()
         )
 
         data = data.collect()
 
-        # Parse timestamps to relative milliseconds
+        # Parse timestamps to relative milliseconds.
         data = data.with_columns(
             pl.col("timestamp")
             .str.strptime(pl.Datetime("ms"), "%Y-%m-%d %H:%M:%S%.f", strict=False)
             .cast(pl.Int64)
             .alias("timestamp")
         )
+        data = data.filter(pl.col("timestamp").is_not_null())
 
         min_ts = data.select(pl.col("timestamp").min()).item()
         data = data.with_columns(
-            ((pl.col("timestamp") - min_ts) / 1_000_000)
-            .cast(pl.Int64)
-            .alias("timestamp")
+            (pl.col("timestamp") - min_ts).cast(pl.Int64).alias("timestamp")
         )
 
         data = data.unique(subset=["user", "question", "timestamp"])
-        data = data.sort(["user", "timestamp"])
+        data = data.sort(["user", "timestamp", "_row_id"])
         data = exclude_short_sequences(data, self.args.min_seq_len)
 
         self.cleaned_raw_data = data
@@ -166,7 +167,7 @@ class NIPS2020T34Data(DataSource):
         )
 
         # Filter to only questions present in sequence data
-        active_questions = set(mapped_data["question"].to_list())
+        active_questions = set(self.cleaned_raw_data["question"].to_list())
         question_skill = question_skill.filter(
             pl.col("question").is_in(active_questions)
         )
@@ -174,8 +175,10 @@ class NIPS2020T34Data(DataSource):
         # Apply question mapping to question_skill
         question_skill = (
             question_skill.join(question_map_df, on="question", how="left")
+            .filter(pl.col("question_id").is_not_null())
             .drop("question")
             .rename({"question_id": "question"})
+            .select(["question", "skill"])
         )
         question_skill = question_skill.unique(subset=["question", "skill"])
 
