@@ -50,42 +50,95 @@ class KDDCup2010Base(DataSource):
             self.load_src_data()
 
         skill_col = self.skill_column
+        required_columns = [
+            "Anon Student Id",
+            "Problem Hierarchy",
+            "Problem Name",
+            "Step Name",
+            "First Transaction Time",
+            "Correct First Attempt",
+            skill_col,
+        ]
+        source_columns = self.raw_data.collect_schema().names()
+        missing_columns = [col for col in required_columns if col not in source_columns]
+        if missing_columns:
+            raise ValueError(
+                f"{self.dataset} raw data is missing columns: {missing_columns}"
+            )
 
         data = self.raw_data.select(
             [
                 pl.col("Anon Student Id").alias("user"),
-                (pl.col("Problem Name") + "___" + pl.col("Step Name")).alias(
-                    "question"
-                ),
-                pl.col("First Transaction Time").alias("timestamp"),
-                pl.col("Correct First Attempt").cast(pl.Int32).alias("label"),
+                pl.concat_str(
+                    [
+                        pl.col("Problem Hierarchy"),
+                        pl.col("Problem Name"),
+                        pl.col("Step Name"),
+                    ],
+                    separator="___",
+                ).alias("question"),
+                pl.col("First Transaction Time").alias("raw_timestamp"),
+                pl.col("Correct First Attempt").alias("raw_label"),
                 pl.col(skill_col).alias("skill"),
             ]
         ).with_row_index("row_idx")
 
+        data = data.with_columns(
+            [
+                pl.col("raw_label").cast(pl.Int32, strict=False).alias("label"),
+                pl.col("raw_timestamp")
+                .str.strptime(pl.Datetime("ms"), "%Y-%m-%d %H:%M:%S%.f", strict=False)
+                .alias("timestamp"),
+            ]
+        ).collect()
+
+        invalid_label_count = data.filter(
+            pl.col("raw_label").is_not_null()
+            & (pl.col("label").is_null() | ~pl.col("label").is_in([0, 1]))
+        ).height
+        if invalid_label_count > 0:
+            raise ValueError(
+                f"{self.dataset} contains {invalid_label_count} invalid labels; "
+                "expected Correct First Attempt to be 0 or 1."
+            )
+
+        invalid_timestamp_count = data.filter(
+            pl.col("raw_timestamp").is_not_null() & pl.col("timestamp").is_null()
+        ).height
+        if invalid_timestamp_count > 0:
+            raise ValueError(
+                f"{self.dataset} contains {invalid_timestamp_count} unparsable "
+                "First Transaction Time values."
+            )
+
+        before_filter_count = data.height
+
         data = data.filter(
             pl.col("user").is_not_null()
             & pl.col("question").is_not_null()
+            & pl.col("timestamp").is_not_null()
             & pl.col("label").is_not_null()
             & pl.col("skill").is_not_null()
         )
 
-        data = data.collect()
+        dropped_count = before_filter_count - data.height
+        if dropped_count > 0:
+            logger.info(
+                f"Dropped {dropped_count} {self.dataset} rows with missing "
+                "user/question/timestamp/label/skill."
+            )
 
-        # Parse timestamps and convert to relative seconds
-        data = data.with_columns(
-            pl.col("timestamp")
-            .str.strptime(pl.Datetime("ms"), "%Y-%m-%d %H:%M:%S%.f", strict=False)
-            .cast(pl.Int64)
-            .alias("timestamp")
-        )
+        min_ts = data.select(pl.col("timestamp").min()).item()
+        if min_ts is None:
+            raise ValueError(f"{self.dataset} has no valid rows after cleaning.")
 
+        data = data.with_columns(pl.col("timestamp").dt.timestamp("ms").alias("timestamp"))
         min_ts = data.select(pl.col("timestamp").min()).item()
         data = data.with_columns(
             ((pl.col("timestamp") - min_ts) / 1_000)
             .cast(pl.Int64)
             .alias("timestamp")
-        )
+        ).drop(["raw_timestamp", "raw_label"])
 
         data = data.sort(["user", "timestamp", "row_idx"]).drop("row_idx")
 
@@ -123,10 +176,24 @@ class KDDCup2010Base(DataSource):
         )
 
         # Split multi-skill by "~~" and build question_skill relation
+        question_skill_sets = mapped_data.select(["question", "skill"]).unique(
+            subset=["question", "skill"], keep="first"
+        )
+        ambiguous_skill_set_count = (
+            question_skill_sets.group_by("question")
+            .agg(pl.col("skill").n_unique().alias("num_skill_sets"))
+            .filter(pl.col("num_skill_sets") > 1)
+            .height
+        )
+        if ambiguous_skill_set_count > 0:
+            logger.warning(
+                f"{self.dataset} has {ambiguous_skill_set_count} questions with "
+                "multiple raw KC sets. Downstream skill sequences use the union "
+                "from question_skill."
+            )
+
         question_skill = (
-            mapped_data.select(["question", "skill"])
-            .filter(pl.col("skill").is_not_null())
-            .unique(subset=["question", "skill"], keep="first")
+            question_skill_sets.filter(pl.col("skill").is_not_null())
             .with_columns(pl.col("skill").str.split("~~").alias("skill_parts"))
             .explode("skill_parts")
             .with_columns(pl.col("skill_parts").cast(pl.String).alias("skill"))
