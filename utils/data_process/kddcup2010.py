@@ -179,17 +179,16 @@ class KDDCup2010Base(DataSource):
         question_skill_sets = mapped_data.select(["question", "skill"]).unique(
             subset=["question", "skill"], keep="first"
         )
-        ambiguous_skill_set_count = (
+        multi_kc_question_count = (
             question_skill_sets.group_by("question")
             .agg(pl.col("skill").n_unique().alias("num_skill_sets"))
             .filter(pl.col("num_skill_sets") > 1)
             .height
         )
-        if ambiguous_skill_set_count > 0:
-            logger.warning(
-                f"{self.dataset} has {ambiguous_skill_set_count} questions with "
-                "multiple raw KC sets. Downstream skill sequences use the union "
-                "from question_skill."
+        if multi_kc_question_count > 0:
+            logger.debug(
+                f"{self.dataset}: {multi_kc_question_count} questions have "
+                "multiple KC annotations across rows, taking union."
             )
 
         question_skill = (
