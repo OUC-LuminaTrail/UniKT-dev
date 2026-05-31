@@ -9,6 +9,7 @@ from .assist17 import Assistments2017Data
 from .data_source import DataSource
 from .ednet_kt1 import EdNetKT1Data
 from .junyi2015 import Junyi2015Data
+from .kddcup2010 import Algebra2005Data, Algebra2006Data, Bridge2006Data
 from .slepemapy import SlepemapyData
 
 
@@ -34,10 +35,13 @@ def get_data_source(dataset_name: str, args: Any) -> DataSource:
 
 
 __all__ = [
+    "Algebra2005Data",
+    "Algebra2006Data",
     "Assistments2009Data",
     "Assistments2012Data",
     "Assistments2015Data",
     "Assistments2017Data",
+    "Bridge2006Data",
     "EdNetKT1Data",
     "SlepemapyData",
     "Junyi2015Data",
