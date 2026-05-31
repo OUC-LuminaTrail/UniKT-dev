@@ -132,12 +132,12 @@ class KDDCup2010Base(DataSource):
         if min_ts is None:
             raise ValueError(f"{self.dataset} has no valid rows after cleaning.")
 
-        data = data.with_columns(pl.col("timestamp").dt.timestamp("ms").alias("timestamp"))
+        data = data.with_columns(
+            pl.col("timestamp").dt.timestamp("ms").alias("timestamp")
+        )
         min_ts = data.select(pl.col("timestamp").min()).item()
         data = data.with_columns(
-            ((pl.col("timestamp") - min_ts) / 1_000)
-            .cast(pl.Int64)
-            .alias("timestamp")
+            ((pl.col("timestamp") - min_ts) / 1_000).cast(pl.Int64).alias("timestamp")
         ).drop(["raw_timestamp", "raw_label"])
 
         data = data.sort(["user", "timestamp", "row_idx"]).drop("row_idx")
