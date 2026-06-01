@@ -55,8 +55,10 @@ trainer_cls = TRAINERS.get("GIKT")
 |----------|---------|
 | `TRAINERS` | Model trainers |
 | `MODELS` | PyTorch model classes |
+| `DATA_SOURCES` | Data source processors |
 | `PARAM_CONFIGS` | Parameter configurations |
 | `ANALYZERS` | Case analysis components |
+| `COMPONENTS` | General-purpose shared components |
 
 ## Trainer Pattern
 
@@ -77,11 +79,18 @@ trainer.run()
 
 ```python
 class MyTrainer(BaseTrainer):
-    def forward_pass(self, batch) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return (loss, predictions)"""
+    def forward_pass(self, batch) -> dict:
+        """Return dict with keys: y_hat, y_label, y_predict, y_score, y_prob."""
         logits = self.model(batch)
-        loss = self.loss_fn(logits, batch['label'])
-        return loss, logits
+        y_hat = logits.squeeze(-1)
+        y_label = batch["label"].float()
+        return {
+            "y_hat": y_hat,
+            "y_label": y_label,
+            "y_predict": (y_hat >= 0.0).float(),
+            "y_score": y_hat,
+            "y_prob": torch.sigmoid(y_hat),
+        }
 ```
 
 ## Adding a New Model
@@ -207,7 +216,8 @@ kt-exp-graph/
 │   │   ├── base_trainer.py
 │   │   ├── callbacks.py
 │   │   ├── checkpoint.py
-│   │   └── early_stopping.py
+│   │   ├── metrics.py
+│   │   └── multi_trainer.py
 │   ├── config/        # Configuration management
 │   ├── core/          # Core (registry, logger)
 │   ├── data_process/  # Data processing

@@ -35,7 +35,7 @@
 
 ## 🔥 Highlights
 
-- **KT Models**: DKT, AKT, GIKT, HGIKT, SGKT, SQGKT, DyGKT, SimpleKT, and more
+- **KT Models**: DKT, AKT, GKT, GIKT, HGIKT, SGKT, SQGKT, DyGKT, SimpleKT, DKVMN, DTransformer, HawkesKT, LBKT, QIKT, ReKT, RobustKT, UKT, ABKT, BDGKT, ClusterKT, and more
 - **Multi-Dataset Support**: ASSISTments (2009/2012/2017), EdNet-KT1
 - **Optuna Integration**: Automated hyperparameter search with parallel support
 - **Ablation Framework**: Built-in tools for component-wise analysis
@@ -46,14 +46,25 @@
 
 | Model | Paper | Code |
 |-------|-------|------|
-| **DKT** | [Deep Knowledge Tracing (WWW 2015)](https://dl.acm.org/doi/10.1145/2736277.2741782) | [GitHub](https://github.com/chrispiech/DeepKnowledgeTracing) |
+| **DKT** | [Deep Knowledge Tracing (NeurIPS 2015)](https://papers.nips.cc/paper/5654-deep-knowledge-tracing) | [GitHub](https://github.com/chrispiech/DeepKnowledgeTracing) |
 | **AKT** | [Context-Aware Attentive Knowledge Tracing (KDD 2020)](https://dl.acm.org/doi/10.1145/3394486.3403282) | [GitHub](https://github.com/arghosh/AKT) |
-| **GKT** | [Graph-based Knowledge Tracing (ICONIP 2019)](https://link.springer.com/chapter/10.1007/978-3-030-36708-4_12) | [GitHub](https://github.com/jhljx/GKT) |
-| **GIKT** | [A Graph-based Interaction Model for KT (ECML-PKDD 2020)](https://link.springer.com/chapter/10.1007/978-3-030-67664-3_17) | [GitHub](https://github.com/ApexEDM/GIKT) |
+| **GKT** | [Graph-based Knowledge Tracing (WI 2019)](https://dl.acm.org/doi/10.1145/3350546.3352513) | [GitHub](https://github.com/jhljx/GKT) |
+| **GIKT** | [A Graph-based Interaction Model for KT (ECML-PKDD 2020)](https://arxiv.org/abs/2009.05991) | [GitHub](https://github.com/ApexEDM/GIKT) |
 | **SGKT** | [Session Graph-based Knowledge Tracing (ESA 2022)](https://www.sciencedirect.com/science/article/abs/pii/S0957417422009770) | [GitHub](https://github.com/CCNUZFW/SGKT) |
 | **SQGKT** | [Student-Question Interaction Graph-based KT (ESA 2025)](https://www.sciencedirect.com/science/article/abs/pii/S0957417425027915) | [GitHub](https://github.com/Yingying933/SQGKT) |
-| **DyGKT** | [Dynamic Graph Learning for Knowledge Tracing (CIKM 2024)](https://dl.acm.org/doi/10.1145/3627673.3679842) | [GitHub](https://github.com/PengLinzhi/DyGKT) |
-| **SimpleKT** | [A Simple But Tough-to-Beat Baseline (ICLR 2023)](https://openreview.net/forum?id=V34evfF6ch) | [GitHub](https://github.com/pykt-team/pykt-toolkit) |
+| **DyGKT** | [Dynamic Graph Learning for Knowledge Tracing (KDD 2024)](https://dl.acm.org/doi/10.1145/3637528.3671773) | [GitHub](https://github.com/PengLinzhi/DyGKT) |
+| **SimpleKT** | [A Simple But Tough-to-Beat Baseline (ICLR 2023)](https://openreview.net/forum?id=9HiGqC9C-KA) | [pyKT](https://github.com/pykt-team/pykt-toolkit) |
+| **DKVMN** | [Dynamic Key-Value Memory Networks for Knowledge Tracing (WWW 2017)](https://dl.acm.org/doi/10.1145/3038912.3052580) | [GitHub](https://github.com/jennyzhang0215/DKVMN) |
+| **DTransformer** | [Tracing Knowledge Instead of Patterns: Stable KT with Diagnostic Transformer (WWW 2023)](https://dl.acm.org/doi/10.1145/3543507.3583255) | [GitHub](https://github.com/yxonic/DTransformer) |
+| **HawkesKT** | [Temporal Cross-Effects in Knowledge Tracing (WSDM 2021)](https://dl.acm.org/doi/10.1145/3437963.3441802) | [GitHub](https://github.com/THUwangcy/HawkesKT) |
+| **LBKT** | [Learning Behavior-oriented Knowledge Tracing (KDD 2023)](https://dl.acm.org/doi/10.1145/3580305.3599407) | [GitHub](https://github.com/bigdata-ustc/EduKTM) |
+| **QIKT** | [Improving Interpretability of Deep Sequential KT with Question-centric Cognitive Representations (AAAI 2023)](https://ojs.aaai.org/index.php/AAAI/article/view/26661) | [pyKT](https://github.com/pykt-team/pykt-toolkit) |
+| **ReKT** | [Revisiting Knowledge Tracing: A Simple and Powerful Model (ACM MM 2024)](https://openreview.net/forum?id=GYomxff6HZ) | [GitHub](https://github.com/lilstrawberry/ReKT) |
+| **RobustKT** | [Enhancing Knowledge Tracing through Decoupling Cognitive Pattern from Error-Prone Data (WWW 2025)](https://dl.acm.org/doi/10.1145/3696410.3714486) | [pyKT](https://github.com/pykt-team/pykt-toolkit) |
+| **UKT** | [Uncertainty-aware Knowledge Tracing (AAAI 2025)](https://ojs.aaai.org/index.php/AAAI/article/view/35007) | [GitHub](https://github.com/UncertaintyForKnowledgeTracing/UKT) |
+| **ABKT** | [Ability Boosted Knowledge Tracing (Information Sciences 2022)](https://www.sciencedirect.com/science/article/pii/S0020025522001876) | [GitHub](https://github.com/ccnu-mathits/ABKT) |
+| **BDGKT** | [Bidirectional Dynamic Graph Knowledge Tracing (Knowledge-Based Systems 2026)](https://doi.org/10.1016/j.knosys.2026.115532) | [Github](https://github.com/Oia-10/BDGKT) |
+| **ClusterKT** | [Cluster-driven Knowledge Tracing: Joint Learning-Forgetting Effects Modeling via State Dependency (ESA 2025)](https://www.sciencedirect.com/science/article/abs/pii/S0957417425022389) | [GitHub](https://github.com/Lzhenghua/ClusterKT) |
 
 ## 📦 Installation
 
@@ -218,10 +229,13 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 
 | Dataset | Source |
 |---------|--------|
-| ASSISTments 2009 | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2009-2010-assistment-data) |
-| ASSISTments 2012 | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2012-13-school-data-with-affect) |
-| ASSISTments 2017 | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2017-assistments-data) |
+| ASSISTments 2009 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| ASSISTments 2012 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| ASSISTments 2015 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| ASSISTments 2017 | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
 | EdNet-KT1 | [GitHub](https://github.com/riiid/ednet) |
+| Junyi 2015 | [Junyi Academy](https://pslcdatashop.web.cmu.edu/Files?datasetId=1198) |
+| Slepemapy | [SLEP](https://www.fi.muni.cz/adaptivelearning/) |
 
 ## 📚 Documentation
 
@@ -245,9 +259,7 @@ kt-exp-graph/
 ├── data/              # Processed datasets
 ├── docs/              # Documentation
 ├── model/             # Model implementations
-│   ├── GIKT/
-│   ├── HGIKT/
-│   ├── SGKT/
+│   ├── DKT/
 │   └── layers/        # Shared components
 ├── runs/              # Experiment outputs
 ├── utils/             # Framework utilities

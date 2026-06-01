@@ -16,10 +16,13 @@ flowchart LR
 
 | Dataset | Source |
 |---------|--------|
-| `assistments09` | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2009-2010-assistment-data) |
-| `assistments12` | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2012-13-school-data-with-affect) |
-| `assistments17` | [ASSISTmentsData](https://sites.google.com/site/assistmentsdata/datasets/2017-assistments-data) |
+| `assistments09` | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| `assistments12` | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| `assistments15` | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
+| `assistments17` | [ASSISTmentsData](https://www.etrialstestbed.org/data-sets) |
 | `ednet_kt1` | [GitHub](https://github.com/riiid/ednet) |
+| `junyi2015` | [Junyi Academy](https://www.kaggle.com/datasets/junyiacademy/learning-activity-public-dataset) |
+| `slepemapy` | [SLEP](https://www.fi.muni.cz/adaptivelearning/) |
 
 ## Quick Start
 

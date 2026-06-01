@@ -144,10 +144,17 @@ class MyTrainer(BaseTrainer):
         super().__init__(**kwargs)
         self.model = MyModel(config)
 
-    def forward_pass(self, batch):
+    def forward_pass(self, batch) -> dict:
         logits = self.model(batch)
-        loss = self.loss_fn(logits, batch['response'].float())
-        return loss, logits
+        y_hat = logits.squeeze(-1)
+        y_label = batch["response"].float()
+        return {
+            "y_hat": y_hat,
+            "y_label": y_label,
+            "y_predict": (y_hat >= 0.0).float(),
+            "y_score": y_hat,
+            "y_prob": torch.sigmoid(y_hat),
+        }
 ```
 
 ### Gradient Clipping

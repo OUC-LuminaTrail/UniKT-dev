@@ -10,10 +10,13 @@ logger = get_logger(__name__)
 
 
 SUPPORTED_DATASETS = [
+    "algebra2005",
+    "algebra2006",
     "assistments09",
     "assistments12",
     "assistments15",
     "assistments17",
+    "bridge2006",
     "ednet_kt1",
     "junyi2015",
     "nips2020_t34",

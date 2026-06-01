@@ -275,8 +275,10 @@ class WindowlateProcessor:
             users_per_batch: 每批处理的用户数
         """
         # 构建题目到技能列表的映射
-        q_skill_map = question_data.group_by("question").agg(
-            pl.col("skill").alias("skills")
+        q_skill_map = (
+            question_data.sort("question", "skill")
+            .group_by("question")
+            .agg(pl.col("skill").sort().alias("skills"))
         )
 
         # 将技能列表映射到测试数据

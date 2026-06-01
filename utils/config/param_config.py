@@ -144,16 +144,23 @@ class DataParams(BaseParamConfig):
                 "short": "d",
                 "required": True,
                 "choices": [
+                    "algebra2005",
+                    "algebra2006",
                     "assistments09",
                     "assistments12",
                     "assistments15",
                     "assistments17",
+                    "bridge2006",
                     "ednet_kt1",
                     "junyi2015",
                     "nips2020_t34",
                     "slepemapy",
                 ],
-                "help": "Dataset name to use",
+                "help": (
+                    "Dataset name to use (choices: algebra2005, algebra2006, "
+                    "assistments09, assistments12, assistments15, assistments17, "
+                    "bridge2006, ednet_kt1, junyi2015, nips2020_t34, slepemapy)"
+                ),
             },
             "data_base_path": {
                 "type": str,
@@ -278,6 +285,12 @@ class GeneralParams(BaseParamConfig):
                 "default": False,
                 "short": "st",
                 "help": "Skip test set evaluation after training (default: False)",
+            },
+            "cache": {
+                "type": bool,
+                "default": False,
+                "short": "ca",
+                "help": "Enable disk cache for model data preparation (default: False)",
             },
         }
         return group_name, params
