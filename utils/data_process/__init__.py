@@ -10,6 +10,7 @@ from .data_source import DataSource
 from .ednet_kt1 import EdNetKT1Data
 from .junyi2015 import Junyi2015Data
 from .kddcup2010 import Algebra2005Data, Algebra2006Data, Bridge2006Data
+from .nips2020_t34 import NIPS2020T34Data
 from .slepemapy import SlepemapyData
 
 
@@ -45,6 +46,7 @@ __all__ = [
     "EdNetKT1Data",
     "SlepemapyData",
     "Junyi2015Data",
+    "NIPS2020T34Data",
     "DataSource",
     "get_data_source",
 ]

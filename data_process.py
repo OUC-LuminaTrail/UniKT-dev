@@ -18,8 +18,9 @@ SUPPORTED_DATASETS = [
     "assistments17",
     "bridge2006",
     "ednet_kt1",
-    "slepemapy",
     "junyi2015",
+    "nips2020_t34",
+    "slepemapy",
 ]
 
 

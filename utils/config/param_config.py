@@ -152,10 +152,15 @@ class DataParams(BaseParamConfig):
                     "assistments17",
                     "bridge2006",
                     "ednet_kt1",
-                    "slepemapy",
                     "junyi2015",
+                    "nips2020_t34",
+                    "slepemapy",
                 ],
-                "help": "Dataset name to use (choices: algebra2005, algebra2006, assistments09, assistments12, assistments15, assistments17, bridge2006, ednet_kt1, slepemapy, junyi2015)",
+                "help": (
+                    "Dataset name to use (choices: algebra2005, algebra2006, "
+                    "assistments09, assistments12, assistments15, assistments17, "
+                    "bridge2006, ednet_kt1, junyi2015, nips2020_t34, slepemapy)"
+                ),
             },
             "data_base_path": {
                 "type": str,
