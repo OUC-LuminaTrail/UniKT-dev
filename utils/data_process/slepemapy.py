@@ -108,27 +108,16 @@ class SlepemapyData(DataSource):
 
         data = data.collect()
 
-        # Convert timestamp string to milliseconds
+        # Parse timestamps to Unix milliseconds
         data = data.with_columns(
-            (
-                pl.col("timestamp")
-                .str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S")
-                .cast(pl.Int64)
-                / 1_000
-            )
-            .cast(pl.Int64)
+            pl.col("timestamp")
+            .str.strptime(pl.Datetime("ms"), "%Y-%m-%d %H:%M:%S")
+            .dt.epoch("ms")
             .alias("timestamp")
         )
 
-        # Convert to global relative time (dataset-wise earliest timestamp as zero)
-        data = data.with_columns(
-            (pl.col("timestamp") - pl.col("timestamp").min())
-            .cast(pl.Int64)
-            .alias("timestamp")
-        )
-
-        # Sort by user and timestamp
-        data = data.sort(["user", "timestamp"])
+        # Normalize timestamps and sort deterministically
+        data = self._normalize_and_sort_timestamps(data)
 
         # Remove duplicates
         data = data.unique()
