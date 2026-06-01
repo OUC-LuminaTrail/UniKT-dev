@@ -78,6 +78,7 @@ class SlepemapyData(DataSource):
                 pl.col("place_answered"),
                 pl.col("type"),
                 pl.col("inserted").alias("timestamp"),
+                pl.col("response_time").alias("ms_first_response"),
             ]
         )
 
@@ -207,7 +208,9 @@ class SlepemapyData(DataSource):
         )
 
         # Build sequence_data
-        sequence_data = mapped_data.select(["user", "question", "label", "timestamp"])
+        sequence_data = mapped_data.select(
+            ["user", "question", "label", "timestamp", "ms_first_response"]
+        )
 
         # Build ID mapping for user
         self._build_id_mapping(sequence_data, ["user"])
