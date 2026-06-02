@@ -115,6 +115,8 @@ class KQN(nn.Module):
 
     def encode_skills(self, next_concept: torch.Tensor) -> torch.Tensor:
         """Encode next-concept ids into positive, L2-normalized skill vectors."""
-        next_skills = F.one_hot(next_concept.long(), num_classes=self.num_skills).float()
+        next_skills = F.one_hot(
+            next_concept.long(), num_classes=self.num_skills
+        ).float()
         skill_vectors = self.skill_encoder(next_skills)
         return F.normalize(skill_vectors, p=2, dim=-1)
