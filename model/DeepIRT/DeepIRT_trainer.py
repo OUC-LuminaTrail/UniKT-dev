@@ -75,22 +75,22 @@ class DeepIRTModelParams(BaseParamConfig):
             },
             "test_batch_size": {
                 "type": int,
-                "default": 512,
-                "help": "Batch size for windowlate test evaluation",
+                "default": 64,
+                "help": "Batch size for windowlate test evaluation; matches PyKT loader batch size",
             },
             "test_num_workers": {
                 "type": int,
-                "default": 4,
+                "default": 0,
                 "help": "Number of DataLoader workers for windowlate test evaluation",
             },
             "test_pin_memory": {
                 "type": bool,
-                "default": True,
+                "default": False,
                 "help": "Use pinned memory for windowlate test DataLoader",
             },
             "test_prefetch_factor": {
                 "type": int,
-                "default": 2,
+                "default": None,
                 "help": "DataLoader prefetch factor for windowlate test evaluation",
             },
             "max_grad_norm": {
