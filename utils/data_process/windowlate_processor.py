@@ -7,7 +7,6 @@ from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import polars as pl
-import pyarrow as pa
 import pyarrow.parquet as pq
 import tqdm
 
@@ -22,7 +21,7 @@ class WindowlateProcessor:
     - 每个目标 KC 仅生成一个可评估窗口（窗口末位是目标 KC）
     - 历史位置仅作为上下文，不参与评估（mask=0）
     - 目标位置参与评估（mask=1）
-    - 当序列长度超过 max_seq_len 时，仅保留“以目标位置结尾”的最后一个窗口
+    - 当序列长度超过 max_seq_len 时，仅保留"以目标位置结尾"的最后一个窗口
     """
 
     # ===== 类常量：数据结构定义 =====
@@ -68,7 +67,7 @@ class WindowlateProcessor:
         sample_id_start: int,
         group_id_start: int,
         max_seq_len: int,
-    ) -> Iterator[tuple]:
+    ) -> Iterator[list[tuple]]:
         """生成单个用户的所有样本数据。
 
         Args:
@@ -81,7 +80,8 @@ class WindowlateProcessor:
             max_seq_len: 最大序列长度
 
         Yields:
-            tuple: (sample_id, position, skill, response, mask, user_id, group_id, true_label)
+            list[tuple]: 完整样本的所有行，每行格式为
+                (sample_id, position, skill, response, mask, user_id, group_id, true_label)
         """
         # 展开技能和标签
         expanded_skills = []
@@ -122,7 +122,7 @@ class WindowlateProcessor:
                 full_group_ids = expanded_group_ids[:history_end] + [current_group_id]
                 full_true_labels = expanded_labels[:history_end] + [current_label]
 
-                # 仅保留“以目标位结尾”的窗口
+                # 仅保留"以目标位结尾"的窗口
                 if len(full_skills) > max_seq_len:
                     win_skills = full_skills[-max_seq_len:]
                     win_questions = full_questions[-max_seq_len:]
@@ -137,18 +137,22 @@ class WindowlateProcessor:
                     win_true_labels = full_true_labels
 
                 target_pos = len(win_skills) - 1
+                rows = []
                 for pos in range(len(win_skills)):
-                    yield (
-                        sample_id,
-                        pos,
-                        win_skills[pos],
-                        win_questions[pos],
-                        win_labels[pos],
-                        1 if pos == target_pos else 0,
-                        user_id,
-                        win_group_ids[pos],
-                        win_true_labels[pos],
+                    rows.append(
+                        (
+                            sample_id,
+                            pos,
+                            win_skills[pos],
+                            win_questions[pos],
+                            win_labels[pos],
+                            1 if pos == target_pos else 0,
+                            user_id,
+                            win_group_ids[pos],
+                            win_true_labels[pos],
+                        )
                     )
+                yield rows
                 sample_id += 1
 
     # ===== 批量处理 =====
@@ -189,7 +193,7 @@ class WindowlateProcessor:
                 sample_id_start,
                 group_id_start,
             ) in batch_users:
-                for sample_data in cls.generate_user_samples(
+                for sample_rows in cls.generate_user_samples(
                     user_id,
                     labels,
                     skills_list,
@@ -198,11 +202,10 @@ class WindowlateProcessor:
                     group_id_start,
                     max_seq_len,
                 ):
-                    # 追加到缓冲区
-                    for i, col in enumerate(cls.SAMPLE_COLUMNS):
-                        buffers[col].append(sample_data[i])
+                    for row in sample_rows:
+                        for i, col in enumerate(cls.SAMPLE_COLUMNS):
+                            buffers[col].append(row[i])
 
-                    # 检查是否需要刷新
                     if len(buffers["sample_id"]) >= chunk_row_limit:
                         writer = cls._flush_buffers(buffers, writer, output_path)
                         total_rows += len(buffers["sample_id"])
@@ -441,8 +444,8 @@ class WindowlateProcessor:
                     continue
 
                 pq_file = pq.ParquetFile(worker_path)
-                for record_batch in pq_file.iter_batches(batch_size=65536):
-                    table = pa.Table.from_batches([record_batch])
+                for rg_idx in range(pq_file.num_row_groups):
+                    table = pq_file.read_row_group(rg_idx)
                     if final_writer is None:
                         final_writer = pq.ParquetWriter(tmp_path, table.schema)
                     final_writer.write_table(table)
