@@ -46,9 +46,9 @@ class DeepIRTModelParams(BaseParamConfig):
             },
             "epochs": {
                 "type": int,
-                "default": 150,
+                "default": 200,
                 "short": "ep",
-                "help": "Number of training epochs",
+                "help": "Number of training epochs; matches PyKT train_config default",
             },
             "learning_rate": {
                 "type": float,
@@ -69,9 +69,9 @@ class DeepIRTModelParams(BaseParamConfig):
             },
             "batch_size": {
                 "type": int,
-                "default": 128,
+                "default": 64,
                 "short": "bs",
-                "help": "Batch size for training",
+                "help": "Batch size for training; matches PyKT deep_irt OOM override",
             },
             "test_batch_size": {
                 "type": int,
@@ -95,8 +95,8 @@ class DeepIRTModelParams(BaseParamConfig):
             },
             "max_grad_norm": {
                 "type": float,
-                "default": 10.0,
-                "help": "Max gradient norm for clipping",
+                "default": None,
+                "help": "Max gradient norm for clipping; None matches PyKT DeepIRT",
             },
         }
         return group_name, params
