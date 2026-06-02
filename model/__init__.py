@@ -20,6 +20,7 @@ TRAINERS.register_lazy(
 )
 TRAINERS.register_lazy("DKT", "model.DKT.DKT_trainer", "DKTTrainer")
 TRAINERS.register_lazy("DKVMN", "model.DKVMN.DKVMN_trainer", "DKVMNTrainer")
+TRAINERS.register_lazy("DeepIRT", "model.DeepIRT.DeepIRT_trainer", "DeepIRTTrainer")
 TRAINERS.register_lazy("DyGKT", "model.DyGKT.DyGKT_trainer", "DyGKTTrainer")
 TRAINERS.register_lazy("GIKT", "model.GIKT.GIKT_trainer", "GIKTTrainer")
 TRAINERS.register_lazy("ReKT", "model.ReKT.ReKT_trainer", "ReKTTrainer")
@@ -102,6 +103,9 @@ PARAM_CONFIGS.register_lazy(
 )
 PARAM_CONFIGS.register_lazy("DKT", "model.DKT.DKT_trainer", "DKTModelParams")
 PARAM_CONFIGS.register_lazy("DKVMN", "model.DKVMN.DKVMN_trainer", "DKVMNModelParams")
+PARAM_CONFIGS.register_lazy(
+    "DeepIRT", "model.DeepIRT.DeepIRT_trainer", "DeepIRTModelParams"
+)
 PARAM_CONFIGS.register_lazy("DyGKT", "model.DyGKT.DyGKT_trainer", "DyGKTModelParams")
 PARAM_CONFIGS.register_lazy("GIKT", "model.GIKT.GIKT_trainer", "GIKTModelParams")
 PARAM_CONFIGS.register_lazy("ReKT", "model.ReKT.ReKT_trainer", "ReKTModelParams")
