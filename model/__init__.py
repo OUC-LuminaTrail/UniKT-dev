@@ -35,6 +35,7 @@ TRAINERS.register_lazy("SQGKT", "model.SQGKT.SQGKT_trainer", "SQGKTTrainer")
 TRAINERS.register_lazy("UKT", "model.UKT.UKT_trainer", "UKTTrainer")
 TRAINERS.register_lazy("QIKT", "model.QIKT.QIKT_trainer", "QIKTTrainer")
 TRAINERS.register_lazy("MCKT", "model.MCKT.MCKT_trainer", "MCKTTrainer")
+TRAINERS.register_lazy("KQN", "model.KQN.KQN_trainer", "KQNTrainer")
 
 # HGIKT 变体
 TRAINERS.register_lazy(
@@ -123,6 +124,7 @@ PARAM_CONFIGS.register_lazy("SQGKT", "model.SQGKT.SQGKT_trainer", "SQGKTModelPar
 PARAM_CONFIGS.register_lazy("UKT", "model.UKT.UKT_trainer", "UKTModelParams")
 PARAM_CONFIGS.register_lazy("QIKT", "model.QIKT.QIKT_trainer", "QIKTModelParams")
 PARAM_CONFIGS.register_lazy("MCKT", "model.MCKT.MCKT_trainer", "MCKTModelParams")
+PARAM_CONFIGS.register_lazy("KQN", "model.KQN.KQN_trainer", "KQNModelParams")
 
 # HGIKT 变体参数配置
 PARAM_CONFIGS.register_lazy(
