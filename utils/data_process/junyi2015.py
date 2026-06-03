@@ -218,8 +218,14 @@ class Junyi2015Data(DataSource):
             .collect()
         )
 
-        # Normalize timestamps and sort deterministically
-        sequence_data = self._normalize_and_sort_timestamps(sequence_data)
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        sequence_data = sequence_data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
+
+        sequence_data = sequence_data.sort(["user", "timestamp"])
 
         logger.debug(f"Loaded {len(sequence_data)} raw interactions.")
 

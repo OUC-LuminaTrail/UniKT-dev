@@ -239,9 +239,14 @@ class Assistments2017Data(DataSource):
             .alias("ms_first_response")
         )
 
-        # Normalize timestamps and sort deterministically
-        data = self._normalize_and_sort_timestamps(data)
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        data = data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
 
+        data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         data = data.filter(pl.col("skill").is_not_null())
         data = data.filter(pl.col("label").is_in([0, 1]))

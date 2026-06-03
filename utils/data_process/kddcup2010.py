@@ -81,7 +81,7 @@ class KDDCup2010Base(DataSource):
                 pl.col("Correct First Attempt").alias("raw_label"),
                 pl.col(skill_col).alias("skill"),
             ]
-        )
+        ).with_row_index("row_idx")
 
         data = data.with_columns(
             [
@@ -128,15 +128,19 @@ class KDDCup2010Base(DataSource):
                 "user/question/timestamp/label/skill."
             )
 
-        data = data.with_columns(
-            pl.col("timestamp").dt.timestamp("ms").alias("timestamp")
-        ).drop(["raw_timestamp", "raw_label"])
-
-        if data.is_empty():
+        min_ts = data.select(pl.col("timestamp").min()).item()
+        if min_ts is None:
             raise ValueError(f"{self.dataset} has no valid rows after cleaning.")
 
-        # Normalize timestamps and sort deterministically
-        data = self._normalize_and_sort_timestamps(data)
+        data = data.with_columns(
+            pl.col("timestamp").dt.timestamp("ms").alias("timestamp")
+        )
+        min_ts = data.select(pl.col("timestamp").min()).item()
+        data = data.with_columns(
+            ((pl.col("timestamp") - min_ts) / 1_000).cast(pl.Int64).alias("timestamp")
+        ).drop(["raw_timestamp", "raw_label"])
+
+        data = data.sort(["user", "timestamp", "row_idx"]).drop("row_idx")
 
         data = exclude_short_sequences(data, self.args.min_seq_len)
 

@@ -342,10 +342,15 @@ class EdNetKT1Data(DataSource):
                 & pl.col("question").is_not_null()
                 & pl.col("label").is_not_null()
             )
+            .sort(["user", "timestamp"])
         )
 
-        # Normalize timestamps and sort deterministically
-        sequence_data = self._normalize_and_sort_timestamps(sequence_data)
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        sequence_data = sequence_data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
 
         # Exclude sequences that are too short
         data = exclude_short_sequences(sequence_data, self.args.min_seq_len)

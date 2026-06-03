@@ -78,7 +78,6 @@ class SlepemapyData(DataSource):
                 pl.col("place_answered"),
                 pl.col("type"),
                 pl.col("inserted").alias("timestamp"),
-                pl.col("response_time").alias("ms_first_response"),
             ]
         )
 
@@ -109,16 +108,27 @@ class SlepemapyData(DataSource):
 
         data = data.collect()
 
-        # Parse timestamps to Unix milliseconds
+        # Convert timestamp string to milliseconds
         data = data.with_columns(
-            pl.col("timestamp")
-            .str.strptime(pl.Datetime("ms"), "%Y-%m-%d %H:%M:%S")
-            .dt.epoch("ms")
+            (
+                pl.col("timestamp")
+                .str.strptime(pl.Datetime, "%Y-%m-%d %H:%M:%S")
+                .cast(pl.Int64)
+                / 1_000
+            )
+            .cast(pl.Int64)
             .alias("timestamp")
         )
 
-        # Normalize timestamps and sort deterministically
-        data = self._normalize_and_sort_timestamps(data)
+        # Convert to global relative time (dataset-wise earliest timestamp as zero)
+        data = data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
+
+        # Sort by user and timestamp
+        data = data.sort(["user", "timestamp"])
 
         # Remove duplicates
         data = data.unique()
@@ -208,9 +218,7 @@ class SlepemapyData(DataSource):
         )
 
         # Build sequence_data
-        sequence_data = mapped_data.select(
-            ["user", "question", "label", "timestamp", "ms_first_response"]
-        )
+        sequence_data = mapped_data.select(["user", "question", "label", "timestamp"])
 
         # Build ID mapping for user
         self._build_id_mapping(sequence_data, ["user"])
