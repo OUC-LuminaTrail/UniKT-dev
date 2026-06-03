@@ -35,7 +35,7 @@ class RobustKTModelParams(BaseParamConfig):
             },
             "d_ff": {
                 "type": int,
-                "default": 256,
+                "default": 512,
                 "help": "Feed-forward network dimension",
             },
             "final_fc_dim": {
