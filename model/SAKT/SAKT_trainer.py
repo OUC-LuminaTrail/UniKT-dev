@@ -206,10 +206,7 @@ class SAKTTrainer(BaseTrainer):
 
         y_hat_shifted = self.model(sequence, response)
         no_history_targets = mask[:, :1].bool()
-        if (
-            no_history_targets.any()
-            and not self._warned_windowlate_no_history
-        ):
+        if no_history_targets.any() and not self._warned_windowlate_no_history:
             skipped_count = int(no_history_targets.sum().item())
             logger.warning(
                 "SAKT windowlate skipped %s target(s) at position 0 in this batch: "

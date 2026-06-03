@@ -198,7 +198,9 @@ class KQNTrainer(BaseTrainer):
             target_mask,
         )
 
-    def forward_pass(self, batch_data: tuple[torch.Tensor, ...]) -> dict[str, torch.Tensor]:
+    def forward_pass(
+        self, batch_data: tuple[torch.Tensor, ...]
+    ) -> dict[str, torch.Tensor]:
         """Run a training/validation batch.
 
         Batch format is ``(concept, response, mask, question)``. ``question`` is

@@ -27,9 +27,7 @@ class SAKTBlock(nn.Module):
 
     def __init__(self, emb_size: int, num_attn_heads: int, dropout: float) -> None:
         super().__init__()
-        self.attn = nn.MultiheadAttention(
-            emb_size, num_attn_heads, dropout=dropout
-        )
+        self.attn = nn.MultiheadAttention(emb_size, num_attn_heads, dropout=dropout)
         self.attn_dropout = nn.Dropout(dropout)
         self.attn_layer_norm = nn.LayerNorm(emb_size)
 
@@ -95,9 +93,7 @@ class SAKT(nn.Module):
         if num_en <= 0:
             raise ValueError("num_en must be positive for SAKT")
         if emb_size % num_attn_heads != 0:
-            raise ValueError(
-                "emb_size must be divisible by num_attn_heads for SAKT"
-            )
+            raise ValueError("emb_size must be divisible by num_attn_heads for SAKT")
         if seq_len < 2:
             raise ValueError("seq_len must be at least 2 for shifted SAKT input")
 
@@ -113,9 +109,7 @@ class SAKT(nn.Module):
         self.exercise_emb = nn.Embedding(num_c, emb_size)
         self.position_emb = nn.Embedding(seq_len, emb_size)
 
-        self.blocks = _get_clones(
-            SAKTBlock(emb_size, num_attn_heads, dropout), num_en
-        )
+        self.blocks = _get_clones(SAKTBlock(emb_size, num_attn_heads, dropout), num_en)
         self.dropout_layer = nn.Dropout(dropout)
         self.pred = nn.Linear(emb_size, 1)
 
