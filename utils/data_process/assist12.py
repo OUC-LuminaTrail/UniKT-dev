@@ -171,14 +171,9 @@ class Assistments2012Data(DataSource):
             ]
         )
 
-        # Convert to global relative time (dataset-wise earliest timestamp as zero)
-        data = data.with_columns(
-            (pl.col("timestamp") - pl.col("timestamp").min())
-            .cast(pl.Int64)
-            .alias("timestamp")
-        )
+        # Normalize timestamps and sort deterministically
+        data = self._normalize_and_sort_timestamps(data)
 
-        data = data.sort(["user", "timestamp"])
         data = data.with_columns([pl.col("user").cast(pl.Int32)])
         # Filter out rows with null skill early (these questions have no skill info)
         data = data.filter(pl.col("skill").is_not_null())

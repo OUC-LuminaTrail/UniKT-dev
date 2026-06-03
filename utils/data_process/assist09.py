@@ -20,6 +20,8 @@ class Assistments2009Data(DataSource):
     Dataset source: https://sites.google.com/site/assistmentsdata/home/2009-2010-assistment-data
     """
 
+    timestamp_unit: str = "ordinal"
+
     def __init__(self, args):
         super().__init__(
             dataset="assistments09",
@@ -178,16 +180,8 @@ class Assistments2009Data(DataSource):
 
         data = data.unique().collect()
 
-        # Convert to global relative time (dataset-wise earliest timestamp as zero)
-        data = data.with_columns(
-            pl.col("timestamp")
-            .cast(pl.Int64)
-            .sub(pl.col("timestamp").cast(pl.Int64).min())
-            .cast(pl.Int64)
-            .alias("timestamp")
-        )
-
-        data = data.sort(["user", "timestamp"])
+        # Normalize timestamps and sort deterministically
+        data = self._normalize_and_sort_timestamps(data)
 
         # Exclude sequences that are too short
         data = exclude_short_sequences(data, self.args.min_seq_len)

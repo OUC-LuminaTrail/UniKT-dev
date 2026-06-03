@@ -29,6 +29,10 @@ class DataSource(ABC):
     and saving dataset files with metadata tracking and integrity checks.
     """
 
+    timestamp_unit: str = (
+        "ms"  # Override to "ordinal" for datasets without real timestamps
+    )
+
     def __init__(
         self, dataset: str, data_base_path: str, data_url: str = None, seed: int = 42
     ):
@@ -127,6 +131,31 @@ class DataSource(ABC):
         if primary is None:
             primary = ["user", "timestamp"]
         return primary + [c for c in self.sequence_data.columns if c not in primary]
+
+    def _normalize_and_sort_timestamps(self, data: pl.DataFrame) -> pl.DataFrame:
+        """将 timestamp 列归一化为相对时间并确定性排序。
+
+        调用前，timestamp 列应为绝对 Unix 毫秒 (timestamp_unit="ms")
+        或整数序号 (timestamp_unit="ordinal")。
+        调用后，timestamp 值为从最早时刻起的相对值，数据按
+        ["user", "timestamp", "row_idx"] 确定性排序。
+        """
+        # ordinal 类型需先确保 Int64
+        if self.timestamp_unit == "ordinal":
+            data = data.with_columns(
+                pl.col("timestamp").cast(pl.Int64).alias("timestamp")
+            )
+        # 统一：减最小值 → 相对时间
+        data = data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
+        # 确定性排序（row_idx 作为 tie-breaker）
+        if "row_idx" not in data.columns:
+            data = data.with_row_index("row_idx")
+        data = data.sort(["user", "timestamp", "row_idx"]).drop("row_idx")
+        return data
 
     def save_data(self):
         """Save processed relation tables, sequence data, and metadata."""

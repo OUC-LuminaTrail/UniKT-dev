@@ -25,6 +25,8 @@ class Assistments2015Data(DataSource):
     as both question and skill (standard approach in KT literature).
     """
 
+    timestamp_unit: str = "ordinal"
+
     def __init__(self, args):
         super().__init__(
             dataset="assistments15",
@@ -144,16 +146,8 @@ class Assistments2015Data(DataSource):
 
         data = data.unique().collect()
 
-        # Convert to global relative time
-        data = data.with_columns(
-            pl.col("timestamp")
-            .cast(pl.Int64)
-            .sub(pl.col("timestamp").cast(pl.Int64).min())
-            .cast(pl.Int64)
-            .alias("timestamp")
-        )
-
-        data = data.sort(["user", "timestamp"])
+        # Normalize timestamps and sort deterministically
+        data = self._normalize_and_sort_timestamps(data)
 
         data = exclude_short_sequences(data, self.args.min_seq_len)
 
