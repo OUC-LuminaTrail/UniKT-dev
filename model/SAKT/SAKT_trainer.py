@@ -15,13 +15,6 @@ logger = get_logger(__name__)
 class SAKTModelParams(BaseParamConfig):
     """SAKT hyperparameter configuration."""
 
-    PYKT_ES_MIN_DELTA = 1e-3
-
-    @classmethod
-    def apply_parser_defaults(cls, parser: Any) -> None:
-        """Apply PyKT SAKT training defaults for shared CLI parameters."""
-        parser.set_defaults(es_min_delta=cls.PYKT_ES_MIN_DELTA)
-
     def define_params(self) -> tuple[str, dict]:
         group_name = "SAKT Parameters"
         params = {
@@ -123,9 +116,7 @@ class SAKTTrainer(BaseTrainer):
                 monitor=getattr(args, "es_monitor", "auc"),
                 mode=getattr(args, "es_mode", "max"),
                 patience=es_patience,
-                min_delta=getattr(
-                    args, "es_min_delta", SAKTModelParams.PYKT_ES_MIN_DELTA
-                ),
+                min_delta=getattr(args, "es_min_delta", 1e-3),
             )
 
         self.with_training(
