@@ -115,7 +115,6 @@ class SAKTTrainer(BaseTrainer):
             )
 
         super().__init__(model)
-        self._warned_windowlate_no_history = False
 
         early_stopping_cfg = None
         es_patience = getattr(args, "es_patience", None)
@@ -151,10 +150,6 @@ class SAKTTrainer(BaseTrainer):
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
-    @staticmethod
-    def _shift_train_mask(mask: torch.Tensor) -> torch.Tensor:
-        return mask[:, :-1].bool() & mask[:, 1:].bool()
-
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
@@ -172,11 +167,13 @@ class SAKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        y_hat_shifted = self.model(sequence, response)
-        valid_mask = self._shift_train_mask(mask)
-
-        y_hat = torch.masked_select(y_hat_shifted, valid_mask)
-        y_label = torch.masked_select(response[:, 1:].float(), valid_mask)
+        y_hat_full = self.model(sequence, response)
+        y_hat, y_label, _ = self._extract_valid_predictions(
+            y_hat_full,
+            response[:, 1:],
+            mask[:, :-1].bool() & mask[:, 1:].bool(),
+            skip_first=False,
+        )
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
@@ -204,21 +201,14 @@ class SAKTTrainer(BaseTrainer):
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
 
-        y_hat_shifted = self.model(sequence, response)
-        no_history_targets = mask[:, :1].bool()
-        if no_history_targets.any() and not self._warned_windowlate_no_history:
-            skipped_count = int(no_history_targets.sum().item())
-            logger.warning(
-                "SAKT windowlate skipped %s target(s) at position 0 in this batch: "
-                "PyKT-style shifted SAKT predicts response[t] from history up to "
-                "t-1, so first-position targets have no history.",
-                skipped_count,
-            )
-            self._warned_windowlate_no_history = True
+        y_hat_full = self.model(sequence, response)
         target_mask = mask[:, 1:].bool()
-
-        y_hat = torch.masked_select(y_hat_shifted, target_mask)
-        y_label = torch.masked_select(true_labels[:, 1:].float(), target_mask)
+        y_hat, y_label, _ = self._extract_valid_predictions(
+            y_hat_full,
+            true_labels[:, 1:],
+            target_mask,
+            skip_first=False,
+        )
         group_ids = torch.masked_select(late_group_id[:, 1:], target_mask)
 
         return {
