@@ -114,11 +114,14 @@ class DAGKTModelData(QuestionModelData):
     def _compute_question_correct_rates(
         self, num_questions: int, fold_idx: int | None = None
     ) -> torch.Tensor:
-        """从数据中统计每题的正确率。
+        """仅从训练集统计每题的正确率。
+
+        排除验证集（fold == fold_idx）和测试集（fold == -1），
+        只使用训练集数据以避免数据泄露。
 
         Args:
             num_questions: 题目总数
-            fold_idx: 要排除的 fold 索引（可选）
+            fold_idx: 当前验证集的 fold 索引（可选）
 
         Returns:
             题目正确率张量 [num_questions, 1]
@@ -127,11 +130,15 @@ class DAGKTModelData(QuestionModelData):
 
         data = self.data_src.get_sequence_data().to_pandas()
 
-        # 排除指定 fold 的数据
-        if fold_idx is not None and "fold" in data.columns:
-            data = data[data["fold"] != fold_idx]
+        # 仅使用训练集数据：排除验证集（fold_idx）和测试集（fold == -1）
+        if "fold" in data.columns:
+            mask = data["fold"] != -1  # 排除测试集
+            if fold_idx is not None:
+                mask &= data["fold"] != fold_idx  # 排除验证集
+            data = data[mask]
             self.logger.info(
-                f"Excluding fold {fold_idx} from correct rate calculation."
+                f"Computing correct rates from training data only "
+                f"(excluded fold {fold_idx} and test fold -1)."
             )
 
         # 统计每题正确率
@@ -190,45 +197,3 @@ class DAGKTModelData(QuestionModelData):
         )
 
         return attempt_counts
-
-    def split_kfold_data(
-        self, user_sequence, user_response, user_mask, attempt_counts, fold_idx
-    ):
-        """K-fold 划分数据，返回包含 attempt_counts 的数据元组。"""
-        from sklearn.model_selection import KFold
-
-        kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
-        kf = KFold(n_splits=kfold_n_splits, shuffle=False)
-
-        indices = list(kf.split(user_sequence))
-        train_val_idx, test_idx = indices[fold_idx]
-
-        # 从训练+验证集中再划分训练集和验证集
-        # 使用训练+验证集的前 80% 作为训练集，后 20% 作为验证集
-        n_train_val = len(train_val_idx)
-        n_train = int(n_train_val * 0.8)
-
-        # 确保不重复随机划分：使用固定的训练/验证切分
-        train_idx = train_val_idx[:n_train]
-        val_idx = train_val_idx[n_train:]
-
-        train_data = (
-            user_sequence[train_idx],
-            user_response[train_idx],
-            user_mask[train_idx],
-            attempt_counts[train_idx],
-        )
-        val_data = (
-            user_sequence[val_idx],
-            user_response[val_idx],
-            user_mask[val_idx],
-            attempt_counts[val_idx],
-        )
-        test_data = (
-            user_sequence[test_idx],
-            user_response[test_idx],
-            user_mask[test_idx],
-            attempt_counts[test_idx],
-        )
-
-        return train_data, val_data, test_data
