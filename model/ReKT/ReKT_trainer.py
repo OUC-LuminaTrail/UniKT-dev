@@ -70,7 +70,6 @@ class ReKTTrainer(BaseTrainer):
             train_dataset,
             val_dataset,
             test_dataset,
-            self.graph,
             extra_metadata,
         ) = model_data.prepare_data(args)
 
@@ -119,8 +118,6 @@ class ReKTTrainer(BaseTrainer):
             model_name="ReKT",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
-
-        self.graph = self.graph.to(self.device_)
 
     def forward_pass(
         self,

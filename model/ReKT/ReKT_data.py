@@ -77,8 +77,6 @@ class ReKTModelData(QuestionModelData):
         )
         user_skill_sequence = question_to_combined[user_sequence]
 
-        graph = self.build_hetero_graph([("question", "has", "skill")])
-
         if fold_idx is not None:
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
                 raise ValueError(
@@ -109,6 +107,5 @@ class ReKTModelData(QuestionModelData):
             train_dataset,
             val_dataset,
             test_dataset,
-            graph,
             {"num_combined_skills": num_combined_skills},
         )
