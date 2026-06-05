@@ -12,6 +12,7 @@ from utils.core import PARAM_CONFIGS, TRAINERS
 TRAINERS.register_lazy("BDGKT", "model.BDGKT.BDGKT_trainer", "BDGKTTrainer")
 TRAINERS.register_lazy("ABKT", "model.ABKT.ABKT_trainer", "ABKTTrainer")
 TRAINERS.register_lazy("AKT", "model.AKT.AKT_trainer", "AKTTrainer")
+TRAINERS.register_lazy("DAGKT", "model.DAGKT.DAGKT_trainer", "DAGKTTrainer")
 TRAINERS.register_lazy(
     "ClusterKT", "model.ClusterKT.ClusterKT_trainer", "ClusterKTTrainer"
 )
@@ -97,6 +98,7 @@ TRAINERS.register_lazy(
 PARAM_CONFIGS.register_lazy("BDGKT", "model.BDGKT.BDGKT_trainer", "BDGKTModelParams")
 PARAM_CONFIGS.register_lazy("ABKT", "model.ABKT.ABKT_trainer", "ABKTModelParams")
 PARAM_CONFIGS.register_lazy("AKT", "model.AKT.AKT_trainer", "AKTModelParams")
+PARAM_CONFIGS.register_lazy("DAGKT", "model.DAGKT.DAGKT_trainer", "DAGKTModelParams")
 PARAM_CONFIGS.register_lazy(
     "ClusterKT", "model.ClusterKT.ClusterKT_trainer", "ClusterKTModelParams"
 )
