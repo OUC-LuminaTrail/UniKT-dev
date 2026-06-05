@@ -35,12 +35,51 @@ class DAGKTModelData(QuestionModelData):
     """DAGKT 模型数据准备类。
 
     在 GIKT 数据基础上增加：
-    - 题目正确率（difficulty_rates）: 从数据中统计每题的正确率
-    - 学生尝试次数（attempt_counts）: 对每个学生统计每题的累计尝试次数
+    - 题目正确率（difficulty_rates）: 从训练集统计每题的正确率
+    - 学生尝试次数（attempt_counts）: 直接使用数据集中的 attempt_count 字段
     """
 
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
+
+    def load_sequence_data(self):
+        """加载用户答题序列，额外加载 attempt_count 字段。
+
+        Returns:
+            (user_sequence, user_response, user_mask, user_id_sequence, user_attempt)
+        """
+        import numpy as np
+
+        self.logger.info("Building response sequences from split data...")
+
+        data = self.data_src.get_split_question_sequence_data().to_pandas()
+        max_seq_len = self.data_src.get_metadata("max_seq_len")
+        num_users = data["user"].nunique()
+
+        user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
+        user_response = np.zeros((num_users, max_seq_len), dtype=int)
+        user_mask = np.zeros((num_users, max_seq_len), dtype=int)
+        user_attempt = np.zeros((num_users, max_seq_len), dtype=np.float32)
+
+        user_indices = data["user"].values
+        seq_positions = data["seq_pos"].values
+
+        user_sequence[user_indices, seq_positions] = data["question"].values
+        user_id_sequence[user_indices, seq_positions] = user_indices
+        user_response[user_indices, seq_positions] = data["label"].values
+        user_mask[user_indices, seq_positions] = 1
+
+        # 加载 attempt_count 字段
+        if "attempt_count" in data.columns:
+            user_attempt[user_indices, seq_positions] = data[
+                "attempt_count"
+            ].values.astype(np.float32)
+            self.logger.info("Loaded attempt_count from dataset.")
+        else:
+            self.logger.warning("attempt_count column not found in data, using zeros.")
+
+        return user_sequence, user_response, user_mask, user_id_sequence, user_attempt
 
     @override
     def prepare_data(self, args):
@@ -48,8 +87,8 @@ class DAGKTModelData(QuestionModelData):
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
-        # 构建用户答题序列
-        user_sequence, user_response, user_mask, user_id_sequence = (
+        # 构建用户答题序列（含 attempt_count）
+        user_sequence, user_response, user_mask, user_id_sequence, attempt_counts = (
             self.load_sequence_data()
         )
 
@@ -75,8 +114,8 @@ class DAGKTModelData(QuestionModelData):
             num_questions, fold_idx
         )
 
-        # 计算学生尝试次数 [num_users, max_seq_len]
-        attempt_counts = self._compute_attempt_counts(user_sequence)
+        # 归一化 attempt_count 到 [0, 1]
+        attempt_counts = self._normalize_attempt_counts(attempt_counts)
 
         # K-fold 划分
         if fold_idx is not None:
@@ -162,31 +201,15 @@ class DAGKTModelData(QuestionModelData):
 
         return correct_rates
 
-    def _compute_attempt_counts(self, user_sequence: np.ndarray) -> np.ndarray:
-        """计算每个学生对每题的累计尝试次数。
-
-        对每个学生遍历序列，统计在当前时间步之前已经做过同一题的次数。
-        结果归一化到 [0, 1]。
+    def _normalize_attempt_counts(self, attempt_counts: np.ndarray) -> np.ndarray:
+        """归一化 attempt_count 到 [0, 1]。
 
         Args:
-            user_sequence: 用户问题序列 [num_users, max_seq_len]
+            attempt_counts: 原始尝试次数 [num_users, max_seq_len]
 
         Returns:
             归一化的尝试次数 [num_users, max_seq_len]
         """
-        num_users, seq_len = user_sequence.shape
-        attempt_counts = np.zeros((num_users, seq_len), dtype=np.float32)
-
-        for u in range(num_users):
-            question_seen: dict[int, int] = {}
-            for t in range(seq_len):
-                q = user_sequence[u, t]
-                if q == 0:  # padding 位置跳过
-                    continue
-                attempt_counts[u, t] = question_seen.get(q, 0)
-                question_seen[q] = question_seen.get(q, 0) + 1
-
-        # 归一化到 [0, 1]
         max_attempts = attempt_counts.max()
         if max_attempts > 0:
             attempt_counts = attempt_counts / max_attempts
