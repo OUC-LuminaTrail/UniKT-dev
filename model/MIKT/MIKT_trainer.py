@@ -131,6 +131,7 @@ class MIKTTrainer(BaseTrainer):
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
+            max_clip_grad_norm=args.grad_clip,
             early_stopping=early_stopping_cfg,
         ).with_experiment(
             exp_manager=exp_manager,

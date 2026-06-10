@@ -45,12 +45,6 @@ class MIKT(nn.Module):
         self.skill_embed = nn.Parameter(torch.rand(skill_max, d))
         nn.init.xavier_uniform_(self.skill_embed)
 
-        self.var = nn.Parameter(torch.rand(pro_max, d))
-        self.change = nn.Parameter(torch.rand(pro_max, 1))
-
-        self.pos_embed = nn.Parameter(torch.rand(max_seq, d))
-        nn.init.xavier_uniform_(self.pos_embed)
-
         self.skill_state = nn.Parameter(torch.rand(skill_max, state_d))
         self.time_state = nn.Parameter(torch.rand(max_seq, state_d))
         self.all_state = nn.Parameter(torch.rand(1, state_d))
@@ -63,7 +57,6 @@ class MIKT(nn.Module):
         )
 
         self.ans_embed = nn.Embedding(2, d)
-        self.lstm = nn.LSTM(2 * d, d, batch_first=True)
 
         self.now_obtain = nn.Sequential(
             nn.Linear(d, state_d),
@@ -72,26 +65,17 @@ class MIKT(nn.Module):
             nn.Tanh(),
         )
 
-        self.pro_diff_embed = nn.Parameter(torch.rand(pro_max, d))
         self.pro_diff = nn.Embedding(pro_max, 1)
 
         self.pro_linear = nn.Linear(d, d)
         self.skill_linear = nn.Linear(d, d)
         self.pro_change = nn.Linear(d, d)
 
-        self.pro_guess = nn.Embedding(pro_max, 1)
-        self.pro_divide = nn.Embedding(pro_max, 1)
-
         self.pro_ability = nn.Sequential(
             nn.Linear(3 * d, d),
             nn.ReLU(),
             nn.Linear(d, 1),
         )
-
-        self.obtain1_linear = nn.Linear(d, d)
-        self.obtain2_linear = nn.Linear(d, d)
-
-        self.pro_diff_judge = nn.Linear(d, 1)
 
         self.all_obtain = nn.Linear(d, d)
 
@@ -100,13 +84,6 @@ class MIKT(nn.Module):
             nn.ReLU(),
             nn.Dropout(p),
             nn.Linear(d, d),
-        )
-
-        self.do_attn = nn.Sequential(
-            nn.Linear(2 * d, d),
-            nn.ReLU(),
-            nn.Dropout(p),
-            nn.Linear(d, 1),
         )
 
         self.predict_attn = nn.Linear(3 * d, d)
@@ -249,7 +226,6 @@ class MIKT(nn.Module):
             now_ability = torch.sigmoid(
                 self.pro_ability(torch.cat([now_need_state, now_pro_embed], dim=-1))
             )
-            now_diff = F.embedding(now_pro, pro_diff)
             now_diff = F.embedding(now_pro, pro_diff)
 
             now_output = torch.sigmoid(5 * (now_ability - now_diff))
