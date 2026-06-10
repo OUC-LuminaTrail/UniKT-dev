@@ -34,6 +34,9 @@ class MIKT(nn.Module):
         d = args.embed_dim
         state_d = args.state_dim
         p = args.dropout
+        assert d == state_d, (
+            f"MIKT requires embed_dim == state_dim, got {d} != {state_d}"
+        )
 
         self.pro_max = pro_max
         self.skill_max = skill_max
@@ -105,7 +108,6 @@ class MIKT(nn.Module):
 
         Returns:
             predictions: 预测概率 [B, S-1]
-            contrast_loss: 对比损失（始终为0）
         """
         device = question.device
 
@@ -255,6 +257,4 @@ class MIKT(nn.Module):
 
         P = torch.vstack(res_p).T
 
-        contrast_loss = torch.tensor(0.0, device=device)
-
-        return P, contrast_loss
+        return P

@@ -155,9 +155,7 @@ class MIKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        y_hat_full, contrast_loss = self.model(
-            sequence, response, mask, self.question_skill_matrix
-        )
+        y_hat_full = self.model(sequence, response, mask, self.question_skill_matrix)
 
         shifted_response = response[:, 1:]
         shifted_mask = mask[:, 1:]
@@ -178,14 +176,4 @@ class MIKTTrainer(BaseTrainer):
             "y_prob": y_hat,
         }
 
-        if contrast_loss.item() != 0:
-            result["contrast_loss"] = contrast_loss
-
         return result
-
-    def _compute_loss(self, outputs: dict) -> torch.Tensor:
-        """计算损失，包含 BCE 损失和对比损失"""
-        bce_loss = self.loss(outputs["y_hat"], outputs["y_label"])
-        if "contrast_loss" in outputs:
-            return bce_loss + outputs["contrast_loss"]
-        return bce_loss
