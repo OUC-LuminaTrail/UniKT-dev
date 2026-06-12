@@ -184,9 +184,6 @@ class DeepIRTTrainer(BaseTrainer):
 
         y_hat_full = self.model(sequence, response, mask)
 
-        # PyKT DeepIRT trains model(cc, cr) with y[:, 1:] against rshft.
-        # The base helper's skip_first=True path would use y[:, :-1], which
-        # is the wrong alignment for DKVMN-style same-position predictions.
         valid_mask = mask[:, 1:] & mask[:, :-1]
         y_hat = torch.masked_select(y_hat_full[:, 1:], valid_mask)
         y_label = torch.masked_select(response.float()[:, 1:], valid_mask)

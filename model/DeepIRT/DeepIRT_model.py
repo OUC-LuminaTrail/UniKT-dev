@@ -30,7 +30,6 @@ class DeepIRT(nn.Module):
         if emb_type != "qid":
             raise ValueError("DeepIRT currently supports only emb_type='qid'.")
 
-        self.model_name = "deep_irt"
         self.num_c = num_c
         self.dim_s = dim_s
         self.size_m = size_m
