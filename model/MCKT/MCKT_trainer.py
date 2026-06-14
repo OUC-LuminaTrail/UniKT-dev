@@ -195,7 +195,6 @@ class MCKTTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            use_swanlab=getattr(args, "use_swanlab", True),
             model_name="MCKT",
             dataset_name=getattr(args, "dataset", ""),
             skip_test=getattr(args, "skip_test", False),
