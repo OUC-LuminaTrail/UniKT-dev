@@ -123,16 +123,16 @@
         </transition>
         <el-table
           ref="queueTableRef"
-          :data="queueItems"
+          :data="paginatedQueueItems"
           row-key="id"
           size="small"
           class="task-table"
           @selection-change="handleQueueSelectionChange"
         >
-          <el-table-column type="selection" width="45" />
+          <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column label="位置" width="70">
             <template #default="{ $index }">
-              <span class="pos-badge">#{{ $index + 1 }}</span>
+              <span class="pos-badge">#{{ (queuePage - 1) * queuePageSize + $index + 1 }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="id" label="ID" width="70" sortable />
@@ -164,6 +164,16 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-pagination
+          v-if="queueItems.length > queuePageSize"
+          class="table-pagination"
+          v-model:current-page="queuePage"
+          v-model:page-size="queuePageSize"
+          :total="queueItems.length"
+          :page-sizes="[10, 20, 50]"
+          layout="total, sizes, prev, pager, next"
+          size="small"
+        />
       </template>
     </template>
 
@@ -224,6 +234,11 @@
             <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="finished_at" label="完成时间" width="170" sortable>
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatDateTime(row.finished_at) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="90" align="right">
           <template #default="{ row }">
             <div class="action-group">
@@ -280,6 +295,8 @@ const page = ref(1)
 const pageSize = ref(20)
 const runningPage = ref(1)
 const runningPageSize = ref(20)
+const queuePage = ref(1)
+const queuePageSize = ref(20)
 
 const selectedTasks = ref<TaskInfo[]>([])
 const selectedRunningTasks = ref<TaskInfo[]>([])
@@ -358,6 +375,10 @@ const allDataQuery = useQuery({
 const tasks = computed(() => allDataQuery.data.value?.tasks ?? [])
 const runningTasks = computed(() => allDataQuery.data.value?.runningTasks ?? [])
 const queueItems = computed(() => allDataQuery.data.value?.queueItems ?? [])
+const paginatedQueueItems = computed(() => {
+  const start = (queuePage.value - 1) * queuePageSize.value
+  return queueItems.value.slice(start, start + queuePageSize.value)
+})
 const total = computed(() => allDataQuery.data.value?.total ?? 0)
 const runningTotal = computed(() => allDataQuery.data.value?.runningTotal ?? 0)
 const loading = computed(() => allDataQuery.isPending.value)
@@ -370,6 +391,7 @@ const switchTab = (tab: string) => {
   activeTab.value = tab
   page.value = 1
   runningPage.value = 1
+  queuePage.value = 1
   selectedTasks.value = []
   selectedRunningTasks.value = []
   selectedQueueItems.value = []
