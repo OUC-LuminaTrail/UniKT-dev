@@ -56,7 +56,7 @@ def list_tasks(
     with SessionLocal() as session:
         stmt = select(Task).order_by(
             Task.finished_at.is_(None).desc(),  # active tasks (null finished_at) first
-            desc(Task.finished_at),             # then by completion time, most recent first
+            desc(Task.finished_at),  # then by completion time, most recent first
         )
         if status:
             stmt = stmt.where(Task.status == status)
