@@ -33,7 +33,26 @@
           <span class="divider-label">运行中</span>
           <span class="divider-count">{{ runningTasks.length }}</span>
         </div>
-        <el-table :data="runningTasks" size="small" class="task-table" :default-sort="{ prop: 'id', order: 'ascending' }">
+        <transition name="batch-bar">
+          <div v-if="selectedRunningTasks.length > 0" class="batch-bar">
+            <span class="batch-info">已选择 <strong>{{ selectedRunningTasks.length }}</strong> 项</span>
+            <button class="batch-stop-btn" @click="handleBatchStop">
+              <el-icon :size="14"><SwitchButton /></el-icon>
+              批量停止
+            </button>
+            <button class="batch-clear-btn" @click="clearRunningSelection">取消选择</button>
+          </div>
+        </transition>
+        <el-table
+          ref="runningTableRef"
+          :data="runningTasks"
+          row-key="id"
+          size="small"
+          class="task-table"
+          :default-sort="{ prop: 'id', order: 'ascending' }"
+          @selection-change="handleRunningSelectionChange"
+        >
+          <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column prop="id" label="ID" width="70" sortable />
           <el-table-column label="名称" min-width="160">
             <template #default="{ row }">
@@ -92,10 +111,28 @@
           <span class="divider-label">排队中</span>
           <span class="divider-count">{{ queueItems.length }}</span>
         </div>
-        <el-table :data="queueItems" size="small" class="task-table">
+        <transition name="batch-bar">
+          <div v-if="selectedQueueItems.length > 0" class="batch-bar">
+            <span class="batch-info">已选择 <strong>{{ selectedQueueItems.length }}</strong> 项</span>
+            <button class="batch-cancel-btn" @click="handleBatchCancelQueue">
+              <el-icon :size="14"><Delete /></el-icon>
+              批量取消
+            </button>
+            <button class="batch-clear-btn" @click="clearQueueSelection">取消选择</button>
+          </div>
+        </transition>
+        <el-table
+          ref="queueTableRef"
+          :data="paginatedQueueItems"
+          row-key="id"
+          size="small"
+          class="task-table"
+          @selection-change="handleQueueSelectionChange"
+        >
+          <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column label="位置" width="70">
             <template #default="{ $index }">
-              <span class="pos-badge">#{{ $index + 1 }}</span>
+              <span class="pos-badge">#{{ (queuePage - 1) * queuePageSize + $index + 1 }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="id" label="ID" width="70" sortable />
@@ -127,6 +164,16 @@
             </template>
           </el-table-column>
         </el-table>
+        <el-pagination
+          v-if="queueItems.length > queuePageSize"
+          class="table-pagination"
+          v-model:current-page="queuePage"
+          v-model:page-size="queuePageSize"
+          :total="queueItems.length"
+          :page-sizes="[10, 20, 50]"
+          layout="total, sizes, prev, pager, next"
+          size="small"
+        />
       </template>
     </template>
 
@@ -187,6 +234,11 @@
             <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="finished_at" label="完成时间" width="170" sortable>
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatDateTime(row.finished_at) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="90" align="right">
           <template #default="{ row }">
             <div class="action-group">
@@ -243,9 +295,15 @@ const page = ref(1)
 const pageSize = ref(20)
 const runningPage = ref(1)
 const runningPageSize = ref(20)
+const queuePage = ref(1)
+const queuePageSize = ref(20)
 
 const selectedTasks = ref<TaskInfo[]>([])
+const selectedRunningTasks = ref<TaskInfo[]>([])
+const selectedQueueItems = ref<QueueItem[]>([])
 const otherTableRef = ref<InstanceType<typeof ElTable>>()
+const runningTableRef = ref<InstanceType<typeof ElTable>>()
+const queueTableRef = ref<InstanceType<typeof ElTable>>()
 
 const tabs = [
   { label: '全部', value: 'all' },
@@ -317,6 +375,10 @@ const allDataQuery = useQuery({
 const tasks = computed(() => allDataQuery.data.value?.tasks ?? [])
 const runningTasks = computed(() => allDataQuery.data.value?.runningTasks ?? [])
 const queueItems = computed(() => allDataQuery.data.value?.queueItems ?? [])
+const paginatedQueueItems = computed(() => {
+  const start = (queuePage.value - 1) * queuePageSize.value
+  return queueItems.value.slice(start, start + queuePageSize.value)
+})
 const total = computed(() => allDataQuery.data.value?.total ?? 0)
 const runningTotal = computed(() => allDataQuery.data.value?.runningTotal ?? 0)
 const loading = computed(() => allDataQuery.isPending.value)
@@ -329,7 +391,10 @@ const switchTab = (tab: string) => {
   activeTab.value = tab
   page.value = 1
   runningPage.value = 1
+  queuePage.value = 1
   selectedTasks.value = []
+  selectedRunningTasks.value = []
+  selectedQueueItems.value = []
   sessionStorage.setItem('taskListTab', tab)
   router.replace({ query: tab !== 'running' ? { tab } : {} })
 }
@@ -427,6 +492,59 @@ const handleBatchDelete = async () => {
   await Promise.all(selectedTasks.value.map(t => deleteTask(t.id)))
   ElMessage.success(`已删除 ${count} 个任务`)
   clearSelection()
+  invalidateTasks()
+}
+
+// --- Running tasks multi-select ---
+const handleRunningSelectionChange = (rows: TaskInfo[]) => {
+  selectedRunningTasks.value = rows
+}
+
+const clearRunningSelection = () => {
+  runningTableRef.value?.clearSelection()
+}
+
+const handleBatchStop = async () => {
+  const count = selectedRunningTasks.value.length
+  await ElMessageBox.confirm(
+    `确定停止选中的 ${count} 个运行中任务？正在进行的训练进度将丢失。`,
+    '批量停止',
+    {
+      confirmButtonText: '停止',
+      cancelButtonText: '取消',
+      type: 'warning',
+    }
+  )
+  ElMessage.success('已发送停止信号')
+  await Promise.all(selectedRunningTasks.value.map(t => stopTask(t.id)))
+  ElMessage.success(`已停止 ${count} 个任务`)
+  clearRunningSelection()
+  setTimeout(invalidateTasks, 2000)
+}
+
+// --- Queue multi-select ---
+const handleQueueSelectionChange = (rows: QueueItem[]) => {
+  selectedQueueItems.value = rows
+}
+
+const clearQueueSelection = () => {
+  queueTableRef.value?.clearSelection()
+}
+
+const handleBatchCancelQueue = async () => {
+  const count = selectedQueueItems.value.length
+  await ElMessageBox.confirm(
+    `确定取消选中的 ${count} 个排队任务？`,
+    '批量取消',
+    {
+      confirmButtonText: '取消任务',
+      cancelButtonText: '返回',
+      type: 'warning',
+    }
+  )
+  await Promise.all(selectedQueueItems.value.map(t => stopTask(t.id)))
+  ElMessage.success(`已取消 ${count} 个排队任务`)
+  clearQueueSelection()
   invalidateTasks()
 }
 </script>
@@ -750,6 +868,48 @@ html.dark .btn-primary:hover {
 }
 
 .batch-delete-btn:hover {
+  background: rgba(248, 81, 73, 0.15);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.batch-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  background: rgba(210, 153, 34, 0.08);
+  color: var(--accent-orange);
+  border: 1px solid rgba(210, 153, 34, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.batch-stop-btn:hover {
+  background: rgba(210, 153, 34, 0.15);
+  border-color: rgba(210, 153, 34, 0.4);
+}
+
+.batch-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  background: rgba(248, 81, 73, 0.08);
+  color: var(--accent-red);
+  border: 1px solid rgba(248, 81, 73, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.batch-cancel-btn:hover {
   background: rgba(248, 81, 73, 0.15);
   border-color: rgba(248, 81, 73, 0.4);
 }

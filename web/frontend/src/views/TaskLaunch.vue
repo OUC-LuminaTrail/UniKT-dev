@@ -1,6 +1,6 @@
 <template>
   <div class="task-launch">
-    <div class="task-launch-body">
+    <div ref="bodyRef" class="task-launch-body">
       <div class="page-header">
         <h1 class="page-title">新建训练任务</h1>
         <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
@@ -118,7 +118,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, h } from 'vue'
+import { ref, computed, watch, h, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -200,6 +200,9 @@ function onSelectConfirm() {
   localStorage.setItem(STORAGE_KEY_ENV, envId.value)
   localStorage.setItem(STORAGE_KEY_DATASET, dataset.value)
   step.value = 'params'
+  nextTick(() => {
+    bodyRef.value?.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior })
+  })
 }
 
 const datasetMetaQuery = useQuery({
@@ -306,6 +309,7 @@ async function onStartTraining() {
 }
 
 const initDone = ref(false)
+const bodyRef = ref<HTMLElement | null>(null)
 const selectionStepRef = ref<InstanceType<typeof SelectionStep> | null>(null)
 
 async function refreshAll() {

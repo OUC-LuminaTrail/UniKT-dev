@@ -54,7 +54,10 @@ def list_tasks(
     from fastapi_pagination.ext.sqlalchemy import paginate
 
     with SessionLocal() as session:
-        stmt = select(Task).order_by(desc(Task.created_at))
+        stmt = select(Task).order_by(
+            Task.finished_at.is_(None).desc(),  # active tasks (null finished_at) first
+            desc(Task.finished_at),  # then by completion time, most recent first
+        )
         if status:
             stmt = stmt.where(Task.status == status)
         return paginate(session, stmt, params=params)
