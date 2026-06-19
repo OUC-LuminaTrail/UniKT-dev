@@ -137,7 +137,7 @@ class KDDCup2010Base(DataSource):
         )
         min_ts = data.select(pl.col("timestamp").min()).item()
         data = data.with_columns(
-            ((pl.col("timestamp") - min_ts) / 1_000).cast(pl.Int64).alias("timestamp")
+            (pl.col("timestamp") - min_ts).alias("timestamp")
         ).drop(["raw_timestamp", "raw_label"])
 
         data = data.sort(["user", "timestamp", "row_idx"]).drop("row_idx")
