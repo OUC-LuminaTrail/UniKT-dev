@@ -234,9 +234,7 @@ class SQGKTTrainer(BaseTrainer):
         )  # [B, S]
 
         # 提取有效位置的预测和标签（跳过第一个时间步）
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=True
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

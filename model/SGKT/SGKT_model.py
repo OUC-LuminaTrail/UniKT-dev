@@ -515,4 +515,4 @@ class SGKT(nn.Module):
             # Extract skill embeddings: feature_embedding.weight[:num_skills]
             skill_embeddings = self.feature_embedding.weight[: self.num_skills]
             return logits, skill_embeddings, output_series
-        return logits
+        return F.pad(logits, (0, 1))  # [B, S-1] → [B, S]

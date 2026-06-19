@@ -270,14 +270,7 @@ class GKTTrainer(BaseTrainer):
         y_hat_full = self.model(sequence, response, mask)
 
         # 提取有效位置的预测和标签
-        # 模型输出 [B, S-1] 已经是 shifted 预测
-        # 所以需要将 response 和 mask 也 shift 来匹配: [B, S] -> [B, S-1]
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full,
-            response[:, 1:],  # Shift to match predictions
-            mask[:, 1:],  # Shift to match predictions
-            skip_first=False,
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
@@ -316,21 +309,20 @@ class GKTTrainer(BaseTrainer):
         true_labels = self._move_tensor_to_device(true_labels)
 
         # 模型前向传播
-        # 输出形状: [B, S-1]，其中 y[:, t] 预测 response[:, t+1]
+        # 输出形状: [B, S]，其中 y[:, t] 预测 response[:, t+1]，y[:, S-1]=0
         y_hat_full = self.model(sequence, response, mask)
 
         # ==================== 关键：GKT 预测对齐 ====================
-        # 模型输出 [B, S-1]：y[:, t] 预测 response[:, t+1]
-        # 所以 y_hat_full[:, t] 对应 true_labels[:, t+1]
-        # 需要对齐：y_hat_full 对应 true_labels[:, 1:]
+        # 模型输出 [B, S]：y[:, t] 预测 response[:, t+1]，尾部补零
+        # y_hat_full[:, :-1] 对应 true_labels[:, 1:]
 
-        # y_hat_full 已经是 [B, S-1]，对应 true_labels[:, 1:]
+        true_labels_aligned = true_labels[:, 1:]  # [B, S-1]
         true_labels_aligned = true_labels[:, 1:]  # [B, S-1]
         mask_aligned = mask[:, 1:]  # [B, S-1]
         group_id_aligned = late_group_id[:, 1:]  # [B, S-1]
 
         # 使用 mask 筛选需要预测的位置
-        y_hat = torch.masked_select(y_hat_full, mask_aligned)
+        y_hat = torch.masked_select(y_hat_full[:, :-1], mask_aligned)
         y_label = torch.masked_select(true_labels_aligned, mask_aligned).float()
         group_ids = torch.masked_select(group_id_aligned, mask_aligned)
 

@@ -260,24 +260,16 @@ class SGKTTrainer(BaseTrainer):
             hist_neighbor_index = self._move_tensor_to_device(hist_neighbor_index)
 
         # Model forward pass
-        # Output at time t predicts label at time t+1
         y_hat_full = self.model(
             user_sequence=sequence,
             user_response=response,
             user_mask=mask,
             hrg_data=self.hrg_data,
-            hist_neighbor_index=hist_neighbor_index,  # Pass pre-computed fallback indices
-        )  # [B, S-1]
+            hist_neighbor_index=hist_neighbor_index,
+        )  # [B, S]
 
-        # Extract valid predictions
-        # Model already returns [B, S-1] (shifted predictions)
-        # So we shift response and mask to match: [B, S] -> [B, S-1]
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full,
-            response[:, 1:],  # Shift to match predictions
-            mask[:, 1:],  # Shift to match predictions
-            skip_first=False,
-        )
+        # 提取有效位置的预测和标签
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         # Handle empty batch
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

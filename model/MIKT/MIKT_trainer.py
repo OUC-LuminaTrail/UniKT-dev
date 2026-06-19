@@ -157,12 +157,7 @@ class MIKTTrainer(BaseTrainer):
 
         y_hat_full = self.model(sequence, response, mask, self.question_skill_matrix)
 
-        shifted_response = response[:, 1:]
-        shifted_mask = mask[:, 1:]
-
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, shifted_response, shifted_mask, skip_first=False
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 

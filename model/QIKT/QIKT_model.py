@@ -195,7 +195,7 @@ class QIKT(nn.Module):
         y_concept_all = self._avg_fusion_concepts(y_concept_all_raw, c_shift)
 
         # 从 [B, S-1] 填充到 [B, S]，末尾补零
-        # 约定：position t 预测 response[t+1]，配合 skip_first=True 使用
+        # 约定：position t 预测 response[t+1]
         dummy = torch.zeros(B, 1, device=question.device)
         return {
             "y_question_next": torch.cat([y_question_next, dummy], dim=1),

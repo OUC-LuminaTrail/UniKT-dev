@@ -534,35 +534,27 @@ class BaseTrainer(ABC):
         y_hat_full: torch.Tensor,
         response: torch.Tensor,
         mask: torch.Tensor,
-        skip_first: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        提取有效位置的预测和标签，统一处理序列对齐问题
+        提取有效位置的预测和标签。
+
+        约定：y_hat_full[t] 预测 response[t+1]。
+        valid_mask = mask[:, :-1] & mask[:, 1:]，即输入上下文和预测目标都必须有效。
 
         参数:
             y_hat_full: 模型输出的完整预测 [B, S]
             response: 响应标签 [B, S]
             mask: 有效位置掩码 [B, S]
-            skip_first: 是否跳过第一个时间步（模型在t预测t+1）
 
         返回:
             y_hat: 有效位置的预测值
             y_label: 有效位置的标签
             valid_mask: 有效掩码
         """
-        # 根据需求决定是否跳过第一个时间步
-        if skip_first:
-            y_hat_seq = y_hat_full[:, :-1]
-            y_label_seq = response.float()[:, 1:]
-            mask_curr = mask[:, :-1]
-            mask_next = mask[:, 1:]
-            valid_mask = mask_curr & mask_next
-        else:
-            y_hat_seq = y_hat_full
-            y_label_seq = response.float()
-            valid_mask = mask
+        y_hat_seq = y_hat_full[:, :-1]
+        y_label_seq = response.float()[:, 1:]
+        valid_mask = mask[:, :-1] & mask[:, 1:]
 
-        # 使用 mask 选择有效位置
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
         y_label = torch.masked_select(y_label_seq, valid_mask)
 

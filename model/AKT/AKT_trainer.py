@@ -248,10 +248,13 @@ class AKTTrainer(BaseTrainer):
             sequence, response, mask, pid_data
         )  # [B, S]
 
-        # 提取有效位置的预测和标签
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=False
+        # 归一化：y[t] 预测 response[t] → y[t] 预测 response[t+1]
+        y_norm = torch.cat(
+            [y_hat_full[:, 1:], torch.zeros_like(y_hat_full[:, :1])], dim=1
         )
+
+        # 提取有效位置的预测和标签
+        y_hat, y_label, _ = self._extract_valid_predictions(y_norm, response, mask)
 
         # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

@@ -3,6 +3,7 @@
 import copy
 
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 
@@ -158,4 +159,5 @@ class SAKT(nn.Module):
         for block in self.blocks:
             hidden = block(current_emb, hidden, hidden)
 
-        return torch.sigmoid(self.pred(self.dropout_layer(hidden))).squeeze(-1)
+        y = torch.sigmoid(self.pred(self.dropout_layer(hidden))).squeeze(-1)
+        return F.pad(y, (0, 1))  # [B, S-1] → [B, S]

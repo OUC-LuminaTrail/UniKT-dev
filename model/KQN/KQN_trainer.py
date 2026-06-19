@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
 from utils.core import TRAINERS, get_logger
@@ -215,12 +216,8 @@ class KQNTrainer(BaseTrainer):
         )
 
         y_hat_full = self.model(current_concept, current_response, next_concept)
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full,
-            next_response,
-            target_mask,
-            skip_first=False,
-        )
+        y_norm = F.pad(y_hat_full, (0, 1))  # [B, S-1] → [B, S]
+        y_hat, y_label, _ = self._extract_valid_predictions(y_norm, response, mask)
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
@@ -257,12 +254,8 @@ class KQNTrainer(BaseTrainer):
         y_hat_full = self.model(current_concept, current_response, next_concept)
 
         target_mask = mask[:, 1:]
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full,
-            true_labels[:, 1:],
-            target_mask,
-            skip_first=False,
-        )
+        y_hat = torch.masked_select(y_hat_full, target_mask)
+        y_label = torch.masked_select(true_labels[:, 1:], target_mask)
         group_ids = torch.masked_select(late_group_id[:, 1:], target_mask)
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

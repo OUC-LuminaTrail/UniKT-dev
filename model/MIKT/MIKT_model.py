@@ -257,4 +257,4 @@ class MIKT(nn.Module):
 
         P = torch.vstack(res_p).T
 
-        return P
+        return F.pad(P, (0, 1))  # [B, S-1] → [B, S]

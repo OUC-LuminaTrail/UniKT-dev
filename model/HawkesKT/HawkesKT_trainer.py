@@ -133,14 +133,11 @@ class HawkesKTTrainer(BaseTrainer):
 
         y_hat_full = self.model(skill, problem, time, label)
 
-        # Model predicts label[:,t] from all previous interactions
-        y_hat = y_hat_full[:, 1:]
-        y_label = label[:, 1:].float()
-        valid_mask = mask[:, 1:]
-
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat, y_label, valid_mask, skip_first=False
+        # 归一化：y[t] 预测 label[t] → y[t] 预测 label[t+1]
+        y_norm = torch.cat(
+            [y_hat_full[:, 1:], torch.zeros_like(y_hat_full[:, :1])], dim=1
         )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_norm, label, mask)
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)

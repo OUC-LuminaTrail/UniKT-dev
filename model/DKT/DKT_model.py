@@ -64,7 +64,7 @@ class DKT(nn.Module):
         target_concepts = sequence[:, 1:]
         # 使用 one-hot 编码选择对应概念的预测
         y = (y[:, :-1] * one_hot(target_concepts.long(), self.num_c)).sum(-1)
-        # 在开头填充一个 0，使输出形状为 [B, S]
-        y = torch.cat([torch.zeros_like(y[:, :1]), y], dim=1)
+        # 约定：位置 t 预测 response[t+1]，末尾补零对齐到 [B, S]
+        y = torch.cat([y, torch.zeros_like(y[:, :1])], dim=1)
 
         return y

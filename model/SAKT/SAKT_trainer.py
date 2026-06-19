@@ -159,12 +159,7 @@ class SAKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask)
 
         y_hat_full = self.model(sequence, response)
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full,
-            response[:, 1:],
-            mask[:, :-1].bool() & mask[:, 1:].bool(),
-            skip_first=False,
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
@@ -194,12 +189,8 @@ class SAKTTrainer(BaseTrainer):
 
         y_hat_full = self.model(sequence, response)
         target_mask = mask[:, 1:].bool()
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full,
-            true_labels[:, 1:],
-            target_mask,
-            skip_first=False,
-        )
+        y_hat = torch.masked_select(y_hat_full[:, :-1], target_mask)
+        y_label = torch.masked_select(true_labels[:, 1:], target_mask)
         group_ids = torch.masked_select(late_group_id[:, 1:], target_mask)
 
         return {

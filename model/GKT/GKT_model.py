@@ -431,4 +431,4 @@ class GKT(nn.Module):
         # 堆叠预测结果
         pred_res = torch.stack(pred_list, dim=1)  # [batch_size, seq_len - 1]
 
-        return pred_res
+        return F.pad(pred_res, (0, 1))  # [B, S-1] → [B, S]

@@ -3,6 +3,7 @@
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
 from utils.core import TRAINERS, get_logger
@@ -210,8 +211,7 @@ class MCKTTrainer(BaseTrainer):
         last_ans = response[:, :-1]
         next_problem = question[:, 1:]
         next_ans = response[:, 1:]
-        target_mask = mask[:, :-1] & mask[:, 1:]
-        return last_problem, last_ans, next_problem, next_ans, target_mask
+        return last_problem, last_ans, next_problem, next_ans
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -221,15 +221,15 @@ class MCKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        last_problem, last_ans, next_problem, next_ans, target_mask = (
-            self._build_mckt_inputs(question, response, mask)
+        last_problem, last_ans, next_problem, next_ans = self._build_mckt_inputs(
+            question, response, mask
         )
         y_hat_full, state_loss, pro_loss, react_loss = self.model(
             last_problem, last_ans, next_problem, next_ans
         )
 
-        y_hat = torch.masked_select(y_hat_full, target_mask)
-        y_label = torch.masked_select(next_ans.float(), target_mask)
+        y_norm = F.pad(y_hat_full, (0, 1))  # [B, S-1] → [B, S]
+        y_hat, y_label, _ = self._extract_valid_predictions(y_norm, response, mask)
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 

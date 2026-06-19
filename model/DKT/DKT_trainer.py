@@ -177,12 +177,11 @@ class DKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask)
 
         # 模型前向传播
+        # 模型在时刻 t 的输出预测的是 t+1 的标签
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
         # 提取有效位置的预测和标签
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=False
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
@@ -210,9 +209,9 @@ class DKTTrainer(BaseTrainer):
         - true_labels: [历史标签, 真实标签]  # 用于评估
 
         DKT 预测语义：
-        - y_hat[:, t] 预测的是 response[t]
-        - y_hat[:, 0] = 0（无有效预测）
-        - 铍要对齐：y_hat[:, 1:] 对应 true_labels[:, 1:]
+        - y_hat[:, t] 预测的是 response[t+1]
+        - y_hat[:, S-1] = 0（尾部补零，无有效预测）
+        - 需要对齐：y_hat[:, :-1] 对应 true_labels[:, 1:]
         """
         sequence, response, mask, late_group_id, true_labels, _ = batch_data
 
@@ -230,7 +229,7 @@ class DKTTrainer(BaseTrainer):
         # 但 y_hat[:, 0] = 0（无有效预测）
         # 所以有效预测是 y_hat[:, 1:]，对应 true_labels[:, 1:]
 
-        y_hat_aligned = y_hat_full[:, 1:]  # [B, S-1]，有效预测
+        y_hat_aligned = y_hat_full[:, :-1]  # [B, S-1]，有效预测（跳过尾部补零）
         true_labels_aligned = true_labels[:, 1:]  # [B, S-1]，对应的真实标签
         mask_aligned = mask[:, 1:]  # [B, S-1]，对应的 mask
         group_id_aligned = late_group_id[:, 1:]  # [B, S-1]，对应的 group_id
