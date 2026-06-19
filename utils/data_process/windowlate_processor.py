@@ -22,10 +22,12 @@ class WindowlateProcessor:
     - 历史位置仅作为上下文，不参与评估（mask=0）
     - 目标位置参与评估（mask=1）
     - 当序列长度超过 max_seq_len 时，仅保留"以目标位置结尾"的最后一个窗口
+    - 原样保留源 sequence_data 中的所有额外列（目标位保留真实值）
     """
 
-    # ===== 类常量：数据结构定义 =====
-    DTYPE_MAP: dict[str, pl.DataType] = {
+    # ===== 数据结构定义 =====
+    # 核心输出列：由源数据特殊映射而来，不作为额外列重复保留。
+    CORE_DTYPE_MAP: dict[str, pl.DataType] = {
         "sample_id": pl.Int64,
         "position": pl.Int32,
         "skill": pl.Int32,
@@ -37,9 +39,22 @@ class WindowlateProcessor:
         "true_label": pl.Int8,
         "fold": pl.Int32,
     }
-    COLUMN_ORDER: list[str] = list(DTYPE_MAP.keys())
-    SAMPLE_COLUMNS: list[str] = [col for col in COLUMN_ORDER if col != "fold"]
+    CORE_SAMPLE_COLUMNS: list[str] = [col for col in CORE_DTYPE_MAP if col != "fold"]
+    # 源数据中已被映射为核心列的列；其余列将原样保留到输出。
+    RESERVED_COLUMNS: set[str] = {"user", "question", "label", "skills", "fold"}
     CHUNK_ROW_LIMIT: int = 500_000
+
+    # 每次 build 时配置：需要原样保留的额外源列及其 dtype。
+    EXTRA_COLUMNS: list[str] = []
+    EXTRA_DTYPES: dict[str, pl.DataType] = {}
+
+    @classmethod
+    def _init_worker(
+        cls, extra_columns: list[str], extra_dtypes: dict[str, pl.DataType]
+    ) -> None:
+        """子进程初始化：在每个 worker 中同步额外列配置。"""
+        cls.EXTRA_COLUMNS = extra_columns
+        cls.EXTRA_DTYPES = extra_dtypes
 
     # ===== 核心算法 =====
 
@@ -67,6 +82,7 @@ class WindowlateProcessor:
         sample_id_start: int,
         group_id_start: int,
         max_seq_len: int,
+        extras: dict[str, list],
     ) -> Iterator[list[tuple]]:
         """生成单个用户的所有样本数据。
 
@@ -78,16 +94,20 @@ class WindowlateProcessor:
             sample_id_start: 起始样本ID
             group_id_start: 起始组ID
             max_seq_len: 最大序列长度
+            extras: 需原样保留的额外源列，键为列名，值为每个交互的取值
 
         Yields:
             list[tuple]: 完整样本的所有行，每行格式为
-                (sample_id, position, skill, response, mask, user_id, group_id, true_label)
+                (sample_id, position, skill, response, mask, user_id, group_id,
+                 true_label, *extra_values)
         """
-        # 展开技能和标签
+        extra_columns = cls.EXTRA_COLUMNS
+        # 展开技能、标签以及所有额外列（按技能展开，与 expanded_* 对齐）
         expanded_skills = []
         expanded_questions = []
         expanded_labels = []
         expanded_group_ids = []
+        expanded_extras: dict[str, list] = {col: [] for col in extra_columns}
         inter_boundaries = [0]
 
         for i, (q_skills, label) in enumerate(zip(skills_list, labels)):
@@ -97,6 +117,8 @@ class WindowlateProcessor:
                 expanded_questions.append(question_id)
                 expanded_labels.append(label)
                 expanded_group_ids.append(group_id_start + i)
+                for col in extra_columns:
+                    expanded_extras[col].append(extras[col][i])
             inter_boundaries.append(inter_boundaries[-1] + len(q_skills))
 
         if not expanded_skills:
@@ -114,13 +136,22 @@ class WindowlateProcessor:
                 current_question = expanded_questions[current_skill_pos]
                 current_label = expanded_labels[current_skill_pos]
                 current_group_id = expanded_group_ids[current_skill_pos]
+                current_extras = {
+                    col: expanded_extras[col][current_skill_pos]
+                    for col in extra_columns
+                }
 
-                # 统一构建预测序列：历史 + 当前技能（目标位 response 置 0 防泄漏）
+                # 统一构建预测序列：历史 + 当前技能（目标位 response 置 0 防泄漏）。
+                # 额外列在目标位保留真实值（与 true_label 一致）。
                 full_skills = expanded_skills[:history_end] + [current_skill]
                 full_questions = expanded_questions[:history_end] + [current_question]
                 full_labels = expanded_labels[:history_end] + [0]
                 full_group_ids = expanded_group_ids[:history_end] + [current_group_id]
                 full_true_labels = expanded_labels[:history_end] + [current_label]
+                full_extras = {
+                    col: expanded_extras[col][:history_end] + [current_extras[col]]
+                    for col in extra_columns
+                }
 
                 # 仅保留"以目标位结尾"的窗口
                 if len(full_skills) > max_seq_len:
@@ -129,29 +160,34 @@ class WindowlateProcessor:
                     win_labels = full_labels[-max_seq_len:]
                     win_group_ids = full_group_ids[-max_seq_len:]
                     win_true_labels = full_true_labels[-max_seq_len:]
+                    win_extras = {
+                        col: full_extras[col][-max_seq_len:] for col in extra_columns
+                    }
                 else:
                     win_skills = full_skills
                     win_questions = full_questions
                     win_labels = full_labels
                     win_group_ids = full_group_ids
                     win_true_labels = full_true_labels
+                    win_extras = full_extras
 
                 target_pos = len(win_skills) - 1
                 rows = []
                 for pos in range(len(win_skills)):
-                    rows.append(
-                        (
-                            sample_id,
-                            pos,
-                            win_skills[pos],
-                            win_questions[pos],
-                            win_labels[pos],
-                            1 if pos == target_pos else 0,
-                            user_id,
-                            win_group_ids[pos],
-                            win_true_labels[pos],
-                        )
-                    )
+                    row = [
+                        sample_id,
+                        pos,
+                        win_skills[pos],
+                        win_questions[pos],
+                        win_labels[pos],
+                        1 if pos == target_pos else 0,
+                        user_id,
+                        win_group_ids[pos],
+                        win_true_labels[pos],
+                    ]
+                    for col in extra_columns:
+                        row.append(win_extras[col][pos])
+                    rows.append(tuple(row))
                 yield rows
                 sample_id += 1
 
@@ -181,8 +217,9 @@ class WindowlateProcessor:
         writer = None
         total_rows = 0
 
-        # 初始化缓冲区
-        buffers = {col: [] for col in cls.DTYPE_MAP}
+        sample_columns = cls.CORE_SAMPLE_COLUMNS + cls.EXTRA_COLUMNS
+        # 初始化缓冲区（fold 由常量填充，不缓冲）
+        buffers = {col: [] for col in sample_columns}
 
         try:
             for (
@@ -192,6 +229,7 @@ class WindowlateProcessor:
                 questions,
                 sample_id_start,
                 group_id_start,
+                extras,
             ) in batch_users:
                 for sample_rows in cls.generate_user_samples(
                     user_id,
@@ -201,9 +239,10 @@ class WindowlateProcessor:
                     sample_id_start,
                     group_id_start,
                     max_seq_len,
+                    extras,
                 ):
                     for row in sample_rows:
-                        for i, col in enumerate(cls.SAMPLE_COLUMNS):
+                        for i, col in enumerate(sample_columns):
                             buffers[col].append(row[i])
 
                     if len(buffers["sample_id"]) >= chunk_row_limit:
@@ -231,21 +270,23 @@ class WindowlateProcessor:
         output_path: str,
     ) -> pq.ParquetWriter:
         """将缓冲区数据写入parquet文件。"""
-        chunk_df = pl.DataFrame(
-            {
-                "sample_id": np.asarray(buffers["sample_id"], dtype=np.int64),
-                "position": np.asarray(buffers["position"], dtype=np.int32),
-                "skill": np.asarray(buffers["skill"], dtype=np.int32),
-                "question": np.asarray(buffers["question"], dtype=np.int32),
-                "response": np.asarray(buffers["response"], dtype=np.int8),
-                "mask": np.asarray(buffers["mask"], dtype=np.int8),
-                "user_id": np.asarray(buffers["user_id"], dtype=np.int32),
-                "group_id": np.asarray(buffers["group_id"], dtype=np.int64),
-                "true_label": np.asarray(buffers["true_label"], dtype=np.int8),
-                "fold": np.asarray([-1] * len(buffers["sample_id"]), dtype=np.int32),
-            },
-            schema=cls.DTYPE_MAP,
-        )
+        data = {
+            "sample_id": np.asarray(buffers["sample_id"], dtype=np.int64),
+            "position": np.asarray(buffers["position"], dtype=np.int32),
+            "skill": np.asarray(buffers["skill"], dtype=np.int32),
+            "question": np.asarray(buffers["question"], dtype=np.int32),
+            "response": np.asarray(buffers["response"], dtype=np.int8),
+            "mask": np.asarray(buffers["mask"], dtype=np.int8),
+            "user_id": np.asarray(buffers["user_id"], dtype=np.int32),
+            "group_id": np.asarray(buffers["group_id"], dtype=np.int64),
+            "true_label": np.asarray(buffers["true_label"], dtype=np.int8),
+        }
+        # 额外列原样保留，交由 schema 完成 dtype 转换
+        for col in cls.EXTRA_COLUMNS:
+            data[col] = buffers[col]
+        data["fold"] = np.full(len(buffers["sample_id"]), -1, dtype=np.int32)
+
+        chunk_df = pl.DataFrame(data, schema={**cls.CORE_DTYPE_MAP, **cls.EXTRA_DTYPES})
         chunk_table = chunk_df.to_arrow()
 
         if writer is None:
@@ -287,6 +328,14 @@ class WindowlateProcessor:
         # 将技能列表映射到测试数据
         test_data = test_data.join(q_skill_map, on="question", how="inner")
         sorted_test_data = test_data.sort(["user", "timestamp"])
+
+        # 配置动态 schema：原样保留源数据中除核心映射列外的所有列
+        cls.EXTRA_COLUMNS = [
+            c for c in test_data.columns if c not in cls.RESERVED_COLUMNS
+        ]
+        cls.EXTRA_DTYPES = {c: test_data.schema[c] for c in cls.EXTRA_COLUMNS}
+        if cls.EXTRA_COLUMNS:
+            logger.debug(f"Windowlate preserving extra columns: {cls.EXTRA_COLUMNS}")
 
         # 确定worker数量
         if num_workers <= 0:
@@ -344,12 +393,14 @@ class WindowlateProcessor:
                 return group_key[0]
             return group_key
 
+        extra_columns = cls.EXTRA_COLUMNS
         user_groups = sorted_test_data.group_by("user", maintain_order=True)
         for group_key, user_df in user_groups:
             user = _normalize_group_key(group_key)
             labels = user_df["label"].to_list()
             skills_list = user_df["skills"].to_list()
             questions = user_df["question"].to_list()
+            extras = {col: user_df[col].to_list() for col in extra_columns}
 
             sample_count = cls.count_user_samples(skills_list, max_seq_len)
             user_records.append(
@@ -360,6 +411,7 @@ class WindowlateProcessor:
                     questions,
                     global_sample_id,
                     global_group_id,
+                    extras,
                 )
             )
             global_sample_id += sample_count
@@ -404,7 +456,11 @@ class WindowlateProcessor:
             ):
                 worker_results[res[0]] = res
         else:
-            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            with ProcessPoolExecutor(
+                max_workers=num_workers,
+                initializer=cls._init_worker,
+                initargs=(cls.EXTRA_COLUMNS, cls.EXTRA_DTYPES),
+            ) as executor:
                 # 提交所有任务
                 futures = {
                     executor.submit(cls.process_user_batch, inp): inp[0]
