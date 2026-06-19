@@ -1,3 +1,5 @@
+import threading
+
 from dependencies import get_python_env_manager
 from fastapi import APIRouter, Depends, HTTPException
 from schemas import ModelSchemaResponse
@@ -7,6 +9,7 @@ from services.schema_extractor import SchemaExtractor
 router = APIRouter(prefix="/api/schemas", tags=["schemas"])
 
 _extractor: SchemaExtractor | None = None
+_extractor_lock = threading.Lock()
 
 
 def _get_extractor(
@@ -14,7 +17,9 @@ def _get_extractor(
 ) -> SchemaExtractor:
     global _extractor
     if _extractor is None:
-        _extractor = SchemaExtractor(env_manager=mgr)
+        with _extractor_lock:
+            if _extractor is None:
+                _extractor = SchemaExtractor(env_manager=mgr)
     return _extractor
 
 

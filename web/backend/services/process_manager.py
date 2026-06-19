@@ -28,6 +28,7 @@ class ProcessManager:
         self._readers: dict[int, threading.Thread] = {}
         self._queue: list[int] = []
         self._max_concurrent = 1
+        self._available_slots = 1
         self._lock = threading.Lock()
 
     @property
@@ -37,8 +38,10 @@ class ProcessManager:
     @max_concurrent.setter
     def max_concurrent(self, value: int) -> None:
         with self._lock:
+            diff = max(1, value) - self._max_concurrent
             self._max_concurrent = max(1, value)
-            self._dequeue_next()
+            self._available_slots += diff
+        self._dequeue_next()
 
     @property
     def running_count(self) -> int:
@@ -49,8 +52,10 @@ class ProcessManager:
 
     def reorder_queue(self, task_ids: list[int]) -> None:
         with self._lock:
+            task_set = set(task_ids)
+            preserved = [tid for tid in self._queue if tid not in task_set]
             valid = [tid for tid in task_ids if tid in self._queue]
-            self._queue = valid
+            self._queue = valid + preserved
 
     def remove_from_queue(self, task_id: int) -> bool:
         with self._lock:
@@ -87,36 +92,51 @@ class ProcessManager:
             task.status = "pending"
             session.commit()
 
-        self._enqueue(task_id, model_name, params, env_id, custom_python_path)
+        self._enqueue(task_id)
 
     def _enqueue(
         self,
         task_id: int,
-        model_name: str,
-        params: dict,
-        env_id: str,
-        custom_python_path: str | None = None,
     ) -> None:
         with self._lock:
-            if self.running_count < self._max_concurrent:
-                self._do_launch(task_id, model_name, params, env_id, custom_python_path)
-            else:
-                self._queue.append(task_id)
+            self._queue.append(task_id)
+        self._dequeue_next()
 
     def _dequeue_next(self) -> None:
-        while self._queue and self.running_count < self._max_concurrent:
-            task_id = self._queue.pop(0)
-            with SessionLocal() as session:
-                task = session.query(Task).get(task_id)
-                if not task or task.status != "pending":
-                    continue
-                extra = task.extra_params or "{}"
-                params = json.loads(extra)
-                model_name = task.model_name
-                env_id = f"{task.env_type}:{task.env_name}"
-                custom_python_path = task.python_path or None
+        while True:
+            with self._lock:
+                if not self._queue or self._available_slots <= 0:
+                    return
+                task_id = self._queue.pop(0)
+                self._available_slots -= 1
 
-            self._do_launch(task_id, model_name, params, env_id, custom_python_path)
+            try:
+                with SessionLocal() as session:
+                    task = session.query(Task).get(task_id)
+                    if not task or task.status != "pending":
+                        if not task:
+                            with self._lock:
+                                self._queue = [
+                                    tid for tid in self._queue if tid != task_id
+                                ]
+                        with self._lock:
+                            self._available_slots += 1
+                        continue
+                    extra = task.extra_params or "{}"
+                    params = json.loads(extra)
+                    model_name = task.model_name
+                    env_id = f"{task.env_type}:{task.env_name}"
+                    custom_python_path = task.python_path or None
+
+                launched = self._do_launch(
+                    task_id, model_name, params, env_id, custom_python_path
+                )
+            except Exception:
+                launched = False
+
+            if not launched:
+                with self._lock:
+                    self._available_slots += 1
 
     def _do_launch(
         self,
@@ -125,11 +145,11 @@ class ProcessManager:
         params: dict,
         env_id: str,
         custom_python_path: str | None = None,
-    ) -> None:
+    ) -> bool:
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task:
-                return
+                return False
 
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             cli_args = self._build_cli_args(model_name, params)
@@ -146,36 +166,52 @@ class ProcessManager:
 
             project_root = str(Path(__file__).resolve().parent.parent.parent.parent)
 
-            master_fd, slave_fd = pty.openpty()
+            try:
+                master_fd, slave_fd = pty.openpty()
+            except OSError:
+                task.status = "failed"
+                task.finished_at = datetime.now()
+                session.commit()
+                return False
 
-            winsize = struct.pack("HHHH", 24, 80, 0, 0)
-            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+            try:
+                winsize = struct.pack("HHHH", 24, 80, 0, 0)
+                fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
-            env = os.environ.copy()
-            env["TERM"] = "xterm-256color"
-            env["FORCE_COLOR"] = "1"
+                env = os.environ.copy()
+                env["TERM"] = "xterm-256color"
+                env["FORCE_COLOR"] = "1"
 
-            proc = subprocess.Popen(
-                cmd,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=project_root,
-                start_new_session=True,
-                env=env,
-            )
-            os.close(slave_fd)
-
-            self._procs[task_id] = proc
-            self._master_fds[task_id] = master_fd
+                proc = subprocess.Popen(
+                    cmd,
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    cwd=project_root,
+                    start_new_session=True,
+                    env=env,
+                )
+                os.close(slave_fd)
+            except Exception:
+                os.close(slave_fd)
+                os.close(master_fd)
+                task.status = "failed"
+                task.finished_at = datetime.now()
+                session.commit()
+                return False
 
             task.pid = proc.pid
             task.status = "running"
             task.started_at = datetime.now()
             if env_type == "custom" and custom_python_path:
                 task.python_path = custom_python_path
+
+            self._procs[task_id] = proc
+            self._master_fds[task_id] = master_fd
+
             session.commit()
 
+        try:
             reader = threading.Thread(
                 target=self._read_pty,
                 args=(task_id, master_fd),
@@ -191,6 +227,24 @@ class ProcessManager:
             )
             t.start()
             self._monitors[task_id] = t
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._kill_process_group(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=3)
+            self._procs.pop(task_id, None)
+            os.close(master_fd)
+            self._master_fds.pop(task_id, None)
+            self._readers.pop(task_id, None)
+            self._monitors.pop(task_id, None)
+            with SessionLocal() as session:
+                task = session.query(Task).get(task_id)
+                if task and task.status == "running":
+                    task.status = "failed"
+                    task.finished_at = datetime.now()
+                    session.commit()
+            return False
+
+        return True
 
     def _read_pty(self, task_id: int, master_fd: int) -> None:
         offset = 0
@@ -202,7 +256,7 @@ class ProcessManager:
                 .first()
             )
             if last_chunk:
-                offset = last_chunk.byte_offset
+                offset = last_chunk.byte_offset + len(last_chunk.raw_data)
         while True:
             try:
                 data = os.read(master_fd, 65536)
@@ -284,25 +338,42 @@ class ProcessManager:
             with contextlib.suppress(OSError):
                 os.close(master_fd)
 
-        self._procs.pop(task_id, None)
-        return True
+        reader = self._readers.pop(task_id, None)
+        if reader and reader.is_alive():
+            reader.join(timeout=5)
+        self._monitors.pop(task_id, None)
+        self._master_fds.pop(task_id, None)
+
+        with self._lock:
+            proc_was_present = self._procs.pop(task_id, None) is not None
+        return proc_was_present
 
     def _monitor_process(self, task_id: int) -> None:
-        proc = self._procs.get(task_id)
+        with self._lock:
+            proc = self._procs.get(task_id)
         if proc is None:
             return
 
+        exit_code = -1
         try:
             proc.wait()
             exit_code = proc.returncode
-        except Exception:
-            exit_code = -1
+        except OSError:
+            pass
 
-        self._procs.pop(task_id, None)
+        slot_returned = False
+        with self._lock:
+            if self._procs.pop(task_id, None) is not None:
+                self._available_slots += 1
+                slot_returned = True
+
+        self._master_fds.pop(task_id, None)
 
         reader = self._readers.pop(task_id, None)
         if reader and reader.is_alive():
             reader.join(timeout=5)
+
+        self._monitors.pop(task_id, None)
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
@@ -313,9 +384,7 @@ class ProcessManager:
                 task.pid = None
                 session.commit()
 
-        self._monitors.pop(task_id, None)
-
-        with self._lock:
+        if slot_returned:
             self._dequeue_next()
 
     def stop_task(self, task_id: int) -> bool:
@@ -326,19 +395,36 @@ class ProcessManager:
                     task.status = "stopped"
                     task.finished_at = datetime.now()
                     session.commit()
-            with self._lock:
-                self._dequeue_next()
+            self._dequeue_next()
             return True
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
-            if not task or task.status != "running":
+            if not task or task.status not in ("running", "interrupted"):
                 return False
+
+            if task.status == "interrupted":
+                pid = task.pid
+                if pid:
+                    with contextlib.suppress(
+                        ProcessLookupError, PermissionError, OSError
+                    ):
+                        os.kill(pid, signal.SIGKILL)
+                task.status = "stopped"
+                task.finished_at = datetime.now()
+                task.pid = None
+                session.commit()
+                self._monitors.pop(task_id, None)
+                return True
 
             task.status = "stopping"
             session.commit()
 
-        self._terminate_task_processes(task_id)
+        proc_was_present = self._terminate_task_processes(task_id)
+
+        if proc_was_present:
+            with self._lock:
+                self._available_slots += 1
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
@@ -348,6 +434,7 @@ class ProcessManager:
                 task.pid = None
                 session.commit()
 
+        self._dequeue_next()
         return True
 
     def kill_task(self, task_id: int) -> bool:
@@ -359,28 +446,46 @@ class ProcessManager:
                     task.exit_code = -9
                     task.finished_at = datetime.now()
                     session.commit()
-            with self._lock:
-                self._dequeue_next()
+            self._dequeue_next()
             return True
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
-            if not task or task.status != "running":
+            if not task or task.status not in ("running", "interrupted"):
                 return False
+
+            if task.status == "interrupted":
+                pid = task.pid
+                if pid:
+                    with contextlib.suppress(
+                        ProcessLookupError, PermissionError, OSError
+                    ):
+                        os.kill(pid, signal.SIGKILL)
+                task.status = "stopped"
+                task.finished_at = datetime.now()
+                task.pid = None
+                session.commit()
+                self._monitors.pop(task_id, None)
+                return True
 
             task.status = "stopping"
             session.commit()
 
         proc = self._procs.get(task_id)
+        proc_was_present = False
         if proc:
             with contextlib.suppress(Exception):
                 self._kill_process_group(proc.pid, signal.SIGKILL)
-            self._procs.pop(task_id, None)
+            with self._lock:
+                proc_was_present = self._procs.pop(task_id, None) is not None
 
-        master_fd = self._master_fds.get(task_id)
+        master_fd = self._master_fds.pop(task_id, None)
         if master_fd is not None:
             with contextlib.suppress(OSError):
                 os.close(master_fd)
+
+        self._readers.pop(task_id, None)
+        self._monitors.pop(task_id, None)
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
@@ -391,6 +496,10 @@ class ProcessManager:
                 task.pid = None
                 session.commit()
 
+        if proc_was_present:
+            with self._lock:
+                self._available_slots += 1
+        self._dequeue_next()
         return True
 
     def recover_tasks(self) -> None:
@@ -405,6 +514,8 @@ class ProcessManager:
                     try:
                         proc = psutil.Process(task.pid)
                         if proc.is_running():
+                            task.status = "interrupted"
+                            session.commit()
                             t = threading.Thread(
                                 target=self._recover_monitor,
                                 args=(task.id, task.pid),
@@ -426,23 +537,29 @@ class ProcessManager:
                 .order_by(Task.created_at)
                 .all()
             )
-            for task in pending_tasks:
-                self._queue.append(task.id)
+            with self._lock:
+                for task in pending_tasks:
+                    self._queue.append(task.id)
 
-        with self._lock:
-            self._dequeue_next()
+        self._dequeue_next()
 
     def _recover_monitor(self, task_id: int, pid: int) -> None:
+        exit_code = -1
         try:
             proc = psutil.Process(pid)
             proc.wait()
             exit_code = proc.returncode
-        except psutil.NoSuchProcess:
-            exit_code = -1
+        except (
+            psutil.NoSuchProcess,
+            psutil.AccessDenied,
+            psutil.ZombieProcess,
+            OSError,
+        ):
+            pass
 
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
-            if task and task.status == "running":
+            if task and task.status in ("running", "interrupted"):
                 task.status = "completed" if exit_code == 0 else "failed"
                 task.exit_code = exit_code
                 task.finished_at = datetime.now()
@@ -452,5 +569,22 @@ class ProcessManager:
         self._monitors.pop(task_id, None)
 
     def shutdown(self) -> None:
-        for task_id in list(self._procs.keys()):
+        task_ids = list(self._procs.keys())
+        for task_id in task_ids:
             self._terminate_task_processes(task_id)
+            reader = self._readers.pop(task_id, None)
+            if reader and reader.is_alive():
+                reader.join(timeout=5)
+            self._monitors.pop(task_id, None)
+            self._master_fds.pop(task_id, None)
+
+        with SessionLocal() as session:
+            session.query(Task).filter(Task.status.in_(["running", "stopping"])).update(
+                {
+                    "status": "interrupted",
+                    "exit_code": -15,
+                    "finished_at": datetime.now(),
+                    "pid": None,
+                }
+            )
+            session.commit()

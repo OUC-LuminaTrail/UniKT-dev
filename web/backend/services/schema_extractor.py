@@ -39,9 +39,13 @@ class SchemaExtractor:
             return
         base = self._resolve_base_cmd()
         cmd = base + [HELPER_SCRIPT]
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
-        )
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            self._models = []
+            return
         all_models: list[str] = []
         errored: set[str] = set()
         for line in result.stdout.strip().split("\n"):

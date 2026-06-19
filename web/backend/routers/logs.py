@@ -1,14 +1,18 @@
+import logging
+
 from database import SessionLocal
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from models import LogChunk, Task
 from services.log_watcher import LogWatcher
 from sqlalchemy import asc
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["logs"])
 
 
 @router.get("/api/tasks/{task_id}/logs")
-def get_logs(task_id: int, offset: int = 0, limit: int = 10000):
+def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=100000)):
     with SessionLocal() as session:
         task = session.query(Task).get(task_id)
         if not task:
@@ -65,4 +69,4 @@ async def stream_logs(websocket: WebSocket, task_id: int, from_offset: int = Que
     except WebSocketDisconnect:
         pass
     except Exception:
-        pass
+        logger.exception("WebSocket stream error")

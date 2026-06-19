@@ -55,7 +55,9 @@ class PythonEnvManager:
     def resolve_command(
         self, env_id: str, custom_python_path: str | None = None
     ) -> list[str]:
-        env_type, env_name = env_id.split(":", 1)
+        parts = env_id.split(":", 1)
+        env_type = parts[0]
+        env_name = parts[1] if len(parts) > 1 else ""
         if env_type == "pixi":
             pixi_bin = _find_pixi() or "pixi"
             return [pixi_bin, "run", "--environment", env_name, "python"]

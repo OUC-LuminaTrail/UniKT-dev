@@ -43,7 +43,9 @@ class PreprocessManager:
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
+        self._monitors: dict[int, threading.Thread] = {}
         self._next_id = 1
+        self._lock = threading.Lock()
 
     def start(
         self,
@@ -53,8 +55,9 @@ class PreprocessManager:
         env_id: str | None = None,
         custom_python_path: str | None = None,
     ) -> PreprocessTask:
-        task_id = self._next_id
-        self._next_id += 1
+        with self._lock:
+            task_id = self._next_id
+            self._next_id += 1
 
         command = self._build_command(
             action, dataset, params, env_id, custom_python_path
@@ -63,42 +66,72 @@ class PreprocessManager:
         task = PreprocessTask(
             task_id, command, env_id=env_id, custom_python_path=custom_python_path
         )
-        self._tasks[task_id] = task
 
-        master_fd, slave_fd = pty.openpty()
+        try:
+            master_fd, slave_fd = pty.openpty()
+        except OSError:
+            task.status = "failed"
+            task.finished_at = datetime.now()
+            return task
 
-        winsize = struct.pack("HHHH", 24, 80, 0, 0)
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+        try:
+            winsize = struct.pack("HHHH", 24, 80, 0, 0)
+            fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
 
-        env = os.environ.copy()
-        env["TERM"] = "xterm-256color"
-        env["FORCE_COLOR"] = "1"
+            env = os.environ.copy()
+            env["TERM"] = "xterm-256color"
+            env["FORCE_COLOR"] = "1"
 
-        proc = subprocess.Popen(
-            command,
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            cwd=str(PROJECT_ROOT),
-            start_new_session=True,
-            env=env,
-        )
-        os.close(slave_fd)
+            proc = subprocess.Popen(
+                command,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=str(PROJECT_ROOT),
+                start_new_session=True,
+                env=env,
+            )
+            os.close(slave_fd)
+        except Exception:
+            os.close(slave_fd)
+            os.close(master_fd)
+            task.status = "failed"
+            task.finished_at = datetime.now()
+            return task
 
         task.pid = proc.pid
-        self._procs[task_id] = proc
-        self._master_fds[task_id] = master_fd
 
-        reader = threading.Thread(
-            target=self._read_pty,
-            args=(task_id, master_fd),
-            daemon=True,
-        )
-        reader.start()
-        self._readers[task_id] = reader
+        with self._lock:
+            self._tasks[task_id] = task
+            self._procs[task_id] = proc
+            self._master_fds[task_id] = master_fd
 
-        t = threading.Thread(target=self._monitor, args=(task_id,), daemon=True)
-        t.start()
+        try:
+            reader = threading.Thread(
+                target=self._read_pty,
+                args=(task_id, master_fd),
+                daemon=True,
+            )
+            reader.start()
+            self._readers[task_id] = reader
+
+            t = threading.Thread(target=self._monitor, args=(task_id,), daemon=True)
+            t.start()
+            self._monitors[task_id] = t
+        except Exception:
+            with contextlib.suppress(Exception):
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                proc.wait(timeout=3)
+            os.close(master_fd)
+            with self._lock:
+                self._procs.pop(task_id, None)
+                self._tasks.pop(task_id, None)
+                self._master_fds.pop(task_id, None)
+                self._readers.pop(task_id, None)
+                self._monitors.pop(task_id, None)
+            task.status = "failed"
+            task.finished_at = datetime.now()
+            return task
 
         return task
 
@@ -112,7 +145,7 @@ class PreprocessManager:
                 .first()
             )
             if last_chunk:
-                offset = last_chunk.byte_offset
+                offset = last_chunk.byte_offset + len(last_chunk.raw_data)
         while True:
             try:
                 data = os.read(master_fd, 65536)
@@ -152,16 +185,33 @@ class PreprocessManager:
     def list_all(self) -> list[PreprocessTask]:
         return list(self._tasks.values())
 
+    def delete(self, task_id: int) -> bool:
+        task = self._tasks.get(task_id)
+        if not task or task.status == "running":
+            return False
+        if task.status == "stopping":
+            self._terminate_process(task_id)
+        self._tasks.pop(task_id, None)
+        self._procs.pop(task_id, None)
+        self._monitors.pop(task_id, None)
+        self._readers.pop(task_id, None)
+        fd = self._master_fds.pop(task_id, None)
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with SessionLocal() as session:
+            session.query(LogChunk).filter_by(
+                source="preprocess", source_id=task_id
+            ).delete()
+            session.commit()
+        return True
+
     def stop(self, task_id: int) -> bool:
         task = self._tasks.get(task_id)
         if not task or task.status != "running":
             return False
         task.status = "stopping"
-        proc = self._procs.get(task_id)
-        if proc:
-            with contextlib.suppress(Exception):
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGINT)
+        self._terminate_process(task_id)
         return True
 
     def _build_command(
@@ -224,12 +274,13 @@ class PreprocessManager:
             exit_code = -1
 
         self._procs.pop(task_id, None)
+        self._monitors.pop(task_id, None)
 
         reader = self._readers.pop(task_id, None)
         if reader and reader.is_alive():
             reader.join(timeout=5)
 
-        master_fd = self._master_fds.get(task_id)
+        master_fd = self._master_fds.pop(task_id, None)
         if master_fd is not None:
             with contextlib.suppress(OSError):
                 os.close(master_fd)
@@ -244,12 +295,32 @@ class PreprocessManager:
             task.finished_at = datetime.now()
             task.pid = None
 
+    def _terminate_process(self, task_id: int) -> None:
+        proc = self._procs.get(task_id)
+        if proc is None:
+            return
+        pid = proc.pid
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGINT)
+            except (ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGINT)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                proc.wait(timeout=3)
+
     def shutdown(self) -> None:
         for task_id in list(self._procs.keys()):
-            proc = self._procs.pop(task_id, None)
-            if proc:
-                with contextlib.suppress(Exception):
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            self._terminate_process(task_id)
+            self._procs.pop(task_id, None)
+            self._monitors.pop(task_id, None)
+            reader = self._readers.pop(task_id, None)
+            if reader and reader.is_alive():
+                reader.join(timeout=5)
             master_fd = self._master_fds.pop(task_id, None)
             if master_fd is not None:
                 with contextlib.suppress(OSError):
