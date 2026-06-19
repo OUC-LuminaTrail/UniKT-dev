@@ -418,19 +418,21 @@ const handleRunningPageSizeChange = (s: number) => {
 }
 
 const moveUp = async (idx: number) => {
+  const actualIdx = (queuePage.value - 1) * queuePageSize.value + idx
   const items = [...queueItems.value]
-  const tmp = items[idx]
-  items[idx] = items[idx - 1]
-  items[idx - 1] = tmp
+  const tmp = items[actualIdx]
+  items[actualIdx] = items[actualIdx - 1]
+  items[actualIdx - 1] = tmp
   await reorderQueue(items.map(t => t.id))
   invalidateTasks()
 }
 
 const moveDown = async (idx: number) => {
+  const actualIdx = (queuePage.value - 1) * queuePageSize.value + idx
   const items = [...queueItems.value]
-  const tmp = items[idx]
-  items[idx] = items[idx + 1]
-  items[idx + 1] = tmp
+  const tmp = items[actualIdx]
+  items[actualIdx] = items[actualIdx + 1]
+  items[actualIdx + 1] = tmp
   await reorderQueue(items.map(t => t.id))
   invalidateTasks()
 }

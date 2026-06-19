@@ -38,15 +38,17 @@ class LogWatcher:
         from_offset: int = 0,
     ):
         offset = from_offset
-        chunks = self._read_chunks(source, source_id, offset)
+        chunks = await asyncio.to_thread(self._read_chunks, source, source_id, offset)
         for raw_data, chunk_offset in chunks:
             boundary = _find_safe_boundary(
                 raw_data, min(INITIAL_CHUNK_SIZE, len(raw_data))
             )
-            if boundary == 0 and offset == from_offset:
-                boundary = min(INITIAL_CHUNK_SIZE, len(raw_data))
-            chunk = raw_data[:boundary]
-            offset = chunk_offset + boundary
+            if boundary > 0:
+                chunk = raw_data[:boundary]
+                offset = chunk_offset + boundary
+            else:
+                chunk = raw_data
+                offset = chunk_offset + len(raw_data)
             try:
                 text = chunk.decode("utf-8")
             except UnicodeDecodeError:
@@ -56,14 +58,16 @@ class LogWatcher:
             )
             await asyncio.sleep(0)
 
-        if not check_alive or not check_alive():
+        if not check_alive or not await asyncio.to_thread(check_alive):
             await websocket.send_json({"type": "done", "final": True})
             await websocket.close()
             return
 
         while True:
-            if check_alive and not check_alive():
-                remaining = self._read_chunks(source, source_id, offset)
+            if check_alive and not await asyncio.to_thread(check_alive):
+                remaining = await asyncio.to_thread(
+                    self._read_chunks, source, source_id, offset
+                )
                 for raw_data, chunk_offset in remaining:
                     try:
                         text = raw_data.decode("utf-8")
@@ -75,7 +79,9 @@ class LogWatcher:
                     )
                 break
 
-            new_chunks = self._read_chunks(source, source_id, offset)
+            new_chunks = await asyncio.to_thread(
+                self._read_chunks, source, source_id, offset
+            )
             if new_chunks:
                 for raw_data, chunk_offset in new_chunks:
                     try:
@@ -89,8 +95,10 @@ class LogWatcher:
             else:
                 await asyncio.sleep(0.3)
 
-            if check_alive and not check_alive():
-                remaining = self._read_chunks(source, source_id, offset)
+            if check_alive and not await asyncio.to_thread(check_alive):
+                remaining = await asyncio.to_thread(
+                    self._read_chunks, source, source_id, offset
+                )
                 for raw_data, chunk_offset in remaining:
                     try:
                         text = raw_data.decode("utf-8")

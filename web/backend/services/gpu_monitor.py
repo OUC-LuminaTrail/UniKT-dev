@@ -1,5 +1,6 @@
 import contextlib
 import os
+import threading
 import time
 
 import psutil
@@ -12,23 +13,34 @@ class GpuMonitor:
         self._cache_seconds = cache_seconds
         self._cached: GpuStatusResponse | None = None
         self._last_update: float = 0
+        self._lock = threading.Lock()
+        self._nvml_initialized = False
+        try:
+            pynvml.nvmlInit()
+            self._nvml_initialized = True
+        except (pynvml.NVMLError, Exception):
+            pass
 
     def get_status(self) -> GpuStatusResponse:
-        now = time.time()
-        if self._cached and (now - self._last_update) < self._cache_seconds:
-            return self._cached
+        with self._lock:
+            now = time.time()
+            if self._cached and (now - self._last_update) < self._cache_seconds:
+                return self._cached
 
         gpus = self._query_nvml()
-        self._cached = GpuStatusResponse(
+        response = GpuStatusResponse(
             gpus=gpus,
             updated_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
-        self._last_update = now
-        return self._cached
+        with self._lock:
+            self._cached = response
+            self._last_update = time.time()
+        return response
 
     def _query_nvml(self) -> list[GpuInfo]:
+        if not self._nvml_initialized:
+            return []
         try:
-            pynvml.nvmlInit()
             device_count = pynvml.nvmlDeviceGetCount()
             gpus = []
             for i in range(device_count):
@@ -57,11 +69,8 @@ class GpuMonitor:
                         processes=[],
                     )
                 )
-            pynvml.nvmlShutdown()
             return gpus
         except (pynvml.NVMLError, Exception):
-            with contextlib.suppress(Exception):
-                pynvml.nvmlShutdown()
             return []
 
     def get_system_status(self) -> SystemStatusResponse:
@@ -91,3 +100,8 @@ class GpuMonitor:
             load_15m=round(load15, 2),
             updated_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
         )
+
+    def shutdown(self):
+        if self._nvml_initialized:
+            with contextlib.suppress(Exception):
+                pynvml.nvmlShutdown()

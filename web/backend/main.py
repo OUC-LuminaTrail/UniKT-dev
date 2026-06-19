@@ -49,6 +49,8 @@ async def lifespan(app: FastAPI):
         deps.preprocess_manager.shutdown()
     if deps.process_manager:
         deps.process_manager.shutdown()
+    if deps.gpu_monitor:
+        deps.gpu_monitor.shutdown()
 
 
 app = FastAPI(title="KT Experiment Manager", lifespan=lifespan)

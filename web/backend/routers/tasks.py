@@ -1,9 +1,10 @@
 import json
+from datetime import datetime
 
 from database import SessionLocal
 from dependencies import get_process_manager
 from fastapi import APIRouter, Depends, HTTPException
-from models import Task
+from models import LogChunk, Task
 from pagination import Page, Params
 from pydantic import BaseModel
 from schemas import TaskCreate, TaskResponse
@@ -33,13 +34,22 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         session.refresh(task)
         task_id = task.id
 
-    pm.launch_task(
-        task_id=task_id,
-        model_name=body.model_name,
-        params=body.params,
-        env_id=body.env_id,
-        custom_python_path=body.custom_python_path,
-    )
+    try:
+        pm.launch_task(
+            task_id=task_id,
+            model_name=body.model_name,
+            params=body.params,
+            env_id=body.env_id,
+            custom_python_path=body.custom_python_path,
+        )
+    except Exception:
+        with SessionLocal() as session:
+            task = session.query(Task).get(task_id)
+            if task and task.status == "pending":
+                task.status = "failed"
+                task.finished_at = datetime.now()
+                session.commit()
+        raise HTTPException(500, "Failed to launch task")
 
     with SessionLocal() as session:
         task = session.query(Task).get(task_id)
@@ -109,6 +119,7 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
             raise HTTPException(400, "Cannot delete running task")
         if task.status == "pending":
             pm.remove_from_queue(task_id)
+        session.query(LogChunk).filter_by(source="task", source_id=task_id).delete()
         session.delete(task)
         session.commit()
     return {"status": "deleted"}
