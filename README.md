@@ -63,7 +63,7 @@
 | **RobustKT** | [Enhancing Knowledge Tracing through Decoupling Cognitive Pattern from Error-Prone Data (WWW 2025)](https://dl.acm.org/doi/10.1145/3696410.3714486) | [pyKT](https://github.com/pykt-team/pykt-toolkit) |
 | **UKT** | [Uncertainty-aware Knowledge Tracing (AAAI 2025)](https://ojs.aaai.org/index.php/AAAI/article/view/35007) | [GitHub](https://github.com/UncertaintyForKnowledgeTracing/UKT) |
 | **ABKT** | [Ability Boosted Knowledge Tracing (Information Sciences 2022)](https://www.sciencedirect.com/science/article/pii/S0020025522001876) | [GitHub](https://github.com/ccnu-mathits/ABKT) |
-| **BDGKT** | [Bidirectional Dynamic Graph Knowledge Tracing (Knowledge-Based Systems 2026)](https://doi.org/10.1016/j.knosys.2026.115532) | [Github](https://github.com/Oia-10/BDGKT) |
+| **BDGKT** | [Bidirectional Dynamic Graph Knowledge Tracing (Knowledge-Based Systems 2026)](https://doi.org/10.1016/j.knosys.2026.115532) | [GitHub](https://github.com/Oia-10/BDGKT) |
 | **ClusterKT** | [Cluster-driven Knowledge Tracing: Joint Learning-Forgetting Effects Modeling via State Dependency (ESA 2025)](https://www.sciencedirect.com/science/article/abs/pii/S0957417425022389) | [GitHub](https://github.com/Lzhenghua/ClusterKT) |
 
 ## 📦 Installation
