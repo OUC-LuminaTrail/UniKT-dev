@@ -237,7 +237,6 @@ class SkillModelData(BaseModelData):
             user_question: 题目ID序列，shape=(num_samples, max_seq_len)
         """
         import numpy as np
-        import polars as pl
 
         data = self.data_src.get_windowlate_data()
 
@@ -258,13 +257,10 @@ class SkillModelData(BaseModelData):
             "true_label",
         ]
         lazy_data = data.select(required_cols)
-        stats = lazy_data.select(
-            [
-                pl.col("sample_id").n_unique().alias("num_samples"),
-                pl.col("sample_id").max().alias("max_sample_id"),
-            ]
-        ).collect(engine="streaming")
-        num_samples = int(stats["num_samples"][0])
+        all_data = lazy_data.collect(engine="streaming")
+        sample_ids = all_data["sample_id"].to_numpy()
+        positions = all_data["position"].to_numpy()
+        num_samples = int(all_data["sample_id"].n_unique())
 
         if num_samples == 0:
             raise ValueError(
@@ -279,43 +275,13 @@ class SkillModelData(BaseModelData):
         user_true_labels = np.zeros((num_samples, max_seq_len), dtype=np.int8)
         user_question = np.zeros((num_samples, max_seq_len), dtype=np.int32)
 
-        sample_pos = lazy_data.select(["sample_id", "position"]).collect(
-            engine="streaming"
-        )
-        sample_ids = sample_pos["sample_id"].to_numpy()
-        positions = sample_pos["position"].to_numpy()
-
-        user_sequence[sample_ids, positions] = (
-            lazy_data.select("skill").collect(engine="streaming")["skill"].to_numpy()
-        )
-        user_response[sample_ids, positions] = (
-            lazy_data.select("response")
-            .collect(engine="streaming")["response"]
-            .to_numpy()
-        )
-        user_mask[sample_ids, positions] = (
-            lazy_data.select("mask").collect(engine="streaming")["mask"].to_numpy()
-        )
-        user_id_sequence[sample_ids, positions] = (
-            lazy_data.select("user_id")
-            .collect(engine="streaming")["user_id"]
-            .to_numpy()
-        )
-        late_group_id[sample_ids, positions] = (
-            lazy_data.select("group_id")
-            .collect(engine="streaming")["group_id"]
-            .to_numpy()
-        )
-        user_true_labels[sample_ids, positions] = (
-            lazy_data.select("true_label")
-            .collect(engine="streaming")["true_label"]
-            .to_numpy()
-        )
-        user_question[sample_ids, positions] = (
-            lazy_data.select("question")
-            .collect(engine="streaming")["question"]
-            .to_numpy()
-        )
+        user_sequence[sample_ids, positions] = all_data["skill"].to_numpy()
+        user_response[sample_ids, positions] = all_data["response"].to_numpy()
+        user_mask[sample_ids, positions] = all_data["mask"].to_numpy()
+        user_id_sequence[sample_ids, positions] = all_data["user_id"].to_numpy()
+        late_group_id[sample_ids, positions] = all_data["group_id"].to_numpy()
+        user_true_labels[sample_ids, positions] = all_data["true_label"].to_numpy()
+        user_question[sample_ids, positions] = all_data["question"].to_numpy()
 
         self.logger.debug(
             f"Loaded windowlate data: samples={num_samples}, max_seq_len={max_seq_len}"
