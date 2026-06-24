@@ -215,7 +215,7 @@ class Junyi2015Data(DataSource):
                     "count_hints": "hint_count",
                 }
             )
-            .collect()
+            .collect(engine="streaming")
         )
 
         # Convert to global relative time (dataset-wise earliest timestamp as zero)

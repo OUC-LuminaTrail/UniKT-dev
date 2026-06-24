@@ -44,10 +44,10 @@ class NIPS2020T34Data(DataSource):
 
         logger.info("Loading raw data from: %s", self.raw_dir)
         self.raw_data = {
-            "primary": pl.read_csv(paths["primary"]).lazy(),
-            "answer_meta": pl.read_csv(paths["answer_meta"]).lazy(),
-            "question_meta": pl.read_csv(paths["question_meta"]).lazy(),
-            "subject_meta": pl.read_csv(paths["subject_meta"]).lazy(),
+            "primary": pl.scan_csv(paths["primary"]),
+            "answer_meta": pl.scan_csv(paths["answer_meta"]),
+            "question_meta": pl.scan_csv(paths["question_meta"]),
+            "subject_meta": pl.scan_csv(paths["subject_meta"]),
         }
 
     @override
@@ -94,7 +94,7 @@ class NIPS2020T34Data(DataSource):
             & pl.col("timestamp").is_not_null()
         )
 
-        data = data.collect()
+        data = data.collect(engine="streaming")
 
         # Parse timestamps to relative milliseconds.
         data = data.with_columns(

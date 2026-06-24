@@ -790,18 +790,21 @@ class DataSource(ABC):
         # Ensure chronological order within each user, break timestamp ties with remaining columns
         self.sequence_data = self.sequence_data.sort(self._sort_columns())
 
-        # Step 1: Expand questions to skills, preserving the question column
+        # Step 1: 将问题序列展开为技能序列，保留 question 列
         question_skills = (
             self.relation_data["question_skill"]
+            .lazy()
             .sort("question", "skill")
             .group_by("question")
             .agg(pl.col("skill").sort().alias("skills"))
         )
 
         expanded = (
-            self.sequence_data.join(question_skills, on="question", how="inner")
+            self.sequence_data.lazy()
+            .join(question_skills, on="question", how="inner")
             .explode("skills")
             .rename({"skills": "skill"})
+            .sort(self._sort_columns() + ["skill"])
         )
 
         # Step 2: 计算序列位置和长度
@@ -844,11 +847,17 @@ class DataSource(ABC):
         output_cols = [pl.col(c) for c in self.sequence_data.columns]
         output_cols.append(pl.col("skill"))
         output_cols.append(pl.col("relative_pos").alias("seq_pos"))
-        expanded = expanded.select(output_cols).sort("user", "seq_pos")
+        split_skill_data = (
+            expanded.select(output_cols)
+            .sort("user", "seq_pos")
+            .collect(engine="streaming")
+        )
 
-        logger.debug(f"Split into {expanded['user'].n_unique()} skill sub-sequences")
+        logger.debug(
+            f"Split into {split_skill_data['user'].n_unique()} skill sub-sequences"
+        )
 
-        self.split_skill_sequence_data = expanded
+        self.split_skill_sequence_data = split_skill_data
 
     def build_windowlate_data(self):
         """构建用于 windowlate_auc_mean 评估的样本数据。

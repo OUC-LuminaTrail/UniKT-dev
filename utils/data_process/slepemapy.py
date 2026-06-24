@@ -58,11 +58,11 @@ class SlepemapyData(DataSource):
         if not os.path.exists(self.raw_data_path):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
         logger.info(f"Loading raw data from: {self.raw_data_path}")
-        self.raw_data = pl.read_csv(
+        self.raw_data = pl.scan_csv(
             self.raw_data_path,
             separator=";",
             null_values=[""],
-        ).lazy()
+        )
 
     @override
     def clean_raw_data(self):
@@ -106,7 +106,7 @@ class SlepemapyData(DataSource):
         data = data.drop("place_answered")
         data = data.rename({"place_asked": "skill", "type": "assignment"})
 
-        data = data.collect()
+        data = data.collect(engine="streaming")
 
         # Convert timestamp string to milliseconds
         data = data.with_columns(

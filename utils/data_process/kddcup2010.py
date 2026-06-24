@@ -36,13 +36,13 @@ class KDDCup2010Base(DataSource):
         if not os.path.exists(self.raw_data_path):
             raise FileNotFoundError(f"Cannot find: {self.raw_data_path}")
         logger.info(f"Loading raw data from: {self.raw_data_path}")
-        self.raw_data = pl.read_csv(
+        self.raw_data = pl.scan_csv(
             self.raw_data_path,
             separator="\t",
             ignore_errors=True,
             try_parse_dates=False,
             null_values=[""],
-        ).lazy()
+        )
 
     @override
     def clean_raw_data(self):
@@ -90,7 +90,7 @@ class KDDCup2010Base(DataSource):
                 .str.strptime(pl.Datetime("ms"), "%Y-%m-%d %H:%M:%S%.f", strict=False)
                 .alias("timestamp"),
             ]
-        ).collect()
+        ).collect(engine="streaming")
 
         invalid_label_count = data.filter(
             pl.col("raw_label").is_not_null()
