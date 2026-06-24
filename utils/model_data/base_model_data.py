@@ -428,42 +428,31 @@ class BaseModelData(ABC):
         公式：
             difficulty = (1 - correct_rate) * 0.6 + normalized_time * 0.3 + hint_rate * 0.1
         """
-        import tqdm
+        data = self.data_src.get_sequence_data()
 
-        data = self.data_src.get_sequence_data().to_pandas()
-
-        # 如果指定了排除的fold，则过滤掉该fold的数据
         if exclude_fold is not None and "fold" in data.columns:
-            data = data[data["fold"] != exclude_fold]
+            data = data.filter(pl.col("fold") != exclude_fold)
             self.logger.info(
                 f"Excluding fold {exclude_fold} from difficulty calculation."
             )
 
-        # 计算每个问题的正确率
-        question_stats = (
-            data.groupby("question")
-            .agg({"label": ["mean", "count"]})  # 正确率和回答次数
-            .reset_index()
+        stats = data.group_by("question").agg(
+            pl.col("label").mean().alias("correct_rate"),
+            pl.col("label").count().alias("count"),
         )
-        question_stats.columns = ["question", "correct_rate", "count"]
+        confidence = (pl.col("count") / 10.0).clip(0.0, 1.0)
+        error_rate = 1.0 - pl.col("correct_rate")
+        stats = stats.with_columns(
+            (error_rate * confidence + 0.5 * (1.0 - confidence)).alias("difficulty")
+        )
+        if isinstance(stats, pl.LazyFrame):
+            stats = stats.collect()
 
-        # 错误率作为难度的主要指标
-        question_stats["error_rate"] = 1 - question_stats["correct_rate"]
-
-        # 标准化错误率
-        difficulty_scores = {}
-        for _, row in tqdm.tqdm(
-            question_stats.iterrows(),
-            total=len(question_stats),
-            desc="Calculating question difficulty",
-        ):
-            qid = int(row["question"])
-            # 加权：错误率占主要权重，但考虑样本数（少样本的难度评估不太可靠）
-            confidence = min(row["count"] / 10.0, 1.0)  # 10次以上回答视为可靠
-            difficulty = row["error_rate"] * confidence + 0.5 * (1 - confidence)
-            difficulty_scores[qid] = float(difficulty)
-
-        return difficulty_scores
+        questions = stats["question"].to_list()
+        difficulties = stats["difficulty"].to_list()
+        return {
+            int(q): float(d) for q, d in zip(questions, difficulties, strict=True)
+        }
 
     def build_relationship_matrix(
         self, edge_type: tuple[str, str, str], value_type: str = "binary"
@@ -501,93 +490,62 @@ class BaseModelData(ABC):
             # 构建用户-问题计数矩阵
             matrix = model_data.build_data_matrix(('user', 'answers', 'question'), value_type='count')
         """
-        import numpy as np
-        from tqdm import tqdm
-
         src_type, _, dst_type = edge_type
 
-        # Route to the correct relation table based on edge type
         if src_type == "question":
-            data = self.data_src.get_relation(f"question_{dst_type}").to_pandas()
+            rel = self.data_src.get_relation(f"question_{dst_type}")
         elif dst_type == "question":
-            data = self.data_src.get_relation(f"{src_type}_question").to_pandas()
+            rel = self.data_src.get_relation(f"{src_type}_question")
         else:
-            # Derived relation (e.g., skill-assignment): compute via question join
             qs = self.data_src.get_relation("question_skill")
             other = self.data_src.get_relation(f"question_{dst_type}")
-            data = (
+            rel = (
                 qs.join(other, on="question", how="inner")
                 .select([pl.col(src_type), pl.col(dst_type)])
                 .unique(subset=[src_type, dst_type])
-                .to_pandas()
             )
 
-        # 直接使用节点类型作为列名
-        src_col = src_type
-        dst_col = dst_type
-
-        # 验证列是否存在
-        if src_col not in data.columns or dst_col not in data.columns:
+        if src_type not in rel.columns or dst_type not in rel.columns:
             raise ValueError(
-                f"Required columns '{src_col}' or '{dst_col}' not found in data. "
-                f"Available columns: {data.columns.tolist()}"
+                f"Required columns '{src_type}' or '{dst_type}' not found in data. "
+                f"Available columns: {rel.columns}"
             )
 
-        # 获取节点数量
-        # 首先尝试从元数据获取
         src_meta_key = f"num_{src_type}s"
         dst_meta_key = f"num_{dst_type}s"
-
         try:
             num_src = self.data_src.get_metadata(src_meta_key)
         except (KeyError, AttributeError):
-            # 如果元数据中没有，从数据中计算
-            num_src = data[src_col].nunique()
+            num_src = rel.select(pl.col(src_type).n_unique()).item()
             self.logger.warning(
                 f"{src_meta_key} not found in metadata, calculated from data: {num_src}"
             )
-
         try:
             num_dst = self.data_src.get_metadata(dst_meta_key)
         except (KeyError, AttributeError):
-            # 如果元数据中没有，从数据中计算
-            num_dst = data[dst_col].nunique()
+            num_dst = rel.select(pl.col(dst_type).n_unique()).item()
             self.logger.warning(
                 f"{dst_meta_key} not found in metadata, calculated from data: {num_dst}"
             )
 
-        # 初始化矩阵
         data_matrix = np.zeros((num_src, num_dst), dtype=int)
 
-        # 填充矩阵
-        for row in tqdm(
-            data.itertuples(),
-            total=data.shape[0],
-            desc=f"Building {src_type}-{dst_type} matrix",
-        ):
-            src_idx = getattr(row, src_col)
-            dst_idx = getattr(row, dst_col)
+        pairs = rel.select(
+            pl.col(src_type).cast(pl.Int64).alias("src"),
+            pl.col(dst_type).cast(pl.Int64).alias("dst"),
+        ).drop_nulls()
+        src_idx = pairs["src"].to_numpy()
+        dst_idx = pairs["dst"].to_numpy()
+        valid = (src_idx >= 0) & (src_idx < num_src) & (dst_idx >= 0) & (dst_idx < num_dst)
+        src_idx, dst_idx = src_idx[valid], dst_idx[valid]
 
-            # 跳过无效索引（NaN或超出范围）
-            if (
-                src_idx is None
-                or dst_idx is None
-                or np.isnan(src_idx)
-                or np.isnan(dst_idx)
-                or src_idx < 0
-                or dst_idx < 0
-                or src_idx >= num_src
-                or dst_idx >= num_dst
-            ):
-                continue
-
-            if value_type == "binary":
-                data_matrix[int(src_idx), int(dst_idx)] = 1
-            elif value_type == "count":
-                data_matrix[int(src_idx), int(dst_idx)] += 1
-            else:
-                raise ValueError(
-                    f"Unsupported value_type: {value_type}. Supported types: 'binary', 'count'"
-                )
+        if value_type == "binary":
+            data_matrix[src_idx, dst_idx] = 1
+        elif value_type == "count":
+            np.add.at(data_matrix, (src_idx, dst_idx), 1)
+        else:
+            raise ValueError(
+                f"Unsupported value_type: {value_type}. Supported types: 'binary', 'count'"
+            )
 
         return data_matrix
