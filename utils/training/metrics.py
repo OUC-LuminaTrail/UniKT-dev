@@ -133,10 +133,8 @@ class MetricsAccumulator:
             num_groups = uniq_groups.shape[0]
 
             # 标签取每个 group 首个值；同时校验一致性
-            first_idx = np.full(num_groups, -1, dtype=np.int64)
-            for idx, gidx in enumerate(inverse):
-                if first_idx[gidx] == -1:
-                    first_idx[gidx] = idx
+            first_idx = np.full(num_groups, inverse.shape[0], dtype=np.int64)
+            np.minimum.at(first_idx, inverse, np.arange(inverse.shape[0]))
             group_label = y_label_raw[first_idx].astype(np.float64)
 
             if np.any(y_label_raw != group_label[inverse]):
