@@ -190,12 +190,15 @@ class SkillModelData(BaseModelData):
             user_question: 用户题目ID序列，shape为(num_split_users, max_seq_len)
         """
         import numpy as np
+        import polars as pl
 
         self.logger.info("Building skill sequences from split data...")
 
-        data = self.data_src.get_split_skill_sequence_data().to_pandas()
+        data = self.data_src.get_split_skill_sequence_data()
+        if isinstance(data, pl.LazyFrame):
+            data = data.collect()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].nunique()
+        num_users = data["user"].n_unique()
 
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
@@ -203,14 +206,14 @@ class SkillModelData(BaseModelData):
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
         user_question = np.zeros((num_users, max_seq_len), dtype=int)
 
-        user_indices = data["user"].values
-        seq_positions = data["seq_pos"].values
+        user_indices = data["user"].to_numpy()
+        seq_positions = data["seq_pos"].to_numpy()
 
-        user_sequence[user_indices, seq_positions] = data["skill"].values
+        user_sequence[user_indices, seq_positions] = data["skill"].to_numpy()
         user_id_sequence[user_indices, seq_positions] = user_indices
-        user_response[user_indices, seq_positions] = data["label"].values
+        user_response[user_indices, seq_positions] = data["label"].to_numpy()
         user_mask[user_indices, seq_positions] = 1
-        user_question[user_indices, seq_positions] = data["question"].values
+        user_question[user_indices, seq_positions] = data["question"].to_numpy()
 
         self.logger.debug(
             f"Built split skill sequences for {num_users} split users, max_len={max_seq_len}"
