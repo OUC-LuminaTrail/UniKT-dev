@@ -18,6 +18,47 @@ from ..core import get_logger
 logger = get_logger(__name__)
 
 
+def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
+    """按 fusion_type 计算每个 group 的聚合分数。
+
+    mean: 组内均值；vote: 按组内多数对/错方向取相应子集均值，子集为空时回退整组；
+    all: 全对/全错组取整组均值，其余组按多数方向取子集均值。
+    """
+    group_count = np.bincount(inverse, minlength=num_groups).astype(np.float64)
+    if fusion_type == "mean":
+        group_sum = np.bincount(
+            inverse, weights=y_score, minlength=num_groups
+        ).astype(np.float64)
+        return group_sum / np.maximum(group_count, 1.0)
+
+    correct_sum = np.bincount(
+        inverse, weights=(y_score >= threshold), minlength=num_groups
+    ).astype(np.float64)
+    majority = (correct_sum / np.maximum(group_count, 1.0)) >= 0.5
+
+    if fusion_type == "vote":
+        selected = np.where(majority[inverse], y_score >= threshold, y_score < threshold)
+        selected_count = np.bincount(
+            inverse, weights=selected, minlength=num_groups
+        ).astype(np.float64)
+        mask = selected | (selected_count == 0)[inverse]
+    elif fusion_type == "all":
+        uniform = (correct_sum == group_count) | (correct_sum == 0)
+        base = np.where(majority[inverse], y_score >= threshold, y_score < threshold)
+        mask = base | uniform[inverse]
+    else:
+        raise ValueError(f"Unsupported fusion_type: {fusion_type}")
+
+    weights = mask.astype(np.float64)
+    numerator = np.bincount(
+        inverse, weights=y_score * weights, minlength=num_groups
+    ).astype(np.float64)
+    denominator = np.bincount(
+        inverse, weights=weights, minlength=num_groups
+    ).astype(np.float64)
+    return numerator / np.maximum(denominator, 1.0)
+
+
 class MetricsAccumulator:
     """指标累积器。
 
@@ -72,8 +113,8 @@ class MetricsAccumulator:
     def compute(self, phase: str) -> dict[str, float]:
         """计算 epoch 级别指标。
 
-        Returns:
-            包含 "acc", "auc", "rmse" 的字典
+        train/val 返回 acc/auc/rmse；test 且提供 group_id 时，对 mean/vote/all
+        三种 group 聚合分别返回 {fusion}_acc/{fusion}_auc/{fusion}_rmse。
         """
         if phase not in self._accumulators:
             return {}
@@ -82,19 +123,17 @@ class MetricsAccumulator:
         if not accum["y_label"]:
             return {}
 
-        # test 阶段且提供 group_id 时，执行全局 group-level late-mean 聚合
+        # test 阶段提供 group_id 时，对 mean/vote/all 三种 group 聚合分别计算指标
         if phase == "test" and accum["group_id"]:
             group_id: np.ndarray = torch.cat(accum["group_id"]).numpy()
             y_label_raw: np.ndarray = torch.cat(accum["y_label"]).numpy()
             y_score_raw: np.ndarray = torch.cat(accum["y_score"]).numpy()
 
             uniq_groups, inverse = np.unique(group_id, return_inverse=True)
-            group_count = np.bincount(inverse).astype(np.float64)
-            group_sum = np.bincount(inverse, weights=y_score_raw).astype(np.float64)
-            group_score = group_sum / np.maximum(group_count, 1.0)
+            num_groups = uniq_groups.shape[0]
 
             # 标签取每个 group 首个值；同时校验一致性
-            first_idx = np.full(uniq_groups.shape[0], -1, dtype=np.int64)
+            first_idx = np.full(num_groups, -1, dtype=np.int64)
             for idx, gidx in enumerate(inverse):
                 if first_idx[gidx] == -1:
                     first_idx[gidx] = idx
@@ -105,15 +144,24 @@ class MetricsAccumulator:
                     "Inconsistent labels within the same group_id in test evaluation."
                 )
 
-            group_pred = (group_score >= 0.5).astype(np.float64)
-            metrics = {
-                "acc": float(accuracy_score(group_label, group_pred)),
-                "rmse": float(root_mean_squared_error(group_label, group_score)),
-            }
-            try:
-                metrics["auc"] = float(roc_auc_score(group_label, group_score))
-            except ValueError:
-                metrics["auc"] = 0.0
+            metrics = {}
+            for fusion in ("mean", "vote", "all"):
+                group_score = _group_scores(
+                    y_score_raw, inverse, num_groups, fusion, 0.5
+                )
+                group_pred = (group_score >= 0.5).astype(np.float64)
+                metrics[f"{fusion}_acc"] = float(
+                    accuracy_score(group_label, group_pred)
+                )
+                metrics[f"{fusion}_rmse"] = float(
+                    root_mean_squared_error(group_label, group_score)
+                )
+                try:
+                    metrics[f"{fusion}_auc"] = float(
+                        roc_auc_score(group_label, group_score)
+                    )
+                except ValueError:
+                    metrics[f"{fusion}_auc"] = 0.0
             return metrics
 
         y_label: np.ndarray = torch.cat(accum["y_label"]).numpy()
