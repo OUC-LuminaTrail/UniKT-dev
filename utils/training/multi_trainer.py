@@ -34,6 +34,7 @@ from .callbacks import (
     MemoryCleanupCallback,
 )
 from .checkpoint import CheckpointManager
+from .metric_logger import build_default_metric_loggers, resolve_metric_logging_flags
 from .metrics import MetricsAccumulator
 
 logger = get_logger(__name__)
@@ -72,7 +73,8 @@ class MultiStageExperimentConfig:
 
     exp_manager: Any
     hyperparams: Any = None
-    use_swanlab: bool = True
+    no_swanlab: bool = False
+    log_batch_metrics: bool = False
     model_name: str = ""
     dataset_name: str = ""
     seed: int | None = None
@@ -136,7 +138,9 @@ class MultiTrainer:
         self.device_: torch.device | None = None
         self.seed: int | None = None
         self.log_dir = None
-        self.use_swanlab = True
+        self.no_swanlab = False
+        self.log_batch_metrics = False
+        self.metric_logger = None
 
         # Current stage components (set at runtime)
         self.opt: torch.optim.Optimizer | None = None
@@ -165,7 +169,8 @@ class MultiTrainer:
         self,
         exp_manager,
         hyperparams=None,
-        use_swanlab: bool = True,
+        no_swanlab: bool | None = None,
+        log_batch_metrics: bool | None = None,
         model_name: str = "",
         dataset_name: str = "",
         seed: int | None = None,
@@ -176,7 +181,8 @@ class MultiTrainer:
         Args:
             exp_manager: 实验管理器实例
             hyperparams: 超参数（字典或对象，可选）
-            use_swanlab: 是否使用 SwanLab（默认 True）
+            no_swanlab: 是否关闭 SwanLab（None 时从 hyperparams 读取）
+            log_batch_metrics: 是否记录每 batch loss（None 时从 hyperparams 读取）
             model_name: 模型名称
             dataset_name: 数据集名称
             seed: 随机种子（可选）
@@ -188,7 +194,8 @@ class MultiTrainer:
         self._experiment_config = MultiStageExperimentConfig(
             exp_manager=exp_manager,
             hyperparams=hyperparams,
-            use_swanlab=use_swanlab,
+            no_swanlab=bool(no_swanlab),
+            log_batch_metrics=bool(log_batch_metrics),
             model_name=model_name,
             dataset_name=dataset_name,
             seed=seed,
@@ -262,11 +269,14 @@ class MultiTrainer:
             self.device_ = torch.device(self._experiment_config.device)
 
         # 2. Setup training parameters
-        self.use_swanlab = self._experiment_config.use_swanlab
+        # 解析 no_swanlab / log_batch_metrics：显式传入优先，否则回退到 CLI 参数
+        hyperparams = self._experiment_config.hyperparams
+        self.no_swanlab, self.log_batch_metrics = resolve_metric_logging_flags(
+            self._experiment_config, hyperparams
+        )
 
         # 3. Set random seed
         seed = self._experiment_config.seed
-        hyperparams = self._experiment_config.hyperparams
         if seed is None and hyperparams is not None:
             seed = getattr(hyperparams, "seed", 42)
         deterministic = True
@@ -283,8 +293,14 @@ class MultiTrainer:
             os.makedirs(self.log_dir)
 
         # 5. Initialize components
-        self.metrics_accumulator = MetricsAccumulator(use_swanlab=self.use_swanlab)
+        self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
+        # 本地指标记录始终启用；SwanLab 除非 --no_swanlab
+        self.metric_logger = build_default_metric_loggers(
+            log_dir=self.log_dir,
+            log_batch_metrics=self.log_batch_metrics,
+            no_swanlab=self.no_swanlab,
+        )
 
         # 6. Setup hyperparameters
         if hyperparams is not None:
@@ -379,8 +395,7 @@ class MultiTrainer:
                 "before run(), or use with_experiment() which calls build() automatically."
             )
 
-        if self.use_swanlab:
-            self._init_swanlab()
+        self._init_metric_logger()
 
         stages = list(self._stage_builders.keys())
         logger.info(
@@ -439,12 +454,11 @@ class MultiTrainer:
         if self._custom_callback_functions:
             callbacks.append(FunctionCallback(self._custom_callback_functions))
         callbacks.append(MemoryCleanupCallback(cleanup_interval=5))
-        stage_prefix = config.name.upper()
         if self.early_stopping is not None:
             callbacks.append(
                 EarlyStoppingCallback(
                     early_stopping=self.early_stopping,
-                    swanlab_prefix=stage_prefix,
+                    stage=config.name,
                 )
             )
         callbacks.append(
@@ -630,7 +644,6 @@ class MultiTrainer:
         """
         phase = "train" if is_train else "val"
         data_loader = self.train_data if is_train else self.val_data
-        stage_prefix = stage_name.upper()
 
         self.metrics_accumulator.reset(phase)
         self.model.train() if is_train else self.model.eval()
@@ -654,6 +667,17 @@ class MultiTrainer:
 
             total_loss += loss
 
+            # 记录每 batch loss（可选）
+            if self.log_batch_metrics:
+                self.metric_logger.log_batch(
+                    phase=phase,
+                    global_step=self._global_step,
+                    epoch=epoch,
+                    batch_idx=batch_idx,
+                    loss=loss,
+                    stage=stage_name,
+                )
+
             # 更新进度条
             if progress is not None and task_id is not None:
                 progress.advance(task_id)
@@ -665,10 +689,13 @@ class MultiTrainer:
 
         # 聚合并记录指标
         metrics = self.metrics_accumulator.compute(phase)
-
-        # 使用阶段前缀记录指标
-        if self.use_swanlab:
-            self._log_stage_metrics(stage_prefix, phase, metrics, epoch)
+        self.metric_logger.log_metrics(
+            phase=phase,
+            metrics=metrics,
+            step=self._global_step,
+            epoch=epoch,
+            stage=stage_name,
+        )
 
         # Phase 结束回调
         self.callback_manager.on_phase_end(
@@ -752,62 +779,31 @@ class MultiTrainer:
         )
         text.stylize("bold yellow")
 
-    # ==================== SwanLab 集成 ====================
+    # ==================== 指标记录 ====================
 
-    def _init_swanlab(self):
-        """初始化 SwanLab"""
-        import swanlab
-        from dotenv import load_dotenv
-
-        load_dotenv()
-
-        from swanlab.plugin.notification import LarkCallback
-
-        callbacks = []
-        lark_webhook = os.getenv("LARK_WEBHOOK_URL")
-        lark_secret = os.getenv("LARK_SECRET")
-        if lark_webhook:
-            callbacks.append(LarkCallback(webhook_url=lark_webhook, secret=lark_secret))
-
-        # 构建超参数配置
-        config = {}
-        if self.hyperparam_manager is not None:
-            config = self.hyperparam_manager.get_hyperparameters_dict()
-
+    def _init_metric_logger(self):
+        """初始化指标记录后端（本地始终启用，SwanLab 除非 --no_swanlab）。"""
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
-        model_name = type(self).__name__.replace("Trainer", "")
-
-        # 配置swanlab设置
-        settings = swanlab.Settings(log_proxy_type="stderr")
-
-        swanlab.init(
-            workspace=os.getenv("SWANLAB_WORKSPACE", None),
-            project_name="kt-exp-graph",
-            experiment_name=f"Run_{experiment_name}",
-            config=config,
-            callbacks=callbacks,
-            group=model_name,
+        config = (
+            self.hyperparam_manager.get_hyperparameters_dict()
+            if self.hyperparam_manager is not None
+            else {}
+        )
+        group = type(self).__name__.replace("Trainer", "")
+        self.metric_logger.init_run(
+            log_dir=self.log_dir,
+            experiment_name=experiment_name,
+            group=group,
             tags=["cuda" if torch.cuda.is_available() else "cpu", "multi-stage"],
-            settings=settings,
+            config=config,
         )
 
-        self._swanlab_initialized = True
-        logger.info(f"SwanLab initialized for multi-stage training: {experiment_name}")
-
-    def _log_stage_metrics(
-        self, stage_prefix: str, phase: str, metrics: dict, epoch: int
-    ):
-        """记录阶段指标到 SwanLab"""
-        import swanlab
-
-        phase_prefix = "Train" if phase == "train" else "Val"
-        log_data = {}
-        for metric_name, value in metrics.items():
-            if value is not None:
-                log_data[f"{stage_prefix}/{phase_prefix}/{metric_name}"] = value
-
-        if log_data:
-            swanlab.log(log_data, step=self._global_step)
+    def _finish_metric_logger(self, final_metrics=None):
+        """记录最终摘要并结束指标记录后端。"""
+        if final_metrics:
+            self.metric_logger.log_final(metrics=final_metrics, step=self._global_step)
+        self.metric_logger.finish()
+        logger.info("Metric logging finished")
 
     def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
         """设置超参数"""
@@ -867,20 +863,13 @@ class MultiTrainer:
 
         logger.info("=" * 60)
 
-        if self.use_swanlab:
-            import swanlab
+        # 记录各阶段最终最佳指标并结束记录后端
+        final_metrics = {}
+        for stage_name, outputs in self._stage_outputs.items():
+            if outputs.get("best_metric") is not None:
+                final_metrics[f"Final/{stage_name}_best"] = outputs["best_metric"]
 
-            # 记录最终指标
-            final_metrics = {}
-            for stage_name, outputs in self._stage_outputs.items():
-                if outputs.get("best_metric") is not None:
-                    final_metrics[f"Final/{stage_name}_best"] = outputs["best_metric"]
-
-            if final_metrics:
-                swanlab.log(final_metrics)
-
-            swanlab.finish()
-            logger.info("SwanLab run finished")
+        self._finish_metric_logger(final_metrics=final_metrics)
 
 
 __all__ = ["MultiTrainer", "StageConfig"]

@@ -304,7 +304,6 @@ class ABKTTrainer(MultiTrainer):
             self.with_experiment(
                 exp_manager=exp_manager,
                 hyperparams=args,
-                use_swanlab=True,
                 model_name="ABKT",
                 dataset_name=getattr(args, "dataset", "") if args else "",
                 seed=getattr(args, "seed", None) if args else None,

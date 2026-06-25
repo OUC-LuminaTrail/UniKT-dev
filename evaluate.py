@@ -77,7 +77,7 @@ def main():
     logger.info(f"Checkpoint: {checkpoint_path}")
 
     # Step 2: Override args for evaluation mode
-    model_args.use_swanlab = False
+    model_args.no_swanlab = True
     model_args.checkpoint_path = None  # We load weights manually after build
     model_args.skip_test = True  # Prevent TestEvaluationCallback during build
     model_args.device = args.device

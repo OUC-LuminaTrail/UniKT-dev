@@ -13,10 +13,6 @@ import numpy as np
 import torch
 from sklearn.metrics import accuracy_score, roc_auc_score, root_mean_squared_error
 
-from ..core import get_logger
-
-logger = get_logger(__name__)
-
 
 def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
     """按 fusion_type 计算每个 group 的聚合分数。
@@ -26,9 +22,9 @@ def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
     """
     group_count = np.bincount(inverse, minlength=num_groups).astype(np.float64)
     if fusion_type == "mean":
-        group_sum = np.bincount(
-            inverse, weights=y_score, minlength=num_groups
-        ).astype(np.float64)
+        group_sum = np.bincount(inverse, weights=y_score, minlength=num_groups).astype(
+            np.float64
+        )
         return group_sum / np.maximum(group_count, 1.0)
 
     correct_sum = np.bincount(
@@ -37,7 +33,9 @@ def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
     majority = (correct_sum / np.maximum(group_count, 1.0)) >= 0.5
 
     if fusion_type == "vote":
-        selected = np.where(majority[inverse], y_score >= threshold, y_score < threshold)
+        selected = np.where(
+            majority[inverse], y_score >= threshold, y_score < threshold
+        )
         selected_count = np.bincount(
             inverse, weights=selected, minlength=num_groups
         ).astype(np.float64)
@@ -53,9 +51,9 @@ def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
     numerator = np.bincount(
         inverse, weights=y_score * weights, minlength=num_groups
     ).astype(np.float64)
-    denominator = np.bincount(
-        inverse, weights=weights, minlength=num_groups
-    ).astype(np.float64)
+    denominator = np.bincount(inverse, weights=weights, minlength=num_groups).astype(
+        np.float64
+    )
     return numerator / np.maximum(denominator, 1.0)
 
 
@@ -65,20 +63,19 @@ class MetricsAccumulator:
     职责：
     1. 收集 batch 级别的预测和标签
     2. 计算 epoch 级别的聚合指标
-    3. 记录指标到实验追踪系统
+
+    指标的持久化记录由 MetricLogger 负责，本类只负责计算。
 
     Example:
-        >>> accum = MetricsAccumulator(use_swanlab=True)
+        >>> accum = MetricsAccumulator()
         >>> accum.reset("train")
         >>> for batch in dataloader:
         ...     outputs = model(batch)
         ...     accum.update("train", outputs)
         >>> metrics = accum.compute("train")
-        >>> accum.log("train", metrics, epoch=0)
     """
 
-    def __init__(self, use_swanlab: bool = True):
-        self.use_swanlab = use_swanlab
+    def __init__(self):
         self._accumulators: dict[str, dict[str, list]] = {}
 
     def reset(self, phase: str):
@@ -179,25 +176,6 @@ class MetricsAccumulator:
         metrics["rmse"] = float(root_mean_squared_error(y_label, y_prob))
 
         return metrics
-
-    def log(self, phase: str, metrics: dict[str, float], epoch: int):
-        """记录指标到 SwanLab。"""
-        if not self.use_swanlab:
-            return
-
-        try:
-            import swanlab
-
-            if phase == "train":
-                prefix = "Train/"
-            elif phase == "val":
-                prefix = "Val/"
-            else:
-                prefix = f"{phase.capitalize()}/"
-            for name, value in metrics.items():
-                swanlab.log({f"{prefix}{name.upper()}-epoch": value}, step=epoch)
-        except ImportError:
-            logger.warning("SwanLab not available, skipping metric logging")
 
 
 __all__ = ["MetricsAccumulator"]

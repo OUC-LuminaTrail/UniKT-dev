@@ -12,6 +12,13 @@ from .callbacks import (
     FunctionCallback,
     MemoryCleanupCallback,
 )
+from .metric_logger import (
+    LocalMetricLogger,
+    MetricLogger,
+    SwanLabMetricLogger,
+    build_default_metric_loggers,
+    get_metric_logger,
+)
 from .metrics import MetricsAccumulator
 from .multi_trainer import MultiTrainer, StageConfig
 
@@ -26,4 +33,9 @@ __all__ = [
     "CheckpointCallback",
     "MemoryCleanupCallback",
     "FunctionCallback",
+    "MetricLogger",
+    "LocalMetricLogger",
+    "SwanLabMetricLogger",
+    "get_metric_logger",
+    "build_default_metric_loggers",
 ]

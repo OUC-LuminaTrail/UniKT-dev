@@ -201,16 +201,17 @@ class EarlyStoppingCallback(Callback):
         self,
         *,
         early_stopping: EarlyStopping,
-        swanlab_prefix: str = "",
+        stage: str | None = None,
     ):
         """初始化早停回调。
 
         Args:
             early_stopping: 早停对象
+            stage: 多阶段训练的阶段名（用于区分记录的 series），单阶段为 None
         """
         self.early_stopping = early_stopping
         self.cfg = early_stopping.cfg
-        self.swanlab_prefix = swanlab_prefix
+        self.stage = stage
 
         self._stop = False
 
@@ -222,7 +223,18 @@ class EarlyStoppingCallback(Callback):
             return
         current = self._select_monitor_value(metrics, loss)
         self.step(current, epoch, metrics)
-        self._log_swanlab_state(epoch, kwargs.get("trainer"))
+        trainer = kwargs.get("trainer")
+        metric_logger = getattr(trainer, "metric_logger", None) if trainer else None
+        if metric_logger is not None:
+            metric_logger.log_early_stopping(
+                phase="val",
+                best_score=self.early_stopping.best_score,
+                num_bad_epochs=self.early_stopping.num_bad_epochs,
+                best_metrics=self.early_stopping.best_metrics,
+                step=getattr(trainer, "_global_step", epoch),
+                epoch=epoch,
+                stage=self.stage,
+            )
 
     def step(self, current: float, epoch: int, metrics: dict | None = None) -> bool:
         """执行早停检查。
@@ -259,36 +271,6 @@ class EarlyStoppingCallback(Callback):
                 return float("inf")
             return float("-inf")
         return float(value)
-
-    def _log_swanlab_state(self, epoch: int, trainer):
-        if trainer is None or not getattr(trainer, "use_swanlab", False):
-            return
-        try:
-            import swanlab
-
-            prefix = f"{self.swanlab_prefix}/" if self.swanlab_prefix else ""
-            log_data = {
-                f"{prefix}ES/Best": self.early_stopping.best_score,
-                f"{prefix}ES/Num_Bad_Epochs": self.early_stopping.num_bad_epochs,
-            }
-            if self.early_stopping.best_metrics is not None:
-                log_data.update(
-                    {
-                        f"{prefix}ES/Best_AUC": self.early_stopping.best_metrics.get(
-                            "auc", 0.0
-                        ),
-                        f"{prefix}ES/Best_ACC": self.early_stopping.best_metrics.get(
-                            "acc", 0.0
-                        ),
-                        f"{prefix}ES/Best_RMSE": self.early_stopping.best_metrics.get(
-                            "rmse", 0.0
-                        ),
-                    }
-                )
-            step = getattr(trainer, "_global_step", epoch)
-            swanlab.log(log_data, step=step)
-        except ImportError:
-            logger.warning("SwanLab is not installed. Skipping Early Stopping logging.")
 
     def should_stop(self, **kwargs) -> bool:
         """检查是否应该停止训练。"""

@@ -274,11 +274,17 @@ class GeneralParams(BaseParamConfig):
                 "short": "det",
                 "help": "Disable deterministic algorithms (deterministic is enabled by default)",
             },
-            "use_swanlab": {
+            "no_swanlab": {
                 "type": bool,
-                "default": True,
-                "short": "usl",
-                "help": "Enable SwanLab experiment tracking (default: True)",
+                "default": False,
+                "short": "nsl",
+                "help": "Disable SwanLab experiment tracking (default: SwanLab on)",
+            },
+            "log_batch_metrics": {
+                "type": bool,
+                "default": False,
+                "short": "lbm",
+                "help": "Log per-batch loss to batch_metrics_<phase>.csv (default: False)",
             },
             "skip_test": {
                 "type": bool,

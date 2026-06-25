@@ -139,6 +139,9 @@ PARAM_CONFIGS = UniversalRegistry("param_configs", namespace="kt")
 # 案例分析器注册表
 ANALYZERS = UniversalRegistry("analyzers", namespace="kt")
 
+# 指标记录后端注册表
+METRIC_LOGGERS = UniversalRegistry("metric_loggers", namespace="kt")
+
 # ============================================================================
 # 向后兼容的便捷函数
 # ============================================================================
@@ -198,3 +201,17 @@ def register_analyzer(name: str | None = None):
         ...     pass
     """
     return ANALYZERS.register(name)
+
+
+def register_metric_logger(name: str | None = None):
+    """注册指标记录后端的便捷函数。
+
+    Args:
+        name: 后端名称，如果为 None 则使用类名
+
+    Example:
+        >>> @register_metric_logger("wandb")
+        ... class WandbLogger(MetricLogger):
+        ...     pass
+    """
+    return METRIC_LOGGERS.register(name)

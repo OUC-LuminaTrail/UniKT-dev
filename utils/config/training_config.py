@@ -151,14 +151,16 @@ class ExperimentConfig:
     Attributes:
         exp_manager: Experiment manager instance
         hyperparams: Hyperparameters dictionary or object
-        use_swanlab: Whether to use SwanLab for logging
+        no_swanlab: Disable SwanLab tracking (local CSV logging is always on)
+        log_batch_metrics: Record per-batch loss to batch_metrics_<phase>.csv
         model_name: Name of the model
         dataset_name: Name of the dataset
     """
 
     exp_manager: Any = None
     hyperparams: Any = None
-    use_swanlab: bool = True
+    no_swanlab: bool = False
+    log_batch_metrics: bool = False
     model_name: str = ""
     dataset_name: str = ""
 

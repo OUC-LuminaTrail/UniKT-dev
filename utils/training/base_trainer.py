@@ -34,6 +34,7 @@ from .callbacks import (
     TestEvaluationCallback,
 )
 from .checkpoint import CheckpointManager
+from .metric_logger import build_default_metric_loggers, resolve_metric_logging_flags
 from .metrics import MetricsAccumulator
 
 logger = get_logger(__name__)
@@ -89,7 +90,10 @@ class BaseTrainer(ABC):
         self.checkpoint_manager = None
         self.callback_manager = None
         self.hyperparam_manager = None
-        self.use_swanlab = True
+        self.no_swanlab = False
+        self.log_batch_metrics = False
+        self.metric_logger = None
+        self._global_step = 0
         self._custom_callbacks: list[Callback] = []
         self._custom_callback_functions: dict[str, list[Callable]] = {}
 
@@ -245,7 +249,8 @@ class BaseTrainer(ABC):
         self,
         exp_manager,
         hyperparams=None,
-        use_swanlab: bool = True,
+        no_swanlab: bool | None = None,
+        log_batch_metrics: bool | None = None,
         model_name: str = "",
         dataset_name: str = "",
         skip_test: bool = False,
@@ -255,7 +260,8 @@ class BaseTrainer(ABC):
         Args:
             exp_manager: 实验管理器实例
             hyperparams: 超参数（字典或对象，可选）
-            use_swanlab: 是否使用 SwanLab（默认 True）
+            no_swanlab: 是否关闭 SwanLab（None 时从 hyperparams 读取）
+            log_batch_metrics: 是否记录每 batch loss（None 时从 hyperparams 读取）
             model_name: 模型名称
             dataset_name: 数据集名称
             skip_test: 是否跳过训练完成后的测试集评估（默认 False）
@@ -266,7 +272,8 @@ class BaseTrainer(ABC):
         self._experiment_config = ExperimentConfig(
             exp_manager=exp_manager,
             hyperparams=hyperparams,
-            use_swanlab=use_swanlab,
+            no_swanlab=bool(no_swanlab),
+            log_batch_metrics=bool(log_batch_metrics),
             model_name=model_name,
             dataset_name=dataset_name,
         )
@@ -307,10 +314,15 @@ class BaseTrainer(ABC):
 
         # 2. Setup training parameters
         self.epochs = self._training_config.epochs
-        self.use_swanlab = self._experiment_config.use_swanlab
+
+        # 解析 no_swanlab / log_batch_metrics：显式传入优先，否则回退到 CLI 参数，
+        # 使 --no_swanlab / --log_batch_metrics 对所有模型生效。
+        hyperparams = self._experiment_config.hyperparams
+        self.no_swanlab, self.log_batch_metrics = resolve_metric_logging_flags(
+            self._experiment_config, hyperparams
+        )
 
         # 3. Set random seed
-        hyperparams = self._experiment_config.hyperparams
         seed = self._training_config.seed
         if seed is None and hyperparams is not None:
             seed = getattr(hyperparams, "seed", 42)
@@ -340,8 +352,14 @@ class BaseTrainer(ABC):
             os.makedirs(self.log_dir)
 
         # 8. Initialize components
-        self.metrics_accumulator = MetricsAccumulator(use_swanlab=self.use_swanlab)
+        self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
+        # 本地指标记录始终启用；SwanLab 除非 --no_swanlab
+        self.metric_logger = build_default_metric_loggers(
+            log_dir=self.log_dir,
+            log_batch_metrics=self.log_batch_metrics,
+            no_swanlab=self.no_swanlab,
+        )
 
         # 9. Initialize callbacks
         callbacks: list[Callback] = []
@@ -353,7 +371,7 @@ class BaseTrainer(ABC):
             callbacks.append(
                 EarlyStoppingCallback(
                     early_stopping=self.early_stopping,
-                    swanlab_prefix="",
+                    stage=None,
                 )
             )
         callbacks.append(
@@ -693,40 +711,26 @@ class BaseTrainer(ABC):
 
         logger.info(f"Resumed training from epoch {self.start_epoch}")
 
-    def _init_swanlab(self, project_name: str, experiment_name: str = None):
-        """初始化 SwanLab 实验追踪。"""
-        import swanlab
-        from dotenv import load_dotenv
-
-        # 加载环境变量
-        load_dotenv()
-
-        # 配置回调
-        from swanlab.plugin.notification import LarkCallback
-
-        callbacks = []
-        lark_webhook = os.getenv("LARK_WEBHOOK_URL")
-        lark_secret = os.getenv("LARK_SECRET")
-        if lark_webhook:
-            callbacks.append(LarkCallback(webhook_url=lark_webhook, secret=lark_secret))
-
-        settings = swanlab.Settings(log_proxy_type="stderr")
-
-        swanlab.init(
-            workspace=os.getenv("SWANLAB_WORKSPACE", None),
-            project_name=project_name,
-            experiment_name=experiment_name,
-            config=self.hyperparam_manager.get_hyperparameters_dict()
+    def _init_metric_logger(self):
+        """初始化指标记录后端（本地始终启用，SwanLab 除非 --no_swanlab）。"""
+        experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
+        config = (
+            self.hyperparam_manager.get_hyperparameters_dict()
             if self.hyperparam_manager
-            else {},
-            callbacks=callbacks,
+            else {}
+        )
+        self.metric_logger.init_run(
+            log_dir=self.log_dir,
+            experiment_name=experiment_name,
             group=self.model.__class__.__name__,
             tags=["cuda" if torch.cuda.is_available() else "cpu"],
-            settings=settings,
+            config=config,
         )
-        logger.info(
-            f"SwanLab initialized for project: {project_name}, run: {experiment_name}"
-        )
+
+    def _finish_metric_logger(self):
+        """结束指标记录后端。"""
+        self.metric_logger.finish()
+        logger.info("Metric logging finished")
 
     def run(self):
         """运行训练循环。"""
@@ -737,15 +741,8 @@ class BaseTrainer(ABC):
                 "before run()."
             )
 
-        # Initialize SwanLab
-        if self.use_swanlab:
-            from pathlib import Path
-
-            experiment_name = Path(self.log_dir).name
-            self._init_swanlab(
-                project_name="kt-exp-graph",
-                experiment_name=f"Run_{experiment_name}",
-            )
+        # Initialize metric loggers
+        self._init_metric_logger()
 
         self.model.to(self.device_)
         self.loss = self.loss.to(self.device_)
@@ -882,6 +879,18 @@ class BaseTrainer(ABC):
 
             total_loss += loss
 
+            # 记录每 batch loss（可选）并更新全局训练步数
+            if self.log_batch_metrics:
+                self.metric_logger.log_batch(
+                    phase=phase,
+                    global_step=self._global_step,
+                    epoch=epoch,
+                    batch_idx=batch_idx,
+                    loss=loss,
+                )
+            if is_train:
+                self._global_step += 1
+
             # 更新进度条
             if progress is not None and task_id is not None:
                 progress.advance(task_id)
@@ -893,7 +902,9 @@ class BaseTrainer(ABC):
 
         # 聚合并记录指标
         metrics = self.metrics_accumulator.compute(phase)
-        self.metrics_accumulator.log(phase, metrics, epoch)
+        self.metric_logger.log_metrics(
+            phase=phase, metrics=metrics, step=epoch, epoch=epoch
+        )
 
         # Phase 结束回调
         self.callback_manager.on_phase_end(
@@ -991,7 +1002,9 @@ class BaseTrainer(ABC):
                 test_progress.advance(test_task)
 
         metrics = self.metrics_accumulator.compute("test")
-        self.metrics_accumulator.log("test", metrics, epoch=self.epochs or 0)
+        self.metric_logger.log_metrics(
+            phase="test", metrics=metrics, step=self.epochs or 0, epoch=self.epochs or 0
+        )
 
         if metrics:
             metrics_str = ", ".join(
@@ -1055,6 +1068,9 @@ class BaseTrainer(ABC):
                 eval_progress.advance(eval_task)
 
         metrics = self.metrics_accumulator.compute("test")
+        self.metric_logger.log_metrics(
+            phase="test", metrics=metrics, step=self.epochs or 0, epoch=self.epochs or 0
+        )
 
         if metrics:
             metrics_str = ", ".join(
@@ -1080,11 +1096,7 @@ class BaseTrainer(ABC):
 
     def _finish(self):
         """清理资源，结束实验追踪。"""
-        if self.use_swanlab:
-            import swanlab
-
-            swanlab.finish()
-            logger.info("SwanLab run finished")
+        self._finish_metric_logger()
 
 
 __all__ = ["BaseTrainer"]
