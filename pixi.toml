@@ -8,7 +8,7 @@ index-url = "https://pypi.org/simple"
 
 # General pypi dependencies for all features
 [pypi-dependencies]
-swanlab = ">=0.7.13,<0.8"
+swanlab = ">=0.8,<0.9"
 
 [feature.gpu.system-requirements]
 cuda = "12.8"
