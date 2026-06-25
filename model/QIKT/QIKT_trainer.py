@@ -239,7 +239,7 @@ class QIKTTrainer(BaseTrainer):
         """QIKT 前向传播
 
         模型在时刻 t 的输出基于 question[0:t] 和 response[0:t-1]
-        预测 response[t]，使用 skip_first=True 对齐。
+        预测 response[t+1]（next-item 对齐，output[t] 预测 response[t+1]）。
 
         Args:
             batch_data: (sequence, response, mask, skills) 元组
@@ -260,23 +260,21 @@ class QIKTTrainer(BaseTrainer):
         y_fused = self._fuse_predictions(outputs)
 
         # 提取有效预测（跳过第一个位置）
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_fused, response, mask, skip_first=True
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_fused, response, mask)
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
         # 提取辅助预测用于多任务损失（复用同一掩码逻辑）
         q_all, _, _ = self._extract_valid_predictions(
-            outputs["y_question_all"], response, mask, skip_first=True
+            outputs["y_question_all"], response, mask
         )
         c_all, _, _ = self._extract_valid_predictions(
-            outputs["y_concept_all"], response, mask, skip_first=True
+            outputs["y_concept_all"], response, mask
         )
         q_next, _, _ = self._extract_valid_predictions(
-            outputs["y_question_next"], response, mask, skip_first=True
+            outputs["y_question_next"], response, mask
         )
         c_next, _, _ = self._extract_valid_predictions(
-            outputs["y_concept_next"], response, mask, skip_first=True
+            outputs["y_concept_next"], response, mask
         )
 
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)

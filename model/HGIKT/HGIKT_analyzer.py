@@ -106,9 +106,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         )
 
         # Extract valid predictions (skip first position)
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=True
-        )
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         # Handle empty batch
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

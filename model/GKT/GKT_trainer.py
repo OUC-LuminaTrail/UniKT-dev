@@ -265,18 +265,14 @@ class GKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        # 模型前向传播
-        # 输出形状: [B, S-1]，其中 y[:, t] 预测 response[:, t+1]
-        y_hat_full = self.model(sequence, response, mask)
+        # 模型前向传播：输出 [B, S-1]，y[:, t] 预测 response[:, t+1]（next-item）
+        y_hat_full = self._pad_to_full_sequence(self.model(sequence, response, mask))
 
-        # 提取有效位置的预测和标签
-        # 模型输出 [B, S-1] 已经是 shifted 预测
-        # 所以需要将 response 和 mask 也 shift 来匹配: [B, S] -> [B, S-1]
+        # 提取有效位置的预测和标签（pad 到 [B, S] 后用内置 next-item 对齐）
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full,
-            response[:, 1:],  # Shift to match predictions
-            mask[:, 1:],  # Shift to match predictions
-            skip_first=False,
+            response,
+            mask,
         )
 
         # 处理空批次

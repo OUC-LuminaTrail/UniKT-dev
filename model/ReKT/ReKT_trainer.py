@@ -132,7 +132,7 @@ class ReKTTrainer(BaseTrainer):
         logits = self.model(question, skill, response, mask)
 
         y_hat, y_label, _ = self._extract_valid_predictions(
-            logits, response, mask, skip_first=False
+            logits, response, mask, same_position=True
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)

@@ -363,7 +363,7 @@ class MTKT(nn.Module):
 
     预测语义:
     - preds[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
-    - 对应 trainer 中 skip_first=False
+    - 同位置输出（trainer 用 same_position=True 适配 next-item 对齐）
     """
 
     def __init__(

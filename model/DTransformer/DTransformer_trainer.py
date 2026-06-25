@@ -290,7 +290,7 @@ class DTransformerTrainer(BaseTrainer):
             y_hat_full, reg_loss = self.model(sequence, response, mask, pid_data)
 
         y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=False
+            y_hat_full, response, mask, same_position=True
         )
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

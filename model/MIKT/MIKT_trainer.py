@@ -155,14 +155,12 @@ class MIKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        y_hat_full = self.model(sequence, response, mask, self.question_skill_matrix)
-
-        shifted_response = response[:, 1:]
-        shifted_mask = mask[:, 1:]
-
-        y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, shifted_response, shifted_mask, skip_first=False
+        # 模型输出 [B, S-1]，P[:, t] 预测 response[:, t+1]（next-item）；pad 到 [B, S] 后用内置函数
+        y_hat_full = self._pad_to_full_sequence(
+            self.model(sequence, response, mask, self.question_skill_matrix)
         )
+
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 

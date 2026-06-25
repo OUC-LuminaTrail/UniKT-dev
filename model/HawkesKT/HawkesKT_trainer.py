@@ -131,15 +131,10 @@ class HawkesKTTrainer(BaseTrainer):
         label = self._move_tensor_to_device(label)
         mask = self._move_tensor_to_device(mask)
 
+        # 模型同位置输出 y_hat_full[:,t] 预测 label[:,t]；same_position=True 由内置函数归一化
         y_hat_full = self.model(skill, problem, time, label)
-
-        # Model predicts label[:,t] from all previous interactions
-        y_hat = y_hat_full[:, 1:]
-        y_label = label[:, 1:].float()
-        valid_mask = mask[:, 1:]
-
         y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat, y_label, valid_mask, skip_first=False
+            y_hat_full, label, mask, same_position=True
         )
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

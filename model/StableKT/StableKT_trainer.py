@@ -276,7 +276,7 @@ class StableKTTrainer(BaseTrainer):
 
         # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=False
+            y_hat_full, response, mask, same_position=True
         )
 
         # 处理空批次

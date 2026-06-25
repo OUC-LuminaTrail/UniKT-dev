@@ -146,16 +146,15 @@ class HGIKTHyperOnlyUnweightedTrainer(BaseTrainer):
             self.question_skill_matrix,
         )
 
-        # HGIKT specific sampling/alignment
-        y_hat = y_hat_full[:, :-1]
-        target = response[:, 1:].float()
-        mask_flat = mask[:, 1:].bool()
+        # 提取有效预测（next-item 对齐）
+        y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
+        y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
+        y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
         return {
-            "loss": self.loss(y_hat[mask_flat], target[mask_flat]),
-            "y_hat": y_hat[mask_flat],
-            "y_label": target[mask_flat],
-            "y_predict": (torch.sigmoid(y_hat[mask_flat]) > 0.5).long(),
-            "y_score": torch.sigmoid(y_hat[mask_flat]),
-            "y_prob": torch.sigmoid(y_hat[mask_flat]),
+            "y_hat": y_hat,
+            "y_label": y_label,
+            "y_predict": y_predict,
+            "y_score": y_hat,
+            "y_prob": torch.sigmoid(y_hat),
         }

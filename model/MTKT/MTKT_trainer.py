@@ -260,7 +260,7 @@ class MTKTTrainer(BaseTrainer):
 
         MTKT 预测语义:
         - preds[:, t] 使用 sequence[0:t+1] 和 response[0:t+1] 预测 response[t]
-        - 使用 skip_first=False 直接对齐
+        - 同位置输出，trainer 用 same_position=True 由内置函数归一化为 next-item
 
         Args:
             batch_data: (sequence, response, mask, question, rgap, sgap, pcount)
@@ -293,7 +293,7 @@ class MTKTTrainer(BaseTrainer):
             y_hat_full,
             response,
             mask,
-            skip_first=False,
+            same_position=True,
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
