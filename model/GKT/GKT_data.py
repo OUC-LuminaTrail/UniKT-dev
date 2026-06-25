@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 from typing_extensions import override
@@ -130,47 +129,3 @@ class GKTModelData(SkillModelData):
         )
 
         return train_dataset, val_dataset, test_dataset
-
-    def build_transition_graph(self) -> torch.Tensor:
-        """构建基于概念转移的图
-
-        基于数据集中概念序列的转移模式构建邻接矩阵
-
-        Returns:
-            图邻接矩阵，形状为 [num_skills, num_skills]
-        """
-        data = self.data_src.get_sequence_data()
-        num_skills = self.data_src.get_metadata("num_skills")
-
-        # 构建转移矩阵
-        graph = np.zeros((num_skills, num_skills))
-
-        for row in data.itertuples():
-            # 获取问题到技能的映射
-            question_data = self.data_src.get_relation("question_skill")
-            q_to_skills = (
-                question_data.groupby("question")["skill"].apply(list).to_dict()
-            )
-
-            # 获取用户的技能序列
-            skills = q_to_skills.get(row.question, [])
-            for skill in skills:
-                if skill != -1:
-                    # 简单转移计数
-                    pass  # TODO: 实现完整的转移图构建逻辑
-
-        # 对角线置零
-        np.fill_diagonal(graph, 0)
-
-        # 行归一化
-        rowsum = np.array(graph.sum(1))
-
-        def inv(x):
-            return 1.0 / x if x != 0 else 0.0
-
-        inv_func = np.vectorize(inv)
-        r_inv = inv_func(rowsum).flatten()
-        r_mat_inv = np.diag(r_inv)
-        graph = r_mat_inv.dot(graph)
-
-        return torch.from_numpy(graph).float()

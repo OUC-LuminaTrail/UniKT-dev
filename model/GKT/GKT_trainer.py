@@ -82,12 +82,12 @@ class GKTModelParams(BaseParamConfig):
         params = {
             "hidden_dim": {
                 "type": int,
-                "default": 32,
+                "default": 64,
                 "help": "Hidden dimension of the model",
             },
             "embedding_dim": {
                 "type": int,
-                "default": 32,
+                "default": 64,
                 "help": "Embedding dimension of the model",
             },
             "dropout": {
