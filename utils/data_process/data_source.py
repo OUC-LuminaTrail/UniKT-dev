@@ -684,98 +684,216 @@ class DataSource(ABC):
             )
         return self.metadata if key is None else self.metadata[key]
 
-    def build_split_question_sequence_data(self):
-        """构建切分后的序列数据
+    # Target number of source rows processed per batch when splitting
+    # sequences. Batches are aligned to user boundaries so a single user is
+    # never split across batches. This bounds peak memory regardless of how
+    # large the (possibly skill-exploded) dataset grows, while producing output
+    # that is identical to whole-frame processing.
+    _SPLIT_BATCH_ROWS: int = 2_000_000
 
-        参数:
-            max_seq_len: 最大序列长度
-            min_seq_len: 最小序列长度，切分出的子序列长度小于此值将被抛弃
+    def _iter_user_aligned_slices(self, df: pl.DataFrame, target_rows: int):
+        """Yield (start, end) row offsets of contiguous, user-aligned batches.
 
-        说明:
-            - 将长度大于 max_seq_len 的用户序列切分成多个子序列
-            - 返回切分后的数据及统计信息
+        ``df`` must be sorted by the ``user`` column. Each yielded batch
+        contains whole users (a user is never split across batches) and spans
+        at least ``target_rows`` rows, except for the final batch. A single
+        user longer than ``target_rows`` forms its own (oversized) batch.
+
+        Yields:
+            Tuples of (start_offset, end_offset) for use with ``df.slice``.
+        """
+        user_col = df["user"].to_numpy()
+        n = user_col.size
+        if n == 0:
+            return
+        # Indices where a new user group starts (data is already sorted by user).
+        change = np.flatnonzero(user_col[1:] != user_col[:-1]) + 1
+        boundaries = np.concatenate(([0], change, [n]))
+        num_groups = boundaries.size - 1
+
+        start = 0
+        while start < num_groups:
+            end = start + 1
+            while end < num_groups and (
+                boundaries[end] - boundaries[start] < target_rows
+            ):
+                end += 1
+            yield int(boundaries[start]), int(boundaries[end])
+            start = end
+
+    def _build_split_sequences(self, expand_skills: bool) -> pl.DataFrame:
+        """Build split sequences, processing users in memory-bounded batches.
+
+        The split operation is independent per user, so users are processed in
+        contiguous batches aligned to user boundaries. Peak memory is bounded
+        by the batch size rather than the full (possibly skill-exploded)
+        dataset. The output is identical to whole-frame processing: every per-
+        user operation (sequence position, length, split index/length, dense
+        new-user-id assignment in global ``(user, split_idx)`` order) is
+        preserved because no user ever spans two batches.
+
+        Args:
+            expand_skills: If True, expand each question into its skills (one
+                row per skill) before splitting, producing skill sequences. If
+                False, split the question sequences unchanged.
+
+        Returns:
+            DataFrame with the original ``sequence_data`` columns plus a
+            ``seq_pos`` column (and an extra ``skill`` column when
+            ``expand_skills``).
         """
         max_seq_len = self.args.max_seq_len
         min_seq_len = self.args.min_seq_len
+        seq_cols = list(self.sequence_data.columns)
 
+        # Ensure chronological order within each user, breaking timestamp ties
+        # with the remaining columns (matches the previous whole-frame sort).
+        self.sequence_data = self.sequence_data.sort(self._sort_columns())
+
+        question_skills = None
+        if expand_skills:
+            if not self.relation_data or "question_skill" not in self.relation_data:
+                raise ValueError("question_skill relation not available.")
+            # One row per question with its skills sorted ascending. Small
+            # (~num_questions rows) and reused across every batch.
+            question_skills = (
+                self.relation_data["question_skill"]
+                .sort("question", "skill")
+                .group_by("question")
+                .agg(pl.col("skill").sort().alias("skills"))
+            )
+            logger.info(
+                f"Building split skill sequences (max_len={max_seq_len}, "
+                f"min_len={min_seq_len})"
+            )
+        else:
+            logger.info(
+                f"Building split question sequences (max_len={max_seq_len}, "
+                f"min_len={min_seq_len})"
+            )
+
+        parts: list[pl.DataFrame] = []
+        next_new_id = 0
+        for batch_idx, (start, end) in enumerate(
+            self._iter_user_aligned_slices(self.sequence_data, self._SPLIT_BATCH_ROWS)
+        ):
+            batch = self.sequence_data.slice(start, end - start)
+
+            if expand_skills:
+                # The hash join does not guarantee row order, so we must
+                # preserve the deterministic chronological (interaction-major)
+                # order ourselves. Stamp each interaction with its position in
+                # the (already sorted) batch before joining, then explode and
+                # restore order by (position, skill): interactions stay in
+                # chronological order, with each interaction's skills ascending.
+                # This reproduces the previous whole-frame output exactly --
+                # including users with repeated interactions (same question and
+                # timestamp) -- and is independent of batch size.
+                batch = batch.with_columns(pl.int_range(pl.len()).alias("__order"))
+                batch = (
+                    batch.join(question_skills, on="question", how="inner")
+                    .explode("skills")
+                    .rename({"skills": "skill"})
+                    .sort(["__order", "skill"])
+                    .drop("__order")
+                )
+
+            # Per-user sequence position (0..L-1) and total length L.
+            b = batch.with_columns(pl.int_range(pl.len()).over("user").alias("seq_pos"))
+            b = b.join(
+                b.group_by("user").agg(pl.len().alias("seq_len")),
+                on="user",
+                how="left",
+            )
+
+            # Split index and per-split length (constant within a split).
+            b = b.with_columns(
+                (pl.col("seq_pos") // max_seq_len).alias("split_idx")
+            ).with_columns(
+                pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
+                .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
+                .otherwise(max_seq_len)
+                .alias("split_len"),
+            )
+
+            # Keep only splits long enough, then assign dense new user ids.
+            valid = (
+                b.filter(pl.col("split_len") >= min_seq_len)
+                .select(["user", "split_idx"])
+                .unique()
+                .sort("user", "split_idx")
+                .with_row_index("new_user_id")
+            )
+            n_new = valid.height
+            if n_new == 0:
+                continue
+            # Offset the locally-assigned ids by the running global counter so
+            # the global (user, split_idx) ordering is preserved across batches.
+            valid = valid.with_columns(
+                (pl.col("new_user_id").cast(pl.Int64) + next_new_id)
+                .cast(pl.Int32)
+                .alias("new_user_id")
+            )
+
+            b = b.join(valid, on=["user", "split_idx"], how="inner").with_columns(
+                [
+                    pl.col("new_user_id").alias("user"),
+                    (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
+                ]
+            )
+
+            out_cols = [pl.col(c) for c in seq_cols]
+            if expand_skills:
+                out_cols.append(pl.col("skill"))
+            out_cols.append(pl.col("relative_pos").alias("seq_pos"))
+            parts.append(b.select(out_cols).sort("user", "seq_pos"))
+
+            next_new_id += n_new
+            if (batch_idx + 1) % 10 == 0:
+                logger.debug(
+                    f"  processed {batch_idx + 1} batches, "
+                    f"{next_new_id} sub-sequences so far"
+                )
+
+        if not parts:
+            empty = self.sequence_data.head(0).select(seq_cols)
+            if expand_skills:
+                empty = empty.with_columns(pl.lit(None, dtype=pl.Int32).alias("skill"))
+            return empty.with_columns(pl.lit(None, dtype=pl.Int64).alias("seq_pos"))
+
+        return pl.concat(parts, how="vertical")
+
+    def build_split_question_sequence_data(self):
+        """构建切分后的序列数据（按问题）。
+
+        将长度大于 ``max_seq_len`` 的用户序列切分成多个子序列，丢弃长度不足
+        ``min_seq_len`` 的切分，并为每个保留的切分分配新的稠密用户 ID。
+
+        处理按用户分批进行（每批对齐到用户边界），峰值内存受批次大小约束，
+        输出语义与整框处理完全一致。
+        """
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
-        logger.info(
-            f"Building split question sequences (max_len={max_seq_len}, min_len={min_seq_len})"
+        self.split_question_sequence_data = self._build_split_sequences(
+            expand_skills=False
         )
-
-        # Ensure chronological order within each user, break timestamp ties with remaining columns
-        self.sequence_data = self.sequence_data.sort(self._sort_columns())
-
-        # Add sequence position and compute per-user sequence length
-        data = self.sequence_data.with_columns(
-            pl.int_range(pl.len()).over("user").alias("seq_pos")
-        ).join(
-            self.sequence_data.group_by("user").agg(pl.len().alias("seq_len")),
-            on="user",
-            how="left",
-        )
-
-        # 计算每条记录所属的切分及其长度
-        data = data.with_columns(
-            [
-                (pl.col("seq_pos") // max_seq_len).alias("split_idx"),
-            ]
-        ).with_columns(
-            pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
-            .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
-            .otherwise(max_seq_len)
-            .alias("split_len"),
-        )
-
-        # 过滤长度不足的切分
-        valid_splits = (
-            data.filter(pl.col("split_len") >= min_seq_len)
-            .select(["user", "split_idx"])
-            .unique()
-            .sort("user", "split_idx")
-        )
-
-        # 为每个有效切分分配新的用户ID
-        valid_splits = valid_splits.with_row_index("new_user_id")
-
-        # 合并回数据，过滤无效切分的记录
-        data = data.join(valid_splits, on=["user", "split_idx"], how="inner")
-
-        # 更新用户ID和位置
-        data = data.with_columns(
-            [
-                pl.col("new_user_id").cast(pl.Int32).alias("user"),
-                (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
-            ]
-        )
-
-        # 保留原始sequence_data中的所有数据列，并添加seq_pos
-        select_cols = [pl.col(c) for c in self.sequence_data.columns]
-        select_cols.append(pl.col("relative_pos").alias("seq_pos"))
-        data = data.select(select_cols).sort("user", "seq_pos")
-
-        # 统计切分信息
-        final_num_users = data["user"].n_unique()
-
-        logger.debug(f"Split into {final_num_users} sub-sequences")
-
-        self.split_question_sequence_data = data
+        final_num_users = self.split_question_sequence_data["user"].n_unique()
+        logger.debug(f"Split into {final_num_users} question sub-sequences")
 
     def build_split_skill_sequence_data(self):
         """构建切分后的技能序列数据。
 
         将问题序列展开为技能序列（一个问题可能对应多个技能），保留 question 列，
-        然后按 max_seq_len 切分长序列。
+        然后按 ``max_seq_len`` 切分长序列，丢弃长度不足 ``min_seq_len`` 的切分。
+
+        处理按用户分批进行（每批对齐到用户边界），峰值内存受批次大小约束，
+        输出语义与整框处理完全一致。
 
         输出列: sequence_data 原始列 + skill + seq_pos
         """
-        max_seq_len = self.args.max_seq_len
-        min_seq_len = self.args.min_seq_len
-
         if self.sequence_data is None:
             raise ValueError(
                 "No processed data available. Please call load_processed_data() or clear_data() first."
@@ -783,81 +901,11 @@ class DataSource(ABC):
         if not self.relation_data or "question_skill" not in self.relation_data:
             raise ValueError("question_skill relation not available.")
 
-        logger.info(
-            f"Building split skill sequences (max_len={max_seq_len}, min_len={min_seq_len})"
-        )
-
-        # Ensure chronological order within each user, break timestamp ties with remaining columns
-        self.sequence_data = self.sequence_data.sort(self._sort_columns())
-
-        # Step 1: 将问题序列展开为技能序列，保留 question 列
-        question_skills = (
-            self.relation_data["question_skill"]
-            .lazy()
-            .sort("question", "skill")
-            .group_by("question")
-            .agg(pl.col("skill").sort().alias("skills"))
-        )
-
-        expanded = (
-            self.sequence_data.lazy()
-            .join(question_skills, on="question", how="inner")
-            .explode("skills")
-            .rename({"skills": "skill"})
-            .sort(self._sort_columns() + ["skill"])
-        )
-
-        # Step 2: 计算序列位置和长度
-        expanded = expanded.with_columns(
-            pl.int_range(pl.len()).over("user").alias("seq_pos")
-        ).join(
-            expanded.group_by("user").agg(pl.len().alias("seq_len")),
-            on="user",
-            how="left",
-        )
-
-        # Step 3: 计算切分索引和每段长度
-        expanded = expanded.with_columns(
-            (pl.col("seq_pos") // max_seq_len).alias("split_idx")
-        ).with_columns(
-            pl.when(pl.col("seq_pos") + max_seq_len >= pl.col("seq_len"))
-            .then(pl.col("seq_len") - pl.col("split_idx") * max_seq_len)
-            .otherwise(max_seq_len)
-            .alias("split_len"),
-        )
-
-        # Step 4: 过滤短切分，分配新用户ID
-        valid_splits = (
-            expanded.filter(pl.col("split_len") >= min_seq_len)
-            .select(["user", "split_idx"])
-            .unique()
-            .sort("user", "split_idx")
-            .with_row_index("new_user_id")
-        )
-
-        # Step 5: 应用有效切分，重映射用户ID和位置
-        expanded = expanded.join(
-            valid_splits, on=["user", "split_idx"], how="inner"
-        ).with_columns(
-            pl.col("new_user_id").cast(pl.Int32).alias("user"),
-            (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
-        )
-
-        # Step 6: 输出列 = sequence_data 原始列 + skill + seq_pos
-        output_cols = [pl.col(c) for c in self.sequence_data.columns]
-        output_cols.append(pl.col("skill"))
-        output_cols.append(pl.col("relative_pos").alias("seq_pos"))
-        split_skill_data = (
-            expanded.select(output_cols)
-            .sort("user", "seq_pos")
-            .collect(engine="streaming")
-        )
-
+        self.split_skill_sequence_data = self._build_split_sequences(expand_skills=True)
         logger.debug(
-            f"Split into {split_skill_data['user'].n_unique()} skill sub-sequences"
+            f"Split into {self.split_skill_sequence_data['user'].n_unique()} "
+            f"skill sub-sequences"
         )
-
-        self.split_skill_sequence_data = split_skill_data
 
     def build_windowlate_data(self):
         """构建用于 windowlate_auc_mean 评估的样本数据。
