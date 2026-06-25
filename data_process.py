@@ -110,7 +110,19 @@ def cmd_process(args):
     """Handle `process` subcommand."""
     dp = get_data_source(args.dataset, args)
     dp.clean_raw_data()
+    # The raw interaction frame is no longer needed after cleaning; release it so
+    # it doesn't pile up against the (much larger) split-stage intermediates.
+    # NOTE: question_data_raw is still consumed by transform_data, so keep it.
+    for attr in ("sequence_data_raw",):
+        if hasattr(dp, attr):
+            setattr(dp, attr, None)
+
     dp.transform_data()
+    # Cleaned data and question metadata are fully consumed by transform_data;
+    # release before the memory-heavy split stages.
+    for attr in ("cleaned_raw_data", "question_data_raw"):
+        if hasattr(dp, attr):
+            setattr(dp, attr, None)
 
     if args.sample_size is not None or args.sample_ratio is not None:
         dp.sample(
