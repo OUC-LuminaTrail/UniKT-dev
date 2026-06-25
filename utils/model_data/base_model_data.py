@@ -450,9 +450,7 @@ class BaseModelData(ABC):
 
         questions = stats["question"].to_list()
         difficulties = stats["difficulty"].to_list()
-        return {
-            int(q): float(d) for q, d in zip(questions, difficulties, strict=True)
-        }
+        return {int(q): float(d) for q, d in zip(questions, difficulties, strict=True)}
 
     def build_relationship_matrix(
         self, edge_type: tuple[str, str, str], value_type: str = "binary"
@@ -536,7 +534,9 @@ class BaseModelData(ABC):
         ).drop_nulls()
         src_idx = pairs["src"].to_numpy()
         dst_idx = pairs["dst"].to_numpy()
-        valid = (src_idx >= 0) & (src_idx < num_src) & (dst_idx >= 0) & (dst_idx < num_dst)
+        valid = (
+            (src_idx >= 0) & (src_idx < num_src) & (dst_idx >= 0) & (dst_idx < num_dst)
+        )
         src_idx, dst_idx = src_idx[valid], dst_idx[valid]
 
         if value_type == "binary":
