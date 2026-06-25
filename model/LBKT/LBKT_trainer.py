@@ -188,13 +188,9 @@ class LBKTTrainer(BaseTrainer):
             self.q_matrix,
         )
 
-        y_hat_seq = preds[:, 1:]
-        y_label_seq = response.float()[:, 1:]
-        valid_mask = mask[:, 1:]
-
-        y_hat = torch.masked_select(y_hat_seq, valid_mask)
-        y_label = torch.masked_select(y_label_seq, valid_mask)
-
+        y_hat, y_label, _ = self._extract_valid_predictions(
+            preds, response, mask, same_position=True
+        )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 

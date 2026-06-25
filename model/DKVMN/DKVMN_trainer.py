@@ -163,9 +163,9 @@ class DKVMNTrainer(BaseTrainer):
 
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # DKVMN 的 p[:, t] 使用历史 0..t-1 预测位置 t，不需要 skip_first
+        # DKVMN 同位置输出：p[:, t] 用历史 0..t-1 预测 response[t]，用 same_position=True 由内置函数归一化
         y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=False
+            y_hat_full, response, mask, same_position=True
         )
 
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)

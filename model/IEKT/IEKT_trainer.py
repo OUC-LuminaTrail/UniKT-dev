@@ -192,14 +192,10 @@ class IEKTTrainer(BaseTrainer):
         logits = out["logits"]  # [B, S]，predict_current[t] 预测 response[t]
         probs = torch.sigmoid(logits)  # [B, S]
 
-        # 左移：y_hat_full[t] = probs[t+1]，预测 response[t+1]
-        B, S = probs.shape
-        dummy = torch.zeros(B, 1, device=probs.device)
-        y_hat_full = torch.cat([probs[:, 1:], dummy], dim=1)
-
-        # 提取有效预测（跳过首位置，对齐 next 预测）
+        # 同位置输出 probs[t] 预测 response[t]；same_position=True 由内置函数归一化
+        # 提取有效预测（next-item 对齐）
         y_hat, y_label, _ = self._extract_valid_predictions(
-            y_hat_full, response, mask, skip_first=True
+            probs, response, mask, same_position=True
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)

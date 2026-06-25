@@ -552,39 +552,61 @@ class BaseTrainer(ABC):
         y_hat_full: torch.Tensor,
         response: torch.Tensor,
         mask: torch.Tensor,
-        skip_first: bool = True,
+        same_position: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        提取有效位置的预测和标签，统一处理序列对齐问题
+        """提取有效位置的预测和标签。
+
+        约定：``y_hat_full[t]`` 预测 ``response[t+1]``。提取始终按 next-item：
+        ``y_hat_full[:,:-1]`` 配 ``response[:,1:]``，相邻对掩码
+        ``mask[:,:-1] & mask[:,1:]``。
+
+        ``same_position=True`` 表示输入是同位置约定（``out[t]`` 预测 ``response[t]``），
+        此时先左移一位并在末尾补占位列（丢掉无历史的第 0 位预测）转成 next-item 视图，
+        再按同一对齐提取——仅做输入归一化，不引入第二种对齐方式。
 
         参数:
-            y_hat_full: 模型输出的完整预测 [B, S]
+            y_hat_full: 模型输出 [B, S]（默认 next-item；same_position=True 时为同位置）
             response: 响应标签 [B, S]
             mask: 有效位置掩码 [B, S]
-            skip_first: 是否跳过第一个时间步（模型在t预测t+1）
+            same_position: 输入是否为同位置约定（out[t] 预测 response[t]）
 
         返回:
             y_hat: 有效位置的预测值
             y_label: 有效位置的标签
-            valid_mask: 有效掩码
+            valid_mask: 有效掩码（相邻对：当前位置与下一位置均有效）
         """
-        # 根据需求决定是否跳过第一个时间步
-        if skip_first:
-            y_hat_seq = y_hat_full[:, :-1]
-            y_label_seq = response.float()[:, 1:]
-            mask_curr = mask[:, :-1]
-            mask_next = mask[:, 1:]
-            valid_mask = mask_curr & mask_next
-        else:
-            y_hat_seq = y_hat_full
-            y_label_seq = response.float()
-            valid_mask = mask
+        # 同位置输入先归一化为 next-item 视图（丢无历史的第 0 位 + 末尾补占位）
+        if same_position:
+            y_hat_full = self._pad_to_full_sequence(y_hat_full[:, 1:])
+
+        # next-item 对齐：t 时刻的预测对应 t+1 时刻的标签
+        y_hat_seq = y_hat_full[:, :-1]
+        y_label_seq = response.float()[:, 1:]
+        mask_curr = mask[:, :-1]
+        mask_next = mask[:, 1:]
+        valid_mask = mask_curr & mask_next
 
         # 使用 mask 选择有效位置
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
         y_label = torch.masked_select(y_label_seq, valid_mask)
 
         return y_hat, y_label, valid_mask
+
+    def _pad_to_full_sequence(self, y_hat: torch.Tensor) -> torch.Tensor:
+        """在时间维末尾补一列零占位，把 ``[B, L]`` 延长为 ``[B, L+1]``。
+
+        用于 next-item 但输出长度为 ``S-1`` 的模型（如 GKT/SAKT/SGKT/MIKT/KQN）：
+        把 ``[B, S-1]`` 补到 ``[B, S]`` 以满足 :meth:`_extract_valid_predictions`
+        的契约。末尾占位列会被内置函数的 ``[:, :-1]`` 切片丢弃，永不参与评分。
+
+        参数:
+            y_hat: 模型输出 [B, L]（next-item 约定下 y[t] 预测 response[t+1]）
+
+        返回:
+            [B, L+1]，末列为零占位
+        """
+        dummy = torch.zeros(y_hat.size(0), 1, device=y_hat.device)
+        return torch.cat([y_hat, dummy], dim=1)
 
     def _handle_empty_batch(
         self, y_hat: torch.Tensor, y_label: torch.Tensor
