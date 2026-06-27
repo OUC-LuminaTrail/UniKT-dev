@@ -43,6 +43,7 @@ TRAINERS.register_lazy("IEKT", "model.IEKT.IEKT_trainer", "IEKTTrainer")
 TRAINERS.register_lazy("MCKT", "model.MCKT.MCKT_trainer", "MCKTTrainer")
 TRAINERS.register_lazy("KQN", "model.KQN.KQN_trainer", "KQNTrainer")
 TRAINERS.register_lazy("MIKT", "model.MIKT.MIKT_trainer", "MIKTTrainer")
+TRAINERS.register_lazy("Mamba4KT", "model.Mamba4KT.Mamba4KT_trainer", "Mamba4KTTrainer")
 TRAINERS.register_lazy("extraKT", "model.extraKT.extraKT_trainer", "extraKTTrainer")
 TRAINERS.register_lazy("MTKT", "model.MTKT.MTKT_trainer", "MTKTTrainer")
 
@@ -145,6 +146,9 @@ PARAM_CONFIGS.register_lazy("IEKT", "model.IEKT.IEKT_trainer", "IEKTModelParams"
 PARAM_CONFIGS.register_lazy("MCKT", "model.MCKT.MCKT_trainer", "MCKTModelParams")
 PARAM_CONFIGS.register_lazy("KQN", "model.KQN.KQN_trainer", "KQNModelParams")
 PARAM_CONFIGS.register_lazy("MIKT", "model.MIKT.MIKT_trainer", "MIKTModelParams")
+PARAM_CONFIGS.register_lazy(
+    "Mamba4KT", "model.Mamba4KT.Mamba4KT_trainer", "Mamba4KTModelParams"
+)
 PARAM_CONFIGS.register_lazy(
     "extraKT", "model.extraKT.extraKT_trainer", "extraKTModelParams"
 )
