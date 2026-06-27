@@ -691,7 +691,7 @@ class BaseTrainer(ABC):
         self.hyperparam_manager.save()
 
         # 打印摘要
-        logger.info(self.hyperparam_manager.get_summary())
+        self.hyperparam_manager.print_summary()
 
     def _get_device_info(self):
         """获取设备信息，包括 CUDA 设备型号。"""

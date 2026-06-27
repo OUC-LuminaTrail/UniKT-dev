@@ -825,7 +825,7 @@ class MultiTrainer:
             self.hyperparam_manager.add_metadata("seed", self.seed)
 
         self.hyperparam_manager.save()
-        logger.info(self.hyperparam_manager.get_summary())
+        self.hyperparam_manager.print_summary()
 
     def _get_device_info(self) -> dict:
         """获取设备信息"""

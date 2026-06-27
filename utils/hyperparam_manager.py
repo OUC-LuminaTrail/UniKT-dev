@@ -10,6 +10,10 @@ from datetime import datetime
 from typing import Any
 
 import torch
+from rich.console import Console, Group
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from utils.core import get_logger
 
@@ -38,6 +42,8 @@ class HyperparameterManager:
         self.metadata: dict[str, Any] = {
             "created_at": datetime.now().isoformat(),
         }
+        # 摘要渲染专用终端，与日志 RichHandler 共享宽度/颜色探测
+        self._console = Console()
         self.logger = get_logger(__name__)
 
     def get_hyperparameters_dict(self) -> dict[str, Any]:
@@ -241,6 +247,77 @@ class HyperparameterManager:
         self._format_params(self.hyperparams, lines, indent=1)
 
         return "\n".join(lines)
+
+    def render_summary(self) -> Panel:
+        """渲染超参数摘要为 rich Panel：外层卡片 + 分组 + 双列 key/value。
+
+        与 get_summary() 的纯文本不同，此方法产出带边框与着色的可视卡片，
+        供训练启动时直观展示，避免多行纯文本刷屏。
+        """
+        sections: list = []
+
+        # 元数据压缩为一行（model_name/dataset_name 已上移到标题，created_at 过长隐藏）
+        meta_pairs = [
+            f"{k}={v}"
+            for k, v in self.metadata.items()
+            if k not in ("model_name", "dataset_name", "created_at")
+        ]
+        if meta_pairs:
+            sections.append(Text("   ".join(meta_pairs), style="dim"))
+            sections.append(Text(""))
+
+        for group, params in self.hyperparams.items():
+            if not params:
+                continue
+            sections.append(Text(f"■ {group.capitalize()}", style="bold magenta"))
+            sections.append(self._param_grid(params))
+            sections.append(Text(""))
+
+        return Panel(
+            Group(*sections),
+            title=self._build_title(),
+            title_align="left",
+            border_style="blue",
+            padding=(0, 1),
+            expand=False,
+        )
+
+    def print_summary(self, console: Console | None = None) -> None:
+        """打印 rich 超参数摘要卡片。"""
+        (console or self._console).print(self.render_summary())
+
+    def _param_grid(self, params: dict) -> Table:
+        """把组内参数排成双列 key/value 网格，行数减半。"""
+        items = list(params.items())
+        half = (len(items) + 1) // 2
+        left, right = items[:half], items[half:]
+
+        grid = Table.grid(padding=(0, 1))
+        grid.add_column(style="cyan", no_wrap=True)
+        grid.add_column()
+        grid.add_column(style="cyan", no_wrap=True)
+        grid.add_column()
+
+        for i in range(half):
+            lk, lv = left[i]
+            if i < len(right):
+                rk, rv = right[i]
+                grid.add_row(str(lk), str(lv), str(rk), str(rv))
+            else:
+                grid.add_row(str(lk), str(lv), "", "")
+        return grid
+
+    def _build_title(self) -> str:
+        """构造卡片标题，拼接可用的 model/dataset 元信息。"""
+        model = self.metadata.get("model_name")
+        dataset = self.metadata.get("dataset_name")
+        if model and dataset:
+            return f"Hyperparameters · {model} @ {dataset}"
+        if model:
+            return f"Hyperparameters · {model}"
+        if dataset:
+            return f"Hyperparameters · @{dataset}"
+        return "Hyperparameters"
 
     def _format_params(self, params: dict, lines: list, indent: int = 0):
         """
