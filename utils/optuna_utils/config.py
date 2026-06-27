@@ -151,6 +151,11 @@ class OptunaConfig:
         elif sampler_name == "random":
             return RandomSampler(**kwargs)
         elif sampler_name == "grid":
+            if "search_space" not in kwargs:
+                raise ValueError(
+                    "GridSampler requires 'search_space' in sampler_kwargs, "
+                    'e.g. {"lr": [1e-3, 1e-4], "layers": [1, 2]}'
+                )
             return GridSampler(**kwargs)
         elif sampler_name == "cmaes":
             return CmaEsSampler(**kwargs)
@@ -168,6 +173,10 @@ class OptunaConfig:
         if pruner_name == "median":
             return MedianPruner(**kwargs)
         elif pruner_name == "percentile":
+            if "percentile" not in kwargs:
+                raise ValueError(
+                    "PercentilePruner requires 'percentile' (0-100) in pruner_kwargs"
+                )
             return PercentilePruner(**kwargs)
         elif pruner_name == "successive_halving":
             return SuccessiveHalvingPruner(**kwargs)
