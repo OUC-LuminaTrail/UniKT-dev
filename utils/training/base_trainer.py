@@ -785,13 +785,9 @@ class BaseTrainer(ABC):
             total_task = progress.add_task(
                 "[bold red]Total Epochs", total=self.epochs, completed=self.start_epoch
             )
-            train_task = progress.add_task(
-                "[bold green]Training", total=len(self.train_data), visible=False
-            )
-            val_task = progress.add_task(
-                "[bold cyan]Validation",
-                total=len(self.val_data) if self.val_data is not None else 0,
-                visible=False,
+            # 训练/验证共用同一条工作进度条，切换阶段时重置 total 与描述
+            work_task = progress.add_task(
+                "[bold green]Training", total=len(self.train_data)
             )
 
             for epoch in range(self.start_epoch, self.epochs):
@@ -801,22 +797,26 @@ class BaseTrainer(ABC):
                 self.callback_manager.on_epoch_begin(epoch, trainer=self)
 
                 # 训练阶段
-                progress.update(train_task, visible=True)
-                progress.reset(train_task)
-                train_loss = self._process_epoch(
-                    epoch, is_train=True, progress=progress, task_id=train_task
+                progress.reset(
+                    work_task,
+                    total=len(self.train_data),
+                    description="[bold green]Training",
                 )
-                progress.update(train_task, visible=False)
+                train_loss = self._process_epoch(
+                    epoch, is_train=True, progress=progress, task_id=work_task
+                )
 
                 # 验证阶段
                 val_loss = None
                 if self.val_data is not None:
-                    progress.update(val_task, visible=True)
-                    progress.reset(val_task)
-                    val_loss = self._process_epoch(
-                        epoch, is_train=False, progress=progress, task_id=val_task
+                    progress.reset(
+                        work_task,
+                        total=len(self.val_data),
+                        description="[bold cyan]Validation",
                     )
-                    progress.update(val_task, visible=False)
+                    val_loss = self._process_epoch(
+                        epoch, is_train=False, progress=progress, task_id=work_task
+                    )
 
                 # Epoch 结束回调
                 self.callback_manager.on_epoch_end(
