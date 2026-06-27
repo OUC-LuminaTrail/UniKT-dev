@@ -71,33 +71,22 @@ class TrainerObjectiveWrapper:
             trial=trial, metric_name=self.metric_name, maximize=self.maximize
         )
 
-        try:
-            data_src = self.data_src_fn()
-            trainer = self.trainer_class(
-                args=args, data_src=data_src, exp_manager=trial_exp_manager
+        data_src = self.data_src_fn()
+        trainer = self.trainer_class(
+            args=args, data_src=data_src, exp_manager=trial_exp_manager
+        )
+        # trainer.__init__ 末尾已 build()，回调列表已定型，需直接追加到活跃列表
+        trainer.callback_manager.callbacks.append(pruning_cb)
+
+        trainer.run()
+
+        if pruning_cb.pruned:
+            raise optuna.TrialPruned(
+                f"Trial {trial.number} pruned at epoch "
+                f"{getattr(trainer, '_best_epoch', None)}"
             )
-            # trainer.__init__ 末尾已 build()，回调列表已定型，需直接追加到活跃列表
-            trainer.callback_manager.callbacks.append(pruning_cb)
 
-            trainer.run()
-
-            if pruning_cb.pruned:
-                raise optuna.TrialPruned(
-                    f"Trial {trial.number} pruned at epoch "
-                    f"{getattr(trainer, '_best_epoch', None)}"
-                )
-
-            return self._extract_metric(trainer, pruning_cb)
-
-        except optuna.TrialPruned:
-            raise
-        except Exception as e:
-            import traceback
-
-            logger.error(
-                f"Trial {trial.number} failed: {str(e)}\n{traceback.format_exc()}"
-            )
-            return self._worst_value()
+        return self._extract_metric(trainer, pruning_cb)
 
     def _create_trial_args(self, params: dict[str, Any]) -> Namespace:
         """根据trial参数创建新的args"""

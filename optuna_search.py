@@ -95,13 +95,17 @@ def main():
     """主函数。"""
     args = parse_args()
 
+    # 先加载配置，以便用 n_trials 标注实验目录
+    logger.info(f"Loading Optuna config from: {args.optuna_config}")
+    optuna_config = load_config_from_json(args.optuna_config)
+
     # 创建实验管理器
     exp_manager = ExperimentManager(
         exp_type=ExperimentType.HYPERPARAM_SEARCH,
         model_name=args.model,
         dataset_name=args.dataset,
         base_dir="runs",
-        tags=[f"n_trials{args.n_trials}"] if hasattr(args, "n_trials") else [],
+        tags=[f"n_trials{optuna_config.n_trials}"],
     )
 
     logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
@@ -110,15 +114,10 @@ def main():
     logger.info(f"{args.model} Optuna Hyperparameter Search")
     logger.info("=" * 60)
 
-    # 加载Optuna配置
-    logger.info(f"Loading Optuna config from: {args.optuna_config}")
-    optuna_config = load_config_from_json(args.optuna_config)
     optuna_config.save_dir = exp_manager.get_log_dir()
     # 优化方向由指标决定，覆盖配置文件中的 direction
     optuna_config.directions = [direction_for_metric(args.metric)]
-    logger.info(
-        f"Optimizing metric '{args.metric}' ({optuna_config.directions[0]})"
-    )
+    logger.info(f"Optimizing metric '{args.metric}' ({optuna_config.directions[0]})")
 
     # 加载参数空间
     logger.info(f"Loading parameter space from: {args.param_space}")

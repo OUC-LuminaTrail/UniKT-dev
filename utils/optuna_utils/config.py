@@ -79,6 +79,19 @@ class HyperparameterSpace:
         else:
             raise ValueError(f"Unsupported parameter type: {self.type}")
 
+        if self.default is not None:
+            if self.type in ("int", "float"):
+                if not (self.low <= self.default <= self.high):
+                    raise ValueError(
+                        f"Parameter '{self.name}': default {self.default} "
+                        f"out of range [{self.low}, {self.high}]"
+                    )
+            elif self.type == "categorical" and self.default not in self.choices:
+                raise ValueError(
+                    f"Parameter '{self.name}': default {self.default} "
+                    f"not in choices {self.choices}"
+                )
+
     def suggest(self, trial: Trial) -> Any:
         """从Optuna trial中采样参数值"""
         self.validate()
