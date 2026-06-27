@@ -22,6 +22,25 @@ from optuna.trial import Trial
 
 logger = logging.getLogger(__name__)
 
+# auc/acc 越大越好，rmse/loss 越小越好
+_METRIC_DIRECTIONS: dict[str, str] = {
+    "auc": "maximize",
+    "acc": "maximize",
+    "rmse": "minimize",
+    "loss": "minimize",
+}
+
+
+def direction_for_metric(metric_name: str) -> str:
+    """根据优化指标返回 Optuna 的优化方向（'maximize' / 'minimize'）。"""
+    direction = _METRIC_DIRECTIONS.get(metric_name.lower())
+    if direction is None:
+        raise ValueError(
+            f"Unsupported metric '{metric_name}'. "
+            f"Expected one of: {sorted(_METRIC_DIRECTIONS)}"
+        )
+    return direction
+
 
 @dataclass
 class HyperparameterSpace:
@@ -166,6 +185,7 @@ def load_param_space_from_json(space_path: str) -> list[HyperparameterSpace]:
 __all__ = [
     "HyperparameterSpace",
     "OptunaConfig",
+    "direction_for_metric",
     "load_config_from_json",
     "load_param_space_from_json",
 ]

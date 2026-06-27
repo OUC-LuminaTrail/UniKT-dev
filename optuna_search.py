@@ -14,6 +14,7 @@ from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
     OptunaTunerBuilder,
     TrainerObjectiveWrapper,
+    direction_for_metric,
     load_config_from_json,
     load_param_space_from_json,
 )
@@ -113,6 +114,11 @@ def main():
     logger.info(f"Loading Optuna config from: {args.optuna_config}")
     optuna_config = load_config_from_json(args.optuna_config)
     optuna_config.save_dir = exp_manager.get_log_dir()
+    # 优化方向由指标决定，覆盖配置文件中的 direction
+    optuna_config.directions = [direction_for_metric(args.metric)]
+    logger.info(
+        f"Optimizing metric '{args.metric}' ({optuna_config.directions[0]})"
+    )
 
     # 加载参数空间
     logger.info(f"Loading parameter space from: {args.param_space}")
