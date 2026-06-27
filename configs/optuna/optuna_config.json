@@ -12,7 +12,6 @@
   "n_trials": 100,
   "n_jobs": 1,
   "timeout": null,
-  "directions": ["maximize"],
   "study_name": "gikt_hyperparameter_search",
   "db_url": null,
   "save_dir": "./optuna_results",

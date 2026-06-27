@@ -22,6 +22,25 @@ from optuna.trial import Trial
 
 logger = logging.getLogger(__name__)
 
+# auc/acc 越大越好，rmse/loss 越小越好
+_METRIC_DIRECTIONS: dict[str, str] = {
+    "auc": "maximize",
+    "acc": "maximize",
+    "rmse": "minimize",
+    "loss": "minimize",
+}
+
+
+def direction_for_metric(metric_name: str) -> str:
+    """根据优化指标返回 Optuna 的优化方向（'maximize' / 'minimize'）。"""
+    direction = _METRIC_DIRECTIONS.get(metric_name.lower())
+    if direction is None:
+        raise ValueError(
+            f"Unsupported metric '{metric_name}'. "
+            f"Expected one of: {sorted(_METRIC_DIRECTIONS)}"
+        )
+    return direction
+
 
 @dataclass
 class HyperparameterSpace:
@@ -59,6 +78,19 @@ class HyperparameterSpace:
                 )
         else:
             raise ValueError(f"Unsupported parameter type: {self.type}")
+
+        if self.default is not None:
+            if self.type in ("int", "float"):
+                if not (self.low <= self.default <= self.high):
+                    raise ValueError(
+                        f"Parameter '{self.name}': default {self.default} "
+                        f"out of range [{self.low}, {self.high}]"
+                    )
+            elif self.type == "categorical" and self.default not in self.choices:
+                raise ValueError(
+                    f"Parameter '{self.name}': default {self.default} "
+                    f"not in choices {self.choices}"
+                )
 
     def suggest(self, trial: Trial) -> Any:
         """从Optuna trial中采样参数值"""
@@ -119,6 +151,11 @@ class OptunaConfig:
         elif sampler_name == "random":
             return RandomSampler(**kwargs)
         elif sampler_name == "grid":
+            if "search_space" not in kwargs:
+                raise ValueError(
+                    "GridSampler requires 'search_space' in sampler_kwargs, "
+                    'e.g. {"lr": [1e-3, 1e-4], "layers": [1, 2]}'
+                )
             return GridSampler(**kwargs)
         elif sampler_name == "cmaes":
             return CmaEsSampler(**kwargs)
@@ -136,6 +173,10 @@ class OptunaConfig:
         if pruner_name == "median":
             return MedianPruner(**kwargs)
         elif pruner_name == "percentile":
+            if "percentile" not in kwargs:
+                raise ValueError(
+                    "PercentilePruner requires 'percentile' (0-100) in pruner_kwargs"
+                )
             return PercentilePruner(**kwargs)
         elif pruner_name == "successive_halving":
             return SuccessiveHalvingPruner(**kwargs)
@@ -166,6 +207,7 @@ def load_param_space_from_json(space_path: str) -> list[HyperparameterSpace]:
 __all__ = [
     "HyperparameterSpace",
     "OptunaConfig",
+    "direction_for_metric",
     "load_config_from_json",
     "load_param_space_from_json",
 ]

@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any
 
 import optuna
+from optuna.samplers import GridSampler
 
 from utils.core import get_logger
 
@@ -109,12 +110,24 @@ class OptunaTuner:
 
         self.study = optuna.create_study(**study_kwargs)
 
-        # 优化
+        # GridSampler 穷举所有组合，无需用 default 种子
+        if not isinstance(sampler, GridSampler):
+            self._enqueue_defaults()
+
+        if self.config.n_jobs > 1:
+            logger.warning(
+                "n_jobs>1 runs trials in threads sharing one GPU/process, which "
+                "can cause GPU contention and is unsafe with SwanLab. Recommended "
+                "only for CPU models or a dedicated multi-GPU setup."
+            )
+
+        # 优化；失败的 trial 标记为 FAIL 而非中断整个搜索
         self.study.optimize(
             self._objective,
             n_trials=self.config.n_trials,
             n_jobs=self.config.n_jobs,
             timeout=self.config.timeout,
+            catch=(Exception,),
             show_progress_bar=(self.config.verbose > 0),
         )
 
@@ -122,8 +135,33 @@ class OptunaTuner:
         if self.config.save_dir:
             self._save_results()
 
-        # 返回最佳参数
-        return self.study.best_params
+        return self._best_params()
+
+    def _enqueue_defaults(self):
+        """将参数空间中声明的 default 入队为启动 trial，加速采样器收敛。
+
+        未声明 default 的参数在 trial 运行时照常采样。
+        """
+        defaults = {
+            space.name: space.default
+            for space in self.param_space
+            if space.default is not None
+        }
+        if not defaults:
+            return
+        self.study.enqueue_trial(defaults)
+        logger.info(f"Enqueued {len(defaults)} default params as a startup trial")
+
+    def _best_params(self) -> dict[str, Any]:
+        """返回最佳参数，兼容多目标研究与无完成 trial 的情况。"""
+        if len(self.study.directions) > 1:
+            pareto = self.study.best_trials
+            return pareto[0].params if pareto else {}
+        try:
+            return self.study.best_params
+        except ValueError:
+            logger.warning("No completed trials; cannot determine best params")
+            return {}
 
     def _save_results(self):
         """保存搜索结果"""
@@ -135,7 +173,7 @@ class OptunaTuner:
         # 保存最佳参数
         best_params_path = os.path.join(self.config.save_dir, "best_params.json")
         with open(best_params_path, "w") as f:
-            json.dump(self.study.best_params, f, indent=2)
+            json.dump(self._best_params(), f, indent=2)
 
         # 保存搜索历史
         history_path = os.path.join(self.config.save_dir, "search_history.json")
@@ -180,11 +218,20 @@ class OptunaTuner:
             "=" * 60,
             f"Study Name: {self.study.study_name}",
             f"Total Trials: {len(self.study.trials)}",
-            f"Best Value: {self.study.best_value}",
-            "\nBest Parameters:",
         ]
-        for param, value in self.study.best_params.items():
-            log.append(f"  {param}: {value}")
+        if len(self.study.directions) > 1:
+            pareto = self.study.best_trials
+            log.append(f"Pareto-optimal trials: {len(pareto)}")
+            for t in pareto[:5]:
+                log.append(f"  trial {t.number}: values={t.values}")
+        else:
+            try:
+                log.append(f"Best Value: {self.study.best_value}")
+                log.append("\nBest Parameters:")
+                for param, value in self.study.best_params.items():
+                    log.append(f"  {param}: {value}")
+            except ValueError:
+                log.append("No completed trials.")
         logger.info("\n".join(log))
 
     def get_dataframe(self):

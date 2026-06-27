@@ -4,11 +4,15 @@ from argparse import Namespace
 from collections.abc import Callable
 from typing import Any
 
+import optuna
+
 from utils.core import get_logger
 
+from .callback import OptunaTrialCallback
 from .config import (
     HyperparameterSpace,
     OptunaConfig,
+    direction_for_metric,
     load_config_from_json,
     load_param_space_from_json,
 )
@@ -46,59 +50,43 @@ class TrainerObjectiveWrapper:
         self.data_src_fn = data_src_fn
         self.base_args = base_args
         self.metric_name = metric_name
+        self.maximize = direction_for_metric(metric_name) == "maximize"
         self.max_epochs = max_epochs or getattr(base_args, "epochs", 50)
         self.exp_manager = exp_manager
 
-        # 验证metric_name
-        if metric_name.lower() not in ["auc", "acc", "rmse", "loss"]:
-            raise ValueError(f"Invalid metric_name: {metric_name}")
-
     def __call__(self, trial, params: dict[str, Any] = None, **kwargs) -> float:
-        """
-        执行一次超参数组合的训练
-        """
+        """执行一次超参数组合的训练。"""
         if params is None:
             params = {}
 
-        # 创建副本，避免修改原始args
         args = self._create_trial_args(params)
 
-        # 为这个trial创建子实验管理器
         trial_exp_manager = None
         if self.exp_manager is not None:
             trial_exp_manager = self.exp_manager.create_sub_experiment(
                 f"trial_{trial.number}"
             )
 
-        try:
-            # 加载数据
-            data_src = self.data_src_fn()
+        pruning_cb = OptunaTrialCallback(
+            trial=trial, metric_name=self.metric_name, maximize=self.maximize
+        )
 
-            # 初始化trainer
-            trainer = self.trainer_class(
-                args=args, data_src=data_src, exp_manager=trial_exp_manager
+        data_src = self.data_src_fn()
+        trainer = self.trainer_class(
+            args=args, data_src=data_src, exp_manager=trial_exp_manager
+        )
+        # trainer.__init__ 末尾已 build()，回调列表已定型，需直接追加到活跃列表
+        trainer.callback_manager.callbacks.append(pruning_cb)
+
+        trainer.run()
+
+        if pruning_cb.pruned:
+            raise optuna.TrialPruned(
+                f"Trial {trial.number} pruned at epoch "
+                f"{getattr(trainer, '_best_epoch', None)}"
             )
 
-            # 运行训练
-            trainer.run()
-
-            # 获取最佳指标
-            metric_value = self._extract_metric(trainer)
-
-            # 用于修剪的报告
-            self._report_intermediate_values(trial, trainer)
-
-            return metric_value
-
-        except Exception as e:
-            import traceback
-
-            logger.error(
-                f"Trial {trial.number} failed: {str(e)}\n{traceback.format_exc()}"
-            )
-            # 无论指标是什么，我们都在最大化目标函数（对于loss是最大化 -loss）
-            # 因此失败时应返回 -inf，表示该次尝试无效且性能极差
-            return float("-inf")
+        return self._extract_metric(trainer, pruning_cb)
 
     def _create_trial_args(self, params: dict[str, Any]) -> Namespace:
         """根据trial参数创建新的args"""
@@ -118,48 +106,27 @@ class TrainerObjectiveWrapper:
 
         return args
 
-    def _extract_metric(self, trainer) -> float:
-        """从trainer中提取优化指标"""
+    def _worst_value(self) -> float:
+        """当前优化方向下的最差目标值（失败 trial 使用）。"""
+        return float("-inf") if self.maximize else float("inf")
+
+    def _extract_metric(self, trainer, pruning_cb) -> float:
+        """提取优化指标的原始值（方向由 study direction 决定，此处不取负）。"""
         metric_lower = self.metric_name.lower()
 
-        # 优先尝试从 EarlyStopping 获取最佳指标
-        # 前提是 EarlyStopping 正在监控我们关心的同一个指标
-        if getattr(trainer, "early_stopping", None) is not None:
-            es_monitor = trainer.early_stopping.cfg.monitor.lower()
-            # 如果 Optuna 优化的指标与 EarlyStopping 监控的指标一致
-            if es_monitor == metric_lower:
-                best_score = trainer.early_stopping.best_score
-                if best_score is not None:
-                    # 根据指标类型决定是否取反
-                    # Optuna 默认最大化
-                    # AUC, ACC: 越大越好 -> 直接返回
-                    # RMSE, Loss: 越小越好 -> 取反返回
-                    if metric_lower in ["rmse", "loss"]:
-                        return -float(best_score)
-                    return float(best_score)
+        # 优先取回调追踪的最佳值，回退到 EarlyStopping 最佳 epoch 的记录
+        if pruning_cb.best_value is not None:
+            return pruning_cb.best_value
 
-        # 尝试从最后的验证指标中获取
-        if hasattr(trainer, "_last_val_metrics"):
-            metrics = trainer._last_val_metrics
-            if metric_lower == "auc" and metrics.get("auc") is not None:
-                return float(metrics["auc"])
-            elif metric_lower == "acc" and metrics.get("acc") is not None:
-                return float(metrics["acc"])
-            elif metric_lower == "rmse" and metrics.get("rmse") is not None:
-                # 最小化RMSE，返回负值
-                return -float(metrics["rmse"])
-            elif metric_lower == "loss":
-                # 如果有loss则返回负值（因为我们要最大化）
-                return -float(getattr(trainer, "_last_val_loss", 0))
+        es = getattr(trainer, "early_stopping", None)
+        if es is not None:
+            if es.best_metrics and es.best_metrics.get(metric_lower) is not None:
+                return float(es.best_metrics[metric_lower])
+            if es.best_score is not None and es.cfg.monitor.lower() == metric_lower:
+                return float(es.best_score)
 
-        # 回退策略
         logger.warning(f"Could not extract metric '{metric_lower}' from trainer")
-        return float("-inf")
-
-    def _report_intermediate_values(self, trial, trainer):
-        """报告中间值用于修剪（可选）"""
-        # 这是一个扩展点，如果需要更精细的修剪策略可以在这里实现
-        pass
+        return self._worst_value()
 
 
 class OptunaTunerBuilder:
