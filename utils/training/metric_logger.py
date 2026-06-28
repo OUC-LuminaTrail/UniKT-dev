@@ -216,7 +216,7 @@ class SwanLabMetricLogger(MetricLogger):
             callbacks=callbacks,
             group=group,
             tags=tags,
-            settings=swanlab.Settings(log_proxy_type="stderr"),
+            settings=swanlab.Settings(),
         )
         self._initialized = True
 
