@@ -251,7 +251,10 @@ function onDatasetClick(name: string) {
   dataset.value = name
 }
 
-watch(() => activeTasksQuery.data.value, (tasks) => {
+// 挂载时恢复正在运行的任务：immediate 处理 query 缓存被同步命中的情况
+// （重新挂载时 data.value 已有值，惰性 watch 不会触发）；
+// 在数据就绪后才手动停止，避免 once 在 tasks 为空时提前失效导致后续真实数据不再触发
+const stopRecover = watch(() => activeTasksQuery.data.value, (tasks) => {
   if (!tasks) return
   const activeTask = tasks.find(t => t.status === 'running')
   if (activeTask) {
@@ -259,7 +262,8 @@ watch(() => activeTasksQuery.data.value, (tasks) => {
     taskInfo.value = activeTask
     phase.value = 'running'
   }
-}, { once: true })
+  stopRecover()
+}, { immediate: true })
 
 watch(() => datasetsQuery.data.value, (data) => {
   if (!data) return
