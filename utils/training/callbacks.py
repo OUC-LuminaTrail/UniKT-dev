@@ -288,6 +288,8 @@ class CheckpointCallback(Callback):
         last_filename: str = "last_checkpoint.pth",
         best_filename: str | None = "best_model.pth",
         keep_best_state: bool = True,
+        monitor: str | None = None,
+        mode: str | None = None,
     ):
         """初始化检查点回调。
 
@@ -297,12 +299,18 @@ class CheckpointCallback(Callback):
             last_filename: 最后检查点文件名
             best_filename: 最佳模型文件名（None 表示不保存最佳）
             keep_best_state: 是否缓存最佳模型 state_dict（多阶段训练可用）
+            monitor: 选择最佳模型时监控的指标（可选）。默认与 ``early_stopping``
+                一致；显式传入可解耦“保存最佳模型”与“早停”所监控的指标。
+            mode: 最佳指标方向 ``'max'``/``'min'``（可选，默认随 monitor 或
+                early_stopping）。
         """
         self.checkpoint_manager = checkpoint_manager
         self.early_stopping = early_stopping
         self.last_filename = last_filename
         self.best_filename = best_filename
         self.keep_best_state = keep_best_state
+        self._monitor_override = monitor.lower() if monitor else None
+        self._mode_override = mode.lower() if mode else None
 
         self.best_metric: float | None = None
         self.best_epoch: int | None = None
@@ -356,6 +364,8 @@ class CheckpointCallback(Callback):
         )
 
     def _monitor_name(self) -> str:
+        if self._monitor_override:
+            return self._monitor_override
         if self.early_stopping is None:
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
@@ -385,11 +395,14 @@ class CheckpointCallback(Callback):
     def _is_better_metric(self, current: float) -> bool:
         if self.best_metric is None:
             return True
-        mode = "max"
-        if self.early_stopping is not None:
+        if self._mode_override:
+            mode = self._mode_override
+        elif self.early_stopping is not None:
             mode = self.early_stopping.cfg.mode
         elif self._monitor_name() in ["rmse", "loss"]:
             mode = "min"
+        else:
+            mode = "max"
         return (
             current > self.best_metric if mode == "max" else current < self.best_metric
         )

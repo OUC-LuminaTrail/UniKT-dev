@@ -6,6 +6,7 @@
 import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -38,6 +39,25 @@ from .metric_logger import build_default_metric_loggers, resolve_metric_logging_
 from .metrics import MetricsAccumulator
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class StageResult:
+    """单个训练阶段的结果。
+
+    Attributes:
+        name: 阶段名称（单阶段训练为 ``None``）。
+        best_metric: 该阶段验证集上的最佳监控指标值。
+        best_epoch: 取得最佳指标的 epoch（从 0 开始）。
+        final_epoch: 该阶段实际训练到的最后一个 epoch。
+        monitor: 监控指标名（如 ``'auc'``/``'acc'``/``'rmse'``）。
+    """
+
+    name: str | None = None
+    best_metric: float | None = None
+    best_epoch: int | None = None
+    final_epoch: int | None = None
+    monitor: str = "auc"
 
 
 class BaseTrainer(ABC):
@@ -96,6 +116,10 @@ class BaseTrainer(ABC):
         self._global_step = 0
         self._custom_callbacks: list[Callback] = []
         self._custom_callback_functions: dict[str, list[Callable]] = {}
+
+        # 多阶段训练上下文（单阶段训练时为 None / 0）
+        self._current_stage: str | None = None
+        self._metric_step_offset: int = 0
 
     def with_training(
         self,
@@ -663,13 +687,18 @@ class BaseTrainer(ABC):
         )
 
         # 添加训练器相关元数据
-        self.hyperparam_manager.add_metadata(
-            "total_params",
-            sum(p.numel() for p in self.model.parameters() if p.requires_grad),
-        )
-
-        self.hyperparam_manager.add_metadata("optimizer", type(self.opt).__name__)
-        self.hyperparam_manager.add_metadata("loss_function", type(self.loss).__name__)
+        # 多阶段训练器在 build() 阶段尚未创建模型/优化器，此时跳过对应元数据
+        if self.model is not None:
+            self.hyperparam_manager.add_metadata(
+                "total_params",
+                sum(p.numel() for p in self.model.parameters() if p.requires_grad),
+            )
+        if self.opt is not None:
+            self.hyperparam_manager.add_metadata("optimizer", type(self.opt).__name__)
+        if self.loss is not None:
+            self.hyperparam_manager.add_metadata(
+                "loss_function", type(self.loss).__name__
+            )
         if self.lr_scheduler is not None:
             self.hyperparam_manager.add_metadata(
                 "lr_scheduler", type(self.lr_scheduler).__name__
@@ -762,6 +791,27 @@ class BaseTrainer(ABC):
         # Initialize metric loggers
         self._init_metric_logger()
 
+        self._run_training_loop()
+
+        self._finish()
+
+    def _run_training_loop(self, start_epoch: int | None = None) -> StageResult:
+        """运行单个训练阶段的 epoch 循环（进度条 + epoch 循环 + 回调）。
+
+        多阶段训练器通过 ``_apply_stage`` 切换 ``self.model`` / ``self.opt`` /
+        ``self.train_data`` / ``self.epochs`` / ``self.early_stopping`` 等属性后
+        重复调用本方法。
+
+        Args:
+            start_epoch: 起始 epoch（``None`` 时使用 ``self.start_epoch``，
+                用于断点续训）。
+
+        Returns:
+            本阶段的 :class:`StageResult`。
+        """
+        if start_epoch is None:
+            start_epoch = self.start_epoch
+
         self.model.to(self.device_)
         self.loss = self.loss.to(self.device_)
 
@@ -771,27 +821,41 @@ class BaseTrainer(ABC):
         # 创建进度条
         progress = create_progress()
 
+        # 多阶段训练时在进度条/日志前加上阶段名前缀
+        stage_prefix = (
+            f"[{self._current_stage.upper()}] " if self._current_stage else ""
+        )
+        total_label = f"{stage_prefix}Epochs" if self._current_stage else "Total Epochs"
+
+        # “Best” 指标取自检查点监控（可能与早停监控不同）
+        checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
+        monitor_name = (
+            checkpoint_cb._monitor_name() if checkpoint_cb else self._monitor_name()
+        )
+
         # 创建最佳指标显示
         best_metric_text = None
         renderables = [progress]
         if self.early_stopping is not None:
             best_metric_text = Text(
-                f"Best {self._monitor_name().upper()}: N/A", style="bold yellow"
+                f"{stage_prefix}Best {monitor_name.upper()}: N/A",
+                style="bold yellow",
             )
             renderables.insert(0, best_metric_text)
 
         with Live(Group(*renderables)):
             # 创建进度任务
             total_task = progress.add_task(
-                "[bold red]Total Epochs", total=self.epochs, completed=self.start_epoch
+                f"[bold red]{total_label}", total=self.epochs, completed=start_epoch
             )
             # 训练/验证共用同一条工作进度条，切换阶段时重置 total 与描述
             work_task = progress.add_task(
                 "[bold green]Training", total=len(self.train_data)
             )
 
-            for epoch in range(self.start_epoch, self.epochs):
-                logger.info(f"Epoch {epoch + 1}/{self.epochs}")
+            epoch = start_epoch
+            for epoch in range(start_epoch, self.epochs):
+                logger.info(f"{stage_prefix}Epoch {epoch + 1}/{self.epochs}")
 
                 # Epoch 开始回调
                 self.callback_manager.on_epoch_begin(epoch, trainer=self)
@@ -832,13 +896,13 @@ class BaseTrainer(ABC):
                     best_epoch = getattr(self, "_best_epoch", None)
                     patience = self.early_stopping.cfg.patience
                     remaining = max(0, patience - self.early_stopping.num_bad_epochs)
-                    if hasattr(self, "_best_metric"):
+                    if getattr(self, "_best_metric", None) is not None:
                         best_str = f"{self._best_metric:.4f}"
                     else:
                         best_str = "N/A"
 
                     best_metric_text.plain = (
-                        f"Best {self._monitor_name().upper()}: {best_str} "
+                        f"{stage_prefix}Best {monitor_name.upper()}: {best_str} "
                         f"(Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}, "
                         f"Patience: {remaining}/{patience})"
                     )
@@ -854,13 +918,21 @@ class BaseTrainer(ABC):
                 # 检查是否应该停止
                 if self.callback_manager.should_stop(trainer=self):
                     progress.console.log(
-                        f"[bold red]Early stopping triggered at epoch {epoch + 1}"
+                        f"[bold red]{stage_prefix}Early stopping triggered at epoch {epoch + 1}"
                     )
                     break
 
         logger.info("Training complete")
         self.callback_manager.on_train_end(trainer=self)
-        self._finish()
+
+        # 汇总本阶段最佳指标
+        return StageResult(
+            name=self._current_stage,
+            best_metric=checkpoint_cb.best_metric if checkpoint_cb else None,
+            best_epoch=checkpoint_cb.best_epoch if checkpoint_cb else None,
+            final_epoch=epoch,
+            monitor=monitor_name,
+        )
 
     def _process_epoch(
         self, epoch: int, is_train: bool, progress=None, task_id=None
@@ -905,6 +977,7 @@ class BaseTrainer(ABC):
                     epoch=epoch,
                     batch_idx=batch_idx,
                     loss=loss,
+                    stage=self._current_stage,
                 )
             if is_train:
                 self._global_step += 1
@@ -921,7 +994,11 @@ class BaseTrainer(ABC):
         # 聚合并记录指标
         metrics = self.metrics_accumulator.compute(phase)
         self.metric_logger.log_metrics(
-            phase=phase, metrics=metrics, step=epoch, epoch=epoch
+            phase=phase,
+            metrics=metrics,
+            step=epoch + self._metric_step_offset,
+            epoch=epoch,
+            stage=self._current_stage,
         )
 
         # Phase 结束回调
@@ -1117,4 +1194,4 @@ class BaseTrainer(ABC):
         self._finish_metric_logger()
 
 
-__all__ = ["BaseTrainer"]
+__all__ = ["BaseTrainer", "StageResult"]

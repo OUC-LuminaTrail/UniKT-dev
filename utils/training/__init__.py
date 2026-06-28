@@ -3,7 +3,7 @@
 提供训练器基类、训练循环、指标计算、回调和检查点管理。
 """
 
-from .base_trainer import BaseTrainer
+from .base_trainer import BaseTrainer, StageResult
 from .callbacks import (
     Callback,
     CallbackManager,
@@ -20,12 +20,14 @@ from .metric_logger import (
     get_metric_logger,
 )
 from .metrics import MetricsAccumulator
-from .multi_trainer import MultiTrainer, StageConfig
+from .multi_trainer import MultiTrainer, StageComponents, StageConfig
 
 __all__ = [
     "BaseTrainer",
     "MultiTrainer",
     "StageConfig",
+    "StageComponents",
+    "StageResult",
     "MetricsAccumulator",
     "Callback",
     "CallbackManager",

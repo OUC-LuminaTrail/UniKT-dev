@@ -32,10 +32,10 @@ class ABKTModelData(QuestionModelData):
 
     def prepare_data(self, args) -> dict:
         """
-        准备 ABKT 所需的全部数据
+        准备 ABKT 所需的全部数据。
 
         参数:
-            args: 命令行参数，需包含 fold 字段
+            args: 命令行参数。
 
         返回:
             dict: {
@@ -52,7 +52,6 @@ class ABKTModelData(QuestionModelData):
         """
         fold_idx = args.fold if hasattr(args, "fold") and args.fold >= 0 else None
 
-        # 获取元数据
         num_users = self.data_src.get_metadata("num_users")
         num_items = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
@@ -61,11 +60,9 @@ class ABKTModelData(QuestionModelData):
             f"Data statistics: users={num_users}, items={num_items}, skills={num_skills}"
         )
 
-        # 1. 构建 Q-Matrix
         self.logger.info("Building Q-Matrix...")
         Q_matrix = self._build_q_matrix(num_items, num_skills)
 
-        # 2. 构建训练序列和测试三元组
         self.logger.info(f"Building ABKT sequences (fold={fold_idx})...")
         train_sequences, test_triplets, train_users, test_users, num_records = (
             self._build_abkt_sequences(fold_idx)
@@ -91,21 +88,12 @@ class ABKTModelData(QuestionModelData):
         }
 
     def _build_q_matrix(self, num_items: int, num_skills: int) -> torch.Tensor:
-        """
-        构建 Q-Matrix (题目-技能关联矩阵)
-
-        使用框架提供的 build_relationship_matrix 方法
-
-        返回:
-            Q_matrix: Tensor [num_items, num_skills]
-        """
-        # 使用框架方法构建关系矩阵
+        """构建 Q-Matrix（题目-技能关联矩阵），返回 [num_items, num_skills]。"""
         q_matrix_np = self.build_relationship_matrix(
             edge_type=("question", "has", "skill"),
             value_type="binary",
         )
 
-        # 转换为 PyTorch 张量
         Q_matrix = torch.from_numpy(q_matrix_np).float()
 
         self.logger.info(f"Q-Matrix shape: {Q_matrix.shape}")
@@ -114,69 +102,41 @@ class ABKTModelData(QuestionModelData):
         return Q_matrix
 
     def _build_abkt_sequences(
-        self, fold_idx: int | None
+        self, fold_idx: int | None = None
     ) -> tuple[dict, list, list, list, int]:
+        """将框架数据转换为 ABKT 的全数据 next-item holdout 划分。
+
+        ABKT 是直推式模型（协同矩阵分解 + 学生-题目二部图），需要利用整个数据集：
+        每个用户既贡献训练前缀（``seq[:-1]``）、又贡献一个测试三元组（最后一项）。
+        这也是 ``_compute_boosting_residuals`` 的前提——测试用户的最终知识状态由其
+        训练前缀计算得到，因此测试用户必须同时出现在训练集中，不能按用户划分 train/test。
+
+        ``fold_idx`` 仅为兼容调用签名而保留，ABKT 不使用框架的 fold 划分。
         """
-        将框架数据转换为 ABKT 所需的序列格式
+        if fold_idx is not None:
+            self.logger.warning(
+                "ABKT uses full-data next-item holdout (covers all users); "
+                f"framework fold={fold_idx} is ignored."
+            )
 
-        框架标准 K-Fold 划分:
-        - 训练集: fold != fold_idx 且 fold != -1
-        - 验证集: fold == fold_idx
-        - 测试集: fold == -1
-
-        ABKT 的数据格式:
-        - train_sequences: {user_id: [[item_ids], [corrects]]}
-            每个训练用户的训练序列（去掉最后一题）
-        - test_triplets: [[user, item, correct], ...]
-            测试集三元组（每个测试用户的最后一题）
-
-        参数:
-            fold_idx: K-Fold 的 fold 索引，None 表示不使用 K-Fold
-
-        返回:
-            train_sequences: dict
-            test_triplets: list
-            train_users: list (训练序列中的用户ID列表)
-            test_users: list (测试三元组中的用户ID列表)
-            num_records: int (训练集总记录数)
-        """
         data = self.data_src.get_sequence_data()
 
-        # 确定用户集合
-        if fold_idx is not None and "fold" in data.columns:
-            # K-Fold 模式
-            test_user_set = set(data[data["fold"] == -1]["user"].unique())
-            # 训练集：排除验证集和测试集
-            train_user_set = set(
-                data[(data["fold"] != fold_idx) & (data["fold"] != -1)]["user"].unique()
-            )
-            self.logger.info(
-                f"Using K-Fold mode: train={len(train_user_set)}, val (fold={fold_idx}), "
-                f"test (fold=-1)={len(test_user_set)}"
-            )
-        else:
-            # 非 K-Fold 模式：所有用户都参与训练，最后一题作为测试
-            test_user_set = set(data["user"].unique())
-            train_user_set = test_user_set.copy()
-            self.logger.info("Using non-K-Fold mode: all users' last item as test")
-
-        # 按用户聚合数据
+        # 按用户聚合序列
         all_sequences = {}
         for row in tqdm(
-            data.itertuples(),
+            data.iter_rows(named=True),
             total=len(data),
             desc="Aggregating user sequences",
         ):
-            user_id = row.user
-            item_id = row.question
-            correct = row.label
+            user_id = row["user"]
+            item_id = row["question"]
+            correct = row["label"]
 
             if user_id not in all_sequences:
                 all_sequences[user_id] = {"items": [], "corrects": []}
             all_sequences[user_id]["items"].append(item_id)
             all_sequences[user_id]["corrects"].append(correct)
 
-        # 构建训练序列和测试三元组
         train_sequences = {}
         test_triplets = []
         train_users = []
@@ -184,29 +144,24 @@ class ABKTModelData(QuestionModelData):
         num_records = 0
 
         for user_id, seq_data in tqdm(
-            all_sequences.items(),
-            desc="Building train/test split",
+            all_sequences.items(), desc="Building train/test split"
         ):
             items = seq_data["items"]
             corrects = seq_data["corrects"]
             seq_len = len(items)
+            train_len = seq_len - 1
 
-            # 训练序列：仅训练用户，去掉最后一题
-            if user_id in train_user_set:
-                train_len = seq_len - 1
-                if train_len > 0:
-                    train_sequences[user_id] = [
-                        [items[:train_len]],
-                        [corrects[:train_len]],
-                    ]
-                    train_users.append(user_id)
-                    num_records += seq_len
+            if train_len > 0:
+                train_sequences[user_id] = [
+                    [items[:train_len]],
+                    [corrects[:train_len]],
+                ]
+                train_users.append(user_id)
+                num_records += seq_len
 
-            # 测试三元组：仅测试用户的最后一题
-            if user_id in test_user_set:
-                test_triplets.append([user_id, items[-1], corrects[-1]])
-                if user_id not in test_users_list:
-                    test_users_list.append(user_id)
+            test_triplets.append([user_id, items[-1], corrects[-1]])
+            if user_id not in test_users_list:
+                test_users_list.append(user_id)
 
         return train_sequences, test_triplets, train_users, test_users_list, num_records
 
@@ -239,7 +194,6 @@ class ABKTModelData(QuestionModelData):
         """
         self.logger.info("Building normalized adjacency matrix...")
 
-        # 收集所有边
         rows = []
         cols = []
 
@@ -249,14 +203,12 @@ class ABKTModelData(QuestionModelData):
         ):
             items = seq_data[0][0]  # [[item_ids]] -> [item_ids]
             for item_id in items:
-                # 用户 -> 题目
+                # 用户 -> 题目，题目 -> 用户（无向图）
                 rows.append(user_id)
                 cols.append(item_id + num_users)
-                # 题目 -> 用户 (无向图)
                 rows.append(item_id + num_users)
                 cols.append(user_id)
 
-        # 构建稀疏邻接矩阵
         data = np.ones(len(rows))
         total_nodes = num_users + num_items
         adj_matrix = sparse.coo_matrix(
@@ -280,7 +232,6 @@ class ABKTModelData(QuestionModelData):
             d = sparse.diags(np.power(np.array(adj_matrix.sum(1)).flatten() + 1e-8, -1))
             adj_norm = d.dot(adj_matrix).tocoo()
 
-        # 转换为 PyTorch 稀疏张量
         indices = torch.tensor(
             np.vstack([adj_norm.row, adj_norm.col]),
             dtype=torch.long,
