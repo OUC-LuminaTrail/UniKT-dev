@@ -12,7 +12,6 @@ class TimeGapEmbedding(nn.Module):
     Concatenates one-hot vectors for rgap, sgap, pcount, then projects
     through a single Linear (bias=False). This preserves cross-feature
     interactions that separate Embedding + sum cannot capture.
-    Matches the original pykt-toolkit timeGap class.
     """
 
     def __init__(self, num_rgap: int, num_sgap: int, num_pcount: int, d_model: int):

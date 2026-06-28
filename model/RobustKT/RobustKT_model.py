@@ -55,7 +55,7 @@ class Smooth(nn.Module):
 
 
 class LayerNorm(nn.Module):
-    """Custom LayerNorm matching the pyKT implementation."""
+    """Custom LayerNorm implementation."""
 
     def __init__(self, hidden_size: int, eps: float = 1e-12) -> None:
         super().__init__()

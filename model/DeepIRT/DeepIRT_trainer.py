@@ -37,7 +37,7 @@ class DeepIRTModelParams(BaseParamConfig):
                 "type": str,
                 "default": "qid",
                 "choices": ["qid"],
-                "help": "Embedding type; PyKT DeepIRT qid path is supported",
+                "help": "Embedding type; DeepIRT qid path is supported",
             },
             "irt_scale": {
                 "type": float,
@@ -48,7 +48,7 @@ class DeepIRTModelParams(BaseParamConfig):
                 "type": int,
                 "default": 200,
                 "short": "ep",
-                "help": "Number of training epochs; matches PyKT train_config default",
+                "help": "Number of training epochs",
             },
             "learning_rate": {
                 "type": float,
@@ -71,12 +71,12 @@ class DeepIRTModelParams(BaseParamConfig):
                 "type": int,
                 "default": 64,
                 "short": "bs",
-                "help": "Batch size for training; matches PyKT deep_irt OOM override",
+                "help": "Batch size for training",
             },
             "test_batch_size": {
                 "type": int,
                 "default": 64,
-                "help": "Batch size for windowlate test evaluation; matches PyKT loader batch size",
+                "help": "Batch size for windowlate test evaluation",
             },
             "test_num_workers": {
                 "type": int,
@@ -96,7 +96,7 @@ class DeepIRTModelParams(BaseParamConfig):
             "max_grad_norm": {
                 "type": float,
                 "default": None,
-                "help": "Max gradient norm for clipping; None matches PyKT DeepIRT",
+                "help": "Max gradient norm for clipping; None disables clipping",
             },
         }
         return group_name, params

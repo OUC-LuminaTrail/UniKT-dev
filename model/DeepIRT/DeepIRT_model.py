@@ -12,7 +12,7 @@ from torch.nn.init import kaiming_normal_
 class DeepIRT(nn.Module):
     """DKVMN memory network with IRT-style prediction.
 
-    The forward path follows PyKT's ``deep_irt.py``: read/write memory with
+    The forward path reads/writes memory with
     DKVMN, infer student ability from ``f`` and item difficulty from ``k``,
     then predict with ``sigmoid(irt_scale * ability - difficulty)``.
     """
@@ -46,7 +46,7 @@ class DeepIRT(nn.Module):
 
         self.f_layer = nn.Linear(self.dim_s * 2, self.dim_s)
         self.dropout_layer = nn.Dropout(dropout)
-        # Kept to mirror PyKT DeepIRT; the IRT head below replaces this layer.
+        # The IRT head below replaces this layer.
         self.p_layer = nn.Linear(self.dim_s, 1)
 
         self.diff_layer = nn.Sequential(nn.Linear(self.dim_s, 1), nn.Tanh())
@@ -68,7 +68,7 @@ class DeepIRT(nn.Module):
             sequence: Skill/KC IDs, shape ``[batch_size, seq_len]``.
             response: Binary correctness labels, shape ``[batch_size, seq_len]``.
             mask: Unused compatibility argument for this repository's trainers.
-            qtest: When true, return ``(p, f, k)`` like PyKT for analysis.
+            qtest: When true, return ``(p, f, k)`` for analysis.
 
         Returns:
             Probability tensor ``p`` with shape ``[batch_size, seq_len]``.

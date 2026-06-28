@@ -34,8 +34,7 @@ def compute_time_gaps(
     num_sgap: int,
     num_pcount: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """计算单个序列的三类遗忘特征（log2 离散化）。
-    """
+    """计算单个序列的三类遗忘特征（log2 离散化）。"""
     max_len = len(skills)
     rgap = np.zeros(max_len, dtype=np.int64)
     sgap = np.full(max_len, num_sgap - 1, dtype=np.int64)

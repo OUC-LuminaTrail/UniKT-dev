@@ -81,7 +81,7 @@ def _compute_time_gaps(
     skill_count: dict[int, int] = {}
 
     def _log2_bucket(val):
-        """Discretize via round(log2(val+1)), matching original pykt-toolkit."""
+        """Discretize via round(log2(val+1))."""
         return round(math.log(val + 1, 2))
 
     for t in range(seq_len):

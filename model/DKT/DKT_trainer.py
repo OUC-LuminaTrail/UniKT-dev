@@ -22,10 +22,10 @@ class DKTModelParams(BaseParamConfig):
     def define_params(self) -> tuple[str, dict]:
         """定义模型参数
 
-        默认值对齐 pyKT 框架：
-        - emb_size: 200 (pyKT default)
-        - dropout: 0.2 (pyKT default)
-        - learning_rate: 1e-3 (pyKT default)
+        默认值：
+        - emb_size: 200
+        - dropout: 0.2
+        - learning_rate: 1e-3
         """
         group_name = "DKT Parameters"
         params = {

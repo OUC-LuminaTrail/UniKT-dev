@@ -178,7 +178,7 @@ class KQNTrainer(BaseTrainer):
 
         Shift semantics:
             current_concept/current_response are positions ``0..S-2`` and form
-            PyKT's interaction input ``x_t``.
+            Interaction input ``x_t``.
             next_concept/next_response are positions ``1..S-1`` and represent
             the query KC and BCE target for ``c_{t+1}``.
             target_mask is true only when both current and next positions are

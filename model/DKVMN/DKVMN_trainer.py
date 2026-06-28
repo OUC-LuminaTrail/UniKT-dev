@@ -13,11 +13,11 @@ logger = get_logger(__name__)
 class DKVMNModelParams(BaseParamConfig):
     """DKVMN 模型参数配置
 
-    默认值对齐 pyKT 框架：
-    - dim_s: 200 (pyKT default)
-    - size_m: 50 (pyKT default)
-    - dropout: 0.2 (pyKT default)
-    - learning_rate: 1e-3 (pyKT default)
+    默认值：
+    - dim_s: 200
+    - size_m: 50
+    - dropout: 0.2
+    - learning_rate: 1e-3
     """
 
     def define_params(self) -> tuple[str, dict]:

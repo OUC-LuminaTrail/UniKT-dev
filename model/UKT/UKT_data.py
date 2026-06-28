@@ -81,7 +81,7 @@ class UKTDataset(Dataset):
 def build_ukt_response_aug(responses, masks):
     """Build UKT contrastive learning augmented responses.
 
-    Matches the original pykt-toolkit augmentation algorithm:
+    Augmentation algorithm:
     - r_aug[0] flipped if rshft_aug_mask[-1] == r_aug_mask[0]
     - rshft_aug[0] flipped if rshft_aug[0] == rshft_aug_mask[-1]
 

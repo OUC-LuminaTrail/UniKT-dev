@@ -662,7 +662,7 @@ class UKT(nn.Module):
     def _augment_response(response, mask):
         """创建对比学习用的增强响应序列
 
-        匹配原始 pykt-toolkit 的增强算法:
+        增强算法:
         - r_aug[0] 在 rshft_aug_mask[-1] == r_aug_mask[0] 时翻转
         - rshft_aug[0] 在 rshft_aug[0] == rshft_aug_mask[-1] 时翻转
 

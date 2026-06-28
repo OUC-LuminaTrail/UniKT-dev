@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 def _compute_gaps_1d(skills: np.ndarray, timestamps: np.ndarray):
     """单条序列的逐位置 rgaps/sgaps/pcounts（未 clamp 的分桶索引）。
 
-    公式（对齐 pykt）：bucket = int(log2(Δ分钟) + 1)，首次出现/首位置 → 0。
+    公式：bucket = int(log2(Δ分钟) + 1)，首次出现/首位置 → 0。
     skills、timestamps 为按时间顺序的 1D 数组。
     """
     length = skills.shape[0]

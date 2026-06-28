@@ -61,7 +61,7 @@ class KQN(nn.Module):
         )
         self.knowledge_projection = nn.Linear(n_rnn_hidden, n_hidden)
 
-        # PyKT-style trainable skill encoder over one-hot KC ids. The one-hot
+        # Trainable skill encoder over one-hot KC ids. The one-hot
         # tensor is created from concept ids only; no external skill features.
         self.skill_encoder = nn.Sequential(
             nn.Linear(num_skills, n_mlp_hidden),
@@ -104,7 +104,7 @@ class KQN(nn.Module):
     def encode_interactions(
         self, concept: torch.Tensor, response: torch.Tensor
     ) -> torch.Tensor:
-        """Encode (concept, response) as PyKT-style 2N one-hot interactions."""
+        """Encode (concept, response) as 2N one-hot interactions."""
         interaction_id = response.long() * self.num_skills + concept.long()
         return F.one_hot(interaction_id, num_classes=2 * self.num_skills).float()
 

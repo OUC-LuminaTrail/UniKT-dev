@@ -7,7 +7,7 @@ from torch import nn
 
 
 class TransformerFFN(nn.Module):
-    """Feed-forward block matching PyKT SAKT."""
+    """Feed-forward block for SAKT."""
 
     def __init__(self, emb_size: int, dropout: float) -> None:
         super().__init__()
@@ -72,7 +72,7 @@ def _get_clones(module: nn.Module, n: int) -> nn.ModuleList:
 class SAKT(nn.Module):
     """Self-Attentive Knowledge Tracing.
 
-    Forward semantics match PyKT SAKT:
+    Forward semantics:
     - history concepts/responses are sequence[:, :-1] and response[:, :-1]
     - current concepts are sequence[:, 1:]
     - output[:, j] predicts response[:, j + 1]
