@@ -29,7 +29,9 @@ TRAINERS.register_lazy("ReKT", "model.ReKT.ReKT_trainer", "ReKTTrainer")
 TRAINERS.register_lazy("RobustKT", "model.RobustKT.RobustKT_trainer", "RobustKTTrainer")
 TRAINERS.register_lazy("HawkesKT", "model.HawkesKT.HawkesKT_trainer", "HawkesKTTrainer")
 TRAINERS.register_lazy("LBKT", "model.LBKT.LBKT_trainer", "LBKTTrainer")
-TRAINERS.register_lazy("GIKTEdmine", "model.GIKTEdmine", "GIKTEdmineTrainer")
+TRAINERS.register_lazy(
+    "GIKTEdmine", "model.GIKTEdmine.GIKT_edmine_trainer", "GIKTEdmineTrainer"
+)
 TRAINERS.register_lazy("GKT", "model.GKT.GKT_trainer", "GKTTrainer")
 TRAINERS.register_lazy("HGIKT", "model.HGIKT.HGIKT_trainer", "HGIKTTrainer")
 TRAINERS.register_lazy("SGKT", "model.SGKT.SGKT_trainer", "SGKTTrainer")
@@ -92,7 +94,7 @@ TRAINERS.register_lazy(
 TRAINERS.register_lazy(
     "HGIKT_QS_QT_Only",
     "model.HGIKT.variants.hgikt_qs_qt_only_trainer",
-    "HGIKTQSSAOnlyTrainer",
+    "HGIKTQSQTOnlyTrainer",
 )
 TRAINERS.register_lazy(
     "HGIKT_QS_SA_Only",
@@ -129,7 +131,9 @@ PARAM_CONFIGS.register_lazy(
     "HawkesKT", "model.HawkesKT.HawkesKT_trainer", "HawkesKTModelParams"
 )
 PARAM_CONFIGS.register_lazy("LBKT", "model.LBKT.LBKT_trainer", "LBKTModelParams")
-PARAM_CONFIGS.register_lazy("GIKTEdmine", "model.GIKTEdmine", "GIKTEdmineModelParams")
+PARAM_CONFIGS.register_lazy(
+    "GIKTEdmine", "model.GIKTEdmine.GIKT_edmine_trainer", "GIKTEdmineModelParams"
+)
 PARAM_CONFIGS.register_lazy("GKT", "model.GKT.GKT_trainer", "GKTModelParams")
 PARAM_CONFIGS.register_lazy("HGIKT", "model.HGIKT.HGIKT_trainer", "HGIKTModelParams")
 PARAM_CONFIGS.register_lazy("SGKT", "model.SGKT.SGKT_trainer", "SGKTModelParams")
@@ -200,7 +204,7 @@ PARAM_CONFIGS.register_lazy(
 PARAM_CONFIGS.register_lazy(
     "HGIKT_QS_QT_Only",
     "model.HGIKT.variants.hgikt_qs_qt_only_trainer",
-    "HGIKTQSSAOnlyModelParams",
+    "HGIKTQSQTOnlyModelParams",
 )
 PARAM_CONFIGS.register_lazy(
     "HGIKT_QS_SA_Only",
