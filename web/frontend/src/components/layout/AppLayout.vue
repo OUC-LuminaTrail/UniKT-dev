@@ -127,6 +127,7 @@ onUnmounted(() => {
 <style scoped>
 .app-layout {
   height: 100vh;
+  overflow: hidden;
   background: var(--bg-base);
 }
 
@@ -174,6 +175,7 @@ onUnmounted(() => {
 
 .main-content {
   --el-main-padding: 24px;
+  min-height: 0;
   background: var(--bg-base);
 }
 
