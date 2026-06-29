@@ -19,7 +19,7 @@ flowchart LR
 
 ```bash
 python case_analysis.py inference \
-    --run_dir runs/normal/GIKT_assistments09_20240403-120000_fold0_bs128
+    --run_dir runs/normal/SGKT_assistments09_20240403-120000_fold0_bs128
 ```
 
 Output: `<run_dir>/case_analysis/predictions.parquet`
@@ -28,7 +28,7 @@ Output: `<run_dir>/case_analysis/predictions.parquet`
 
 ```bash
 python case_analysis.py select \
-    --run_dir runs/normal/GIKT_assistments09_20240403-120000_fold0_bs128 \
+    --run_dir runs/normal/SGKT_assistments09_20240403-120000_fold0_bs128 \
     --strategy diverse \
     --num_users 10
 ```
@@ -39,7 +39,7 @@ Output: `<run_dir>/case_analysis/diverse/selected_users.json`
 
 ```bash
 python case_analysis.py plot \
-    --run_dir runs/normal/GIKT_assistments09_20240403-120000_fold0_bs128 \
+    --run_dir runs/normal/SGKT_assistments09_20240403-120000_fold0_bs128 \
     --selected_users diverse
 ```
 

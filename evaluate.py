@@ -1,7 +1,7 @@
 """Evaluate a trained model on the test set.
 
 Usage:
-    python evaluate.py --run_dir runs/normal/GIKT_assist09_20260520-232131_fold0_bs128
+    python evaluate.py --run_dir runs/normal/HGIKT_assist09_20260520-232131_fold0_bs128
     python evaluate.py --run_dir ... --checkpoint last_checkpoint.pth
     python evaluate.py --run_dir ... --device cpu
 """

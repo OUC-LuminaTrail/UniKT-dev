@@ -68,7 +68,7 @@ class UniversalRegistry:
 
         Args:
             name: 注册名称
-            module_path: 模块路径，如 "model.GIKT.GIKT_trainer"
+            module_path: 模块路径，如 "model.HGIKT.HGIKT_trainer"
             attr_name: 属性名，如 "GIKTTrainer"。如果为 None，则导入模块本身
         """
         self._lazy_registry[name] = (module_path, attr_name)
@@ -196,7 +196,7 @@ def register_analyzer(name: str | None = None):
         name: 分析器名称，如果为 None 则使用类名
 
     Example:
-        >>> @register_analyzer("GIKT")
+        >>> @register_analyzer("HGIKT")
         ... class GIKTAnalyzer:
         ...     pass
     """
