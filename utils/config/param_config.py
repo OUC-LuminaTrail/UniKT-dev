@@ -84,10 +84,10 @@ def register_model_params(model_name: str):
     """注册模型参数配置。
 
     Usage:
-        >>> @register_model_params("HGIKT")
-        ... class HGIKTModelParams(BaseParamConfig):
+        >>> @register_model_params("GIKT")
+        ... class GIKTModelParams(BaseParamConfig):
         ...     def define_params(self):
-        ...         return "HGIKT Parameters", {...}
+        ...         return "GIKT Parameters", {...}
 
     Args:
         model_name: 模型名称

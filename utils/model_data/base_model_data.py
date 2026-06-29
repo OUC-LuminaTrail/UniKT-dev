@@ -312,7 +312,7 @@ class BaseModelData(ABC):
         参数:
             *arrays: 任意个数、首维为样本数的数组或张量。
                      例如：
-            - HGIKT: (sequences, responses, masks)
+                     - GIKT: (sequences, responses, masks)
                      - SQGKT: (sequences, responses, masks, user_id_sequence)
             val_ratio: 验证集比例(默认为0.2)
             test_ratio: 测试集比例(默认为0.0，不分割测试集)

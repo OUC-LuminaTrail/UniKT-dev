@@ -17,7 +17,7 @@ flowchart LR
 
 ```bash
 # Run with default config (100 trials from optuna_config.json)
-python optuna_search.py -m HGIKT -d assistments09
+python optuna_search.py -m GIKT -d assistments09
 ```
 
 ## Parameters
@@ -125,11 +125,11 @@ Run multiple workers sharing the same database:
 
 ```bash
 # Terminal 1 - with SQLite storage
-python optuna_search.py -m HGIKT -d assistments09 \
+python optuna_search.py -m GIKT -d assistments09 \
     --optuna_config configs/optuna/optuna_config_db.json
 
 # Terminal 2 - same command
-python optuna_search.py -m HGIKT -d assistments09 \
+python optuna_search.py -m GIKT -d assistments09 \
     --optuna_config configs/optuna/optuna_config_db.json
 ```
 

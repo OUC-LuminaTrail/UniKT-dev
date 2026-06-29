@@ -9,16 +9,16 @@ This script provides a command-line interface for:
 Usage:
     # Step 1: Run inference
     python case_analysis.py inference \\
-        --run_dir runs/normal/HGIKT_assistments09_20260217-144913_fold0_bs128
+        --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128
 
     # Step 2: Select users
     python case_analysis.py select \\
-        --run_dir runs/normal/HGIKT_assistments09_20260217-144913_fold0_bs128 \
+        --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \\
         --strategy diverse --num_users 10
 
     # Step 3: Generate visualizations
     python case_analysis.py plot \\
-        --run_dir runs/normal/HGIKT_assistments09_20260217-144913_fold0_bs128 \
+        --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \\
         --selected_users diverse
 """
 
@@ -252,16 +252,16 @@ def main():
 Examples:
   # Step 1: Run inference
   python case_analysis.py inference \\
-      --run_dir runs/normal/HGIKT_assistments09_20260217-144913_fold0_bs128
+      --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128
 
   # Step 2: Select diverse users
   python case_analysis.py select \\
-      --run_dir runs/normal/HGIKT_assistments09_20260217-144913_fold0_bs128 \
+      --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \\
       --strategy diverse --num_users 10
 
   # Step 3: Generate visualizations
   python case_analysis.py plot \\
-      --run_dir runs/normal/HGIKT_assistments09_20260217-144913_fold0_bs128 \
+      --run_dir runs/normal/GIKT_assistments09_20260217-144913_fold0_bs128 \\
       --selected_users diverse
         """,
     )

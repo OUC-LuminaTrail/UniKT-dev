@@ -35,7 +35,7 @@
 
 ## 🔥 Highlights
 
-- **KT Models**: DKT, AKT, GKT, HGIKT, SGKT, SQGKT, DyGKT, SimpleKT, DKVMN, DTransformer, HawkesKT, LBKT, QIKT, ReKT, RobustKT, UKT, ABKT, BDGKT, ClusterKT, and more
+- **KT Models**: DKT, AKT, GKT, GIKT, HGIKT, SGKT, SQGKT, DyGKT, SimpleKT, DKVMN, DTransformer, HawkesKT, LBKT, QIKT, ReKT, RobustKT, UKT, ABKT, BDGKT, ClusterKT, and more
 - **Multi-Dataset Support**: ASSISTments (2009/2012/2017), EdNet-KT1
 - **Optuna Integration**: Automated hyperparameter search with parallel support
 - **Ablation Framework**: Built-in tools for component-wise analysis
@@ -49,6 +49,7 @@
 | **DKT** | [Deep Knowledge Tracing (NeurIPS 2015)](https://papers.nips.cc/paper/5654-deep-knowledge-tracing) | [GitHub](https://github.com/chrispiech/DeepKnowledgeTracing) |
 | **AKT** | [Context-Aware Attentive Knowledge Tracing (KDD 2020)](https://dl.acm.org/doi/10.1145/3394486.3403282) | [GitHub](https://github.com/arghosh/AKT) |
 | **GKT** | [Graph-based Knowledge Tracing (WI 2019)](https://dl.acm.org/doi/10.1145/3350546.3352513) | [GitHub](https://github.com/jhljx/GKT) |
+| **GIKT** | [A Graph-based Interaction Model for KT (ECML-PKDD 2020)](https://arxiv.org/abs/2009.05991) | [GitHub](https://github.com/ApexEDM/GIKT) |
 | **SGKT** | [Session Graph-based Knowledge Tracing (ESA 2022)](https://www.sciencedirect.com/science/article/abs/pii/S0957417422009770) | [GitHub](https://github.com/CCNUZFW/SGKT) |
 | **SQGKT** | [Student-Question Interaction Graph-based KT (ESA 2025)](https://www.sciencedirect.com/science/article/abs/pii/S0957417425027915) | [GitHub](https://github.com/Yingying933/SQGKT) |
 | **DyGKT** | [Dynamic Graph Learning for Knowledge Tracing (KDD 2024)](https://dl.acm.org/doi/10.1145/3637528.3671773) | [GitHub](https://github.com/PengLinzhi/DyGKT) |
@@ -204,18 +205,18 @@ python data_process.py process -d assistments09
 ### 2. Train a Model
 
 ```bash
-# Train HGIKT model
-python train.py -m HGIKT -d assistments09
+# Train GIKT model
+python train.py -m GIKT -d assistments09
 
 # Train with K-fold cross-validation
-python train.py -m HGIKT -d assistments09 --fold 0
+python train.py -m GIKT -d assistments09 --fold 0
 ```
 
 ### 3. Hyperparameter Search
 
 ```bash
 # Optuna search with 50 trials
-python optuna_search.py -m HGIKT -d assistments09 --n_trials 50
+python optuna_search.py -m GIKT -d assistments09 --n_trials 50
 ```
 
 ### 4. Ablation Study
@@ -276,4 +277,3 @@ kt-exp-graph/
 This framework builds upon the excellent work of:
 
 - **[pyKT](https://github.com/pykt-team/pykt-toolkit)** - Reference for AKT, SimpleKT, DKT, GKT
-- **[pyedmine](https://github.com/ZhijieXiong/pyedmine)** - Reference for SQGKT

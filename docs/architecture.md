@@ -43,10 +43,10 @@ All components are managed through `UniversalRegistry` with lazy loading:
 from utils.core import TRAINERS, MODELS, PARAM_CONFIGS
 
 # Register (no import happens)
-TRAINERS.register_lazy("HGIKT", "model.HGIKT.HGIKT_trainer", "HGIKTTrainer")
+TRAINERS.register_lazy("GIKT", "model.GIKT.GIKT_trainer", "GIKTTrainer")
 
 # Access (auto-import on first use)
-trainer_cls = TRAINERS.get("HGIKT")
+trainer_cls = TRAINERS.get("GIKT")
 ```
 
 **Available Registries:**
@@ -201,7 +201,8 @@ kt-exp-graph/
 │   ├── AKT/
 │   ├── DKT/
 │   ├── DyGKT/
-│   ├── GKT/
+│   ├── GIKT/
+│   ├── GIKTEdmine/
 │   ├── GKT/
 │   ├── HGIKT/
 │   │   └── variants/  # HGIKT ablation variants

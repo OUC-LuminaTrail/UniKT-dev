@@ -37,7 +37,7 @@
 
 ## 🔥 核心特性
 
-- **KT 模型**：DKT、AKT、GKT、HGIKT、SGKT、SQGKT、DyGKT、SimpleKT、DKVMN、DTransformer、HawkesKT、LBKT、QIKT、ReKT、RobustKT、UKT、ABKT、BDGKT、ClusterKT 等
+- **KT 模型**：DKT、AKT、GKT、GIKT、HGIKT、SGKT、SQGKT、DyGKT、SimpleKT、DKVMN、DTransformer、HawkesKT、LBKT、QIKT、ReKT、RobustKT、UKT、ABKT、BDGKT、ClusterKT 等
 - **多数据集支持**：ASSISTments（2009/2012/2017）、EdNet-KT1
 - **Optuna 集成**：自动化超参数搜索，支持并行优化
 - **消融实验框架**：内置组件级分析工具
@@ -51,6 +51,7 @@
 | **DKT** | [Deep Knowledge Tracing (NeurIPS 2015)](https://papers.nips.cc/paper/5654-deep-knowledge-tracing) | [GitHub](https://github.com/chrispiech/DeepKnowledgeTracing) |
 | **AKT** | [Context-Aware Attentive Knowledge Tracing (KDD 2020)](https://dl.acm.org/doi/10.1145/3394486.3403282) | [GitHub](https://github.com/arghosh/AKT) |
 | **GKT** | [Graph-based Knowledge Tracing (WI 2019)](https://dl.acm.org/doi/10.1145/3350546.3352513) | [GitHub](https://github.com/jhljx/GKT) |
+| **GIKT** | [A Graph-based Interaction Model for KT (ECML-PKDD 2020)](https://arxiv.org/abs/2009.05991) | [GitHub](https://github.com/ApexEDM/GIKT) |
 | **SGKT** | [Session Graph-based Knowledge Tracing (ESA 2022)](https://www.sciencedirect.com/science/article/abs/pii/S0957417422009770) | [GitHub](https://github.com/CCNUZFW/SGKT) |
 | **SQGKT** | [Student-Question Interaction Graph-based KT (ESA 2025)](https://www.sciencedirect.com/science/article/abs/pii/S0957417425027915) | [GitHub](https://github.com/Yingying933/SQGKT) |
 | **DyGKT** | [Dynamic Graph Learning for Knowledge Tracing (KDD 2024)](https://dl.acm.org/doi/10.1145/3637528.3671773) | [GitHub](https://github.com/PengLinzhi/DyGKT) |
@@ -206,18 +207,18 @@ python data_process.py process -d assistments09
 ### 2. 训练模型
 
 ```bash
-# 训练 HGIKT 模型
-python train.py -m HGIKT -d assistments09
+# 训练 GIKT 模型
+python train.py -m GIKT -d assistments09
 
 # K 折交叉验证
-python train.py -m HGIKT -d assistments09 --fold 0
+python train.py -m GIKT -d assistments09 --fold 0
 ```
 
 ### 3. 超参数搜索
 
 ```bash
 # Optuna 搜索 50 轮
-python optuna_search.py -m HGIKT -d assistments09 --n_trials 50
+python optuna_search.py -m GIKT -d assistments09 --n_trials 50
 ```
 
 ### 4. 消融实验
@@ -260,6 +261,8 @@ kt-exp-graph/
 ├── data/              # 处理后的数据集
 ├── docs/              # 项目文档
 ├── model/             # 模型实现
+│   ├── GIKT/
+│   ├── HGIKT/
 │   ├── SGKT/
 │   └── layers/        # 共享组件
 ├── runs/              # 实验输出
@@ -278,4 +281,3 @@ kt-exp-graph/
 本框架参考了以下优秀开源项目：
 
 - **[pyKT](https://github.com/pykt-team/pykt-toolkit)** - AKT、SimpleKT、DKT、GKT 实现参考
-- **[pyedmine](https://github.com/ZhijieXiong/pyedmine)** - SQGKT 实现参考

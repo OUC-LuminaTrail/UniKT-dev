@@ -24,26 +24,26 @@ flowchart LR
 ### Basic Training
 
 ```bash
-# Train HGIKT on ASSISTments 2009
-python train.py -m HGIKT -d assistments09
+# Train GIKT on ASSISTments 2009
+python train.py -m GIKT -d assistments09
 ```
 
 ### K-Fold Cross-Validation
 
 ```bash
 # Single fold
-python train.py -m HGIKT -d assistments09 --fold 0
+python train.py -m GIKT -d assistments09 --fold 0
 
 # All folds
 for i in {0..4}; do
-    python train.py -m HGIKT -d assistments09 --fold $i
+    python train.py -m GIKT -d assistments09 --fold $i
 done
 ```
 
 ### With Early Stopping
 
 ```bash
-python train.py -m HGIKT -d assistments09 \
+python train.py -m GIKT -d assistments09 \
     --es_patience 10 \
     --es_monitor auc \
     --es_mode max
@@ -84,7 +84,7 @@ python train.py -m HGIKT -d assistments09 \
 Training results are saved to `runs/<type>/<run_id>/`:
 
 ```
-runs/normal/HGIKT_assistments09_20240403-120000_fold0_bs128/
+runs/normal/GIKT_assistments09_20240403-120000_fold0_bs128/
 ├── best_model.pth          # Best model checkpoint
 ├── last_checkpoint.pth     # Last checkpoint
 ├── hyperparameters.json    # Hyperparameter config
@@ -113,14 +113,14 @@ Tracked metrics:
 Different models have additional parameters. View all options:
 
 ```bash
-python train.py -m HGIKT -h
+python train.py -m GIKT -h
 ```
 
 Examples:
 
 ```bash
-# HGIKT-specific
-python train.py -m HGIKT -d assistments09 \
+# GIKT-specific
+python train.py -m GIKT -d assistments09 \
     --hidden_dim 256 \
     --n_layers 2 \
     --heads 4 \
@@ -160,13 +160,13 @@ class MyTrainer(BaseTrainer):
 ### Gradient Clipping
 
 ```bash
-python train.py -m HGIKT -d assistments09 --max_grad_norm 1.0
+python train.py -m GIKT -d assistments09 --max_grad_norm 1.0
 ```
 
 ### Skip Test Evaluation
 
 ```bash
-python train.py -m HGIKT -d assistments09 --skip_test
+python train.py -m GIKT -d assistments09 --skip_test
 ```
 
 ## Related Docs

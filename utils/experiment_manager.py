@@ -32,17 +32,17 @@ class ExperimentManager:
     Example:
         >>> # 方式1：直接创建
         >>> manager = ExperimentManager(
-        ...     model_name="HGIKT",
-        ...     model_name="HGIKT",
+        ...     exp_type=ExperimentType.NORMAL,
+        ...     model_name="GIKT",
         ...     dataset_name="assist09",
         ...     tags=["fold0"]
         ... )
         >>> log_dir = manager.get_log_dir()
-        >>> # runs/normal/HGIKT_assist09_20241201-120000_fold0/
+        >>> # runs/normal/GIKT_assist09_20241201-120000_fold0/
 
         >>> # 方式2：从命令行参数创建
         >>> parser = argparse.ArgumentParser()
-        >>> parser.add_argument("--model", type=str, default="HGIKT")
+        >>> parser.add_argument("--model", type=str, default="GIKT")
         >>> parser.add_argument("--dataset", type=str, default="assist09")
         >>> parser.add_argument("--fold", type=int, default=0)
         >>> args = parser.parse_args()
@@ -61,7 +61,7 @@ class ExperimentManager:
 
         Args:
             exp_type: 实验类型（NORMAL/HYPERPARAM_SEARCH）
-            model_name: 模型名称（HGIKT/SQGKT）
+            model_name: 模型名称（GIKT/HGIKT/SQGKT）
             dataset_name: 数据集名称（assist09/assist12/assist17/ednet）
             base_dir: 基础目录（默认: runs）
             tags: 可选标签列表（fold0, bs64等）
@@ -105,8 +105,8 @@ class ExperimentManager:
         Example:
             >>> parent_manager = ExperimentManager(...)
             >>> child_manager = parent_manager.create_sub_experiment("trial_0")
-            >>> # parent: runs/hyperparam_search/HGIKT_assist09_20241201-120000/
-            >>> # child:  runs/hyperparam_search/HGIKT_assist09_20241201-120000/trial_0/
+            >>> # parent: runs/hyperparam_search/GIKT_assist09_20241201-120000/
+            >>> # child:  runs/hyperparam_search/GIKT_assist09_20241201-120000/trial_0/
         """
         # 创建子实验目录
         sub_dir = self.exp_dir / sub_name
@@ -138,7 +138,7 @@ class ExperimentManager:
         Example:
             >>> manager = ExperimentManager(...)
             >>> full_model_dir = manager.create_subdir("full_model")
-            >>> # runs/normal/HGIKT_assist09_20241201-120000/full_model/
+            >>> # runs/normal/GIKT_assist09_20241201-120000/full_model/
         """
         subdir = self.exp_dir / name
         subdir.mkdir(parents=True, exist_ok=True)

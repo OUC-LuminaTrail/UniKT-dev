@@ -151,7 +151,7 @@ python data_process.py download -d assistments09
 python data_process.py process -d assistments09
 
 # 3. Train model
-python train.py -m HGIKT -d assistments09
+python train.py -m GIKT -d assistments09
 
 # 4. (Optional) Login to SwanLab for experiment tracking
 swanlab login
@@ -162,7 +162,7 @@ swanlab login
 Experiments are saved to `runs/normal/<model>_<dataset>_<timestamp>/`:
 
 ```
-runs/normal/HGIKT_assistments09_20240403-120000_fold0_bs128/
+runs/normal/GIKT_assistments09_20240403-120000_fold0_bs128/
 ├── best_model.pth          # Best model checkpoint
 ├── hyperparameters.json    # Hyperparameter config
 └── training.log            # Training logs
