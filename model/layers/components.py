@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch_geometric.nn import HeteroConv, TransformerConv
 
 
 class HistoryRecap(nn.Module):
@@ -218,3 +219,81 @@ class GeneralInteraction(nn.Module):
         logits = logits * user_mask.float()
 
         return logits
+
+
+class GNN_QS(nn.Module):
+    """问题-技能图聚合模块。
+
+    使用 TransformerConv 进行多层异构图神经网络聚合。
+
+    Args:
+        embedding_dim: 节点嵌入维度
+        n_hop: GNN 层数
+        heads: 注意力头数
+        dropout: Dropout 概率
+
+    Example:
+        >>> gnn = GNN_QS(embedding_dim=128, n_hop=2, heads=4, dropout=0.2)
+        >>> x = {"question": q_emb, "skill": s_emb}
+        >>> edge_index = {("question", "has", "skill"): edge1, ("skill", "rev_has", "question"): edge2}
+        >>> output = gnn(x, edge_index)
+    """
+
+    def __init__(
+        self,
+        embedding_dim: int,
+        n_hop: int,
+        heads: int,
+        dropout: float,
+    ) -> None:
+        super().__init__()
+        self.n_hop = n_hop
+        self.heads = heads
+        self.dropout = dropout
+        self.convs = torch.nn.ModuleList()
+
+        for _ in range(n_hop):
+            conv = HeteroConv(
+                {
+                    ("question", "has", "skill"): TransformerConv(
+                        (embedding_dim, embedding_dim),
+                        embedding_dim,
+                        aggr="add",
+                        heads=heads,
+                        concat=False,
+                    ),
+                    ("skill", "rev_has", "question"): TransformerConv(
+                        (embedding_dim, embedding_dim),
+                        embedding_dim,
+                        aggr="add",
+                        heads=heads,
+                        concat=False,
+                    ),
+                },
+                aggr="sum",
+            )
+            self.convs.append(conv)
+        self.gnn_conv = nn.ModuleList(self.convs)
+
+    def forward(
+        self,
+        x: dict[str, torch.Tensor],
+        edge_index: dict[tuple[str, str, str], torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """前向传播。
+
+        Args:
+            x: 节点特征字典
+            edge_index: 边索引字典
+
+        Returns:
+            聚合后的节点表示字典
+        """
+        for conv in self.gnn_conv:
+            x: torch.Tensor = conv(x, edge_index)
+            x = {key: x.relu() for key, x in x.items()}
+            x = {
+                key: F.dropout(x, p=self.dropout, training=self.training)
+                for key, x in x.items()
+            }
+        return x

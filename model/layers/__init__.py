@@ -1,3 +1,3 @@
-from .components import GeneralInteraction, HistoryRecap
+from .components import GNN_QS, GeneralInteraction, HistoryRecap
 
-__all__ = ["HistoryRecap", "GeneralInteraction"]
+__all__ = ["GNN_QS", "HistoryRecap", "GeneralInteraction"]

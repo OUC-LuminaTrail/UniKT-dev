@@ -7,8 +7,7 @@ from torch_geometric.nn import Linear
 
 from utils.core import register_model
 
-from ..GIKT.GIKT_model import GNN_QS
-from ..layers import GeneralInteraction, HistoryRecap
+from ..layers import GNN_QS, GeneralInteraction, HistoryRecap
 
 
 class Autoencoder(nn.Module):
