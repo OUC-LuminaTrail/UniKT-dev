@@ -77,11 +77,11 @@ class GIKTModelParams(BaseParamConfig):
                 "nargs": "?",
                 "help": "Hidden sizes for each LSTM layer; last layer must equal embedding_dim (default: [200, 100])",
             },
-            "dropout_keep_probs": {
+            "dropout_probs": {
                 "type": list,
-                "default": [0.8, 0.8, 1],
+                "default": [0.2, 0.2, 0.0],
                 "nargs": "?",
-                "help": "Keep probabilities for [LSTM, GNN, eval] (default: [0.8, 0.8, 1])",
+                "help": "Keep probabilities for [LSTM, GNN, eval] (default: [0.2, 0.2, 0.0])",
             },
             # 训练
             "epochs": {

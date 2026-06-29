@@ -44,7 +44,7 @@ class ConcatAggregator(nn.Module):
         output = torch.cat([self_vectors, neighbors_agg], dim=-1).reshape(
             -1, self.dim * 2
         )
-        output = F.dropout(output, p=1.0 - self.dropout, training=self.training)
+        output = F.dropout(output, p=self.dropout, training=self.training)
         output = output @ self.weights + self.bias
         return self.act(output.reshape(batch_size, seq_len, -1, self.dim))
 
@@ -58,7 +58,7 @@ class GIKTGraphAggregator(nn.Module):
         question_neighbor_num,
         skill_neighbor_num,
         n_hop=3,
-        dropout_keep_probs=None,
+        dropout_probs=None,
         aggregator="sum",
     ):
         super().__init__()
@@ -66,7 +66,7 @@ class GIKTGraphAggregator(nn.Module):
         self.question_neighbor_num = question_neighbor_num
         self.skill_neighbor_num = skill_neighbor_num
         self.n_hop = n_hop
-        self.keep_prob_gnn = (dropout_keep_probs or [0.8, 0.8, 1])[1]
+        self.dropout_gnn = (dropout_probs or [0.2, 0.2, 0.0])[1]
 
         if aggregator not in {"sum", "concat"}:
             raise ValueError("aggregator must be 'sum' or 'concat'")
@@ -75,7 +75,7 @@ class GIKTGraphAggregator(nn.Module):
         # 每跳一个 aggregator，在其层内的内层 hop 中复用
         self.aggregators = nn.ModuleList(
             [
-                aggregator_cls(self.embedding_dim, 1.0 - self.keep_prob_gnn, torch.tanh)
+                aggregator_cls(self.embedding_dim, self.dropout_gnn, torch.tanh)
                 for _ in range(n_hop)
             ]
         )
@@ -170,7 +170,7 @@ class GIKT(nn.Module):
         self.embedding_dim = args.embedding_dim
         self.hidden_neurons = list(args.hidden_neurons)
         self.hidden_size = self.hidden_neurons[-1]
-        self.keep_prob = list(args.dropout_keep_probs)[0]
+        self.dropout_prob = list(args.dropout_probs)[0]
         self.model_name = getattr(args, "variant", "hsei")
         self.sim_emb = getattr(args, "sim_emb", "question_emb")
         self.hist_neighbor_num = args.hist_neighbor_num
@@ -192,7 +192,7 @@ class GIKT(nn.Module):
             args.question_neighbor_num,
             args.skill_neighbor_num,
             self.n_hop,
-            list(args.dropout_keep_probs),
+            list(args.dropout_probs),
             args.aggregator,
         )
         # feature_layer 当前题/下一题共用（对应原 TF reuse=True）
@@ -218,7 +218,7 @@ class GIKT(nn.Module):
 
     def _run_lstm(self, x):
         """逐层 LSTM，每层输出接 dropout（对应 DropoutWrapper）。"""
-        drop_p = 1.0 - self.keep_prob
+        drop_p = self.dropout_prob
         for lstm in self.lstm_layers:
             x, _ = lstm(x)
             x = F.dropout(x, p=drop_p, training=self.training)
