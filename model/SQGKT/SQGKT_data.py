@@ -1,258 +1,265 @@
+from collections import defaultdict
+from functools import partial
+
 import numpy as np
 import torch
-from torch.utils.data.dataset import Dataset
-from typing_extensions import override
+from torch.utils.data import Dataset
 
 from utils.core import get_logger
-from utils.data_process.data_source import DataSource
 from utils.model_data import QuestionModelData
 
 
-class SQGKTDataset(Dataset):
-    def __init__(self, users, sequences, responses, masks):
-        self.users = users
-        self.sequences = sequences
-        self.responses = responses
-        self.masks = masks
+def sample_hist_neighbors(
+    batch_size, max_seq_len, hist_neighbor_num, skill_index, pad_index=None
+):
+    """同技能历史采样：位置 t 在历史 [0, t-1] 中随机选 M 个技能相同的位置。"""
+    if pad_index is None:
+        pad_index = max_seq_len
+    if hist_neighbor_num == 0:
+        return np.zeros((batch_size, max_seq_len, 0), dtype=np.int64)
 
-    def __getitem__(self, index):
-        return (
-            torch.tensor(self.users[index], dtype=torch.long),
-            torch.tensor(self.sequences[index], dtype=torch.long),
-            torch.tensor(self.responses[index], dtype=torch.long),
-            torch.tensor(self.masks[index], dtype=torch.bool),  # 掩码为布尔类型
-        )
+    skills = (
+        skill_index.numpy()
+        if isinstance(skill_index, torch.Tensor)
+        else np.asarray(skill_index)
+    )
+    result = np.full(
+        (batch_size, max_seq_len, hist_neighbor_num), pad_index, dtype=np.int64
+    )
+    result[:, 0, :] = pad_index
 
-    def __len__(self):
-        return len(self.sequences)
+    for b in range(batch_size):
+        seq_skills = skills[b]
+        same_skill = seq_skills[np.newaxis, :] == seq_skills[:, np.newaxis]
+        causal = np.tril(np.ones((max_seq_len, max_seq_len), dtype=bool), k=-1)
+        valid = same_skill & causal
+        for t in range(1, max_seq_len):
+            candidates = np.where(valid[t])[0]
+            if len(candidates) >= hist_neighbor_num:
+                result[b, t] = np.random.choice(
+                    candidates, hist_neighbor_num, replace=False
+                )
+            elif len(candidates) > 0:
+                result[b, t] = np.random.choice(
+                    candidates, hist_neighbor_num, replace=True
+                )
+    return result
 
 
 class SQGKTModelData(QuestionModelData):
-    def __init__(self, data_src: DataSource):
+    def __init__(self, data_src):
         super().__init__(data_src)
         self.logger = get_logger(__name__)
 
-    @override
     def prepare_data(self, args):
-        r"""
-        准备SQGKT模型所需的数据
-        """
-        fold_idx = args.fold if args.fold >= 0 else None
-        kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
-
-        # 构建用户答题序列
         user_sequence, user_response, user_mask, user_id_sequence = (
             self.load_sequence_data()
         )
 
-        # 构建问题-技能关联矩阵
-        qs_table = self.build_relationship_matrix(("question", "has", "skill"))
-
-        # 问题-技能图的邻接表
-        # q_neighbors_qs[question_id] -> 该问题的技能邻居ID列表
-        # c_neighbors_qs[skill_id] -> 该技能的问题邻居ID列表
-        qs_q_neighbor_size = max(1, int(getattr(args, "qs_question_neighbors", 5)))
-        qs_c_neighbor_size = max(1, int(getattr(args, "qs_skill_neighbors", 10)))
-        self.logger.info(
-            f"[SQGKT] QS neighbors: q->s={qs_q_neighbor_size}, s->q={qs_c_neighbor_size}"
+        question_skill_matrix = self.build_relationship_matrix(
+            ("question", "has", "skill"), value_type="binary"
         )
-        q_neighbors_qs, c_neighbors_qs = self.build_graph_neighbors(
-            qs_table,
-            q_neighbor_size=qs_q_neighbor_size,
-            c_neighbor_size=qs_c_neighbor_size,
+        num_questions = self.data_src.get_metadata("num_questions")
+        num_skills = self.data_src.get_metadata("num_skills")
+        # load_sequence_data 以切分后的“序列（窗口）”为行，用户 id 即行索引。
+        num_users = user_sequence.shape[0]
+
+        self.logger.info("Building question-skill neighbors...")
+        question_neighbors, skill_neighbors = self.build_qs_neighbors(
+            question_skill_matrix,
+            num_skills,
+            num_questions,
+            args.question_neighbor_num,
+            args.skill_neighbor_num,
         )
-        qs_table = torch.tensor(qs_table, dtype=torch.long)
-        q_neighbors_qs = torch.tensor(q_neighbors_qs, dtype=torch.long)
-        c_neighbors_qs = torch.tensor(c_neighbors_qs, dtype=torch.long)
 
-        # 构建用户-问题邻接表
-        uq_matrix = self.build_relationship_matrix(("user", "answers", "question"))
-
-        # 用户-问题图的邻接表
-        # u_neighbors_uq[user_id] -> 该用户的问题邻居ID列表
-        # q_neighbors_uq[question_id] -> 该问题的用户邻居ID列表
-        uq_u_neighbor_size = max(1, int(getattr(args, "uq_user_neighbors", 5)))
-        uq_q_neighbor_size = max(1, int(getattr(args, "uq_question_neighbors", 5)))
-        self.logger.info(
-            f"[SQGKT] UQ neighbors: u->q={uq_u_neighbor_size}, q->u={uq_q_neighbor_size}"
+        self.logger.info("Building student-question graph...")
+        q_neighbors_2, uq_stat_q = self.build_sq_graph(
+            num_questions, args.user_neighbor_num
         )
-        u_neighbors_uq, q_neighbors_uq = self.build_graph_neighbors(
-            uq_matrix,
-            q_neighbor_size=uq_u_neighbor_size,
-            c_neighbor_size=uq_q_neighbor_size,
+
+        train_data, val_data, test_data = self.split_kfold_data(
+            user_sequence,
+            user_response,
+            user_mask,
+            user_id_sequence,
+            fold_idx=args.fold,
         )
-        u_neighbors_uq = torch.tensor(u_neighbors_uq, dtype=torch.long)
-        q_neighbors_uq = torch.tensor(q_neighbors_uq, dtype=torch.long)
+        train_seq, train_res, train_mask, train_uid = train_data
+        val_seq, val_res, val_mask, val_uid = val_data
+        test_seq, test_res, test_mask, test_uid = test_data
 
-        uq_table = self.build_uq_table_with_factors()
-        uq_table = torch.tensor(uq_table, dtype=torch.float32)
+        train_skills = self._extract_skills(train_seq, question_skill_matrix)
+        val_skills = self._extract_skills(val_seq, question_skill_matrix)
+        test_skills = self._extract_skills(test_seq, question_skill_matrix)
 
-        # 划分训练集和验证集
-        if fold_idx is not None:
-            kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
-            if fold_idx < 0 or fold_idx >= kfold_n_splits:
-                raise ValueError(
-                    f"Fold index {fold_idx} is out of range for {kfold_n_splits} folds."
-                )
-            train_data, val_data, test_data = self.split_kfold_data(
-                user_id_sequence,
-                user_sequence,
-                user_response,
-                user_mask,
-                fold_idx=fold_idx,
-            )
-        else:
-            raise ValueError(
-                "Fold index must be specified for k-fold cross-validation."
-            )
-
-        # 构建模型数据集
         train_dataset = SQGKTDataset(
-            train_data[0], train_data[1], train_data[2], train_data[3]
+            train_seq, train_res, train_mask, train_uid, train_skills
         )
-        val_dataset = SQGKTDataset(val_data[0], val_data[1], val_data[2], val_data[3])
+        val_dataset = SQGKTDataset(val_seq, val_res, val_mask, val_uid, val_skills)
         test_dataset = SQGKTDataset(
-            test_data[0], test_data[1], test_data[2], test_data[3]
+            test_seq, test_res, test_mask, test_uid, test_skills
         )
 
+        collate = partial(sqgkt_collate_fn, hist_neighbor_num=args.hist_neighbor_num)
+
+        self.logger.info(
+            f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
+        )
+
+        graph_data = {
+            "question_neighbors": torch.from_numpy(question_neighbors).long(),
+            "skill_neighbors": torch.from_numpy(skill_neighbors).long(),
+            "q_neighbors_2": torch.from_numpy(q_neighbors_2).long(),
+            "uq_stat_q": torch.from_numpy(uq_stat_q).float(),
+            "next_neighbor_num": args.next_neighbor_num,
+            "feature_embedding": None,
+        }
         return (
             train_dataset,
             val_dataset,
             test_dataset,
-            qs_table,
-            q_neighbors_qs,
-            c_neighbors_qs,
-            uq_table,
-            u_neighbors_uq,
-            q_neighbors_uq,
+            graph_data,
+            num_skills,
+            num_questions,
+            num_users,
+            collate,
+            collate,
         )
 
-    def build_graph_neighbors(self, adj_matrix, q_neighbor_size, c_neighbor_size):
+    @staticmethod
+    def build_qs_neighbors(question_skill_matrix, num_skills, num_questions, qn, sn):
+        """问题-技能二部图邻居表（偏移节点 id，对应 GIKTGraphAggregator）。
+
+        节点 id 布局：技能 [0, num_skills)，题目 [num_skills, num_skills+num_questions)。
+        question_neighbors 以组合 id 为索引（题目行偏移 +num_skills），skill_neighbors 以技能 id 索引。
         """
-        从邻接矩阵构建邻居表。
+        qs_num = num_skills + num_questions
+        question_to_skills = [
+            np.where(question_skill_matrix[q] == 1)[0] for q in range(num_questions)
+        ]
+        skill_to_questions = [
+            np.where(question_skill_matrix[:, s] == 1)[0] + num_skills
+            for s in range(num_skills)
+        ]
 
-        Args:
-            adj_matrix: shape [num_row, num_col] 的0/1矩阵
-            q_neighbor_size: 每行节点的邻居采样数
-            c_neighbor_size: 每列节点的邻居采样数
+        question_neighbors = np.zeros([qs_num, qn], dtype=np.int32)
+        skill_neighbors = np.zeros([num_skills, sn], dtype=np.int32)
 
-        Returns:
-            row_neighbors: [num_row, q_neighbor_size] 每行的列邻居
-            col_neighbors: [num_col, c_neighbor_size] 每列的行邻居
-        """
-        num_row, num_col = adj_matrix.shape
-        row_neighbors = np.zeros([num_row, q_neighbor_size], dtype=np.int32)
-        col_neighbors = np.zeros([num_col, c_neighbor_size], dtype=np.int32)
-
-        # 构建行 -> 列邻居
-        for row_id in range(num_row):
-            neighbors = np.argwhere(adj_matrix[row_id] > 0).reshape(-1)
+        for q_id, neighbors in enumerate(question_to_skills):
             if len(neighbors) == 0:
                 continue
-            if len(neighbors) >= q_neighbor_size:
-                row_neighbors[row_id] = np.random.choice(
-                    neighbors, q_neighbor_size, replace=False
-                )
-            else:
-                row_neighbors[row_id] = np.random.choice(
-                    neighbors, q_neighbor_size, replace=True
-                )
-
-        # 构建列 -> 行邻居
-        for col_id in range(num_col):
-            neighbors = np.argwhere(adj_matrix[:, col_id] > 0).reshape(-1)
+            question_neighbors[num_skills + q_id] = np.random.choice(
+                neighbors, qn, replace=len(neighbors) < qn
+            )
+        for s_id, neighbors in enumerate(skill_to_questions):
             if len(neighbors) == 0:
                 continue
-            if len(neighbors) >= c_neighbor_size:
-                col_neighbors[col_id] = np.random.choice(
-                    neighbors, c_neighbor_size, replace=False
-                )
-            else:
-                col_neighbors[col_id] = np.random.choice(
-                    neighbors, c_neighbor_size, replace=True
-                )
+            skill_neighbors[s_id] = np.random.choice(
+                neighbors, sn, replace=len(neighbors) < sn
+            )
+        return question_neighbors, skill_neighbors
 
-        return row_neighbors, col_neighbors
+    def build_sq_graph(self, num_questions, k):
+        """学生-问题图（论文 §4.1–4.2）。
 
-    def build_uq_table_with_factors(self):
+        对每个问题 q_j 采样 k 个答过它的学生，并按论文式 (6) 计算边权 g_ij 的三个分量：
+          c_i   : 学生 i 的整体作答正确率（学习能力，式 1）
+          g^p   : 基于 attempt_count（泊松）的知识获取因子（式 2–3）
+          g^n   : 基于 hint_count（泊松）的知识获取因子（式 4–5）
+        三分量按位存储（g_ij = w_c·c + w_p·g^p + w_n·g^n 中的可学习权重在模型中）。
+        返回 q_neighbors_2[num_questions, k]（采样学生 id）与 uq_stat_q[num_questions, k, 3]。
         """
-        构建三维的用户-问题表，包含三个因子：
-        - ability_factor: 用户学习能力因子（用户的平均正确率）
-        - attempt_factor_g: 尝试因子（基于问题的尝试次数统计）
-        - hint_factor_g: 提示因子（基于问题的提示次数统计）
-
-        返回:
-            uq_table: 形状 (num_user, num_question, 3) 的三维张量
-        """
-        self.logger.info("Building user-question table with factors...")
         from scipy.stats import poisson
 
-        # 获取切分后的序列数据（用户ID已重新分配）
         data = self.data_src.get_split_question_sequence_data().to_pandas()
-        num_users = self.data_src.get_metadata("num_split_question_users")
-        num_questions = self.data_src.get_metadata("num_questions")
+        eta, alpha, beta = 10.0, 0.3, 0.7
 
-        # 创建三维表
-        uq_table = np.zeros([num_users, num_questions, 3], dtype=np.float32)
+        # 学生整体正确率 c_i（式 1）
+        stu_total = data.groupby("user")["label"].size()
+        stu_correct = data.groupby("user")["label"].sum()
+        c_i = (stu_correct / stu_total.clip(lower=1)).to_dict()
 
-        # 参数设置
-        alpha = 0.3
-        eta = 10
-        beta = 0.7
+        # 每个问题的 attempt/hint 泊松参数 λ（MLE = 均值）
+        lam_p = data.groupby("question")["attempt_count"].mean().to_dict()
+        lam_n = data.groupby("question")["hint_count"].mean().to_dict()
 
-        # 1. 计算学习能力因子
-        self.logger.info("Computing learning ability factors...")
+        # 每个 (学生, 问题) 的累计 attempt/hint
+        pq = data.groupby(["user", "question"])["attempt_count"].sum().to_dict()
+        nq = data.groupby(["user", "question"])["hint_count"].sum().to_dict()
+        # 每个问题答过的学生集合
+        q_to_students = defaultdict(list)
+        for u, q in pq:
+            q_to_students[q].append(u)
 
-        # 用户ID和问题ID
-        user_ids = data["user"].values
-        question_ids = data["question"].values
+        def factor(count, lam):
+            pc = 0.0 if lam <= 0 else 1.0 - poisson.sf(int(count) - 1, lam)
+            return alpha + (1.0 - alpha) / (1.0 + np.exp(eta * (pc - beta)))
 
-        # 计算每个用户的平均正确率
-        user_ability_series = data.groupby("user")["label"].mean()
-        # 映射回每个交互，得到能力因子
-        ability_factors = data["user"].map(user_ability_series).fillna(0.5).values
-
-        # 2. 计算问题的尝试次数和提示次数统计
-        if "attempt_count" in data.columns and "hint_count" in data.columns:
-            self.logger.info("Computing attempt and hint factors...")
-
-            # 计算每个问题的平均尝试次数和提示次数
-            question_attempt_mean = data.groupby("question")["attempt_count"].mean()
-            question_hint_mean = data.groupby("question")["hint_count"].mean()
-
-            # 映射到每个交互
-            mean_attempts = data["question"].map(question_attempt_mean).fillna(1).values
-            mean_hints = data["question"].map(question_hint_mean).fillna(0).values
-
-            # 获取每个交互的尝试次数和提示次数
-            attempt_counts = data["attempt_count"].fillna(1).values
-            hint_counts = data["hint_count"].fillna(0).values
-
-            # 计算 attempt_factor
-            attempt_factor = poisson.cdf(attempt_counts - 1, mean_attempts)
-            attempt_factor_g = alpha + (1 - alpha) / (
-                1 + np.exp(eta * (attempt_factor - beta))
-            )
-
-            # 计算 hint_factor
-            hint_factor = np.zeros_like(hint_counts, dtype=np.float32)
-            mask_hint = mean_hints > 0
-            if np.any(mask_hint):
-                hint_factor[mask_hint] = poisson.cdf(
-                    hint_counts[mask_hint] - 1, mean_hints[mask_hint]
+        q_neighbors_2 = np.zeros([num_questions, k], dtype=np.int32)
+        uq_stat_q = np.zeros([num_questions, k, 3], dtype=np.float32)
+        for q in range(num_questions):
+            students = q_to_students.get(q, [])
+            if not students:
+                continue
+            n = len(students)
+            idx = np.random.choice(n, k, replace=(n < k))
+            sampled = np.array(students, dtype=np.int32)[idx]
+            q_neighbors_2[q] = sampled
+            for slot, u in enumerate(sampled):
+                uq_stat_q[q, slot, 0] = c_i.get(int(u), 0.0)
+                uq_stat_q[q, slot, 1] = factor(
+                    pq.get((int(u), q), 0), lam_p.get(q, 0.0)
                 )
+                uq_stat_q[q, slot, 2] = factor(
+                    nq.get((int(u), q), 0), lam_n.get(q, 0.0)
+                )
+        return q_neighbors_2, uq_stat_q
 
-            hint_factor_g = alpha + (1 - alpha) / (
-                1 + np.exp(eta * (hint_factor - beta))
-            )
+    @staticmethod
+    def _extract_skills(user_sequence, question_skill_matrix):
+        first_skill = np.argmax(question_skill_matrix, axis=1)
+        has_skill = np.any(question_skill_matrix == 1, axis=1)
+        question_to_skill = np.where(has_skill, first_skill, 0).astype(
+            user_sequence.dtype, copy=False
+        )
+        return question_to_skill[user_sequence]
 
-            # 存储到三维表中
-            uq_table[user_ids, question_ids, 0] = ability_factors
-            uq_table[user_ids, question_ids, 1] = attempt_factor_g
-            uq_table[user_ids, question_ids, 2] = hint_factor_g
-        else:
-            raise ValueError(
-                "Data must contain 'attempt_count' and 'hint_count' columns to compute factors."
-            )
 
-        return uq_table
+class SQGKTDataset(Dataset):
+    def __init__(self, user_sequence, user_response, user_mask, user_id, user_skills):
+        self.user_sequence = torch.from_numpy(np.asarray(user_sequence)).long()
+        self.user_response = torch.from_numpy(np.asarray(user_response)).long()
+        self.user_mask = torch.from_numpy(np.asarray(user_mask)).bool()
+        self.user_id = torch.from_numpy(np.asarray(user_id)[:, 0]).long()
+        self.user_skills = torch.from_numpy(np.asarray(user_skills)).long()
+
+    def __len__(self):
+        return len(self.user_sequence)
+
+    def __getitem__(self, idx):
+        return {
+            "sequence": self.user_sequence[idx],
+            "response": self.user_response[idx],
+            "mask": self.user_mask[idx],
+            "user_id": self.user_id[idx],
+            "skills": self.user_skills[idx],
+        }
+
+
+def sqgkt_collate_fn(batch, hist_neighbor_num=3):
+    from torch.utils.data.dataloader import default_collate
+
+    batched = default_collate(batch)
+    batch_size, full_seq_len = batched["skills"].shape
+    model_seq_len = full_seq_len - 1
+    batched["hist_neighbor_index"] = torch.from_numpy(
+        sample_hist_neighbors(
+            batch_size,
+            model_seq_len,
+            hist_neighbor_num,
+            batched["skills"][:, :model_seq_len],
+            pad_index=model_seq_len,
+        )
+    ).long()
+    return batched

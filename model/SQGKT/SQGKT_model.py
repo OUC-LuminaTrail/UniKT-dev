@@ -1,460 +1,207 @@
-from typing import Any
+"""SQGKT: student-question interaction graph-based knowledge tracing.
+
+1. 边权 g_ij（§4.1 式 6）：g_ij = w_c·c_i + w_p·g_ij^p + w_n·g_ij^n
+   - c_i：学生整体正确率（学习能力，式 1）
+   - g_ij^p：基于 attempt_count 的泊松知识获取因子（式 2–3）
+   - g_ij^n：基于 hint_count 的泊松知识获取因子（式 4–5）
+   w_c/w_p/w_n 可学习；c/g^p/g^n 三分量在数据端预算，按位与采样学生对齐。
+2. 图嵌入（§4.3 式 9–11）：把答过 q_j 的学生按边权 g_ij 加权聚合“进”问题，得到每题表示 q̃_j。
+3. 融合（式 16）：q̂_j = w_q1·q̃_j + w_q2·q_j（q_j 来自问题-技能图），w_q1/w_q2 可学习。
+4. q̂_t 同时用于 LSTM 输入（式 17）与预测交互项（式 20）。
+
+修复的原作者 sqgkt.py bug：
+- LSTMCell 未传上一时刻隐状态
+- predict 末端多做一次 sigmoid 与 BCEWithLogitsLoss 冲突
+"""
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn.dense.linear import Linear
+import torch.nn.functional as F
 
-from utils.core import register_model
+from model.GIKT.GIKT_model import GIKTGraphAggregator
+
+from ..layers import GeneralInteraction, HistoryRecap
 
 
-@register_model("SQGKT")
 class SQGKT(nn.Module):
-    """SQGKT 主模型。
-
-    Sequence Question Graph-based Knowledge Training，基于序列-问题图的知识追踪模型。
-
-    Args:
-        args: 模型参数配置
-        data_metadata: 数据集元数据
-        **kwargs: 额外的关键字参数
-
-    Example:
-        >>> model = SQGKT(args, data_metadata)
-        >>> logits = model(user_seq, question_seq, correctness_seq, mask_seq, qs_table, ...)
-    """
-
-    def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
+    def __init__(self, args, data_metadata, **kwargs):
         super().__init__(**kwargs)
-        # 保存参数
-        self.args = args
+        self.num_skills = data_metadata["num_skills"]
+        self.num_questions = data_metadata["num_questions"]
+        self.num_users = data_metadata["num_users"]
+        self.embedding_dim = args.embedding_dim
+        self.hidden_neurons = list(args.hidden_neurons)
+        self.hidden_size = self.hidden_neurons[-1]
+        self.dropout_prob = args.dropout_probs[0]
+        self.model_name = getattr(args, "variant", "hsei")
+        self.sim_emb = getattr(args, "sim_emb", "question_emb")
+        self.hist_neighbor_num = args.hist_neighbor_num
+        self.next_neighbor_num = args.next_neighbor_num
+        self.n_hop = args.n_hop
 
-        # 元数据
-        self.data_metadata = data_metadata
-        # 模型参数
-        self.dim_emb = args.dim_emb
-        self.num_question, self.num_concept = (
-            data_metadata["num_questions"],
-            data_metadata["num_skills"],
+        assert self.hidden_size == self.embedding_dim, (
+            f"hidden_neurons[-1]({self.hidden_size}) must equal embedding_dim({self.embedding_dim})"
         )
-        self.num_user = data_metadata["num_users"]
-        self.agg_hops = args.agg_hops
-        self.dropout4lstm = args.dropout4lstm
-        self.dropout4gnn = args.dropout4gnn
-        self.rank_k = args.rank_k
 
-        # 两个图使用独立的问题嵌入
-        self.embed_question_qs = nn.Embedding(self.num_question, self.dim_emb)
-        self.embed_question_uq = nn.Embedding(self.num_question, self.dim_emb)
-        self.embed_concept = nn.Embedding(self.num_concept, self.dim_emb)
-        self.embed_user = nn.Embedding(self.num_user, self.dim_emb)
-        self.embed_correctness = nn.Embedding(2, self.dim_emb)
-
-        # 问题嵌入的混合权重参数，对应论文公式16
-        self.w1_q = nn.Parameter(torch.tensor(0.5))
-        self.w2_q = nn.Parameter(torch.tensor(0.5))
-
-        # 三个因子的融合权重，对应论文公式6
-        self.w_c = nn.Parameter(torch.tensor(0.33))  # ability factor
-        self.w_p = nn.Parameter(torch.tensor(0.33))  # attempt factor
-        self.w_n = nn.Parameter(torch.tensor(0.33))  # hint factor
-
-        # LSTM单元前的线性层，对应论文公式17
-        self.lstm_pre_fc = nn.Linear(self.dim_emb * 2, self.dim_emb * 2)
-        self.lstm1 = nn.LSTMCell(self.dim_emb * 2, self.dim_emb)
-        self.lstm2 = nn.LSTMCell(self.dim_emb, self.dim_emb)
-
-        # GCN参数 - 问题-技能图 (w1, b1 in paper Eq 9-11)
-        self.mlp4agg_qs = nn.ModuleList(
-            Linear(self.dim_emb, self.dim_emb) for _ in range(self.agg_hops)
+        self.feature_embedding = nn.Embedding(
+            self.num_skills + self.num_questions + 2, self.embedding_dim
         )
-        self.MLP_AGG_last_qs = Linear(self.dim_emb, self.dim_emb)
 
-        # GCN参数 - 学生-问题图 (w2, b2 in paper Eq 12-14)
-        self.mlp4agg_uq = nn.ModuleList(
-            Linear(self.dim_emb, self.dim_emb) for _ in range(self.agg_hops)
+        self.graph_aggregator = GIKTGraphAggregator(
+            self.embedding_dim,
+            args.question_neighbor_num,
+            args.skill_neighbor_num,
+            self.n_hop,
+            args.dropout_probs,
+            args.aggregator,
         )
-        self.MLP_AGG_last_uq = Linear(self.dim_emb, self.dim_emb)
-        self.dropout_lstm = nn.Dropout(self.dropout4lstm)
-        self.dropout_gnn = nn.Dropout(self.dropout4gnn)
-        self.MLP_query = Linear(self.dim_emb, self.dim_emb)
-        self.MLP_key = Linear(self.dim_emb, self.dim_emb)
-        # 公式10中的W
-        self.MLP_W = Linear(2 * self.dim_emb, 1)
+
+        # 学生-问题图（§4.3 式 9–11）：学生节点嵌入 + 题目自身嵌入（该图专用）+ GCN 变换。
+        # 把答过 q_j 的学生按边权 g_ij 加权聚合“进”该题，得到每题表示 q̃_j。
+        self.emb_table_student = nn.Embedding(self.num_users, self.embedding_dim)
+        self.emb_table_question_sq = nn.Embedding(
+            self.num_questions, self.embedding_dim
+        )
+        self.sq_transform = nn.Linear(self.embedding_dim, self.embedding_dim)
+        # g_ij 边权融合（式 6）与 q̂ 双图融合（式 16，w_q1/w_q2 均为自适应可学习参数）。
+        self.w_c = nn.Parameter(torch.tensor(0.33))
+        self.w_p = nn.Parameter(torch.tensor(0.33))
+        self.w_n = nn.Parameter(torch.tensor(0.33))
+        self.w_q1 = nn.Parameter(torch.tensor(0.5))
+        self.w_q2 = nn.Parameter(torch.tensor(0.5))
+
+        self.feature_layer = nn.Linear(self.embedding_dim, self.hidden_size)
+        self.feature_layer_act = nn.ReLU()
+        self.input_trans_layer = nn.Linear(
+            self.hidden_size + self.embedding_dim, self.hidden_size
+        )
+
+        sizes = [self.embedding_dim] + self.hidden_neurons
+        self.lstm_layers = nn.ModuleList(
+            nn.LSTM(sizes[i], sizes[i + 1], batch_first=True)
+            for i in range(len(self.hidden_neurons))
+        )
+
+        self.history_recap = HistoryRecap(
+            self.hist_neighbor_num, getattr(args, "att_bound", 0.7)
+        )
+        self.general_interaction = GeneralInteraction(self.hidden_size)
+
+    def _run_lstm(self, x):
+        drop_p = self.dropout_prob
+        for lstm in self.lstm_layers:
+            x, _ = lstm(x)
+            x = F.dropout(x, p=drop_p, training=self.training)
+        return x
+
+    def _hist_neighbor_sampler(self, input_embedding, hist_neighbor_index, max_step):
+        B, _, H = input_embedding.shape
+        emb = torch.cat(
+            [
+                input_embedding,
+                torch.zeros(
+                    B, 1, H, device=input_embedding.device, dtype=input_embedding.dtype
+                ),
+            ],
+            dim=1,
+        )
+        idx = hist_neighbor_index.reshape(B, max_step * self.hist_neighbor_num)
+        return torch.gather(emb, 1, idx.unsqueeze(-1).expand(-1, -1, H)).reshape(
+            B, max_step, self.hist_neighbor_num, H
+        )
+
+    def _aggregate_sq(self, questions):
+        """学生-问题图 GCN（式 9–11）：把答过每题的学生按边权 g_ij 加权聚合进该题，返回 q̃ [B, S, d]。"""
+        students = self.q_neighbors_2[questions]  # [B, S, K]
+        stats = self.uq_stat_q[questions]  # [B, S, K, 3]
+        g = (
+            self.w_c * stats[..., 0]
+            + self.w_p * stats[..., 1]
+            + self.w_n * stats[..., 2]
+        )  # [B, S, K]
+        stu_emb = self.emb_table_student(students)  # [B, S, K, d]
+        neighbor_msg = (stu_emb * g.unsqueeze(-1)).mean(dim=2)  # [B, S, d]
+        self_msg = self.emb_table_question_sq(questions)  # [B, S, d]
+        return self.feature_layer_act(self.sq_transform(neighbor_msg + self_msg))
 
     def forward(
         self,
-        user_seq: torch.Tensor,  # [B, S]
-        question_seq: torch.Tensor,  # [B, S]
-        correctness_seq: torch.Tensor,  # [B, S]
-        mask_seq: torch.Tensor,  # [B, S]
-        qs_table: torch.Tensor,  # [Q, K]
-        q_neighbors_qs: torch.Tensor,  # [Q, neighbors]
-        c_neighbors_qs: torch.Tensor,  # [K, neighbors]
-        uq_table: torch.Tensor,  # [U, Q, 3]
-        u_neighbors_uq: torch.Tensor,  # [U, neighbors]
-        q_neighbors_uq: torch.Tensor,  # [Q, neighbors]
-    ) -> torch.Tensor:  # [B, S]
-        """前向传播。
+        user_sequence,
+        user_response,
+        user_mask,
+        user_ids,
+        skills,
+        graph_data,
+        hist_neighbor_index,
+    ):
+        max_step = user_sequence.size(1) - 1
+        question_indices = user_sequence[:, :-1] + self.num_skills
+        next_question_indices = user_sequence[:, 1:] + self.num_skills
+        answer_indices = user_response[:, :-1] + self.num_skills + self.num_questions
 
-        Args:
-            user_seq: 用户序列 [B, S]
-            question_seq: 问题序列 [B, S]
-            correctness_seq: 正确性序列 [B, S]
-            mask_seq: 掩码序列 [B, S]
-            qs_table: 问题-技能关联表 [Q, K]
-            q_neighbors_qs: 问题在问题-技能图中的邻居 [Q, neighbors]
-            c_neighbors_qs: 技能在问题-技能图中的邻居 [K, neighbors]
-            uq_table: 用户-问题因子表 [U, Q, 3]
-            u_neighbors_uq: 用户在用户-问题图中的邻居 [U, neighbors]
-            q_neighbors_uq: 问题在用户-问题图中的邻居 [Q, neighbors]
+        input_questions_embedding = self.feature_embedding(question_indices)
+        next_questions_embedding = self.feature_embedding(next_question_indices)
+        input_answers_embedding = self.feature_embedding(answer_indices)
 
-        Returns:
-            预测 logits [B, S]
-        """
-        dim_emb = self.dim_emb
-        if not hasattr(self, "device"):
-            self.device = question_seq.device
-
-        batch_size, seq_len = question_seq.shape
-
-        # 问题-技能图：q_neighbors_qs 每个问题有多少技能邻居，c_neighbors_qs 每个技能有多少问题邻居
-        qs_q_neighbor_size = q_neighbors_qs.shape[1]  # 技能邻居数
-        qs_c_neighbor_size = c_neighbors_qs.shape[1]  # 问题邻居数
-
-        # 用户-问题图：u_neighbors_uq 每个用户有多少问题邻居，q_neighbors_uq 每个问题有多少用户邻居
-        uq_u_neighbor_size = u_neighbors_uq.shape[1]  # 问题邻居数
-        uq_q_neighbor_size = q_neighbors_uq.shape[1]  # 用户邻居数
-
-        # 初始化LSTM隐藏状态和细胞状态
-        h1 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
-        )
-        c1 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
-        )
-        h2 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
-        )
-        c2 = torch.nn.init.xavier_uniform_(torch.zeros(batch_size, dim_emb)).to(
-            self.device
+        aggregate_embedding, next_aggregate_embedding = self.graph_aggregator(
+            question_indices, next_question_indices, graph_data
         )
 
-        state_history = torch.zeros(batch_size, seq_len, dim_emb).to(self.device)
-        y_hat = torch.zeros(batch_size, seq_len).to(self.device)
+        # 学生-问题图聚合 q̃，与问题-技能图 q 线性融合得 q̂（式 16）
+        self.q_neighbors_2 = graph_data["q_neighbors_2"]
+        self.uq_stat_q = graph_data["uq_stat_q"]
+        q_tilde_in = self._aggregate_sq(user_sequence[:, :-1])
+        q_tilde_next = self._aggregate_sq(user_sequence[:, 1:])
+        qhat_in = self.w_q1 * q_tilde_in + self.w_q2 * aggregate_embedding[0].squeeze(2)
+        qhat_next = self.w_q1 * q_tilde_next + self.w_q2 * next_aggregate_embedding[
+            0
+        ].squeeze(2)
 
-        for t in range(seq_len - 1):
-            user_t = user_seq[:, t]
-            question_t = question_seq[:, t]
-            response_t = correctness_seq[:, t]
-            mask_t = torch.ne(mask_seq[:, t], 0)
-            emb_response_t = self.embed_correctness(response_t)
+        feature_trans_embedding = self.feature_layer_act(self.feature_layer(qhat_in))
+        next_trans_embedding = self.feature_layer_act(self.feature_layer(qhat_next))
 
-            # ========== 问题-技能图的GNN聚合 ==========
-            nodes_qs = [question_t[mask_t]]
-            batch_size_qs = len(nodes_qs[0])
-            for i in range(self.agg_hops):
-                nodes_current = nodes_qs[-1].reshape(-1)
-                # i=0: 问题->技能, i=1: 技能->问题, i=2: 问题->技能...
-                neighbor_shape = [batch_size_qs] + [
-                    (qs_q_neighbor_size if j % 2 == 0 else qs_c_neighbor_size)
-                    for j in range(i + 1)
-                ]
-                if i % 2 == 0:
-                    # 当前是问题ID，查找其技能邻居
-                    nodes_qs.append(
-                        q_neighbors_qs[nodes_current].reshape(neighbor_shape)
-                    )
-                else:
-                    # 当前是技能ID，查找其问题邻居
-                    nodes_qs.append(
-                        c_neighbors_qs[nodes_current].reshape(neighbor_shape)
-                    )
+        input_trans_embedding = self.input_trans_layer(
+            torch.cat([feature_trans_embedding, input_answers_embedding], dim=-1)
+        )
+        output_series = self._run_lstm(input_trans_embedding)
 
-            # 嵌入：偶数层是问题，奇数层是技能
-            emb_nodes_qs = []
-            for i, nodes in enumerate(nodes_qs):
-                if i % 2 == 0:
-                    emb_nodes_qs.append(self.embed_question_qs(nodes))
-                else:
-                    emb_nodes_qs.append(self.embed_concept(nodes))
-
-            emb_question_t_qs = self.aggregate_qs(emb_nodes_qs)
-            qs_emb_reconstruct = torch.zeros(batch_size, dim_emb).to(self.device)
-            qs_emb_reconstruct[mask_t] = emb_question_t_qs
-            qs_emb_reconstruct[~mask_t] = self.embed_question_qs(question_t[~mask_t])
-
-            # ========== 用户-问题图的GNN聚合 ==========
-            # 起点是用户ID，交替访问：用户->问题->用户->...
-            nodes_uq = [user_t[mask_t]]
-            batch_size_uq = len(nodes_uq[0])
-            for i in range(self.agg_hops):
-                nodes_current = nodes_uq[-1].reshape(-1)
-                # i=0: 用户->问题, i=1: 问题->用户, i=2: 用户->问题...
-                neighbor_shape = [batch_size_uq] + [
-                    (uq_u_neighbor_size if j % 2 == 0 else uq_q_neighbor_size)
-                    for j in range(i + 1)
-                ]
-                if i % 2 == 0:
-                    # 当前是用户ID，查找其问题邻居
-                    nodes_uq.append(
-                        u_neighbors_uq[nodes_current].reshape(neighbor_shape)
-                    )
-                else:
-                    # 当前是问题ID，查找其用户邻居
-                    nodes_uq.append(
-                        q_neighbors_uq[nodes_current].reshape(neighbor_shape)
-                    )
-
-            # 嵌入：偶数层是用户，奇数层是问题
-            emb_nodes_uq = []
-            for i, nodes in enumerate(nodes_uq):
-                if i % 2 == 0:
-                    emb_nodes_uq.append(self.embed_user(nodes))
-                else:
-                    emb_nodes_uq.append(self.embed_question_uq(nodes))
-
-            # 使用带权重聚合
-            emb_question_t_uq = self.aggregate_uq(
-                emb_nodes_uq, user_t[mask_t], uq_table
+        if self.model_name in ("hssi", "hsei"):
+            source = (
+                output_series if self.model_name == "hssi" else input_trans_embedding
             )
-            uq_emb_reconstruct = torch.zeros(batch_size, dim_emb).to(self.device)
-            uq_emb_reconstruct[mask_t] = emb_question_t_uq
-            uq_emb_reconstruct[~mask_t] = self.embed_question_uq(question_t[~mask_t])
-
-            # 融合两个图的问题嵌入，公式16
-            emb_hat_q = self.w1_q * qs_emb_reconstruct + self.w2_q * uq_emb_reconstruct
-
-            # LSTM更新知识状态
-            lstm1_input = torch.concat((emb_hat_q, emb_response_t), dim=1)
-            h1, c1 = self.lstm1(lstm1_input, (h1, c1))
-            h1 = self.dropout_lstm(h1)
-
-            h2, c2 = self.lstm2(h1, (h2, c2))
-            lstm2_output = self.dropout_lstm(h2)
-
-            # 找t+1时刻习题对应的知识点
-            question_next = question_seq[:, t + 1]
-            correspond_concepts = qs_table[question_next]
-            correspond_concepts_list = []
-            max_concept = 1
-            for i in range(batch_size):
-                concepts_index = torch.nonzero(correspond_concepts[i] == 1).squeeze()
-                if len(concepts_index.shape) == 0:
-                    correspond_concepts_list.append(
-                        torch.unsqueeze(self.embed_concept(concepts_index), dim=0)
-                    )
-                else:
-                    if concepts_index.shape[0] > max_concept:
-                        max_concept = concepts_index.shape[0]
-                    correspond_concepts_list.append(self.embed_concept(concepts_index))
-            # 将习题和对应知识点embedding拼接起来
-            emb_question_next = self.embed_question_qs(question_next)
-            question_concept = torch.zeros(batch_size, max_concept + 1, dim_emb).to(
-                self.device
+            hist_neighbors_features = self._hist_neighbor_sampler(
+                source, hist_neighbor_index, max_step
             )
-            for b, emb_concepts in enumerate(correspond_concepts_list):
-                num_qc = 1 + emb_concepts.shape[0]
-                emb_next = torch.unsqueeze(emb_question_next[b], dim=0)
-                question_concept[b, 0:num_qc] = torch.concat(
-                    (emb_next, emb_concepts), dim=0
-                )
-            question_concept = question_concept.to(self.device)
-            # recap选取历史状态
-            current_state = lstm2_output.unsqueeze(dim=1)
-            if t == 0:
-                # t=0时，只有当前状态，没有历史状态
-                current_history_state = current_state
-            elif t <= self.rank_k:
-                current_history_state = torch.concat(
-                    (current_state, state_history[:, 0:t]), dim=1
-                )
-            else:
-                Q = (
-                    self.embed_question_qs(question_next)
-                    .clone()
-                    .detach()
-                    .unsqueeze(dim=-1)
-                )
-                K = self.embed_question_qs(question_seq[:, 0:t]).clone().detach()
-                product_score = torch.bmm(K, Q).squeeze(dim=-1)
-                _, indices = torch.topk(product_score, k=self.rank_k, dim=1)
-                select_history = torch.concat(
-                    tuple(
-                        state_history[i][indices[i]].unsqueeze(dim=0)
-                        for i in range(batch_size)
-                    ),
-                    dim=0,
-                )
-                current_history_state = torch.concat(
-                    (current_state, select_history), dim=1
-                )
-            # 标准KT对齐：y_hat[:, t] 存储用t时刻信息预测t+1时刻的结果
-            # 这样 y_hat[:, t] 对应标签 correctness_seq[:, t+1]
-            y_hat[:, t] = self.predict(question_concept, current_history_state)
-            state_history[:, t] = lstm2_output
-        return y_hat
-
-    def aggregate_qs(self, emb_list: list[torch.Tensor]) -> torch.Tensor:
-        """问题-技能图的聚合 (Eq 9-11)。
-
-        Args:
-            emb_list: 嵌入列表
-
-        Returns:
-            聚合后的嵌入
-        """
-        agg_hops = self.agg_hops
-        for i in range(agg_hops):
-            for j in range(agg_hops - i):
-                emb_list[j] = self.sum_aggregate_qs(emb_list[j], emb_list[j + 1], j)
-        return torch.tanh(self.MLP_AGG_last_qs(emb_list[0]))
-
-    def sum_aggregate_qs(
-        self, emb_self: torch.Tensor, emb_neighbor: torch.Tensor, hop: int
-    ) -> torch.Tensor:
-        """问题-技能图的单跳聚合。
-
-        Args:
-            emb_self: 自身嵌入
-            emb_neighbor: 邻居嵌入
-            hop: 当前跳数
-
-        Returns:
-            聚合后的嵌入
-        """
-        emb_sum_neighbor = torch.mean(emb_neighbor, dim=-2)
-        emb_sum = emb_sum_neighbor + emb_self
-        return torch.tanh(self.dropout_gnn(self.mlp4agg_qs[hop](emb_sum)))
-
-    def aggregate_uq(
-        self,
-        emb_list: list[torch.Tensor],
-        user_ids: torch.Tensor | None = None,
-        uq_table: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """学生-问题图的聚合 (Eq 12-14)，考虑 g_ij 权重。
-
-        Args:
-            emb_list: 嵌入列表
-            user_ids: 用户ID（可选）
-            uq_table: 用户-问题因子表（可选）
-
-        Returns:
-            聚合后的嵌入
-        """
-        agg_hops = self.agg_hops
-        for i in range(agg_hops):
-            for j in range(agg_hops - i):
-                emb_list[j] = self.sum_aggregate_uq(
-                    emb_list[j], emb_list[j + 1], j, user_ids, uq_table
-                )
-        return torch.tanh(self.MLP_AGG_last_uq(emb_list[0]))
-
-    def sum_aggregate_uq(
-        self,
-        emb_self: torch.Tensor,
-        emb_neighbor: torch.Tensor,
-        hop: int,
-        user_ids: torch.Tensor | None = None,
-        uq_table: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """学生-问题图的单跳聚合。
-
-        Args:
-            emb_self: 自身嵌入
-            emb_neighbor: 邻居嵌入
-            hop: 当前跳数
-            user_ids: 用户ID（可选）
-            uq_table: 用户-问题因子表（可选）
-
-        Returns:
-            聚合后的嵌入
-        """
-        if hop == 0 and user_ids is not None and uq_table is not None:
-            # 只在第一跳（用户->问题）时进行加权
-            # emb_self: [num_users_batch, emb_dim]
-            # emb_neighbor: [num_users_batch, num_neighbors, emb_dim]
-            # uq_table: [num_users, num_questions, 3]
-
-            num_nodes = emb_self.size(0)
-            emb_dim = emb_self.size(1)
-            num_neighbors = emb_neighbor.size(1)
-
-            # 获取用户的因子 [num_users_batch, num_questions, 3]
-            user_factors = uq_table[user_ids]  # [batch, num_questions, 3]
-
-            # 对所有问题取平均得到该用户的平均因子 [num_users_batch, 3]
-            avg_factors = user_factors.mean(dim=1)  # [batch, 3]
-
-            # 计算 g_ij = w_c * c_i + w_p * g_p + w_n * g_n
-            # avg_factors: [batch, 3] where [:, 0]=c_i, [:, 1]=g_p, [:, 2]=g_n
-            g_ij = (
-                self.w_c * avg_factors[:, 0]
-                + self.w_p * avg_factors[:, 1]
-                + self.w_n * avg_factors[:, 2]
-            )  # [batch]
-
-            # 扩展权重以匹配邻居维度 [batch, num_neighbors, emb_dim]
-            g_ij_expanded = g_ij.view(num_nodes, 1, 1).expand(
-                num_nodes, num_neighbors, emb_dim
-            )
-
-            # 加权聚合
-            weighted_neighbor = emb_neighbor * g_ij_expanded
-            emb_sum_neighbor = torch.mean(weighted_neighbor, dim=-2)
-            emb_sum = emb_sum_neighbor + emb_self
         else:
-            # 其他跳使用标准平均聚合
-            emb_sum_neighbor = torch.mean(emb_neighbor, dim=-2)
-            emb_sum = emb_sum_neighbor + emb_self
+            if self.sim_emb == "skill_emb":
+                qe, nqe = (
+                    self.feature_embedding(skills[:, :-1]),
+                    self.feature_embedding(skills[:, 1:]),
+                )
+            elif self.sim_emb == "question_emb":
+                qe, nqe = input_questions_embedding, next_questions_embedding
+            else:
+                qe, nqe = feature_trans_embedding, next_trans_embedding
+            qa_source = (
+                input_trans_embedding if self.model_name == "ssei" else output_series
+            )
+            hist_neighbors_features = self.history_recap(
+                qe, nqe, qa_source, user_mask[:, :-1], hist_neighbor_index
+            )
 
-        return torch.tanh(self.dropout_gnn(self.mlp4agg_uq[hop](emb_sum)))
+        if self.next_neighbor_num != 0:
+            nn_sampled = self.graph_aggregator.sample_next_neighbors(
+                next_aggregate_embedding, self.next_neighbor_num
+            )
+            nn_keys = torch.cat([next_trans_embedding.unsqueeze(2), nn_sampled], dim=2)
+        else:
+            nn_keys = next_trans_embedding.unsqueeze(2)
 
-    def predict(
-        self,
-        question_concept: torch.Tensor,  # [B, num_qc, dim_emb]
-        current_history_state: torch.Tensor,  # [B, num_state, dim_emb]
-    ) -> torch.Tensor:  # [B]
-        """预测函数。
+        if self.hist_neighbor_num != 0:
+            nh_values = torch.cat(
+                [output_series.unsqueeze(2), hist_neighbors_features], dim=2
+            )
+        else:
+            nh_values = output_series.unsqueeze(2)
 
-        Args:
-            question_concept: 问题-概念嵌入 [B, num_qc, dim_emb]
-            current_history_state: 当前历史状态 [B, num_state, dim_emb]
-
-        Returns:
-            预测结果 [B]
-        """
-        # question_concept: (batch_size, num_qc, dim_emb), current_history_state: (batch_size, num_state, dim_emb)
-        output_g = torch.bmm(
-            question_concept, torch.transpose(current_history_state, 1, 2)
-        )
-
-        num_qc, num_state = question_concept.shape[1], current_history_state.shape[1]
-        states = torch.unsqueeze(
-            current_history_state, dim=1
-        )  # [batch_size, 1, num_state, dim_emb]
-        states = states.repeat(
-            1, num_qc, 1, 1
-        )  # [batch_size, num_qc, num_state, dim_emb]
-        question_concepts = torch.unsqueeze(
-            question_concept, dim=2
-        )  # [batch_size, num_qc, 1, dim_emb]
-        question_concepts = question_concepts.repeat(
-            1, 1, num_state, 1
-        )  # [batch_size, num_qc, num_state, dim_emb]
-
-        K = torch.tanh(
-            self.MLP_query(states)
-        )  # [batch_size, num_qc, num_state, dim_emb]
-        Q = torch.tanh(
-            self.MLP_key(question_concepts)
-        )  # [batch_size, num_qc, num_state, dim_emb]
-        tmp = self.MLP_W(
-            torch.concat((Q, K), dim=-1)
-        )  # [batch_size, num_qc, num_state, 1]
-        tmp = torch.squeeze(tmp, dim=-1)  # [batch_size, num_qc, num_state]
-        alpha = torch.softmax(tmp, dim=2)  # [batch_size, num_qc, num_state]
-        p = torch.sum(torch.sum(alpha * output_g, dim=1), dim=1)  # [batch_size, 1]
-        result = torch.squeeze(p, dim=-1)
-
-        return result
+        return self.general_interaction(nh_values, nn_keys, user_mask[:, :-1])

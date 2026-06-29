@@ -1,9 +1,4 @@
-"""SQGKT 模型训练器。
-
-定义 SQGKTTrainer 类，用于训练和评估 SQGKT 模型。
-"""
-
-from typing import Any
+"""SQGKT 模型训练器。"""
 
 import torch
 
@@ -13,164 +8,158 @@ from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
 
+__all__ = ["SQGKTTrainer", "SQGKTModelParams"]
+
 
 @register_model_params("SQGKT")
 class SQGKTModelParams(BaseParamConfig):
-    """SQGKT 模型参数配置。"""
-
     def define_params(self) -> tuple[str, dict]:
-        group_name = "SQGKT Parameters"
-        params = {
-            "dim_emb": {
+        return "SQGKT Parameters", {
+            "n_hop": {
+                "type": int,
+                "default": 3,
+                "short": "nh",
+                "help": "Number of GNN aggregation hops (default: 3)",
+            },
+            "skill_neighbor_num": {
+                "type": int,
+                "default": 4,
+                "help": "Number of skill neighbors sampled per hop (default: 4)",
+            },
+            "question_neighbor_num": {
+                "type": int,
+                "default": 4,
+                "help": "Number of question neighbors sampled per hop (default: 4)",
+            },
+            "user_neighbor_num": {
+                "type": int,
+                "default": 5,
+                "help": "Sampled students per question in the student-question graph (default: 5)",
+            },
+            "hist_neighbor_num": {
+                "type": int,
+                "default": 3,
+                "short": "hn",
+                "help": "Number of historical neighbor samples M (default: 3)",
+            },
+            "next_neighbor_num": {
+                "type": int,
+                "default": 4,
+                "short": "nn",
+                "help": "Number of next-question neighbor samples N (default: 4)",
+            },
+            "att_bound": {
+                "type": float,
+                "default": 0.7,
+                "help": "Similarity threshold (default: 0.7)",
+            },
+            "aggregator": {
+                "type": str,
+                "default": "sum",
+                "help": "Aggregator type: sum or concat (default: sum)",
+            },
+            "variant": {
+                "type": str,
+                "default": "hsei",
+                "help": "History sampling variant: hssi/hsei (same skill) or ssei/dkt (similarity) (default: hsei)",
+            },
+            "sim_emb": {
+                "type": str,
+                "default": "question_emb",
+                "help": "Similarity embedding: skill_emb/question_emb/feature (default: question_emb)",
+            },
+            "embedding_dim": {
                 "type": int,
                 "default": 100,
                 "short": "ed",
                 "help": "Embedding dimension (default: 100)",
             },
-            "agg_hops": {
-                "type": int,
-                "default": 3,
-                "short": "nh",
-                "help": "Number of GNN hops (default: 3)",
+            "hidden_neurons": {
+                "type": list,
+                "default": [200, 100],
+                "nargs": "?",
+                "help": "Hidden sizes for each LSTM layer; last layer must equal embedding_dim (default: [200, 100])",
             },
-            "dropout4lstm": {
-                "type": float,
-                "default": 0.2,
-                "short": "dpl",
-                "help": "LSTM dropout probability (default: 0.2)",
-            },
-            "dropout4gnn": {
-                "type": float,
-                "default": 0.4,
-                "short": "dpg",
-                "help": "GNN dropout probability (default: 0.4)",
-            },
-            "qs_question_neighbors": {
-                "type": int,
-                "default": 5,
-                "help": "Question neighbors in question-skill graph (default: 5)",
-            },
-            "qs_skill_neighbors": {
-                "type": int,
-                "default": 10,
-                "help": "Skill neighbors in question-skill graph (default: 10)",
-            },
-            "uq_user_neighbors": {
-                "type": int,
-                "default": 5,
-                "help": "User neighbors in user-question graph (default: 5)",
-            },
-            "uq_question_neighbors": {
-                "type": int,
-                "default": 5,
-                "help": "Question neighbors in user-question graph (default: 5)",
-            },
-            "rank_k": {
-                "type": int,
-                "default": 10,
-                "help": "Top K for soft review mechanism (default: 10)",
+            "dropout_probs": {
+                "type": list,
+                "default": [0.2, 0.2, 0],
+                "nargs": "?",
+                "help": "Dropout probabilities for [LSTM, GNN, eval] (default: [0.2, 0.2, 0])",
             },
             "epochs": {
                 "type": int,
-                "default": 300,
+                "default": 100,
                 "short": "ep",
-                "help": "Number of training epochs (default: 200)",
+                "help": "Number of training epochs (default: 100)",
             },
             "learning_rate": {
                 "type": float,
                 "default": 0.001,
                 "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.001)",
+                "help": "Learning rate (default: 0.001)",
             },
-            "lr_decay_factor": {
+            "lr_decay": {
                 "type": float,
                 "default": None,
-                "help": "Learning rate decay factor per epoch (default: None)",
+                "help": "Learning rate decay factor per epoch (default: no decay)",
             },
             "weight_decay": {
                 "type": float,
-                "default": 1e-4,
+                "default": 1e-8,
                 "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer (default: 0.0001)",
+                "help": "Weight decay (default: 1e-8)",
             },
             "batch_size": {
                 "type": int,
-                "default": 128,
+                "default": 32,
                 "short": "bs",
-                "help": "Batch size for training (default: 128)",
+                "help": "Batch size (default: 32)",
             },
         }
-        return group_name, params
 
 
 @TRAINERS.register("SQGKT")
 class SQGKTTrainer(BaseTrainer):
-    """SQGKT 模型训练器。
+    """SQGKT 模型训练器。"""
 
-    负责初始化 SQGKT 模型、优化器和训练数据，并实现前向传播逻辑。
-
-    Args:
-        args: 模型参数配置
-        data_src: 数据源实例
-        exp_manager: 实验管理器（可选）
-    """
-
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
-        # 1. 准备数据
+    def __init__(self, args=None, data_src=None, exp_manager=None):
         from model.SQGKT.SQGKT_data import SQGKTModelData
+        from model.SQGKT.SQGKT_model import SQGKT
 
         model_data = SQGKTModelData(data_src)
         (
             train_dataset,
             val_dataset,
             test_dataset,
-            qs_table,
-            q_neighbors_qs,
-            c_neighbors_qs,
-            uq_table,
-            u_neighbors_uq,
-            q_neighbors_uq,
+            self.graph_data,
+            self.num_skills,
+            self.num_questions,
+            self.num_users,
+            train_collate_fn,
+            val_collate_fn,
         ) = model_data.prepare_data(args)
 
-        # 2. 初始化模型
-        from model.SQGKT import SQGKT
-
         logger.info("Initializing SQGKT model...")
-        model = SQGKT(args, data_src.get_metadata())
-
-        # 3. 调用父类构造函数
+        metadata = dict(data_src.get_metadata())
+        metadata["num_users"] = self.num_users
+        model = SQGKT(args=args, data_metadata=metadata)
         super().__init__(model)
 
-        # 4. 创建优化器和损失函数
-        loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
         )
+        lr_scheduler = (
+            torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.lr_decay)
+            if args.lr_decay
+            else None
+        )
+        early_stopping_cfg = EarlyStoppingConfig(
+            monitor=args.es_monitor,
+            mode=args.es_mode,
+            patience=args.es_patience,
+            min_delta=args.es_min_delta,
+        )
 
-        # 5. 创建学习率调度器
-        lr_scheduler = None
-        if args.lr_decay_factor:
-            lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay_factor
-            )
-
-        # 6. 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 7. 配置训练器
         self.with_training(
             epochs=args.epochs,
             seed=args.seed,
@@ -181,71 +170,57 @@ class SQGKTTrainer(BaseTrainer):
             val_data=val_dataset,
             test_data=test_dataset,
             batch_size=args.batch_size,
+            collate_fn=train_collate_fn,
+            val_collate_fn=val_collate_fn,
         ).with_optimization(
             optimizer=optimizer,
-            loss_fn=loss_fn,
+            loss_fn=torch.nn.BCEWithLogitsLoss(),
             lr_scheduler=lr_scheduler,
             early_stopping=early_stopping_cfg,
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
             model_name="SQGKT",
-            dataset_name=getattr(args, "dataset", ""),
+            dataset_name=args.dataset,
         ).build()
 
-        # 8. 移动静态数据到设备
-        self.qs_table = self._move_tensor_to_device(qs_table)
-        self.q_neighbors_qs = self._move_tensor_to_device(q_neighbors_qs)
-        self.c_neighbors_qs = self._move_tensor_to_device(c_neighbors_qs)
-        self.uq_table = self._move_tensor_to_device(uq_table)
-        self.u_neighbors_uq = self._move_tensor_to_device(u_neighbors_uq)
-        self.q_neighbors_uq = self._move_tensor_to_device(q_neighbors_uq)
+        self.graph_data = {
+            key: value.to(self.device_) if hasattr(value, "to") else value
+            for key, value in self.graph_data.items()
+        }
+        self.graph_data["feature_embedding"] = self.model.feature_embedding.weight
 
-    def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
-    ) -> dict[str, torch.Tensor]:
-        """SQGKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成。
+        logger.info(
+            f"SQGKT Trainer: {self.num_skills} skills, {self.num_questions} questions"
+        )
 
-        Args:
-            batch_data: 包含 (users, sequence, response, mask) 的元组
+    def forward_pass(self, batch_data):
+        sequence = self._move_tensor_to_device(batch_data["sequence"])
+        response = self._move_tensor_to_device(batch_data["response"])
+        mask = self._move_tensor_to_device(batch_data["mask"])
+        user_id = self._move_tensor_to_device(batch_data["user_id"])
+        skills = self._move_tensor_to_device(batch_data["skills"])
+        hist_neighbor_index = self._move_tensor_to_device(
+            batch_data["hist_neighbor_index"]
+        )
 
-        Returns:
-            包含 y_hat, y_label, y_predict 的字典
-        """
-        # 解包数据并移动到设备
-        users, sequence, response, mask = batch_data
-        users = self._move_tensor_to_device(users)
-        sequence = self._move_tensor_to_device(sequence)
-        response = self._move_tensor_to_device(response)
-        mask = self._move_tensor_to_device(mask)
-
-        # 模型前向传播
-        y_hat_full = self.model(
-            users,
-            sequence,
-            response,
-            mask,
-            self.qs_table,
-            self.q_neighbors_qs,
-            self.c_neighbors_qs,
-            self.uq_table,
-            self.u_neighbors_uq,
-            self.q_neighbors_uq,
-        )  # [B, S]
-
-        # 提取有效位置的预测和标签（跳过第一个时间步）
+        y_hat_full = self._pad_to_full_sequence(
+            self.model(
+                user_sequence=sequence,
+                user_response=response,
+                user_mask=mask,
+                user_ids=user_id,
+                skills=skills,
+                graph_data=self.graph_data,
+                hist_neighbor_index=hist_neighbor_index,
+            )
+        )
         y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
-
-        # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
-
-        # 生成二分类预测
-        y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
-
         return {
             "y_hat": y_hat,
             "y_label": y_label,
-            "y_predict": y_predict,
+            "y_predict": self._generate_binary_predictions(y_hat, threshold=0.0),
             "y_score": y_hat,
             "y_prob": torch.sigmoid(y_hat),
         }
