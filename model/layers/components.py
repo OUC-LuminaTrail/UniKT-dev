@@ -31,6 +31,7 @@ class HistoryRecap(nn.Module):
         super().__init__()
         self.hist_neighbor_num = hist_neighbor_num
         self.att_bound = att_bound
+        self.register_buffer("tri_mask", None, persistent=False)
 
     def forward(
         self,
@@ -41,7 +42,6 @@ class HistoryRecap(nn.Module):
         hist_neighbor_index: torch.Tensor | None = None,  # [B, S, M] 可选的备用索引
     ) -> torch.Tensor:
         B, S, _ = input_q_emb.size()
-        H = qa_emb.size(-1)
         device = input_q_emb.device
 
         # 归一化向量
@@ -51,9 +51,15 @@ class HistoryRecap(nn.Module):
         q_similarity = torch.bmm(next_q_norm, input_q_norm.transpose(1, 2))  # [B, S, S]
 
         # 创建下三角矩阵：tri[i, j] = True if j < i (j 是历史位置)
-        tri_mask = torch.tril(
-            torch.ones(S, S, device=device, dtype=torch.bool), diagonal=-1
-        )  # [S, S]
+        if (
+            self.tri_mask is None
+            or self.tri_mask.size(-1) != S
+            or self.tri_mask.device != device
+        ):
+            self.tri_mask = torch.tril(
+                torch.ones(S, S, device=device, dtype=torch.bool), diagonal=-1
+            )
+        tri_mask = self.tri_mask  # [S, S]
 
         # 结合用户有效掩码
         # user_mask: [B, S] -> [B, S, 1] (next位置) 和 [B, 1, S] (input位置)
@@ -63,61 +69,32 @@ class HistoryRecap(nn.Module):
         # 综合掩码: [1, S, S] & [B, S, 1] & [B, 1, S] -> [B, S, S]
         valid_mask = tri_mask.unsqueeze(0) & valid_next & valid_input
 
-        # 将未来位置和无效位置的相似度清零
-        q_similarity = q_similarity.masked_fill(~valid_mask, 0.0)
+        # 将未来/无效位置及低于阈值的相似度一并清零
+        keep = valid_mask & (q_similarity > self.att_bound)
+        q_similarity = q_similarity.masked_fill(~keep, 0.0)
 
-        # 应用相似度阈值
-        q_similarity = torch.where(
-            q_similarity > self.att_bound, q_similarity, torch.zeros_like(q_similarity)
-        )
-
-        # 选择历史邻居位置
-        # 注意：对于没有足够历史的位置，会选到相似度=0的位置
         hist_attention_value, temp_hist_index = torch.topk(
             q_similarity,
             k=self.hist_neighbor_num,
-            dim=2,  # 在 input 维度（历史维度）上取 top-k
+            dim=2,
             largest=True,
             sorted=True,
-        )  # [B, S, M], [B, S, M]
+        )
 
-        # 当相似度 <= 0 时，使用预计算的备用索引
-        if hist_neighbor_index is not None:
-            # 使用预计算的 hist_neighbor_index 作为备用
-            temp_hist_index = torch.where(
-                hist_attention_value > 0,
-                temp_hist_index,
-                hist_neighbor_index,  # 使用预计算的索引而非 -1
-            )
-        else:
-            # 如果没有提供 hist_neighbor_index，使用 -1 作为无效标记
-            temp_hist_index = torch.where(
-                hist_attention_value > 0,
-                temp_hist_index,
-                torch.full_like(temp_hist_index, -1),
-            )  # [B, S, M]
-
-        # 在 qa_emb 后添加零向量作为 padding
-        zero_padding = torch.zeros(B, 1, H, device=device, dtype=qa_emb.dtype)
-        qa_emb_padded = torch.cat([qa_emb, zero_padding], dim=1)  # [B, S+1, H]
-
-        # 将 -1 索引映射到最后一个位置（零向量）
+        fallback = (
+            hist_neighbor_index
+            if hist_neighbor_index is not None
+            else torch.full_like(temp_hist_index, -1)
+        )
         temp_hist_index = torch.where(
-            temp_hist_index >= 0,
-            temp_hist_index,
-            torch.full_like(temp_hist_index, S),  # S 是 padding 的位置
-        )  # [B, S, M]
+            hist_attention_value > 0, temp_hist_index, fallback
+        )
 
-        # 扩展索引以匹配特征维度
-        # temp_hist_index: [B, S, M] -> [B, S, M, H]
-        hist_index_expanded = temp_hist_index.unsqueeze(-1).expand(-1, -1, -1, H)
+        qa_emb_padded = F.pad(qa_emb, (0, 0, 0, 1))
+        temp_hist_index = temp_hist_index.masked_fill(temp_hist_index < 0, S)
 
-        # 从 qa_emb_padded 中按索引取特征
-        hist_neighbors = torch.gather(
-            qa_emb_padded.unsqueeze(1).expand(-1, S, -1, -1),  # [B, S, S+1, H]
-            2,  # 在第 3 维（历史位置维）上 gather
-            hist_index_expanded,
-        )  # [B, S, M, H]
+        batch_idx = torch.arange(B, device=device).view(B, 1, 1)
+        hist_neighbors = qa_emb_padded[batch_idx, temp_hist_index]
 
         return hist_neighbors
 
