@@ -8,7 +8,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -100,7 +100,7 @@ class HGIKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT")
+@register_trainer("HGIKT")
 class HGIKTTrainer(BaseTrainer):
     """HGIKT 模型训练器 - 使用 Fluent API。
 
@@ -119,7 +119,7 @@ class HGIKTTrainer(BaseTrainer):
         exp_manager: Any = None,
     ) -> None:
         # 1. 准备数据
-        from model.HGIKT import HGIKTModelData
+        from model.HGIKT.HGIKT_data import HGIKTModelData
 
         model_data = HGIKTModelData(data_src)
         data_dict = model_data.prepare_data(args)

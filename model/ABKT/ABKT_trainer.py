@@ -13,7 +13,7 @@ from utils.config import (
     create_optimized_dataloader,
     register_model_params,
 )
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.data_process import DataSource
 from utils.training import MultiTrainer, StageComponents, StageConfig
 
@@ -224,7 +224,7 @@ class AMLoss(nn.Module):
         return loss + self.am_lambda * (u_norm + i_norm)
 
 
-@TRAINERS.register("ABKT")
+@register_trainer("ABKT")
 class ABKTTrainer(MultiTrainer):
     """ABKT 两阶段训练器。
 

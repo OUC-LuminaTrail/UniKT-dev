@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -98,7 +98,7 @@ class HGIKTHeteroOnlyModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_HeteroOnly")
+@register_trainer("HGIKT_HeteroOnly")
 class HGIKTHeteroOnlyTrainer(BaseTrainer):
     """Trainer for HGIKT with heterogeneous graph only.
 

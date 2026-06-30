@@ -6,8 +6,6 @@ from dhg.nn import HGNNConv
 from torch.nn import functional as F
 from torch_geometric.nn import HGTConv, Linear
 
-from utils.core import register_model
-
 from ..layers import GeneralInteraction, HistoryRecap
 
 
@@ -194,7 +192,6 @@ class MoEFusion(nn.Module):
         return self.norm(fused).reshape(*B_shape, self.dim)
 
 
-@register_model("HGIKT")
 class HGIKT(nn.Module):
     """HGIKT 主模型。
 

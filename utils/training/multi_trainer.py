@@ -4,7 +4,7 @@
 模型 / 优化器 / 损失 / 数据 / 早停配置，阶段之间通过钩子传递数据。
 
 Example:
-    >>> @TRAINERS.register("ABKT")
+    >>> @register_trainer("ABKT")
     ... class ABKTTrainer(MultiTrainer):
     ...     def __init__(self, args, data_src, exp_manager):
     ...         super().__init__(device=args.device, seed=args.seed)

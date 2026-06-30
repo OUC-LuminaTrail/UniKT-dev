@@ -3,7 +3,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -54,7 +54,7 @@ class ReKTModelParams(BaseParamConfig):
         }
 
 
-@TRAINERS.register("ReKT")
+@register_trainer("ReKT")
 class ReKTTrainer(BaseTrainer):
     def __init__(
         self,
@@ -62,7 +62,7 @@ class ReKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        from model.ReKT import ReKTModelData
+        from model.ReKT.ReKT_data import ReKTModelData
         from model.ReKT.ReKT_model import ReKT
 
         model_data = ReKTModelData(data_src)

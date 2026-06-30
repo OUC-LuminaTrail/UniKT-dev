@@ -6,8 +6,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from utils.core import register_model
-
 
 class TimeEncoder(nn.Module):
     """Cosine time encoder."""
@@ -116,7 +114,6 @@ class DyKTSeq(nn.Module):
         return torch.squeeze(hidden, dim=0)
 
 
-@register_model("DyGKT")
 class DyGKT(nn.Module):
     """Dynamic Graph-based Knowledge Tracing model."""
 

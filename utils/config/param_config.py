@@ -7,7 +7,7 @@ import argparse
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..core import PARAM_CONFIGS
+from ..core import PARAM_CONFIGS, register_model_params
 
 
 class BaseParamConfig(ABC):
@@ -73,34 +73,6 @@ class BaseParamConfig(ABC):
                 kwargs["type"] = cfg["type"]
 
             group.add_argument(*arg_names, **kwargs)
-
-
-# ============================================================================
-# 模型参数注册表（使用统一注册表）
-# ============================================================================
-
-
-def register_model_params(model_name: str):
-    """注册模型参数配置。
-
-    Usage:
-        >>> @register_model_params("GIKT")
-        ... class GIKTModelParams(BaseParamConfig):
-        ...     def define_params(self):
-        ...         return "GIKT Parameters", {...}
-
-    Args:
-        model_name: 模型名称
-
-    Returns:
-        装饰器函数
-    """
-
-    def decorator(cls: type[BaseParamConfig]) -> type[BaseParamConfig]:
-        PARAM_CONFIGS.register(model_name)(cls)
-        return cls
-
-    return decorator
 
 
 def get_model_params(model_name: str) -> type[BaseParamConfig] | None:

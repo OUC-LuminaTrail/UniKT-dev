@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -97,7 +97,7 @@ class HGIKTHyperOnlySimpleModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_HyperOnlySimple")
+@register_trainer("HGIKT_HyperOnlySimple")
 class HGIKTHyperOnlySimpleTrainer(BaseTrainer):
     """Trainer for HGIKT with simple hypergraph only (no difficulty weighting).
 

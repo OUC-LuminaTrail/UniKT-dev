@@ -9,10 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.core import register_model
 
-
-@register_model("MIKT")
 class MIKT(nn.Module):
     """MIKT 模型
 

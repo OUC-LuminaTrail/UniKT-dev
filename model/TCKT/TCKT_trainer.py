@@ -24,7 +24,7 @@ from utils.config import (
     EarlyStoppingConfig,
     register_model_params,
 )
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 from utils.training.callbacks import Callback
 
@@ -130,7 +130,7 @@ class GlobalDictRefreshCallback(Callback):
         self.trainer.refresh_global_dict()
 
 
-@TRAINERS.register("TCKT")
+@register_trainer("TCKT")
 class TCKTTrainer(BaseTrainer):
     """TCKT 训练器。"""
 

@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -50,7 +50,7 @@ class HGIKTQSQTOnlyModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("HGIKT_QS_QT_Only")
+@register_trainer("HGIKT_QS_QT_Only")
 class HGIKTQSQTOnlyTrainer(BaseTrainer):
     """Trainer for HGIKT with QS and QT edges only."""
 

@@ -5,8 +5,6 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch_geometric.nn import Linear
 
-from utils.core import register_model
-
 from ..layers import GNN_QS, GeneralInteraction, HistoryRecap
 
 
@@ -59,7 +57,6 @@ class Autoencoder(nn.Module):
         return encoded, recon_loss
 
 
-@register_model("DAGKT")
 class DAGKT(nn.Module):
     """DAGKT 主模型。
 

@@ -3,8 +3,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical
 
-from utils.core import register_model
-
 
 class IEKTMLP(nn.Module):
     """多层感知机头
@@ -47,7 +45,6 @@ class IEKTGRUCell(nn.Module):
         return h_t
 
 
-@register_model("IEKT")
 class IEKT(nn.Module):
     """IEKT 模型
 

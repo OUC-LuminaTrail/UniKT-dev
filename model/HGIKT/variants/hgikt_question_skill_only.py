@@ -8,7 +8,6 @@ import torch.nn.functional as F
 from torch_geometric.nn import HGTConv, Linear
 
 from model.layers import GeneralInteraction, HistoryRecap
-from utils.core import register_model
 
 
 class HeteroGNN(nn.Module):
@@ -55,7 +54,6 @@ class HeteroGNN(nn.Module):
         return x_dict
 
 
-@register_model("HGIKT_QuestionSkillOnly")
 class HGIKT_QuestionSkillOnly(nn.Module):
     """HGIKT variant with only heterogeneous graph for knowledge representation.
 

@@ -7,7 +7,7 @@ Defines training logic for Session Graph-based Knowledge Tracing model.
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -137,7 +137,7 @@ class SGKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("SGKT")
+@register_trainer("SGKT")
 class SGKTTrainer(BaseTrainer):
     """
     SGKT model trainer
@@ -150,7 +150,7 @@ class SGKTTrainer(BaseTrainer):
         exp_manager=None,
     ):
         # 1. 准备数据
-        from model.SGKT import SGKTModelData
+        from model.SGKT.SGKT_data import SGKTModelData
 
         model_data = SGKTModelData(data_src)
         (

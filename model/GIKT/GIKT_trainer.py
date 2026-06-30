@@ -3,7 +3,7 @@
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -116,7 +116,7 @@ class GIKTModelParams(BaseParamConfig):
         }
 
 
-@TRAINERS.register("GIKT")
+@register_trainer("GIKT")
 class GIKTTrainer(BaseTrainer):
     """GIKT 模型训练器。"""
 

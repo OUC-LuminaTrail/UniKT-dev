@@ -9,7 +9,6 @@ from dhg.nn import HGNNConv
 from torch_geometric.nn import Linear
 
 from model.layers import GeneralInteraction, HistoryRecap
-from utils.core import register_model
 
 
 class HyperGNN(nn.Module):
@@ -40,7 +39,6 @@ class HyperGNN(nn.Module):
         return x2
 
 
-@register_model("HGIKT_HyperOnly")
 class HGIKT_HyperOnly(nn.Module):
     """HGIKT variant with only hypergraph for knowledge representation.
 

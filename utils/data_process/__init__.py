@@ -1,52 +1,37 @@
+"""数据处理包。
+
+导入本包触发静态注册发现(扫描源码,不导入数据源代码),把所有 ``@register_data_source``
+注册项写入 ``DATA_SOURCES`` 懒索引。数据源代码在 ``get_data_source(...)`` 时才按需导入。
+"""
+
+from pathlib import Path
 from typing import Any
 
-from utils.core import DATA_SOURCES
+from utils.core import DATA_SOURCES, discover_registrations
 
-from .assist09 import Assistments2009Data
-from .assist12 import Assistments2012Data
-from .assist15 import Assistments2015Data
-from .assist17 import Assistments2017Data
 from .data_source import DataSource
-from .ednet_kt1 import EdNetKT1Data
-from .junyi2015 import Junyi2015Data
-from .kddcup2010 import Algebra2005Data, Algebra2006Data, Bridge2006Data
-from .nips2020_t34 import NIPS2020T34Data
-from .slepemapy import SlepemapyData
+
+discover_registrations(Path(__file__).parent, "utils.data_process")
 
 
 def get_data_source(dataset_name: str, args: Any) -> DataSource:
-    """Get the appropriate DataSource instance for a given dataset name.
+    """按名取数据源实例(按需懒导入对应模块)。
 
     Args:
-        dataset_name: Name of the dataset (e.g., 'assistments09', 'ednet_kt1')
-        args: Configuration arguments for the data source
+        dataset_name: 数据集名(如 ``"assistments09"``、``"ednet_kt1"``)。
+        args: 数据源配置参数。
 
     Returns:
-        DataSource instance configured with the provided args
+        配置好的 ``DataSource`` 实例。
 
     Raises:
-        ValueError: If dataset_name is not registered in DATA_SOURCES
+        ValueError: 数据集名未注册。
     """
     if dataset_name not in DATA_SOURCES:
         available = ", ".join(DATA_SOURCES.keys())
         raise ValueError(f"Unsupported dataset: {dataset_name}. Available: {available}")
-
     dataset_cls = DATA_SOURCES.get(dataset_name)
     return dataset_cls(args=args)
 
 
-__all__ = [
-    "Algebra2005Data",
-    "Algebra2006Data",
-    "Assistments2009Data",
-    "Assistments2012Data",
-    "Assistments2015Data",
-    "Assistments2017Data",
-    "Bridge2006Data",
-    "EdNetKT1Data",
-    "SlepemapyData",
-    "Junyi2015Data",
-    "NIPS2020T34Data",
-    "DataSource",
-    "get_data_source",
-]
+__all__ = ["DataSource", "get_data_source"]

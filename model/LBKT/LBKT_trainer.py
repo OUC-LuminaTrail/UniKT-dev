@@ -3,7 +3,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -80,7 +80,7 @@ class LBKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("LBKT")
+@register_trainer("LBKT")
 class LBKTTrainer(BaseTrainer):
     """LBKT 模型训练器。"""
 
@@ -90,7 +90,7 @@ class LBKTTrainer(BaseTrainer):
         data_src: Any = None,
         exp_manager: Any = None,
     ) -> None:
-        from model.LBKT import LBKTModelData
+        from model.LBKT.LBKT_data import LBKTModelData
         from model.LBKT.LBKT_model import LBKT
 
         model_data = LBKTModelData(data_src)

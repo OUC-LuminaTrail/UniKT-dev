@@ -9,7 +9,6 @@ from dhg.nn import HGNNConv
 from torch_geometric.nn import HGTConv, Linear
 
 from model.layers import GeneralInteraction, HistoryRecap
-from utils.core import register_model
 
 
 class HeteroGNN(nn.Module):
@@ -84,7 +83,6 @@ class HyperGNN(nn.Module):
         return x2
 
 
-@register_model("HGIKT_WeightedFusion")
 class HGIKT_WeightedFusion(nn.Module):
     """HGIKT variant with learnable weighted addition fusion.
 

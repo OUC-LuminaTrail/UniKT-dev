@@ -22,9 +22,7 @@ from .config import (
     register_model_params,
 )
 from .core import (
-    COMPONENTS,
     DATA_SOURCES,
-    MODELS,
     TRAINERS,
     get_logger,
     seed_everything,
@@ -42,10 +40,8 @@ from .training import (
 
 __all__ = [
     # Core
-    "MODELS",
     "TRAINERS",
     "DATA_SOURCES",
-    "COMPONENTS",
     "get_logger",
     "seed_everything",
     # Config

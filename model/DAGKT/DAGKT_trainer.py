@@ -8,7 +8,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -126,7 +126,7 @@ class DAGKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("DAGKT")
+@register_trainer("DAGKT")
 class DAGKTTrainer(BaseTrainer):
     """DAGKT 模型训练器。
 
@@ -140,7 +140,7 @@ class DAGKTTrainer(BaseTrainer):
         exp_manager: Any = None,
     ) -> None:
         # 1. 准备数据
-        from model.DAGKT import DAGKTModelData
+        from model.DAGKT.DAGKT_data import DAGKTModelData
 
         model_data = DAGKTModelData(data_src)
         (

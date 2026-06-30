@@ -1,41 +1,38 @@
-"""核心基础设施模块
+"""核心基础设施:统一注册表、日志、随机种子。"""
 
-提供统一注册表、日志系统和随机种子设置。
-"""
-
+from .discovery import discover_registrations
 from .logger import get_logger, reset_loggers, set_log_level
 from .random import seed_everything
 from .registry import (
     ANALYZERS,
-    COMPONENTS,
     DATA_SOURCES,
     METRIC_LOGGERS,
-    MODELS,
     PARAM_CONFIGS,
     TRAINERS,
     UniversalRegistry,
     register_analyzer,
     register_data_source,
     register_metric_logger,
-    register_model,
+    register_model_params,
     register_trainer,
 )
 
 __all__ = [
-    # Registry
-    "MODELS",
+    # Registries
     "TRAINERS",
-    "DATA_SOURCES",
-    "COMPONENTS",
     "PARAM_CONFIGS",
+    "DATA_SOURCES",
     "ANALYZERS",
     "METRIC_LOGGERS",
     "UniversalRegistry",
-    "register_model",
+    # Decorators
     "register_trainer",
+    "register_model_params",
     "register_data_source",
     "register_analyzer",
     "register_metric_logger",
+    # Discovery
+    "discover_registrations",
     # Logger
     "get_logger",
     "set_log_level",

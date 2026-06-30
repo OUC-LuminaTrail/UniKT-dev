@@ -8,8 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.core import register_model
-
 
 class MLP(nn.Module):
     """MLP 分类解码器"""
@@ -28,7 +26,6 @@ class MLP(nn.Module):
         return self.out(self.dropout(x))
 
 
-@register_model("QIKT")
 class QIKT(nn.Module):
     """QIKT 模型
 

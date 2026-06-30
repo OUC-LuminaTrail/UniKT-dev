@@ -3,8 +3,6 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from utils.core import register_model
-
 
 class Layer1(nn.Module):
     """行为效应门控层。"""
@@ -138,7 +136,6 @@ class LBKTcell(nn.Module):
         return preds, h
 
 
-@register_model("LBKT")
 class LBKT(nn.Module):
     def __init__(self, args: Any, data_metadata: dict[str, Any]):
         super().__init__()

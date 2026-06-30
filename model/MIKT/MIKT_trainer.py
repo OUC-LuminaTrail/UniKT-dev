@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -69,7 +69,7 @@ class MIKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("MIKT")
+@register_trainer("MIKT")
 class MIKTTrainer(BaseTrainer):
     """MIKT 模型训练器"""
 

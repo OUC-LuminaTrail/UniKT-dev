@@ -1,217 +1,138 @@
-"""统一注册表系统
+"""统一注册表系统:装饰器注册 + 静态发现懒加载。
 
-提供类型安全的组件注册和管理，支持命名空间隔离。
-合并了原有的多个注册表（全局、params）。
+每个注册表维护两张表:
+
+- ``_registry``: 名字 -> 类,由 ``@register_<role>(...)`` 装饰器在模块导入时填充。
+- ``_index``: 名字 -> 模块路径,由 :mod:`utils.core.discovery` 在**不导入模块**的前提下
+  扫描源码填充。
 """
 
 from collections.abc import Callable
-from typing import TypeVar
-
-T = TypeVar("T")
 
 
 class UniversalRegistry:
-    """通用注册表，支持命名空间和类型约束。
-
-    Args:
-        name: 注册表名称
-        namespace: 命名空间，用于隔离不同模块的注册表
+    """通用注册表:支持装饰器注册与静态发现懒加载。
 
     Example:
-        >>> models = UniversalRegistry("models", namespace="kt")
-        >>> @models.register("MyModel")
-        ... class MyModel:
-        ...     pass
-        >>> models.get("MyModel")
-        <class '__main__.MyModel'>
+        >>> TRAINERS = UniversalRegistry("trainers")
+        >>> @register_trainer("GIKT")
+        ... class GIKTTrainer: ...
+        >>> TRAINERS.get("GIKT")
     """
 
-    def __init__(self, name: str, namespace: str = "kt"):
+    def __init__(self, name: str):
         self._name = name
-        self._namespace = namespace
-        self._registry: dict[str, type[T]] = {}
-        self._lazy_registry: dict[str, tuple[str, str | None]] = {}
+        self._registry: dict[str, type] = {}
+        self._index: dict[str, str] = {}
 
-    @property
-    def full_name(self) -> str:
-        """获取完整的注册表名称（包含命名空间）。"""
-        return f"{self._namespace}.{self._name}"
-
-    def register(self, name: str | None = None) -> Callable[[type[T]], type[T]]:
-        """注册组件。
+    def register(self, name: str | None = None) -> Callable[[type], type]:
+        """装饰器:把类绑定到 ``name``,在模块导入时触发。
 
         Args:
-            name: 用于注册组件的名称。如果为 None，则使用类/函数名称。
-
-        Returns:
-            装饰器函数
+            name: 注册名。为 ``None`` 时取类名。
 
         Raises:
-            KeyError: 如果名称已存在
+            KeyError: 该名字已绑定到**另一个**类。
         """
 
-        def _register(cls: type[T]) -> type[T]:
-            register_name = name if name is not None else cls.__name__
-            if register_name in self._registry:
-                raise KeyError(
-                    f"'{register_name}' already registered in '{self.full_name}'"
-                )
-            self._registry[register_name] = cls
+        def decorator(cls: type) -> type:
+            n = name if name is not None else cls.__name__
+            prev = self._registry.get(n)
+            if prev is not None and prev is not cls:
+                raise KeyError(f"'{n}' already registered in '{self._name}'")
+            self._registry[n] = cls
+            self._index.pop(n, None)  # 已实例化,懒索引不再需要
             return cls
 
-        return _register
+        return decorator
 
-    def register_lazy(
-        self, name: str, module_path: str, attr_name: str | None = None
-    ) -> None:
-        """延迟注册组件，在调用 get() 时才真正导入。
+    def index(self, name: str, module_path: str) -> None:
+        """静态发现入口:记录 ``name`` 所在模块路径,**不导入模块**。
 
         Args:
-            name: 注册名称
-            module_path: 模块路径，如 "model.GIKT.GIKT_trainer"
-            attr_name: 属性名，如 "GIKTTrainer"。如果为 None，则导入模块本身
-        """
-        self._lazy_registry[name] = (module_path, attr_name)
-
-    def get(self, name: str) -> type[T]:
-        """获取已注册的组件。
-
-        支持延迟加载：如果组件通过 register_lazy() 注册，会在首次调用时导入。
-
-        Args:
-            name: 组件名称
-
-        Returns:
-            已注册的组件类
+            name: 注册名。
+            module_path: 该名字所在模块的点分路径(如 ``model.GIKT.GIKT_trainer``)。
 
         Raises:
-            KeyError: 如果组件未找到
+            KeyError: 同一名字被索引到两个不同模块。
         """
-        # 检查延迟注册
-        if name in self._lazy_registry:
+        prev = self._index.get(name)
+        if prev is not None and prev != module_path:
+            raise KeyError(
+                f"'{name}' indexed twice in '{self._name}': {prev} vs {module_path}"
+            )
+        self._index.setdefault(name, module_path)
+
+    def get(self, name: str) -> type:
+        """按名取类;必要时按 ``_index`` 懒导入对应模块。
+
+        Raises:
+            KeyError: 名字未注册。
+        """
+        cls = self._registry.get(name)
+        if cls is not None:
+            return cls
+        module_path = self._index.get(name)
+        if module_path is not None:
             import importlib
 
-            module_path, attr_name = self._lazy_registry[name]
-            module = importlib.import_module(module_path)
-            cls = getattr(module, attr_name) if attr_name else module
-            self._lazy_registry.pop(name)
-            self._registry[name] = cls
-            return cls
-
-        if name not in self._registry:
-            available = ", ".join(self.keys())
-            raise KeyError(
-                f"'{name}' not found in '{self.full_name}'. Available: {available}"
-            )
-        return self._registry[name]
+            importlib.import_module(module_path)  # 触发装饰器 -> 填充 _registry
+            cls = self._registry.get(name)
+            if cls is not None:
+                return cls
+        raise KeyError(
+            f"'{name}' not found in '{self._name}'. Available: {', '.join(self.keys())}"
+        )
 
     def keys(self) -> list[str]:
-        """获取所有已注册的名称（包括延迟注册）。"""
-        return list(self._registry.keys()) + list(self._lazy_registry.keys())
+        """全部已注册名字(已加载与懒索引取并集,去重)。"""
+        seen = list(self._registry.keys())
+        seen += [k for k in self._index if k not in self._registry]
+        return seen
 
-    def __contains__(self, name: str) -> bool:
-        """检查组件是否已注册（包括延迟注册）。"""
-        return name in self._registry or name in self._lazy_registry
+    def __contains__(self, name: object) -> bool:
+        return name in self._registry or name in self._index
 
     def __repr__(self) -> str:
-        return f"UniversalRegistry('{self.full_name}', items={self.keys()})"
+        return f"UniversalRegistry('{self._name}', items={self.keys()})"
 
 
 # ============================================================================
-# 全局注册表（使用命名空间隔离）
+# 全局注册表
 # ============================================================================
 
-# 知识追踪模型注册表
-MODELS = UniversalRegistry("models", namespace="kt")
+TRAINERS = UniversalRegistry("trainers")
+PARAM_CONFIGS = UniversalRegistry("param_configs")
+DATA_SOURCES = UniversalRegistry("data_sources")
+ANALYZERS = UniversalRegistry("analyzers")
+METRIC_LOGGERS = UniversalRegistry("metric_loggers")
 
-# 训练器注册表
-TRAINERS = UniversalRegistry("trainers", namespace="kt")
-
-# 数据源注册表
-DATA_SOURCES = UniversalRegistry("data_sources", namespace="kt")
-
-# 通用组件注册表
-COMPONENTS = UniversalRegistry("components", namespace="kt")
-
-# 参数配置注册表
-PARAM_CONFIGS = UniversalRegistry("param_configs", namespace="kt")
-
-# 案例分析器注册表
-ANALYZERS = UniversalRegistry("analyzers", namespace="kt")
-
-# 指标记录后端注册表
-METRIC_LOGGERS = UniversalRegistry("metric_loggers", namespace="kt")
 
 # ============================================================================
-# 向后兼容的便捷函数
+# 便捷装饰器:统一为 @register_<role>("name") 词汇
 # ============================================================================
-
-
-def register_model(name: str | None = None):
-    """注册模型的便捷函数。
-
-    Args:
-        name: 模型名称，如果为 None 则使用类名
-
-    Example:
-        >>> @register_model("MyModel")
-        ... class MyModel:
-        ...     pass
-    """
-    return MODELS.register(name)
 
 
 def register_trainer(name: str | None = None):
-    """注册训练器的便捷函数。
-
-    Args:
-        name: 训练器名称，如果为 None 则使用类名
-
-    Example:
-        >>> @register_trainer("MyTrainer")
-        ... class MyTrainer:
-        ...     pass
-    """
+    """注册训练器到 ``TRAINERS``。"""
     return TRAINERS.register(name)
 
 
+def register_model_params(name: str | None = None):
+    """注册模型参数配置到 ``PARAM_CONFIGS``。"""
+    return PARAM_CONFIGS.register(name)
+
+
 def register_data_source(name: str | None = None):
-    """注册数据源的便捷函数。
-
-    Args:
-        name: 数据源名称，如果为 None 则使用类名
-
-    Example:
-        >>> @register_data_source("MyDataset")
-        ... class MyDataset:
-        ...     pass
-    """
+    """注册数据源到 ``DATA_SOURCES``。"""
     return DATA_SOURCES.register(name)
 
 
 def register_analyzer(name: str | None = None):
-    """注册案例分析器的便捷函数。
-
-    Args:
-        name: 分析器名称，如果为 None 则使用类名
-
-    Example:
-        >>> @register_analyzer("GIKT")
-        ... class GIKTAnalyzer:
-        ...     pass
-    """
+    """注册案例分析器到 ``ANALYZERS``。"""
     return ANALYZERS.register(name)
 
 
 def register_metric_logger(name: str | None = None):
-    """注册指标记录后端的便捷函数。
-
-    Args:
-        name: 后端名称，如果为 None 则使用类名
-
-    Example:
-        >>> @register_metric_logger("wandb")
-        ... class WandbLogger(MetricLogger):
-        ...     pass
-    """
+    """注册指标记录后端到 ``METRIC_LOGGERS``。"""
     return METRIC_LOGGERS.register(name)

@@ -6,8 +6,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.core import MODELS
-
 from ..layers import GeneralInteraction
 
 
@@ -388,7 +386,6 @@ class HistoryRecap(nn.Module):
         return hist_neighbors_features
 
 
-@MODELS.register("SGKT")
 class SGKT(nn.Module):
     def __init__(self, args, data_metadata, **kwargs):
         super().__init__(**kwargs)

@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger, register_trainer
 from utils.training import BaseTrainer
 
 logger = get_logger(__name__)
@@ -130,7 +130,7 @@ class DyGKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@TRAINERS.register("DyGKT")
+@register_trainer("DyGKT")
 class DyGKTTrainer(BaseTrainer):
     """DyGKT 模型训练器"""
 
@@ -152,7 +152,7 @@ class DyGKTTrainer(BaseTrainer):
         )
 
         # 1. 准备数据
-        from model.DyGKT import DyGKTModelData
+        from model.DyGKT.DyGKT_data import DyGKTModelData
 
         model_data = DyGKTModelData(data_src)
         train_dataset, val_dataset, test_dataset, model_metadata = (
