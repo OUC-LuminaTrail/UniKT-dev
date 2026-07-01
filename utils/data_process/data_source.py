@@ -540,7 +540,7 @@ class DataSource(ABC):
         raise NotImplementedError("Subclasses should implement transform_data method")
 
     @abstractmethod
-    def clean_raw_data(self) -> pl.DataFrame:
+    def clean_raw_data(self) -> None:
         """Clean raw data. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement clean_raw_data method")
 
