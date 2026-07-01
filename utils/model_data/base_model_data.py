@@ -10,6 +10,8 @@ import polars as pl
 from utils.core import get_logger
 from utils.data_process import DataSource
 
+logger = get_logger(__name__)
+
 
 class BaseModelData(ABC):
     r"""
@@ -45,7 +47,6 @@ class BaseModelData(ABC):
             - 缓存键基于类名、函数名、入参（args/kwargs）构建
             - 缓存目录: .cache/<ClassName>/
         """
-        logger = get_logger(__name__)
 
         def _normalize_for_key(obj):
             """将对象转为稳定、可序列化的结构"""
@@ -432,9 +433,7 @@ class BaseModelData(ABC):
 
         if exclude_fold is not None and "fold" in data.columns:
             data = data.filter(pl.col("fold") != exclude_fold)
-            self.logger.info(
-                f"Excluding fold {exclude_fold} from difficulty calculation."
-            )
+            logger.info(f"Excluding fold {exclude_fold} from difficulty calculation.")
 
         stats = data.group_by("question").agg(
             pl.col("label").mean().alias("correct_rate"),
@@ -515,14 +514,14 @@ class BaseModelData(ABC):
             num_src = self.data_src.get_metadata(src_meta_key)
         except (KeyError, AttributeError):
             num_src = rel.select(pl.col(src_type).n_unique()).item()
-            self.logger.warning(
+            logger.warning(
                 f"{src_meta_key} not found in metadata, calculated from data: {num_src}"
             )
         try:
             num_dst = self.data_src.get_metadata(dst_meta_key)
         except (KeyError, AttributeError):
             num_dst = rel.select(pl.col(dst_type).n_unique()).item()
-            self.logger.warning(
+            logger.warning(
                 f"{dst_meta_key} not found in metadata, calculated from data: {num_dst}"
             )
 
