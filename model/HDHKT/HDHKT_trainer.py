@@ -1,6 +1,6 @@
-"""HGIKT 模型训练器。
+"""HDHKT 模型训练器。
 
-定义 HGIKT 模型特定的训练逻辑。
+定义 HDHKT 模型特定的训练逻辑。
 """
 
 from typing import Any
@@ -14,12 +14,12 @@ from utils.training import BaseTrainer
 logger = get_logger(__name__)
 
 
-@register_model_params("HGIKT")
-class HGIKTModelParams(BaseParamConfig):
-    """HGIKT 模型参数配置。"""
+@register_model_params("HDHKT")
+class HDHKTModelParams(BaseParamConfig):
+    """HDHKT 模型参数配置。"""
 
     def define_params(self) -> tuple[str, dict]:
-        group_name = "HGIKT Parameters"
+        group_name = "HDHKT Parameters"
         params = {
             "hidden_dim": {
                 "type": int,
@@ -100,11 +100,11 @@ class HGIKTModelParams(BaseParamConfig):
         return group_name, params
 
 
-@register_trainer("HGIKT")
-class HGIKTTrainer(BaseTrainer):
-    """HGIKT 模型训练器 - 使用 Fluent API。
+@register_trainer("HDHKT")
+class HDHKTTrainer(BaseTrainer):
+    """HDHKT 模型训练器 - 使用 Fluent API。
 
-    负责初始化 HGIKT 模型、优化器和训练数据，并实现前向传播逻辑。
+    负责初始化 HDHKT 模型、优化器和训练数据，并实现前向传播逻辑。
 
     Args:
         args: 模型参数配置
@@ -119,9 +119,9 @@ class HGIKTTrainer(BaseTrainer):
         exp_manager: Any = None,
     ) -> None:
         # 1. 准备数据
-        from model.HGIKT.HGIKT_data import HGIKTModelData
+        from model.HDHKT.HDHKT_data import HDHKTModelData
 
-        model_data = HGIKTModelData(data_src)
+        model_data = HDHKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         # 解包数据
@@ -133,10 +133,10 @@ class HGIKTTrainer(BaseTrainer):
         self.question_skill_matrix = data_dict["question_skill_matrix"]
 
         # 2. 初始化模型
-        from model.HGIKT.HGIKT_model import HGIKT
+        from model.HDHKT.HDHKT_model import HDHKT
 
-        logger.info("Initializing HGIKT model...")
-        model = HGIKT(args, data_src.get_metadata(), self.hetero_graph.metadata())
+        logger.info("Initializing HDHKT model...")
+        model = HDHKT(args, data_src.get_metadata(), self.hetero_graph.metadata())
 
         # 3. 调用父类构造函数
         super().__init__(model)
@@ -184,7 +184,7 @@ class HGIKTTrainer(BaseTrainer):
         ).with_experiment(
             exp_manager=exp_manager,
             hyperparams=args,
-            model_name="HGIKT",
+            model_name="HDHKT",
             dataset_name=getattr(args, "dataset", ""),
         ).build()
 
@@ -196,7 +196,7 @@ class HGIKTTrainer(BaseTrainer):
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        """HGIKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成。
+        """HDHKT 前向传播，使用基类辅助方法统一处理数据移动和预测生成。
 
         Args:
             batch_data: 包含 (sequence, response, mask) 的元组

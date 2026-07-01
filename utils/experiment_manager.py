@@ -61,7 +61,7 @@ class ExperimentManager:
 
         Args:
             exp_type: 实验类型（NORMAL/HYPERPARAM_SEARCH）
-            model_name: 模型名称（GIKT/HGIKT/SQGKT）
+            model_name: 模型名称（GIKT/HDHKT/SQGKT）
             dataset_name: 数据集名称（assist09/assist12/assist17/ednet）
             base_dir: 基础目录（默认: runs）
             tags: 可选标签列表（fold0, bs64等）

@@ -32,7 +32,7 @@ class AblationStudyConfig:
 
     Attributes:
         study_name: Name of the ablation study
-        base_model: Base model name (e.g., "HGIKT")
+        base_model: Base model name (e.g., "HDHKT")
         dataset: Dataset name (e.g., "assistments09"), provided from command line
         fold: Fold index for K-Fold cross-validation, provided from command line
         shared_params: Parameters shared across all ablations

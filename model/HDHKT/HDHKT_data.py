@@ -9,7 +9,7 @@ from utils.model_data import QuestionModelData
 logger = get_logger(__name__)
 
 
-class HGIKTDataset(Dataset):
+class HDHKTDataset(Dataset):
     def __init__(self, sequences, responses, masks):
         self.sequences = torch.as_tensor(sequences, dtype=torch.long)
         self.responses = torch.as_tensor(responses, dtype=torch.long)
@@ -26,14 +26,14 @@ class HGIKTDataset(Dataset):
         return len(self.sequences)
 
 
-class HGIKTModelData(QuestionModelData):
+class HDHKTModelData(QuestionModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
     @override
     def prepare_data(self, args):
         r"""
-        准备HGIKT模型所需的数据
+        准备HDHKT模型所需的数据
         """
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
@@ -95,13 +95,13 @@ class HGIKTModelData(QuestionModelData):
             )
         else:
             raise ValueError(
-                "K-fold cross-validation is required for HGIKT. Please specify a valid fold index."
+                "K-fold cross-validation is required for HDHKT. Please specify a valid fold index."
             )
 
         # 构建模型数据集
-        train_dataset = HGIKTDataset(train_data[0], train_data[1], train_data[2])
-        val_dataset = HGIKTDataset(val_data[0], val_data[1], val_data[2])
-        test_dataset = HGIKTDataset(test_data[0], test_data[1], test_data[2])
+        train_dataset = HDHKTDataset(train_data[0], train_data[1], train_data[2])
+        val_dataset = HDHKTDataset(val_data[0], val_data[1], val_data[2])
+        test_dataset = HDHKTDataset(test_data[0], test_data[1], test_data[2])
 
         # 返回数据
         return_data = {

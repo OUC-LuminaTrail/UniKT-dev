@@ -1,6 +1,6 @@
-"""HGIKT Case Analyzer.
+"""HDHKT Case Analyzer.
 
-Provides inference-only capabilities for HGIKT model case analysis.
+Provides inference-only capabilities for HDHKT model case analysis.
 """
 
 from typing import Any
@@ -12,18 +12,18 @@ from utils.case_analysis.base_analyzer import BaseCaseAnalyzer
 from utils.core import get_logger, register_analyzer
 from utils.data_process import DataSource
 
-from .HGIKT_data import HGIKTModelData
-from .HGIKT_model import HGIKT
+from .HDHKT_data import HDHKTModelData
+from .HDHKT_model import HDHKT
 
 logger = get_logger(__name__)
 
 
-@register_analyzer("HGIKT")
-class HGIKTAnalyzer(BaseCaseAnalyzer):
-    """HGIKT-specific case analyzer for inference and visualization."""
+@register_analyzer("HDHKT")
+class HDHKTAnalyzer(BaseCaseAnalyzer):
+    """HDHKT-specific case analyzer for inference and visualization."""
 
     def __init__(self, args, data_src: DataSource, checkpoint_path: str):
-        """Initialize HGIKT analyzer.
+        """Initialize HDHKT analyzer.
 
         Args:
             args: Model arguments
@@ -33,7 +33,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
         self.args = args
         self.data_src = data_src
 
-        model_data = HGIKTModelData(data_src)
+        model_data = HDHKTModelData(data_src)
         data_dict = model_data.prepare_data(args)
 
         # Unpack data
@@ -60,7 +60,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
             for q_id in range(self.num_questions)
         ]
 
-        model = HGIKT(args, data_src.get_metadata(), hetero_graph.metadata())
+        model = HDHKT(args, data_src.get_metadata(), hetero_graph.metadata())
 
         super().__init__(model, checkpoint_path)
 
@@ -80,7 +80,7 @@ class HGIKTAnalyzer(BaseCaseAnalyzer):
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        """HGIKT forward pass for inference.
+        """HDHKT forward pass for inference.
 
         Args:
             batch_data: Tuple of (sequence, response, mask)

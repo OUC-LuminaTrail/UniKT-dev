@@ -192,8 +192,8 @@ class MoEFusion(nn.Module):
         return self.norm(fused).reshape(*B_shape, self.dim)
 
 
-class HGIKT(nn.Module):
-    """HGIKT 主模型。
+class HDHKT(nn.Module):
+    """HDHKT 主模型。
 
     层次化图知识追踪模型，融合异构图和超图进行预测。
 
@@ -204,7 +204,7 @@ class HGIKT(nn.Module):
         **kwargs: 额外的关键字参数
 
     Example:
-        >>> model = HGIKT(args, data_metadata, hetero_metadata)
+        >>> model = HDHKT(args, data_metadata, hetero_metadata)
         >>> logits = model(user_sequence, user_response, user_mask, hetero_graph, hypergraph, question_skill_matrix)
     """
 
