@@ -11,6 +11,8 @@ from utils.core import get_logger
 from utils.data_process import DataSource
 from utils.model_data import BaseModelData
 
+logger = get_logger(__name__)
+
 
 class WindowlateIterableDataset(IterableDataset):
     """Stream windowlate samples from parquet."""
@@ -172,7 +174,6 @@ class SkillModelData(BaseModelData):
 
     def __init__(self, data_src: DataSource, cache: bool = False):
         super().__init__(data_src, cache=cache)
-        self.logger = get_logger(__name__)
 
     def _get_kfold_data(self):
         r"""重写：从技能序列数据获取 K-fold 标签。"""
@@ -192,7 +193,7 @@ class SkillModelData(BaseModelData):
         import numpy as np
         import polars as pl
 
-        self.logger.info("Building skill sequences from split data...")
+        logger.info("Building skill sequences from split data...")
 
         data = self.data_src.get_split_skill_sequence_data()
         if isinstance(data, pl.LazyFrame):
@@ -215,7 +216,7 @@ class SkillModelData(BaseModelData):
         user_mask[user_indices, seq_positions] = 1
         user_question[user_indices, seq_positions] = data["question"].to_numpy()
 
-        self.logger.debug(
+        logger.debug(
             f"Built split skill sequences for {num_users} split users, max_len={max_seq_len}"
         )
 
@@ -286,7 +287,7 @@ class SkillModelData(BaseModelData):
         user_true_labels[sample_ids, positions] = all_data["true_label"].to_numpy()
         user_question[sample_ids, positions] = all_data["question"].to_numpy()
 
-        self.logger.debug(
+        logger.debug(
             f"Loaded windowlate data: samples={num_samples}, max_seq_len={max_seq_len}"
         )
 

@@ -1,12 +1,12 @@
-import logging
-
 from database import SessionLocal
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from models import LogChunk, Task
 from services.log_watcher import LogWatcher
 from sqlalchemy import asc
 
-logger = logging.getLogger(__name__)
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(tags=["logs"])
 

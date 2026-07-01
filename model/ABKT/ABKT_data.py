@@ -28,7 +28,6 @@ class ABKTModelData(QuestionModelData):
 
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
-        self.logger = get_logger(__name__)
 
     def prepare_data(self, args) -> dict:
         """
@@ -56,22 +55,20 @@ class ABKTModelData(QuestionModelData):
         num_items = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
 
-        self.logger.info(
+        logger.info(
             f"Data statistics: users={num_users}, items={num_items}, skills={num_skills}"
         )
 
-        self.logger.info("Building Q-Matrix...")
+        logger.info("Building Q-Matrix...")
         Q_matrix = self._build_q_matrix(num_items, num_skills)
 
-        self.logger.info(f"Building ABKT sequences (fold={fold_idx})...")
+        logger.info(f"Building ABKT sequences (fold={fold_idx})...")
         train_sequences, test_triplets, train_users, test_users, num_records = (
             self._build_abkt_sequences(fold_idx)
         )
 
-        self.logger.info(
-            f"Train users: {len(train_users)}, Test users: {len(test_users)}"
-        )
-        self.logger.info(
+        logger.info(f"Train users: {len(train_users)}, Test users: {len(test_users)}")
+        logger.info(
             f"Test triplets: {len(test_triplets)}, Total records: {num_records}"
         )
 
@@ -96,8 +93,8 @@ class ABKTModelData(QuestionModelData):
 
         Q_matrix = torch.from_numpy(q_matrix_np).float()
 
-        self.logger.info(f"Q-Matrix shape: {Q_matrix.shape}")
-        self.logger.info(f"Q-Matrix density: {Q_matrix.sum() / Q_matrix.numel():.4f}")
+        logger.info(f"Q-Matrix shape: {Q_matrix.shape}")
+        logger.info(f"Q-Matrix density: {Q_matrix.sum() / Q_matrix.numel():.4f}")
 
         return Q_matrix
 
@@ -114,7 +111,7 @@ class ABKTModelData(QuestionModelData):
         ``fold_idx`` 仅为兼容调用签名而保留，ABKT 不使用框架的 fold 划分。
         """
         if fold_idx is not None:
-            self.logger.warning(
+            logger.warning(
                 "ABKT uses full-data next-item holdout (covers all users); "
                 f"framework fold={fold_idx} is ignored."
             )
@@ -192,7 +189,7 @@ class ABKTModelData(QuestionModelData):
         返回:
             归一化的稀疏邻接矩阵 [num_users + num_items, num_users + num_items]
         """
-        self.logger.info("Building normalized adjacency matrix...")
+        logger.info("Building normalized adjacency matrix...")
 
         rows = []
         cols = []
@@ -220,7 +217,7 @@ class ABKTModelData(QuestionModelData):
         adj_matrix = adj_matrix + sparse.eye(total_nodes)
 
         # 归一化
-        self.logger.info("Normalizing adjacency matrix...")
+        logger.info("Normalizing adjacency matrix...")
         if symmetric:
             # 对称归一化: D^{-1/2} A D^{-1/2}
             d = sparse.diags(
@@ -241,8 +238,8 @@ class ABKTModelData(QuestionModelData):
 
         adj_sparse = torch.sparse_coo_tensor(indices, values, shape).coalesce()
 
-        self.logger.info(f"Adjacency matrix shape: {shape}")
-        self.logger.info(f"Number of edges: {len(values)}")
+        logger.info(f"Adjacency matrix shape: {shape}")
+        logger.info(f"Number of edges: {len(values)}")
 
         return adj_sparse
 

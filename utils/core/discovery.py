@@ -10,9 +10,9 @@
 from __future__ import annotations
 
 import ast
-import logging
 from pathlib import Path
 
+from .logger import get_logger
 from .registry import (
     ANALYZERS,
     DATA_SOURCES,
@@ -21,7 +21,7 @@ from .registry import (
     UniversalRegistry,
 )
 
-_logger = logging.getLogger(__name__)
+_logger = get_logger(__name__)
 
 # @register_<role>("name") -> 目标注册表
 _DECORATORS: dict[str, UniversalRegistry] = {

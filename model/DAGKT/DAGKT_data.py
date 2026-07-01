@@ -50,7 +50,7 @@ class DAGKTModelData(QuestionModelData):
         """
         import numpy as np
 
-        self.logger.info("Building response sequences from split data...")
+        logger.info("Building response sequences from split data...")
 
         data = self.data_src.get_split_question_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
@@ -75,9 +75,9 @@ class DAGKTModelData(QuestionModelData):
             user_attempt[user_indices, seq_positions] = data[
                 "attempt_count"
             ].values.astype(np.float32)
-            self.logger.info("Loaded attempt_count from dataset.")
+            logger.info("Loaded attempt_count from dataset.")
         else:
-            self.logger.warning("attempt_count column not found in data, using zeros.")
+            logger.warning("attempt_count column not found in data, using zeros.")
 
         return user_sequence, user_response, user_mask, user_id_sequence, user_attempt
 
@@ -175,7 +175,7 @@ class DAGKTModelData(QuestionModelData):
             if fold_idx is not None:
                 mask &= data["fold"] != fold_idx  # 排除验证集
             data = data[mask]
-            self.logger.info(
+            logger.info(
                 f"Computing correct rates from training data only "
                 f"(excluded fold {fold_idx} and test fold -1)."
             )
@@ -193,7 +193,7 @@ class DAGKTModelData(QuestionModelData):
             if qid < num_questions:
                 correct_rates[qid] = rate
 
-        self.logger.info(
+        logger.info(
             f"Question correct rates: min={correct_rates.min().item():.4f}, "
             f"max={correct_rates.max().item():.4f}, "
             f"mean={correct_rates.mean().item():.4f}"
@@ -214,7 +214,7 @@ class DAGKTModelData(QuestionModelData):
         if max_attempts > 0:
             attempt_counts = attempt_counts / max_attempts
 
-        self.logger.info(
+        logger.info(
             f"Attempt counts: max_raw={max_attempts}, "
             f"normalized_max={attempt_counts.max():.4f}"
         )

@@ -17,6 +17,8 @@ from rich.text import Text
 
 from utils.core import get_logger
 
+logger = get_logger(__name__)
+
 
 class HyperparameterManager:
     """
@@ -44,7 +46,6 @@ class HyperparameterManager:
         }
         # 摘要渲染专用终端，与日志 RichHandler 共享宽度/颜色探测
         self._console = Console()
-        self.logger = get_logger(__name__)
 
     def get_hyperparameters_dict(self) -> dict[str, Any]:
         """
@@ -182,7 +183,7 @@ class HyperparameterManager:
                 with open(filepath, "w", encoding="utf-8") as f:
                     yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
             except ImportError:
-                self.logger.warning("PyYAML not installed. Saving as JSON instead.")
+                logger.warning("PyYAML not installed. Saving as JSON instead.")
                 with open(
                     filepath.replace(".yaml", ".json"), "w", encoding="utf-8"
                 ) as f:
@@ -190,7 +191,7 @@ class HyperparameterManager:
         else:
             raise ValueError(f"Unsupported format: {format}. Use 'json' or 'yaml'.")
 
-        self.logger.info(f"Hyperparameters saved to: {filepath}")
+        logger.info(f"Hyperparameters saved to: {filepath}")
 
     def load(self, filepath: str) -> dict:
         """
@@ -225,7 +226,7 @@ class HyperparameterManager:
         self.metadata = data.get("metadata", {})
         self.hyperparams = data.get("hyperparameters", {})
 
-        self.logger.info(f"Hyperparameters loaded from: {filepath}")
+        logger.info(f"Hyperparameters loaded from: {filepath}")
         return self.hyperparams
 
     def get_summary(self) -> str:
@@ -393,7 +394,7 @@ class HyperparameterManager:
                 missing.append(param)
 
         if missing:
-            self.logger.warning(f"Missing required parameters: {missing}")
+            logger.warning(f"Missing required parameters: {missing}")
             return False
 
         return True

@@ -9,13 +9,11 @@ import numpy as np
 import torch
 
 from utils.case_analysis.base_analyzer import BaseCaseAnalyzer
-from utils.core import get_logger, register_analyzer
+from utils.core import register_analyzer
 from utils.data_process import DataSource
 
 from .HDHKT_data import HDHKTModelData
 from .HDHKT_model import HDHKT
-
-logger = get_logger(__name__)
 
 
 @register_analyzer("HDHKT")

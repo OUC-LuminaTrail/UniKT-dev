@@ -4,7 +4,7 @@
 日志级别由 LOG_LEVEL 环境变量控制（默认：INFO）。
 
 Usage:
-    from utils.logger import get_logger
+    from utils.core import get_logger
 
     logger = get_logger(__name__)
     logger.info("Training started")
@@ -59,7 +59,7 @@ def get_logger(name: str) -> logging.Logger:
         logging.Logger: 配置的日志记录器实例
 
     Example:
-        >>> from utils.logger import get_logger
+        >>> from utils.core import get_logger
         >>> logger = get_logger(__name__)
         >>> logger.info("This is an info message")
         [14:30:25][INFO][my_module] This is an info message
@@ -95,7 +95,7 @@ def set_log_level(level: int) -> None:
         level: 日志级别常量（例如 logging.DEBUG、logging.INFO）
 
     Example:
-        >>> from utils.logger import get_logger, set_log_level
+        >>> from utils.core import get_logger, set_log_level
         >>> import logging
         >>> set_log_level(logging.DEBUG)
         >>> logger = get_logger(__name__)
@@ -114,7 +114,7 @@ def reset_loggers() -> None:
     这对于测试或需要重新初始化日志记录器时很有用。
 
     Example:
-        >>> from utils.logger import reset_loggers
+        >>> from utils.core import reset_loggers
         >>> reset_loggers()
     """
     global _loggers

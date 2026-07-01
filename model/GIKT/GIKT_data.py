@@ -9,6 +9,8 @@ from torch.utils.data import Dataset
 from utils.core import get_logger
 from utils.model_data import QuestionModelData
 
+logger = get_logger(__name__)
+
 
 def sample_hist_neighbors(
     batch_size, max_seq_len, hist_neighbor_num, skill_index, pad_index=None
@@ -50,7 +52,6 @@ def sample_hist_neighbors(
 class GIKTModelData(QuestionModelData):
     def __init__(self, data_src):
         super().__init__(data_src)
-        self.logger = get_logger(__name__)
 
     def prepare_data(self, args):
         user_sequence, user_response, user_mask, user_id_sequence = (
@@ -63,7 +64,7 @@ class GIKTModelData(QuestionModelData):
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
 
-        self.logger.info("Building question-skill neighbors (bipartite, sampled)")
+        logger.info("Building question-skill neighbors (bipartite, sampled)")
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix,
             num_skills,
@@ -101,7 +102,7 @@ class GIKTModelData(QuestionModelData):
             gikt_collate_fn, hist_neighbor_num=args.hist_neighbor_num
         )
 
-        self.logger.info(
+        logger.info(
             f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
         )
 

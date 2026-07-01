@@ -4,10 +4,7 @@ import math
 
 from optuna.trial import Trial
 
-from utils.core import get_logger
 from utils.training import Callback
-
-logger = get_logger(__name__)
 
 
 class OptunaTrialCallback(Callback):

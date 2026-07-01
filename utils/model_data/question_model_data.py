@@ -4,6 +4,8 @@ from utils.core import get_logger
 from utils.data_process import DataSource
 from utils.model_data import BaseModelData
 
+logger = get_logger(__name__)
+
 
 class QuestionModelData(BaseModelData):
     """
@@ -12,7 +14,6 @@ class QuestionModelData(BaseModelData):
 
     def __init__(self, data_src: DataSource, cache: bool = False):
         super().__init__(data_src, cache=cache)
-        self.logger = get_logger(__name__)
 
     def _get_kfold_data(self):
         r"""重写：从问题序列数据获取 K-fold 标签。"""
@@ -38,7 +39,7 @@ class QuestionModelData(BaseModelData):
         """
         import numpy as np
 
-        self.logger.info("Building response sequences from split data...")
+        logger.info("Building response sequences from split data...")
 
         # 加载切分后的序列数据
         data = self.data_src.get_split_question_sequence_data().to_pandas()
@@ -163,7 +164,7 @@ class QuestionModelData(BaseModelData):
             src_type, relation, dst_type = edge_type
 
             # 使用 build_relationship_matrix 构建关联矩阵
-            self.logger.info(
+            logger.info(
                 f"Building relationship matrix for {src_type}-{relation}-{dst_type}"
             )
             rel_matrix = self.build_relationship_matrix(edge_type, value_type="binary")
@@ -173,7 +174,7 @@ class QuestionModelData(BaseModelData):
             src_indices, dst_indices = np.nonzero(rel_matrix)
 
             if len(src_indices) == 0:
-                self.logger.warning(f"No edges found for {edge_type}")
+                logger.warning(f"No edges found for {edge_type}")
                 continue
 
             # 转换为 PyTorch 张量
@@ -194,7 +195,7 @@ class QuestionModelData(BaseModelData):
 
                 # 检查列是否存在
                 if src_col not in data.columns or dst_col not in data.columns:
-                    self.logger.warning(
+                    logger.warning(
                         f"Columns {src_col} or {dst_col} not found. Skipping edge attributes."
                     )
                     continue
@@ -327,7 +328,7 @@ class QuestionModelData(BaseModelData):
 
         # 处理没有超边的情况
         if len(e_list) == 0:
-            self.logger.warning(
+            logger.warning(
                 f"No hyperedges found for {edge_type}. Creating self-loop hypergraph."
             )
             # 创建自环超图：每个顶点自成一个超边
@@ -336,9 +337,9 @@ class QuestionModelData(BaseModelData):
         # 使用 DHG 框架创建超图
         hypergraph = Hypergraph(num_v=num_vertices, e_list=e_list)
 
-        self.logger.info(f"{hyperedge_node_type.capitalize()} Hypergraph constructed:")
-        self.logger.info(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
-        self.logger.info(
+        logger.info(f"{hyperedge_node_type.capitalize()} Hypergraph constructed:")
+        logger.info(f"  - Number of vertices ({vertex_type}s): {hypergraph.num_v}")
+        logger.info(
             f"  - Number of hyperedges ({hyperedge_node_type}s): {hypergraph.num_e}"
         )
 

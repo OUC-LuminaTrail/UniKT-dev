@@ -1,5 +1,3 @@
-import logging
-
 from dependencies import get_preprocess_manager
 from fastapi import (
     APIRouter,
@@ -13,7 +11,9 @@ from pydantic import BaseModel
 from services.log_watcher import LogWatcher
 from services.preprocess_manager import PreprocessManager
 
-logger = logging.getLogger(__name__)
+from utils.core import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/api/preprocess", tags=["preprocess"])
 

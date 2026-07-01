@@ -14,6 +14,8 @@ from torch.utils.data import Dataset
 from utils.core import get_logger
 from utils.model_data import QuestionModelData
 
+logger = get_logger(__name__)
+
 
 def sample_hist_neighbors(
     batch_size,
@@ -102,7 +104,6 @@ class SGKTModelData(QuestionModelData):
 
     def __init__(self, data_src):
         super().__init__(data_src)
-        self.logger = get_logger(__name__)
 
     def prepare_data(self, args):
         """
@@ -133,7 +134,7 @@ class SGKTModelData(QuestionModelData):
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
 
-        self.logger.info("Building question-skill neighbors for HRG")
+        logger.info("Building question-skill neighbors for HRG")
 
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix=question_skill_matrix,
@@ -185,7 +186,7 @@ class SGKTModelData(QuestionModelData):
         train_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
         val_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
 
-        self.logger.info(
+        logger.info(
             f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}"
         )
 

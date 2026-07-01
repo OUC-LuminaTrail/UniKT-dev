@@ -98,7 +98,7 @@ class ClusterKTModelData(QuestionModelData):
                 question_skills["skill_group_id"].to_list(),
             )
         )
-        self.logger.info(
+        logger.info(
             f"Built skill group mapping: {num_skill_groups} groups from "
             f"{len(question_to_sg)} questions"
         )
@@ -132,7 +132,7 @@ class ClusterKTModelData(QuestionModelData):
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_users = data_pd["user"].nunique()
 
-        self.logger.info(
+        logger.info(
             f"Building ClusterKT sequences: {num_users} users, "
             f"max_seq_len={max_seq_len}, num_skill_groups={num_skill_groups}"
         )
@@ -182,7 +182,7 @@ class ClusterKTModelData(QuestionModelData):
                 raise ValueError(
                     f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
                 )
-            self.logger.info(
+            logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
             train_data, val_data, test_data = self.split_kfold_data(

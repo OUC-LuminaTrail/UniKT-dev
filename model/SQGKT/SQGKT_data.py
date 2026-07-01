@@ -8,6 +8,8 @@ from torch.utils.data import Dataset
 from utils.core import get_logger
 from utils.model_data import QuestionModelData
 
+logger = get_logger(__name__)
+
 
 def sample_hist_neighbors(
     batch_size, max_seq_len, hist_neighbor_num, skill_index, pad_index=None
@@ -49,7 +51,6 @@ def sample_hist_neighbors(
 class SQGKTModelData(QuestionModelData):
     def __init__(self, data_src):
         super().__init__(data_src)
-        self.logger = get_logger(__name__)
 
     def prepare_data(self, args):
         user_sequence, user_response, user_mask, user_id_sequence = (
@@ -64,7 +65,7 @@ class SQGKTModelData(QuestionModelData):
         # load_sequence_data 以切分后的“序列（窗口）”为行，用户 id 即行索引。
         num_users = user_sequence.shape[0]
 
-        self.logger.info("Building question-skill neighbors...")
+        logger.info("Building question-skill neighbors...")
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix,
             num_skills,
@@ -73,7 +74,7 @@ class SQGKTModelData(QuestionModelData):
             args.skill_neighbor_num,
         )
 
-        self.logger.info("Building student-question graph...")
+        logger.info("Building student-question graph...")
         q_neighbors_2, uq_stat_q = self.build_sq_graph(
             num_questions, args.user_neighbor_num
         )
@@ -103,7 +104,7 @@ class SQGKTModelData(QuestionModelData):
 
         collate = partial(sqgkt_collate_fn, hist_neighbor_num=args.hist_neighbor_num)
 
-        self.logger.info(
+        logger.info(
             f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
         )
 

@@ -1,7 +1,6 @@
 """Optuna 配置和参数空间辅助工具。"""
 
 import json
-import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -19,8 +18,6 @@ from optuna.samplers import (
     TPESampler,
 )
 from optuna.trial import Trial
-
-logger = logging.getLogger(__name__)
 
 # auc/acc 越大越好，rmse/loss 越小越好
 _METRIC_DIRECTIONS: dict[str, str] = {
