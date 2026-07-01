@@ -71,6 +71,7 @@ def get_logger(name: str) -> logging.Logger:
     # Create new logger
     logger = logging.getLogger(name)
     logger.setLevel(_get_log_level_from_env())
+    logger.propagate = False
 
     # Avoid adding handlers if logger already has them (e.g., from root logger)
     if not logger.handlers:
