@@ -87,9 +87,10 @@ def create_optimized_dataloader(
         config = DataLoaderConfig()
 
     # 必须指定设备信息
-    assert device is not None, (
-        "Device information is required to determine pin_memory setting."
-    )
+    if device is None:
+        raise ValueError(
+            "Device information is required to determine pin_memory setting."
+        )
 
     # 确定 pin_memory
     is_cuda = device.type == "cuda"
