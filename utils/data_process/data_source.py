@@ -1120,14 +1120,22 @@ class DataSource(ABC):
                 .to_list()
             )
             self._apply_sampling_to_data(
-                sampled_users, n_samples, total_users, original_records
+                sampled_users,
+                n_samples,
+                total_users,
+                original_records,
+                stratify=False,
             )
         elif sample_strategy == "stratified":
             sampled_users = self._sample_users_stratified(
                 user_stats, n_samples, attempts_bins, correct_bins
             )
             self._apply_sampling_to_data(
-                sampled_users, n_samples, total_users, original_records
+                sampled_users,
+                n_samples,
+                total_users,
+                original_records,
+                stratify=True,
             )
         elif sample_strategy == "time":
             self._apply_time_sampling(n_samples, total_users, original_records)
@@ -1205,6 +1213,7 @@ class DataSource(ABC):
         n_samples: int,
         total_users: int,
         original_records: int,
+        stratify: bool = True,
     ):
         """Apply sampled users to sequence and question data with ID remapping."""
         user_stats = self.get_user_stats()
@@ -1229,7 +1238,7 @@ class DataSource(ABC):
             "n_samples_requested": n_samples,
             "n_samples_actual": len(sampled_users),
             "sampling_ratio": len(sampled_users) / total_users,
-            "stratify": True,
+            "stratify": stratify,
             "attempts_bins": [20, 100],
             "correct_bins": [0.4, 0.8],
         }
