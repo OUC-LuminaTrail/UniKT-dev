@@ -64,20 +64,16 @@ class HyperparameterManager:
             params: 超参数字典或argparse.Namespace对象
             group: 参数组名称（如'model', 'training', 'data'）。如果为None，参数将添加到根级别
         """
-        # 将Namespace转换为字典
         if isinstance(params, Namespace):
             params = vars(params)
 
-        # 序列化所有参数
         serialized_params = self._serialize_params(params)
 
         if group:
-            # 添加到指定组
             if group not in self.hyperparams:
                 self.hyperparams[group] = {}
             self.hyperparams[group].update(serialized_params)
         else:
-            # 添加到根级别
             self.hyperparams.update(serialized_params)
 
     def add_metadata(self, key: str, value: Any):
@@ -100,46 +96,33 @@ class HyperparameterManager:
         Returns:
             序列化后的值
         """
-        # 处理None
         if value is None:
             return None
-        # 处理基本类型
         elif isinstance(value, (int, float, str, bool)):
             return value
-        # 处理PyTorch张量
         elif isinstance(value, torch.Tensor):
             return value.tolist()
-        # 处理PyTorch设备
         elif isinstance(value, torch.device):
             return str(value)
-        # 处理Namespace
         elif isinstance(value, Namespace):
             return vars(value)
-        # 处理列表和元组
         elif isinstance(value, (list, tuple)):
             return [self._serialize_value(v) for v in value]
-        # 处理字典
         elif isinstance(value, dict):
             return {k: self._serialize_value(v) for k, v in value.items()}
-        # 处理集合
         elif isinstance(value, set):
             return list(value)
-        # 处理Path对象
-        elif hasattr(value, "__fspath__"):  # pathlib.Path
+        elif hasattr(value, "__fspath__"):
             return str(value)
-        # 处理可调用对象（函数、类等）
         elif callable(value):
             if hasattr(value, "__name__"):
                 return f"<callable: {value.__name__}>"
             else:
                 return f"<callable: {type(value).__name__}>"
-        # 其他对象尝试转换为字符串
         else:
             try:
-                # 尝试直接转换
                 return str(value)
             except Exception:
-                # 如果失败，返回类型信息
                 return f"<{type(value).__name__} object>"
 
     def _serialize_params(self, params: dict) -> dict:
@@ -165,12 +148,10 @@ class HyperparameterManager:
         if self.save_dir is None:
             raise ValueError("Save directory not set. Please set save_dir first.")
 
-        # 确保保存目录存在
         os.makedirs(self.save_dir, exist_ok=True)
 
         filepath = os.path.join(self.save_dir, filename)
 
-        # 准备保存的数据
         data = {"metadata": self.metadata, "hyperparameters": self.hyperparams}
 
         if format == "json":
@@ -206,7 +187,6 @@ class HyperparameterManager:
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Hyperparameter file not found: {filepath}")
 
-        # 根据文件扩展名判断格式
         _, ext = os.path.splitext(filepath)
 
         if ext == ".json":
@@ -229,32 +209,8 @@ class HyperparameterManager:
         logger.info(f"Hyperparameters loaded from: {filepath}")
         return self.hyperparams
 
-    def get_summary(self) -> str:
-        """
-        生成超参数摘要
-
-        Returns:
-            格式化的超参数摘要字符串
-        """
-        lines = []
-
-        # 元数据
-        lines.append("[Metadata]")
-        for key, value in self.metadata.items():
-            lines.append(f"  {key}: {value}")
-
-        # 超参数
-        lines.append("\n[Hyperparameters]")
-        self._format_params(self.hyperparams, lines, indent=1)
-
-        return "\n".join(lines)
-
     def render_summary(self) -> Panel:
-        """渲染超参数摘要为 rich Panel：外层卡片 + 分组 + 双列 key/value。
-
-        与 get_summary() 的纯文本不同，此方法产出带边框与着色的可视卡片，
-        供训练启动时直观展示，避免多行纯文本刷屏。
-        """
+        """渲染超参数摘要为 rich Panel：外层卡片 + 分组 + 双列 key/value。"""
         sections: list = []
 
         # 元数据压缩为一行
@@ -319,23 +275,6 @@ class HyperparameterManager:
         if dataset:
             return f"Hyperparameters · @{dataset}"
         return "Hyperparameters"
-
-    def _format_params(self, params: dict, lines: list, indent: int = 0):
-        """
-        递归格式化参数字典
-
-        Args:
-            params: 参数字典
-            lines: 输出行列表
-            indent: 缩进级别
-        """
-        indent_str = "  " * indent
-        for key, value in params.items():
-            if isinstance(value, dict):
-                lines.append(f"{indent_str}{key}:")
-                self._format_params(value, lines, indent + 1)
-            else:
-                lines.append(f"{indent_str}{key}: {value}")
 
     def _flatten_dict(self, d: dict, parent_key: str = "", sep: str = ".") -> dict:
         """
