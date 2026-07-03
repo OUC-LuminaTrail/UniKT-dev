@@ -85,17 +85,8 @@ class WindowlateIterableDataset(IterableDataset):
         )
 
     def _read_batch_arrays(self, table: pa.Table) -> dict[str, np.ndarray]:
-        """读取 Table 为 numpy 数组"""
-        return {
-            "sample_id": table.column("sample_id").to_numpy(),
-            "position": table.column("position").to_numpy(),
-            "skill": table.column("skill").to_numpy(),
-            "question": table.column("question").to_numpy(),
-            "response": table.column("response").to_numpy(),
-            "mask": table.column("mask").to_numpy(),
-            "group_id": table.column("group_id").to_numpy(),
-            "true_label": table.column("true_label").to_numpy(),
-        }
+        """读取 Table 所有列为 numpy 数组"""
+        return {col: table.column(col).to_numpy() for col in table.column_names}
 
     def _iter_row_groups(
         self, row_group_indices: list[int]
@@ -128,26 +119,11 @@ class WindowlateIterableDataset(IterableDataset):
         starts = np.concatenate(([0], boundaries))
         ends = np.concatenate((boundaries, [sample_ids.size]))
 
-        sample_data = {
-            "position": None,
-            "skill": None,
-            "question": None,
-            "response": None,
-            "mask": None,
-            "group_id": None,
-            "true_label": None,
-        }
+        keys = [k for k in batch if k != "sample_id"]
 
         for start, end in zip(starts, ends, strict=False):
-            sample_data["position"] = batch["position"][start:end]
-            sample_data["skill"] = batch["skill"][start:end]
-            sample_data["question"] = batch["question"][start:end]
-            sample_data["response"] = batch["response"][start:end]
-            sample_data["mask"] = batch["mask"][start:end]
-            sample_data["group_id"] = batch["group_id"][start:end]
-            sample_data["true_label"] = batch["true_label"][start:end]
-
-            yield self._build_single_tensor(sample_data)
+            sample = {k: batch[k][start:end] for k in keys}
+            yield self._build_single_tensor(sample)
 
     def __iter__(self):
         self._init_metadata()

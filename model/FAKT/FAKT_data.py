@@ -83,7 +83,7 @@ class FAKTDataset(Dataset):
 
 
 class FAKTWindowlateIterableDataset(WindowlateIterableDataset):
-    """windowlate 流式数据集，额外读取 timestamp 并按窗口计算时间间隔特征。
+    """windowlate 流式数据集，按窗口计算时间间隔特征。
 
     返回 9 元组：(sequence, response, mask, late_group_id, label, question,
                   rgaps, sgaps, pcounts)
@@ -104,45 +104,15 @@ class FAKTWindowlateIterableDataset(WindowlateIterableDataset):
         self.num_sgap = num_sgap
         self.num_pcount = num_pcount
 
-    def _read_batch_arrays(self, table):
-        arrays = super()._read_batch_arrays(table)
-        arrays["timestamp"] = table.column("timestamp").to_numpy()
-        return arrays
-
-    def _process_batch(self, batch):
-        sample_ids = batch["sample_id"]
-        if sample_ids.size == 0:
-            return
-
-        boundaries = np.flatnonzero(sample_ids[1:] != sample_ids[:-1]) + 1
-        starts = np.concatenate(([0], boundaries))
-        ends = np.concatenate((boundaries, [sample_ids.size]))
-
-        keys = (
-            "position",
-            "skill",
-            "response",
-            "mask",
-            "group_id",
-            "true_label",
-            "question",
-            "timestamp",
-        )
-        for start, end in zip(starts, ends, strict=False):
-            sample = {k: batch[k][start:end] for k in keys}
-            yield self._build_single_tensor(sample)
-
     def _build_single_tensor(self, sample):
         positions = sample["position"]
         max_seq_len = self.max_seq_len
 
-        # 按窗口内位置排序，保证按时间顺序计算时间间隔
         order = np.argsort(positions, kind="stable")
         pos_sorted = positions[order]
         skill_sorted = sample["skill"][order]
         ts_sorted = sample["timestamp"][order].astype(np.float64)
 
-        # 仅在真实（非填充）位置上计算时间间隔
         rgaps_w, sgaps_w, pcounts_w = _compute_gaps_1d(skill_sorted, ts_sorted)
         rgaps_w = np.clip(rgaps_w, 0, max(self.num_rgap - 1, 0))
         sgaps_w = np.clip(sgaps_w, 0, max(self.num_sgap - 1, 0))

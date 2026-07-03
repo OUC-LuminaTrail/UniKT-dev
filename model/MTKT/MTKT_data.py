@@ -120,7 +120,7 @@ def _compute_time_gaps(
 class MTKTWindowlateIterableDataset(WindowlateIterableDataset):
     """带遗忘特征的 windowlate 流式数据集。
 
-    在标准 6-元组基础上读取 ``timestamp``，并按窗口实时计算 rgap/sgap/pcount，
+    在标准 6-元组基础上按窗口实时计算 rgap/sgap/pcount，
     返回 9-元组 ``(sequence, response, mask, late_group_id, label, question,
     rgap, sgap, pcount)``。
     """
@@ -138,12 +138,6 @@ class MTKTWindowlateIterableDataset(WindowlateIterableDataset):
         self.num_rgap = num_rgap
         self.num_sgap = num_sgap
         self.num_pcount = num_pcount
-
-    @override
-    def _read_batch_arrays(self, table) -> dict[str, np.ndarray]:
-        data = super()._read_batch_arrays(table)
-        data["timestamp"] = table.column("timestamp").to_numpy()
-        return data
 
     def _build_single_tensor(self, sample: dict[str, np.ndarray]):
         positions = sample["position"]
@@ -190,38 +184,6 @@ class MTKTWindowlateIterableDataset(WindowlateIterableDataset):
             torch.from_numpy(sgap),
             torch.from_numpy(pcount),
         )
-
-    def _process_batch(self, batch: dict[str, np.ndarray]):
-        sample_ids = batch["sample_id"]
-        if sample_ids.size == 0:
-            return
-
-        boundaries = np.flatnonzero(sample_ids[1:] != sample_ids[:-1]) + 1
-        starts = np.concatenate(([0], boundaries))
-        ends = np.concatenate((boundaries, [sample_ids.size]))
-
-        sample_data = {
-            "position": None,
-            "skill": None,
-            "question": None,
-            "response": None,
-            "mask": None,
-            "group_id": None,
-            "true_label": None,
-            "timestamp": None,
-        }
-
-        for start, end in zip(starts, ends, strict=False):
-            sample_data["position"] = batch["position"][start:end]
-            sample_data["skill"] = batch["skill"][start:end]
-            sample_data["question"] = batch["question"][start:end]
-            sample_data["response"] = batch["response"][start:end]
-            sample_data["mask"] = batch["mask"][start:end]
-            sample_data["group_id"] = batch["group_id"][start:end]
-            sample_data["true_label"] = batch["true_label"][start:end]
-            sample_data["timestamp"] = batch["timestamp"][start:end]
-
-            yield self._build_single_tensor(sample_data)
 
 
 class MTKTModelData(SkillModelData):
