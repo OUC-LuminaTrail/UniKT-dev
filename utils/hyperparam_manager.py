@@ -48,13 +48,12 @@ class HyperparameterManager:
         self._console = Console()
 
     def get_hyperparameters_dict(self) -> dict[str, Any]:
-        """
-        获取当前超参数字典
-
-        Returns:
-            超参数字典
-        """
-        return self.hyperparams
+        """获取展平后的超参数字典。"""
+        result: dict[str, Any] = {}
+        for group_params in self.hyperparams.values():
+            if isinstance(group_params, dict):
+                result.update(group_params)
+        return result
 
     def add_hyperparams(self, params: dict | Namespace, group: str | None = None):
         """

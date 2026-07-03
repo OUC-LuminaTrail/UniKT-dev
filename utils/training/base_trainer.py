@@ -771,7 +771,7 @@ class BaseTrainer(ABC):
             experiment_name=experiment_name,
             group=self.model.__class__.__name__,
             tags=["cuda" if torch.cuda.is_available() else "cpu"],
-            config=config,
+            config=config,  # 展平后的 dict，SwanLab 要求 value 为标量
         )
 
     def _finish_metric_logger(self):

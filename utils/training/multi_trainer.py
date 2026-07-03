@@ -360,7 +360,7 @@ class MultiTrainer(BaseTrainer):
             experiment_name=experiment_name,
             group=group,
             tags=["cuda" if torch.cuda.is_available() else "cpu", "multi-stage"],
-            config=config,
+            config=config,  # 展平后的 dict，SwanLab 要求 value 为标量
         )
 
     def _finish(self) -> None:
