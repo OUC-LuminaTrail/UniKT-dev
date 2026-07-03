@@ -257,7 +257,7 @@ class HyperparameterManager:
         """
         sections: list = []
 
-        # 元数据压缩为一行（model_name/dataset_name 已上移到标题，created_at 过长隐藏）
+        # 元数据压缩为一行
         meta_pairs = [
             f"{k}={v}"
             for k, v in self.metadata.items()
@@ -270,7 +270,7 @@ class HyperparameterManager:
         for group, params in self.hyperparams.items():
             if not params:
                 continue
-            sections.append(Text(f"■ {group.capitalize()}", style="bold magenta"))
+            sections.append(Text(f"■ {group}", style="bold magenta"))
             sections.append(self._param_grid(params))
             sections.append(Text(""))
 
@@ -415,80 +415,33 @@ def create_hyperparameter_manager(
         save_dir: 保存目录
         model_name: 模型名称
         dataset_name: 数据集名称
-        auto_group: 是否自动分组参数（默认True）。如果为False，则不分组直接保存所有参数
+        auto_group: 是否自动分组参数（默认True）。根据参数来源（BaseParamConfig子类）自动分组
 
     Returns:
         配置好的HyperparameterManager实例
     """
+    from utils.config.param_config import get_param_sources
+
     manager = HyperparameterManager(save_dir=save_dir)
 
-    # 添加元数据
     if model_name:
         manager.add_metadata("model_name", model_name)
     if dataset_name:
         manager.add_metadata("dataset_name", dataset_name)
 
-    # 转换为字典（如果是Namespace）
     args_dict = vars(args) if isinstance(args, Namespace) else args
 
-    # 如果需要自动分组
     if auto_group:
-        # 自动分组（基于常见的命名模式）
-        model_params = {}
-        training_params = {}
-        data_params = {}
-        other_params = {}
+        param_sources = get_param_sources()
+        grouped: dict[str, dict] = {}
 
         for key, value in args_dict.items():
-            # 模型相关参数
-            if any(
-                kw in key.lower()
-                for kw in [
-                    "hidden",
-                    "embedding",
-                    "layer",
-                    "dropout",
-                    "dim",
-                    "hop",
-                    "top_k",
-                    "head",
-                    "attention",
-                ]
-            ):
-                model_params[key] = value
-            # 训练相关参数
-            elif any(
-                kw in key.lower()
-                for kw in [
-                    "epoch",
-                    "batch",
-                    "lr",
-                    "optimizer",
-                    "loss",
-                    "weight_decay",
-                    "momentum",
-                ]
-            ):
-                training_params[key] = value
-            # 数据相关参数
-            elif any(
-                kw in key.lower() for kw in ["data", "dataset", "sequence", "max_len"]
-            ):
-                data_params[key] = value
-            else:
-                other_params[key] = value
+            group = param_sources.get(key, "General Parameters")
+            grouped.setdefault(group, {})[key] = value
 
-        # 添加所有组（即使为空也不会影响）
-        if model_params:
-            manager.add_hyperparams(model_params, group="model")
-        if training_params:
-            manager.add_hyperparams(training_params, group="training")
-        if data_params:
-            manager.add_hyperparams(data_params, group="data")
-        if other_params:
-            manager.add_hyperparams(other_params, group="general")
+        for group, params in grouped.items():
+            manager.add_hyperparams(params, group=group)
     else:
-        # 不分组，直接添加所有参数
         manager.add_hyperparams(args_dict)
 
     return manager

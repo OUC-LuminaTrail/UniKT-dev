@@ -9,6 +9,8 @@ from typing import Any
 
 from ..core import PARAM_CONFIGS, register_model_params
 
+_PARAM_SOURCES: dict[str, str] = {}
+
 
 class BaseParamConfig(ABC):
     """参数配置基类。
@@ -73,6 +75,16 @@ class BaseParamConfig(ABC):
                 kwargs["type"] = cfg["type"]
 
             group.add_argument(*arg_names, **kwargs)
+            _PARAM_SOURCES[name] = group_name
+
+
+def get_param_sources() -> dict[str, str]:
+    """获取参数名到来源配置组名称的映射。
+
+    Returns:
+        参数名到来源组名称的字典
+    """
+    return dict(_PARAM_SOURCES)
 
 
 def get_model_params(model_name: str) -> type[BaseParamConfig] | None:
@@ -362,5 +374,6 @@ __all__ = [
     "SamplingParams",
     "register_model_params",
     "get_model_params",
+    "get_param_sources",
     "list_models",
 ]

@@ -15,6 +15,7 @@ from .param_config import (
     GeneralParams,
     SamplingParams,
     get_model_params,
+    get_param_sources,
     list_models,
     register_model_params,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "SamplingParams",
     "register_model_params",
     "get_model_params",
+    "get_param_sources",
     "list_models",
     # Data Config
     "DataLoaderConfig",
