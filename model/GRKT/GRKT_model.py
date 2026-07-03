@@ -18,6 +18,16 @@ def _positive_activate(mode, x):
     return x
 
 
+def _sparse_mm(sparse_mat, dense):
+    """CSR-sparse @ dense, handles both 2D [NK,KH] and 3D [B,NK,KH] inputs."""
+    if dense.dim() == 2:
+        return torch.sparse.mm(sparse_mat, dense)
+    B, NK, KH = dense.shape
+    flat = dense.permute(1, 0, 2).reshape(NK, B * KH)
+    out = torch.sparse.mm(sparse_mat, flat)
+    return out.reshape(NK, B, KH).permute(1, 0, 2)
+
+
 class PositiveLinear(nn.Module):
     def __init__(self, d_in, d_out, mode):
         super().__init__()
@@ -226,21 +236,14 @@ class GRKT(nn.Module):
         total_gain,
         total_loss,
         alpha_1,
-        beta_rel_tilde,
-        beta_pre_tilde,
-        beta_sub_tilde,
+        beta_rel_sp,
+        beta_pre_sp,
+        beta_sub_sp,
     ):
-        """Merged graph convolution for gain + loss (OPT 1).
-
-        Stacks gain/loss along the batch dim so each relation type needs
-        only one matmul instead of two.  Total memory is unchanged because
-        the stacked tensor reuses the storage that two separate tensors
-        would occupy.
-        """
+        """Merged graph convolution for gain + loss (OPT 1 + sparse)."""
         B2 = total_gain.size(0)
         alpha_2 = alpha_1.repeat(2, 1, 1)
         for k in range(self.k_hop):
-            # --- relation ---
             stacked = torch.cat(
                 [
                     self.gain_matrix_rel[k](total_gain),
@@ -248,11 +251,10 @@ class GRKT(nn.Module):
                 ],
                 dim=0,
             )
-            out = (beta_rel_tilde.matmul(stacked) * alpha_2).relu()
+            out = (_sparse_mm(beta_rel_sp, stacked) * alpha_2).relu()
             tg_rel = self.gain_output_rel[k](out[:B2])
             tl_rel = self.loss_output_rel[k](out[B2:])
 
-            # --- prerequisite ---
             stacked = torch.cat(
                 [
                     self.gain_matrix_pre[k](total_gain),
@@ -260,11 +262,10 @@ class GRKT(nn.Module):
                 ],
                 dim=0,
             )
-            out = (beta_pre_tilde.matmul(stacked) * alpha_2).relu()
+            out = (_sparse_mm(beta_pre_sp, stacked) * alpha_2).relu()
             tg_pre = self.gain_output_pre[k](out[:B2])
             tl_pre = self.loss_output_pre[k](out[B2:])
 
-            # --- subordinate ---
             stacked = torch.cat(
                 [
                     self.gain_matrix_sub[k](total_gain),
@@ -272,7 +273,7 @@ class GRKT(nn.Module):
                 ],
                 dim=0,
             )
-            out = (beta_sub_tilde.matmul(stacked) * alpha_2).relu()
+            out = (_sparse_mm(beta_sub_sp, stacked) * alpha_2).relu()
             tg_sub = self.gain_output_sub[k](out[:B2])
             tl_sub = self.loss_output_sub[k](out[B2:])
 
@@ -326,19 +327,29 @@ class GRKT(nn.Module):
         beta_pre_tilde = beta_matrix * pre_map / pre_map.sum(-1, True).clamp(1)
         beta_sub_tilde = beta_matrix * sub_map / sub_map.sum(-1, True).clamp(1)
 
+        beta_rel_sp = beta_rel_tilde.to_sparse_csr()
+        beta_pre_sp = beta_pre_tilde.to_sparse_csr()
+        beta_sub_sp = beta_sub_tilde.to_sparse_csr()
+
         scores = []
 
         # Precompute learn and forget kernels (global, not per-step)
         lk_tilde = total_know_embedding
         for k in range(self.k_hop):
             lk_tilde_4_rel = self.learn_kernel_output_rel[k](
-                beta_rel_tilde.matmul(self.learn_kernel_matrix_rel[k](lk_tilde)).relu()
+                _sparse_mm(
+                    beta_rel_sp, self.learn_kernel_matrix_rel[k](lk_tilde)
+                ).relu()
             )
             lk_tilde_4_pre = self.learn_kernel_output_pre[k](
-                beta_pre_tilde.matmul(self.learn_kernel_matrix_pre[k](lk_tilde)).relu()
+                _sparse_mm(
+                    beta_pre_sp, self.learn_kernel_matrix_pre[k](lk_tilde)
+                ).relu()
             )
             lk_tilde_4_sub = self.learn_kernel_output_sub[k](
-                beta_sub_tilde.matmul(self.learn_kernel_matrix_sub[k](lk_tilde)).relu()
+                _sparse_mm(
+                    beta_sub_sp, self.learn_kernel_matrix_sub[k](lk_tilde)
+                ).relu()
             )
             lk_tilde = lk_tilde_4_rel if k == 0 else lk_tilde + lk_tilde_4_rel
             lk_tilde = lk_tilde + lk_tilde_4_pre + lk_tilde_4_sub
@@ -347,13 +358,19 @@ class GRKT(nn.Module):
         fk_tilde = total_know_embedding
         for k in range(self.k_hop):
             fk_tilde_4_rel = self.forget_kernel_output_rel[k](
-                beta_rel_tilde.matmul(self.forget_kernel_matrix_rel[k](fk_tilde)).relu()
+                _sparse_mm(
+                    beta_rel_sp, self.forget_kernel_matrix_rel[k](fk_tilde)
+                ).relu()
             )
             fk_tilde_4_pre = self.forget_kernel_output_pre[k](
-                beta_pre_tilde.matmul(self.forget_kernel_matrix_pre[k](fk_tilde)).relu()
+                _sparse_mm(
+                    beta_pre_sp, self.forget_kernel_matrix_pre[k](fk_tilde)
+                ).relu()
             )
             fk_tilde_4_sub = self.forget_kernel_output_sub[k](
-                beta_sub_tilde.matmul(self.forget_kernel_matrix_sub[k](fk_tilde)).relu()
+                _sparse_mm(
+                    beta_sub_sp, self.forget_kernel_matrix_sub[k](fk_tilde)
+                ).relu()
             )
             fk_tilde = fk_tilde_4_rel if k == 0 else fk_tilde + fk_tilde_4_rel
             fk_tilde = fk_tilde + fk_tilde_4_pre + fk_tilde_4_sub
@@ -395,9 +412,9 @@ class GRKT(nn.Module):
                 h_tilde_2_pre = self.agg_pre_matrix[k](h_tilde) * alpha_1
                 h_tilde_2_sub = self.agg_sub_matrix[k](h_tilde) * alpha_1
 
-                h_tilde_3_rel = beta_rel_tilde.matmul(h_tilde_2_rel)
-                h_tilde_3_pre = beta_pre_tilde.matmul(h_tilde_2_pre)
-                h_tilde_3_sub = beta_sub_tilde.matmul(h_tilde_2_sub)
+                h_tilde_3_rel = _sparse_mm(beta_rel_sp, h_tilde_2_rel)
+                h_tilde_3_pre = _sparse_mm(beta_pre_sp, h_tilde_2_pre)
+                h_tilde_3_sub = _sparse_mm(beta_sub_sp, h_tilde_2_sub)
 
                 h_tilde = h_tilde + h_tilde_3_rel + h_tilde_3_pre + h_tilde_3_sub
 
@@ -431,9 +448,9 @@ class GRKT(nn.Module):
                 total_gain,
                 total_loss,
                 alpha_1,
-                beta_rel_tilde,
-                beta_pre_tilde,
-                beta_sub_tilde,
+                beta_rel_sp,
+                beta_pre_sp,
+                beta_sub_sp,
             )
 
             # Update knowledge state
@@ -487,18 +504,18 @@ class GRKT(nn.Module):
 
                 for k in range(self.k_hop):
                     tl4_rel = self.learn_output_rel[k](
-                        beta_rel_tilde.matmul(
-                            self.learn_matrix_rel[k](total_learn)
+                        _sparse_mm(
+                            beta_rel_sp, self.learn_matrix_rel[k](total_learn)
                         ).relu()
                     )
                     tl4_pre = self.learn_output_pre[k](
-                        beta_pre_tilde.matmul(
-                            self.learn_matrix_pre[k](total_learn)
+                        _sparse_mm(
+                            beta_pre_sp, self.learn_matrix_pre[k](total_learn)
                         ).relu()
                     )
                     tl4_sub = self.learn_output_sub[k](
-                        beta_sub_tilde.matmul(
-                            self.learn_matrix_sub[k](total_learn)
+                        _sparse_mm(
+                            beta_sub_sp, self.learn_matrix_sub[k](total_learn)
                         ).relu()
                     )
                     total_learn = total_learn + tl4_rel + tl4_pre + tl4_sub
