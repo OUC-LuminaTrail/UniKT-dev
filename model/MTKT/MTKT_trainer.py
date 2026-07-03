@@ -312,11 +312,21 @@ class MTKTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data: tuple) -> dict[str, torch.Tensor]:
         """测试前向传播, 支持 windowlateauc_mean 评估
 
-        Windowlate 数据为 6-元组:
-            (sequence, response, mask, late_group_id, true_labels, question)
-        时间间隔使用零填充。
+        Windowlate 数据为 9-元组:
+            (sequence, response, mask, late_group_id, true_labels, question,
+             rgap, sgap, pcount)
         """
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        (
+            sequence,
+            response,
+            mask,
+            late_group_id,
+            true_labels,
+            question,
+            rgap,
+            sgap,
+            pcount,
+        ) = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
@@ -324,11 +334,9 @@ class MTKTTrainer(BaseTrainer):
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
         question = self._move_tensor_to_device(question)
-
-        # 时间间隔零填充 (windowlate 数据无时间戳)
-        rgap = torch.zeros_like(sequence)
-        sgap = torch.zeros_like(sequence)
-        pcount = torch.zeros_like(sequence)
+        rgap = self._move_tensor_to_device(rgap)
+        sgap = self._move_tensor_to_device(sgap)
+        pcount = self._move_tensor_to_device(pcount)
 
         use_pid = self.model.n_pid > 0
         valid_mask = late_group_id >= 0

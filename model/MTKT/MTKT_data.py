@@ -4,6 +4,7 @@
 """
 
 import math
+import os
 
 import numpy as np
 import torch
@@ -13,6 +14,7 @@ from typing_extensions import override
 from utils.core import get_logger
 from utils.data_process import DataSource
 from utils.model_data import SkillModelData
+from utils.model_data.skill_model_data import WindowlateIterableDataset
 
 logger = get_logger(__name__)
 
@@ -113,6 +115,113 @@ def _compute_time_gaps(
         skill_count[s] = skill_count.get(s, 0) + 1
 
     return rgap, sgap, pcount
+
+
+class MTKTWindowlateIterableDataset(WindowlateIterableDataset):
+    """带遗忘特征的 windowlate 流式数据集。
+
+    在标准 6-元组基础上读取 ``timestamp``，并按窗口实时计算 rgap/sgap/pcount，
+    返回 9-元组 ``(sequence, response, mask, late_group_id, label, question,
+    rgap, sgap, pcount)``。
+    """
+
+    def __init__(
+        self,
+        parquet_path: str,
+        max_seq_len: int,
+        num_rgap: int,
+        num_sgap: int,
+        num_pcount: int,
+        batch_read_rows: int = 200_000,
+    ):
+        super().__init__(parquet_path, max_seq_len, batch_read_rows)
+        self.num_rgap = num_rgap
+        self.num_sgap = num_sgap
+        self.num_pcount = num_pcount
+
+    @override
+    def _read_batch_arrays(self, table) -> dict[str, np.ndarray]:
+        data = super()._read_batch_arrays(table)
+        data["timestamp"] = table.column("timestamp").to_numpy()
+        return data
+
+    def _build_single_tensor(self, sample: dict[str, np.ndarray]):
+        positions = sample["position"]
+
+        sequence = np.zeros(self.max_seq_len, dtype=np.int64)
+        response = np.zeros(self.max_seq_len, dtype=np.int64)
+        mask = np.zeros(self.max_seq_len, dtype=np.bool_)
+        late_group_id = np.full(self.max_seq_len, -1, dtype=np.int64)
+        label = np.zeros(self.max_seq_len, dtype=np.int64)
+        question = np.zeros(self.max_seq_len, dtype=np.int64)
+        rgap = np.zeros(self.max_seq_len, dtype=np.int64)
+        sgap = np.full(self.max_seq_len, self.num_sgap - 1, dtype=np.int64)
+        pcount = np.zeros(self.max_seq_len, dtype=np.int64)
+
+        sequence[positions] = sample["skill"]
+        response[positions] = sample["response"]
+        mask[positions] = sample["mask"].astype(np.bool_)
+        late_group_id[positions] = sample["group_id"]
+        label[positions] = sample["true_label"]
+        question[positions] = sample["question"]
+
+        seq_len = int(positions[-1]) + 1 if len(positions) > 0 else 0
+        if seq_len > 0:
+            r, s, p = _compute_time_gaps(
+                sequence[:seq_len],
+                sample["timestamp"].astype(np.float64),
+                seq_len,
+                self.num_rgap,
+                self.num_sgap,
+                self.num_pcount,
+            )
+            rgap[:seq_len] = r
+            sgap[:seq_len] = s
+            pcount[:seq_len] = p
+
+        return (
+            torch.from_numpy(sequence),
+            torch.from_numpy(response),
+            torch.from_numpy(mask),
+            torch.from_numpy(late_group_id),
+            torch.from_numpy(label),
+            torch.from_numpy(question),
+            torch.from_numpy(rgap),
+            torch.from_numpy(sgap),
+            torch.from_numpy(pcount),
+        )
+
+    def _process_batch(self, batch: dict[str, np.ndarray]):
+        sample_ids = batch["sample_id"]
+        if sample_ids.size == 0:
+            return
+
+        boundaries = np.flatnonzero(sample_ids[1:] != sample_ids[:-1]) + 1
+        starts = np.concatenate(([0], boundaries))
+        ends = np.concatenate((boundaries, [sample_ids.size]))
+
+        sample_data = {
+            "position": None,
+            "skill": None,
+            "question": None,
+            "response": None,
+            "mask": None,
+            "group_id": None,
+            "true_label": None,
+            "timestamp": None,
+        }
+
+        for start, end in zip(starts, ends, strict=False):
+            sample_data["position"] = batch["position"][start:end]
+            sample_data["skill"] = batch["skill"][start:end]
+            sample_data["question"] = batch["question"][start:end]
+            sample_data["response"] = batch["response"][start:end]
+            sample_data["mask"] = batch["mask"][start:end]
+            sample_data["group_id"] = batch["group_id"][start:end]
+            sample_data["true_label"] = batch["true_label"][start:end]
+            sample_data["timestamp"] = batch["timestamp"][start:end]
+
+            yield self._build_single_tensor(sample_data)
 
 
 class MTKTModelData(SkillModelData):
@@ -267,7 +376,16 @@ class MTKTModelData(SkillModelData):
         )
 
         # 6. Windowlate 测试集
-        test_dataset = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        parquet_path = os.path.join(
+            self.data_src.data_folder, f"{self.data_src.dataset}_windowlate.parquet"
+        )
+        test_dataset = MTKTWindowlateIterableDataset(
+            parquet_path=parquet_path,
+            max_seq_len=args.max_seq_len,
+            num_rgap=num_rgap,
+            num_sgap=num_sgap,
+            num_pcount=num_pcount,
+        )
 
         logger.info(
             f"MTKT data prepared: train={len(train_dataset)}, "
