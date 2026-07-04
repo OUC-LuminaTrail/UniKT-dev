@@ -78,12 +78,10 @@ class DKVMN(nn.Module):
         e = torch.sigmoid(self.e_layer(v))  # [B, S, dim_s]
         a = torch.tanh(self.a_layer(v))  # [B, S, dim_s]
 
-        for et, at, wt in zip(
-            e.permute(1, 0, 2), a.permute(1, 0, 2), w.permute(1, 0, 2)
-        ):
-            Mvt = Mvt * (1 - (wt.unsqueeze(-1) * et.unsqueeze(1))) + (
-                wt.unsqueeze(-1) * at.unsqueeze(1)
-            )
+        for et, at, wt in zip(e.unbind(1), a.unbind(1), w.unbind(1)):
+            w_col = wt.unsqueeze(-1)  # [B, size_m, 1]
+            we = w_col * et.unsqueeze(1)  # [B, size_m, dim_s] 擦除门（外积）
+            Mvt = torch.addcmul(Mvt * (1 - we), w_col, at.unsqueeze(1))
             Mv.append(Mvt)
 
         Mv = torch.stack(Mv, dim=1)  # [B, S+1, size_m, dim_s]

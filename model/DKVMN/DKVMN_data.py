@@ -51,8 +51,6 @@ class DKVMNDataset(Dataset):
 class DKVMNModelData(SkillModelData):
     """DKVMN 模型数据加载器
 
-    继承自 SkillModelData，使用技能序列构建方式。
-
     Args:
         data_src: 数据源实例
     """
