@@ -1,29 +1,35 @@
 [workspace]
 channels = ["conda-forge"]
-name = "kt-exp-graph"
-platforms = ["linux-64"]
+name = "UniKT"
+platforms = [
+  "linux-64",
+  { name = "gpu", platform = "linux-64", cuda = "12.8", glibc = "2.38" },
+  { name = "dhg-gpu", platform = "linux-64", cuda = "11.7", glibc = "2.38" },
+]
 
 [pypi-options]
 index-url = "https://pypi.org/simple"
 
-# General pypi dependencies for all features
-[pypi-dependencies]
-swanlab = ">=0.8,<0.9"
-
-[feature.gpu.system-requirements]
-cuda = "12.8"
-[feature.gpu.dependencies]
-cuda-version = "==12.8"
+[feature.base]
+platforms = ["linux-64"]
+[feature.base.dependencies]
 python = "3.12.*"
+python-dotenv = ">=1.2.1,<2"
 optuna = "==4.8.0"
 scikit-learn = "==1.8.0"
 pandas = "==3.0.2"
-pyarrow = ">=23.0.0,<24"
-python-dotenv = ">=1.2.1,<2"
+pyarrow = ">=24.0.0,<25"
 ruff = ">=0.15,<0.16"
 pytest = ">=9.0.2,<10"
 seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
+[feature.base.pypi-dependencies]
+swanlab = ">=0.8,<0.9"
+
+[feature.gpu]
+platforms = ["gpu"]
+[feature.gpu.dependencies]
+cuda-version = "==12.8"
 [feature.gpu.pypi-dependencies]
 torch = "==2.10.0+cu128"
 pyg_lib = "==0.6.0"
@@ -34,47 +40,14 @@ polars = { version = ">=1.39.3,<2", extras = ["rt64"] }
 extra-index-urls = ["https://download.pytorch.org/whl/cu128"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-2.10.0+cu128.html" }]
 
-[feature.mamba.system-requirements]
-cuda = "12.8"
-[feature.mamba.dependencies]
-cuda-version = "==12.8"
-python = "3.12.*"
-optuna = "==4.8.0"
-scikit-learn = "==1.8.0"
-pandas = "==3.0.2"
-pyarrow = ">=23.0.0,<24"
-python-dotenv = ">=1.2.1,<2"
-ruff = ">=0.15,<0.16"
-pytest = ">=9.0.2,<10"
-seaborn = ">=0.13.2,<0.14"
-matplotlib = ">=3.10.8,<4"
+[feature.mamba]
+platforms = ["gpu"]
 [feature.mamba.pypi-dependencies]
-torch = "==2.10.0+cu128"
-pyg_lib = "==0.6.0"
-torch-scatter = "==2.1.2"
-torch-geometric = "==2.7.0"
-polars = { version = ">=1.39.3,<2", extras = ["rt64"] }
-#mamba-ssm = { version = "==2.3.1", extras = ["causal-conv1d"] }
 mamba-ssm = { url = "https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
 causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
-[feature.mamba.pypi-options]
-extra-index-urls = ["https://download.pytorch.org/whl/cu128"]
-find-links = [{ url = "https://data.pyg.org/whl/torch-2.10.0+cu128.html" }]
 
-[feature.cpu.system-requirements]
-cuda = "12.8"
-[feature.cpu.dependencies]
-cuda-version = "==12.8"
-python = "3.12.*"
-optuna = "==4.8.0"
-scikit-learn = "==1.8.0"
-pandas = "==3.0.2"
-pyarrow = ">=23.0.0,<24"
-python-dotenv = ">=1.2.1,<2"
-ruff = ">=0.15,<0.16"
-pytest = ">=9.0.2,<10"
-seaborn = ">=0.13.2,<0.14"
-matplotlib = ">=3.10.8,<4"
+[feature.cpu]
+platforms = ["linux-64"]
 [feature.cpu.pypi-dependencies]
 torch = "==2.10.0+cpu"
 pyg_lib = "==0.6.0"
@@ -85,10 +58,9 @@ polars = { version = ">=1.39.3,<2", extras = ["rt64"] }
 extra-index-urls = ["https://download.pytorch.org/whl/cpu"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-2.10.0+cpu.html" }]
 
-[feature.dhg-gpu.system-requirements]
-cuda = "11.7"
-[feature.dhg-gpu.dependencies]
-cuda-version = "11.7.*"
+[feature.dhg]
+platforms = ["linux-64", "dhg-gpu"]
+[feature.dhg.dependencies]
 python = "3.10.*"
 optuna = ">=4.6.0,<5"
 scikit-learn = ">=1.7.2,<2"
@@ -99,43 +71,31 @@ ruff = ">=0.15,<0.16"
 pytest = ">=9.0.2,<10"
 seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
-[feature.dhg-gpu.pypi-dependencies]
+[feature.dhg.pypi-dependencies]
 dhg = "==0.9.*"
-torch = "==1.13.1+cu117"
 pyg_lib = ">=0.4.0,<0.5"
 torch-scatter = "==2.1.1"
 torch-geometric = ">=2.7.0, <3"
 polars = { version = ">=1.38.1, <2", extras = ["rt64"] }
+
+[feature.dhg-gpu]
+platforms = ["dhg-gpu"]
+[feature.dhg-gpu.dependencies]
+cuda-version = "11.7.*"
+[feature.dhg-gpu.pypi-dependencies]
+torch = "==1.13.1+cu117"
 [feature.dhg-gpu.pypi-options]
 extra-index-urls = ["https://download.pytorch.org/whl/cu117"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cu117.html" }]
 
+[feature.dhg-cpu]
+platforms = ["linux-64"]
 [feature.dhg-cpu.pypi-dependencies]
-dhg = "==0.9.*"
 torch = "==1.13.1"
-pyg_lib = ">=0.4.0,<0.5"
-torch-scatter = "==2.1.1"
-torch-geometric = ">=2.7.0, <3"
-polars = { version = ">=1.38.1, <2", extras = ["rt64"] }
-[feature.dhg-cpu.dependencies]
-python = "3.10.*"
-optuna = ">=4.6.0,<5"
-scikit-learn = ">=1.7.2,<2"
-pandas = ">=2.3.3,<3"
-pyarrow = ">=12.0.1,<13"
-python-dotenv = ">=1.2.1,<2"
-ruff = ">=0.15,<0.16"
-pytest = ">=9.0.2,<10"
-seaborn = ">=0.13.2,<0.14"
-matplotlib = ">=3.10.8,<4"
 [feature.dhg-cpu.pypi-options]
 extra-index-urls = ["https://download.pytorch.org/whl/cpu"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
 
-[feature.web.dependencies]
-python = "3.12.*"
-python-dotenv = ">=1.2.1,<2"
-nodejs = "24.*"
 [feature.web.pypi-dependencies]
 fastapi = ">=0.115.0"
 uvicorn = { version = ">=0.34.0", extras = ["standard"] }
@@ -152,12 +112,12 @@ web-dev = { cmd = "cd web/backend && python -m uvicorn main:app --host 127.0.0.1
 web-serve = { cmd = "npm run build && cd ../backend && python -m uvicorn main:app --host 0.0.0.0 --port 8765", cwd = "web/frontend", env = { PYTHONPATH = "../../" }, description = "Build frontend and start production server" }
 
 [environments]
-dhg-cpu = { features = ["dhg-cpu"] }
-dhg-gpu = { features = ["dhg-gpu"] }
-cpu = { features = ["cpu"] }
-mamba = { features = ["mamba"] }
-web = { features = ["web"] }
-default = { features = ["gpu"] }
+dhg-cpu = { features = ["dhg", "dhg-cpu"], no-default-feature = true }
+dhg-gpu = { features = ["dhg", "dhg-gpu"], no-default-feature = true }
+cpu = { features = ["base", "cpu"] }
+mamba = { features = ["base", "gpu", "mamba"] }
+web = { features = ["base", "web"] }
+default = { features = ["base", "gpu"] }
 
 [tasks]
 lint = "ruff check ."
