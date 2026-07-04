@@ -74,9 +74,9 @@ class SGKTModelParams(BaseParamConfig):
                 "help": "Aggregator type: sum or concat (default: sum)",
             },
             "select_index": {
-                "type": list,
+                "type": int,
                 "default": [0, 1, 2],
-                "nargs": "?",
+                "nargs": "+",
                 "help": "Feature indices used for model inputs (default: [0, 1, 2])",
             },
             "sim_emb": {
@@ -98,9 +98,9 @@ class SGKTModelParams(BaseParamConfig):
                 "help": "Hidden layer dimension (default: 100)",
             },
             "dropout_keep_probs": {
-                "type": list,
+                "type": float,
                 "default": [0.8, 0.8, 1],
-                "nargs": "?",
+                "nargs": "+",
                 "help": "Dropout keep probabilities for each GCN layer in HRG (default: [0.8, 0.8, 1])",
             },
             "epochs": {

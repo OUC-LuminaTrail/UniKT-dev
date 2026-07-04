@@ -21,7 +21,13 @@ for model_name in models:
             fields = {}
             for name, cfg in inst.params.items():
                 ptype = cfg.get("type")
-                if ptype is bool:
+                nargs = cfg.get("nargs")
+                # Multi-value params (nargs +/-, or legacy type=list) are exposed
+                # as "list" so the frontend renders a list editor and the value
+                # round-trips as a JSON array.
+                if nargs in ("+", "*") or ptype is list:
+                    type_str = "list"
+                elif ptype is bool:
                     type_str = "bool"
                 elif ptype is int:
                     type_str = "int"

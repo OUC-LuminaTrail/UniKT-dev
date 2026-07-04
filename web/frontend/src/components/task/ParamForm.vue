@@ -58,6 +58,14 @@
                   />
                 </template>
 
+                <template v-else-if="field.def.type === 'list'">
+                  <el-input
+                    :model-value="formatList(formData[field.key])"
+                    @update:model-value="(v: string) => (formData[field.key] = parseList(v))"
+                    :placeholder="field.def.help || field.key"
+                  />
+                </template>
+
                 <template v-else>
                   <el-input v-model="formData[field.key]" :placeholder="field.def.help || field.key" />
                 </template>
@@ -92,6 +100,20 @@ const emit = defineEmits<{ (e: 'update:params', params: Record<string, any>): vo
 const expandedGroups = ref<string[]>([])
 const formData = ref<Record<string, any>>({})
 
+// List params round-trip as JS arrays (so the backend expands them into
+// separate CLI tokens); the input field shows them comma/space-separated.
+const formatList = (v: unknown): string => {
+  if (Array.isArray(v)) return v.join(', ')
+  return v == null ? '' : String(v)
+}
+
+const parseList = (v: string): any[] =>
+  v
+    .split(/[\s,]+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => (Number.isFinite(Number(s)) ? Number(s) : s))
+
 const visibleParams = (group: { params: Record<string, ParamField> }): FieldEntry[] => {
   return Object.entries(group.params)
     .filter(([key]) => !TOP_BAR_PARAMS.has(key))
@@ -113,9 +135,9 @@ const emitParams = (data: Record<string, any>) => {
   const cleaned: Record<string, any> = {}
   for (const [k, v] of Object.entries(data)) {
     if (TOP_BAR_PARAMS.has(k)) continue
-    if (v !== null && v !== undefined && v !== '') {
-      cleaned[k] = v
-    }
+    if (v === null || v === undefined || v === '') continue
+    if (Array.isArray(v) && v.length === 0) continue
+    cleaned[k] = v
   }
   emit('update:params', cleaned)
 }

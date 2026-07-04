@@ -18,6 +18,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
+const sameAsDefault = (a: any, b: any): boolean => {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((v, i) => v === b[i])
+  }
+  return a === b
+}
+
 const props = defineProps<{
   command?: string
   modelName?: string
@@ -42,10 +49,13 @@ const commandDisplay = computed(() => {
   const overridden: string[] = []
   for (const [key, value] of Object.entries(props.params || {})) {
     if (value === null || value === undefined || value === '') continue
+    if (Array.isArray(value) && value.length === 0) continue
     const defaultVal = (props.schemaDefaultParams || {})[key]
-    if (value === defaultVal) continue
+    if (sameAsDefault(value, defaultVal)) continue
     if (typeof value === 'boolean') {
       overridden.push(value ? `--${key}` : `--no_${key.replace(/^no_/, '')}`)
+    } else if (Array.isArray(value)) {
+      overridden.push(`--${key} ${value.join(' ')}`)
     } else {
       overridden.push(`--${key} ${value}`)
     }

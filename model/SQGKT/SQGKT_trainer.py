@@ -75,15 +75,15 @@ class SQGKTModelParams(BaseParamConfig):
                 "help": "Embedding dimension (default: 100)",
             },
             "hidden_neurons": {
-                "type": list,
+                "type": int,
                 "default": [200, 100],
-                "nargs": "?",
+                "nargs": "+",
                 "help": "Hidden sizes for each LSTM layer; last layer must equal embedding_dim (default: [200, 100])",
             },
             "dropout_probs": {
-                "type": list,
+                "type": float,
                 "default": [0.2, 0.2, 0],
-                "nargs": "?",
+                "nargs": "+",
                 "help": "Dropout probabilities for [LSTM, GNN, eval] (default: [0.2, 0.2, 0])",
             },
             "epochs": {

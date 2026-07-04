@@ -290,6 +290,8 @@ class ProcessManager:
                 if value:
                     args.append(f"--{key}")
             elif isinstance(value, list):
+                if not value:
+                    continue
                 args.append(f"--{key}")
                 args.extend(str(v) for v in value)
             else:
