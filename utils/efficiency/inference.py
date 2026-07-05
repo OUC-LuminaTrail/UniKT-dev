@@ -142,14 +142,15 @@ def extract_mask(batch) -> torch.Tensor | None:
 
 
 def count_valid_tokens(batch) -> int:
-    """有效交互数 = ``mask.sum()``；不可得时退化为 ``B*S``。"""
+    """有效交互数。
+
+    序列级模型（有 ``[B,S]`` mask）：``mask.sum()``。
+    交互级模型（无 mask，如 DyGKT，每行一个交互）：batch 行数 B。
+    """
     mask = extract_mask(batch)
     if mask is not None and isinstance(mask, torch.Tensor):
         return int(mask.sum().item())
-    first = _first_tensor(batch)
-    if first is not None and first.dim() >= 2:
-        return int(first.size(0) * first.size(1))
-    return 0
+    return batch_size_of(batch)
 
 
 def batch_size_of(batch) -> int:

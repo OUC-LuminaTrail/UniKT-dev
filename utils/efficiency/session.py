@@ -164,16 +164,8 @@ def _to_device(batch, device: torch.device):
 
 
 def _seq_len_of(batch) -> int | None:
-    """batch 序列长度（mask 或首个 tensor 的第 2 维）。"""
+    """序列长度：仅序列级模型有 ``[B,S]`` mask 时定义；交互级模型（无 mask，如 DyGKT）返回 None。"""
     mask = extract_mask(batch)
     if isinstance(mask, torch.Tensor) and mask.dim() >= 2:
         return int(mask.size(1))
-    items = (
-        batch.values()
-        if isinstance(batch, dict)
-        else (batch if isinstance(batch, (tuple, list)) else [])
-    )
-    for v in items:
-        if isinstance(v, torch.Tensor) and v.dim() >= 2:
-            return int(v.size(1))
     return None
