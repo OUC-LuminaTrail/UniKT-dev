@@ -135,6 +135,28 @@ class KDDCup2010Base(DataSource):
         data = data.with_columns(
             pl.col("timestamp").dt.timestamp("ms").alias("timestamp")
         )
+
+        # Drop rows with mislabeled First Transaction Time. The KDD school-year
+        # data forms a tight timestamp cluster, but a handful of rows carry
+        # decade-off typos (e.g. algebra2006 has rows dated 1993/2014/2015
+        # among a 2006-2007 bulk) that would otherwise inflate DKTForget's
+        # gap vocab and distort min-relative time. A 3*IQR fence (Tukey's
+        # "far outlier" rule) on the absolute ms timestamp removes exactly
+        # these without touching legitimate rows; no-op on clean datasets.
+        q1 = data.select(pl.col("timestamp").quantile(0.25)).item()
+        q3 = data.select(pl.col("timestamp").quantile(0.75)).item()
+        iqr_fence = 3.0 * (q3 - q1)
+        outlier_mask = (pl.col("timestamp") < q1 - iqr_fence) | (
+            pl.col("timestamp") > q3 + iqr_fence
+        )
+        outlier_count = data.filter(outlier_mask).height
+        if outlier_count > 0:
+            logger.info(
+                f"Dropped {outlier_count} {self.dataset} rows with mislabeled "
+                "First Transaction Time (outside 3*IQR fence)."
+            )
+            data = data.filter(~outlier_mask)
+
         min_ts = data.select(pl.col("timestamp").min()).item()
         data = data.with_columns(
             (pl.col("timestamp") - min_ts).alias("timestamp")
