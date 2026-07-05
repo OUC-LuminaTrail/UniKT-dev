@@ -26,6 +26,9 @@ matplotlib = ">=3.10.8,<4"
 [feature.base.pypi-dependencies]
 swanlab = ">=0.8,<0.9"
 omegaconf = ">=2.0.6,<3"
+psutil = ">=7.2.0"
+nvidia-ml-py = "*"
+py-cpuinfo = ">=9.0.0"
 
 [feature.gpu]
 platforms = ["gpu"]
@@ -113,11 +116,9 @@ find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
 
 [feature.web.pypi-dependencies]
 fastapi = ">=0.115.0"
-uvicorn = { version = ">=0.34.0", extras = ["standard"] }
+uvicorn = { version = ">=0.39.0", extras = ["standard"] }
 sqlalchemy = ">=2.0.0"
 pydantic = ">=2.0.0"
-psutil = ">=7.2.0"
-nvidia-ml-py = "*"
 fastapi-problem = ">=0.12.0"
 fastapi-pagination = "*"
 [feature.web.tasks]
