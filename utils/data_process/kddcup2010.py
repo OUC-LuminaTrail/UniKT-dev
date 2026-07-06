@@ -1,3 +1,5 @@
+"""KDD Cup 2010 datasets (Algebra 2005/2006, Bridge to Algebra 2006)."""
+
 import os
 
 import polars as pl
@@ -22,6 +24,7 @@ class KDDCup2010Base(DataSource):
     skill_column: str  # Subclass must set: e.g. "KC(Default)" or "KC(SubSkills)"
 
     def __init__(self, args, dataset: str, raw_filename: str):
+        """Initialize the KDD Cup 2010 base dataset handler."""
         super().__init__(
             dataset=dataset,
             data_base_path=args.data_base_path,
@@ -247,6 +250,7 @@ class Algebra2005Data(KDDCup2010Base):
     skill_column = "KC(Default)"
 
     def __init__(self, args):
+        """Initialize the Algebra 2005-2006 dataset handler."""
         super().__init__(
             args=args,
             dataset="algebra2005",
@@ -264,6 +268,7 @@ class Algebra2006Data(KDDCup2010Base):
     skill_column = "KC(Default)"
 
     def __init__(self, args):
+        """Initialize the Algebra 2006-2007 dataset handler."""
         super().__init__(
             args=args,
             dataset="algebra2006",
@@ -281,6 +286,7 @@ class Bridge2006Data(KDDCup2010Base):
     skill_column = "KC(SubSkills)"
 
     def __init__(self, args):
+        """Initialize the Bridge to Algebra 2006-2007 dataset handler."""
         super().__init__(
             args=args,
             dataset="bridge2006",

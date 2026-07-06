@@ -1,6 +1,7 @@
-"""统一实验管理模块
+"""Unified experiment management module.
 
-提供统一的实验日志目录管理，支持普通训练和超参数搜索。
+Provides consistent experiment log directory management supporting
+standard training and hyperparameter search workflows.
 """
 
 from datetime import datetime
@@ -13,7 +14,7 @@ logger = get_logger(__name__)
 
 
 class ExperimentType(Enum):
-    """实验类型枚举"""
+    """Enumeration of supported experiment types."""
 
     NORMAL = "normal"
     HYPERPARAM_SEARCH = "hyperparam_search"
@@ -21,16 +22,16 @@ class ExperimentType(Enum):
 
 
 class ExperimentManager:
-    """统一的实验管理器
+    """Unified experiment manager.
 
-    职责：
-    1. 创建符合规范的实验目录结构
-    2. 生成统一的命名格式
-    3. 管理实验子目录
-    4. 提供工厂方法从命令行参数创建
+    Responsibilities:
+    1. Create standardised experiment directory structures
+    2. Generate consistent naming conventions
+    3. Manage experiment subdirectories
+    4. Provide factory methods for command-line argument creation
 
     Example:
-        >>> # 方式1：直接创建
+        >>> # Method 1: Direct creation
         >>> manager = ExperimentManager(
         ...     exp_type=ExperimentType.NORMAL,
         ...     model_name="GIKT",
@@ -40,7 +41,7 @@ class ExperimentManager:
         >>> log_dir = manager.get_log_dir()
         >>> # runs/normal/GIKT_assist09_20241201-120000_fold0/
 
-        >>> # 方式2：从命令行参数创建
+        >>> # Method 2: From command-line args
         >>> parser = argparse.ArgumentParser()
         >>> parser.add_argument("--model", type=str, default="GIKT")
         >>> parser.add_argument("--dataset", type=str, default="assist09")
@@ -57,14 +58,14 @@ class ExperimentManager:
         base_dir: str = "runs",
         tags: list[str] | None = None,
     ):
-        """初始化实验管理器
+        """Initialise the experiment manager.
 
         Args:
-            exp_type: 实验类型（NORMAL/HYPERPARAM_SEARCH）
-            model_name: 模型名称（GIKT/HDHKT/SQGKT）
-            dataset_name: 数据集名称（assist09/assist12/assist17/ednet）
-            base_dir: 基础目录（默认: runs）
-            tags: 可选标签列表（fold0, bs64等）
+            exp_type: Experiment type (NORMAL / HYPERPARAM_SEARCH).
+            model_name: Model name (e.g. GIKT, HDHKT, SQGKT).
+            dataset_name: Dataset name (e.g. assist09, assist12, assist17, ednet).
+            base_dir: Base directory (default: "runs").
+            tags: Optional list of tags (e.g. fold0, bs64).
         """
         self.exp_type = exp_type
         self.model_name = model_name
@@ -72,7 +73,7 @@ class ExperimentManager:
         self.base_dir = Path(base_dir)
         self.tags = tags or []
 
-        # 创建实验目录
+        # Create experiment directory
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         exp_name = f"{model_name}_{dataset_name}_{timestamp}"
         if self.tags:
@@ -84,23 +85,24 @@ class ExperimentManager:
         logger.debug(f"Experiment directory created: {self.exp_dir}")
 
     def get_log_dir(self) -> str:
-        """获取日志目录路径
+        """Return the absolute path to the experiment log directory.
 
         Returns:
-            日志目录的绝对路径字符串
+            Absolute path string of the log directory.
         """
         return str(self.exp_dir)
 
     def create_sub_experiment(self, sub_name: str) -> "ExperimentManager":
-        """创建子实验管理器，共享时间戳但使用子目录
+        """Create a sub-experiment manager sharing the same timestamp.
 
-        用于超参数搜索等需要多个子实验的场景，所有子实验共享同一个时间戳。
+        Used for scenarios requiring multiple sub-experiments (e.g. hyperparameter
+        search). All sub-experiments share the same parent timestamp.
 
         Args:
-            sub_name: 子实验名称（如 "trial_0", "full_model", "no_gnn"）
+            sub_name: Sub-experiment name (e.g. "trial_0", "full_model", "no_gnn").
 
         Returns:
-            新的 ExperimentManager 实例，指向子目录
+            A new ExperimentManager instance pointing to the subdirectory.
 
         Example:
             >>> parent_manager = ExperimentManager(...)
@@ -108,32 +110,30 @@ class ExperimentManager:
             >>> # parent: runs/hyperparam_search/GIKT_assist09_20241201-120000/
             >>> # child:  runs/hyperparam_search/GIKT_assist09_20241201-120000/trial_0/
         """
-        # 创建子实验目录
+        # Create sub-experiment directory
         sub_dir = self.exp_dir / sub_name
         sub_dir.mkdir(parents=True, exist_ok=True)
 
-        # 创建一个新的 ExperimentManager，复用父管理器的时间戳和配置
+        # Create a new ExperimentManager reusing the parent's timestamp and config
         sub_manager = ExperimentManager.__new__(ExperimentManager)
         sub_manager.exp_type = self.exp_type
         sub_manager.model_name = self.model_name
         sub_manager.dataset_name = self.dataset_name
         sub_manager.base_dir = self.base_dir
-        sub_manager.tags = self.tags + [sub_name]
+        sub_manager.tags = [*self.tags, sub_name]
         sub_manager.exp_dir = sub_dir
 
         logger.debug(f"Sub-experiment created: {sub_dir}")
         return sub_manager
 
     def create_subdir(self, name: str) -> Path:
-        """创建子目录
-
-        用于需要多个子目录的场景。
+        """Create a subdirectory within the experiment directory.
 
         Args:
-            name: 子目录名称
+            name: Subdirectory name.
 
         Returns:
-            子目录的 Path 对象
+            Path object for the subdirectory.
 
         Example:
             >>> manager = ExperimentManager(...)
@@ -147,25 +147,26 @@ class ExperimentManager:
 
     @staticmethod
     def from_args(args, exp_type: ExperimentType) -> "ExperimentManager":
-        """从命令行参数创建管理器
+        """Create a manager from command-line arguments.
 
-        自动从 args 中提取模型名称、数据集名称和常用标签。
+        Automatically extracts model name, dataset name, and common tags
+        from the args namespace.
 
         Args:
-            args: 命令行参数对象（argparse.Namespace）
-            exp_type: 实验类型
+            args: Command-line argument object (argparse.Namespace).
+            exp_type: Experiment type.
 
         Returns:
-            ExperimentManager 实例
+            An ExperimentManager instance.
         """
         model = getattr(args, "model", "unknown")
         dataset = getattr(args, "dataset", "unknown")
 
         tags = []
-        # 提取fold标签
+        # Extract fold tag
         if hasattr(args, "fold") and args.fold is not None:
             tags.append(f"fold{args.fold}")
-        # 提取batch_size标签
+        # Extract batch_size tag
         if hasattr(args, "batch_size"):
             tags.append(f"bs{args.batch_size}")
 
@@ -209,10 +210,11 @@ class ExperimentManager:
         return manager
 
     def get_experiment_info(self) -> dict:
-        """获取实验信息字典
+        """Return a dictionary of experiment metadata.
 
         Returns:
-            包含实验类型、模型、数据集等信息的字典
+            Dictionary containing experiment type, model name, dataset name,
+            base directory, experiment directory, and tags.
         """
         return {
             "experiment_type": self.exp_type.value,

@@ -1,3 +1,5 @@
+"""ASSISTments 2015 skill builders dataset handler."""
+
 import os
 
 import polars as pl
@@ -26,6 +28,7 @@ class Assistments2015Data(DataSource):
     """
 
     def __init__(self, args):
+        """Initialize the ASSISTments 2015 dataset handler."""
         super().__init__(
             dataset="assistments15",
             data_base_path=args.data_base_path,
@@ -51,6 +54,7 @@ class Assistments2015Data(DataSource):
 
     @override
     def transform_data(self):
+        """Clean data and build question_data and sequence_data."""
         logger.info("Processing ASSISTments 2015 data...")
 
         if self.cleaned_raw_data is None:
@@ -109,6 +113,7 @@ class Assistments2015Data(DataSource):
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):
+        """Clean raw sequence data."""
         if self.raw_data is None:
             self.load_src_data()
 

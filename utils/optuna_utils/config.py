@@ -1,4 +1,4 @@
-"""Optuna 配置和参数空间辅助工具。"""
+"""Optuna configuration and parameter space utilities."""
 
 import json
 from dataclasses import dataclass, field
@@ -19,7 +19,7 @@ from optuna.samplers import (
 )
 from optuna.trial import Trial
 
-# auc/acc 越大越好，rmse/loss 越小越好
+# auc/acc are maximise, rmse/loss are minimise
 _METRIC_DIRECTIONS: dict[str, str] = {
     "auc": "maximize",
     "acc": "maximize",
@@ -29,7 +29,17 @@ _METRIC_DIRECTIONS: dict[str, str] = {
 
 
 def direction_for_metric(metric_name: str) -> str:
-    """根据优化指标返回 Optuna 的优化方向（'maximize' / 'minimize'）。"""
+    """Return the Optuna optimisation direction for a given metric name.
+
+    Args:
+        metric_name: Name of the metric (e.g. 'auc', 'acc', 'rmse', 'loss').
+
+    Returns:
+        'maximize' or 'minimize'.
+
+    Raises:
+        ValueError: If the metric name is not recognised.
+    """
     direction = _METRIC_DIRECTIONS.get(metric_name.lower())
     if direction is None:
         raise ValueError(
@@ -41,19 +51,19 @@ def direction_for_metric(metric_name: str) -> str:
 
 @dataclass
 class HyperparameterSpace:
-    """超参数搜索空间定义"""
+    """Definition of a single hyperparameter search space."""
 
     name: str
     type: str  # 'int', 'float', 'categorical'
     low: float | None = None
     high: float | None = None
-    log: bool | None = None  # 用于数值参数的对数采样
-    step: float | None = None  # 用于整数参数的步长
-    choices: list[Any] | None = None  # 用于分类参数
+    log: bool | None = None  # Logarithmic sampling for numeric params
+    step: float | None = None  # Step size for integer params
+    choices: list[Any] | None = None  # Choices for categorical params
     default: Any | None = None
 
     def validate(self):
-        """验证参数空间配置的完整性"""
+        """Validate the parameter space configuration completeness."""
         if self.type == "int":
             if self.low is None or self.high is None:
                 raise ValueError(
@@ -90,7 +100,14 @@ class HyperparameterSpace:
                 )
 
     def suggest(self, trial: Trial) -> Any:
-        """从Optuna trial中采样参数值"""
+        """Sample a parameter value from the Optuna trial.
+
+        Args:
+            trial: Optuna trial object.
+
+        Returns:
+            The sampled parameter value.
+        """
         self.validate()
 
         if self.type == "int":
@@ -114,32 +131,39 @@ class HyperparameterSpace:
 
 @dataclass
 class OptunaConfig:
-    """Optuna搜索配置"""
+    """Optuna search configuration."""
 
-    # 采样器配置
+    # Sampler configuration
     sampler: str = "tpe"  # 'tpe', 'random', 'grid', 'cmaes'
     sampler_kwargs: dict[str, Any] = field(default_factory=dict)
 
-    # 修剪器配置
+    # Pruner configuration
     pruner: str = "median"  # 'median', 'percentile', 'successive_halving', None
     pruner_kwargs: dict[str, Any] = field(default_factory=dict)
 
-    # 搜索配置
+    # Search configuration
     n_trials: int = 100
-    n_jobs: int = 1  # 并行任务数
-    timeout: int | None = None  # 单位：秒
+    n_jobs: int = 1  # Number of parallel jobs
+    timeout: int | None = None  # Timeout in seconds
     directions: list[str] = field(
         default_factory=lambda: ["maximize"]
-    )  # 'maximize' 或 'minimize'
+    )  # 'maximize' or 'minimize'
 
-    # 存储和日志
+    # Storage and logging
     study_name: str | None = None
-    db_url: str | None = None  # 持久化数据库URL，如 "sqlite:///study.db"
+    db_url: str | None = None  # Persistence DB URL, e.g. "sqlite:///study.db"
     save_dir: str | None = None
     verbose: int = 1  # 0=quiet, 1=normal, 2=verbose
 
     def get_sampler(self) -> BaseSampler:
-        """根据配置创建采样器"""
+        """Create a sampler based on the configuration.
+
+        Returns:
+            An Optuna BaseSampler instance.
+
+        Raises:
+            ValueError: If the sampler name is not recognised.
+        """
         sampler_name = self.sampler.lower()
         kwargs = self.sampler_kwargs.copy()
 
@@ -160,7 +184,14 @@ class OptunaConfig:
             raise ValueError(f"Unsupported sampler: {sampler_name}")
 
     def get_pruner(self) -> BasePruner | None:
-        """根据配置创建修剪器"""
+        """Create a pruner based on the configuration.
+
+        Returns:
+            An Optuna BasePruner instance, or None if no pruner is configured.
+
+        Raises:
+            ValueError: If the pruner name is not recognised.
+        """
         if self.pruner is None:
             return None
 
@@ -182,14 +213,28 @@ class OptunaConfig:
 
 
 def load_config_from_json(config_path: str) -> OptunaConfig:
-    """从JSON文件加载Optuna配置"""
+    """Load an OptunaConfig from a JSON file.
+
+    Args:
+        config_path: Path to the JSON configuration file.
+
+    Returns:
+        An OptunaConfig instance.
+    """
     with open(config_path) as f:
         config_dict = json.load(f)
     return OptunaConfig(**config_dict)
 
 
 def load_param_space_from_json(space_path: str) -> list[HyperparameterSpace]:
-    """从JSON文件加载参数空间定义"""
+    """Load hyperparameter space definitions from a JSON file.
+
+    Args:
+        space_path: Path to the JSON parameter space file.
+
+    Returns:
+        A list of HyperparameterSpace instances.
+    """
     with open(space_path) as f:
         spaces_dict = json.load(f)
 

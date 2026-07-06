@@ -10,12 +10,20 @@ select = [
     "UP",  # pyupgrade
     "C4",  # flake8-comprehensions
     "SIM", # flake8-simplify
+    "D",   # pydocstyle
+    "RUF", # Ruff-specific
 ]
 
 ignore = [
-    "E501",    # 行太长
-    "SIM117",  # 嵌套 with 语句
+    "E501",   # line too long
+    "SIM117",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"model/**/*.py" = ["D", "RUF"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = ["utils", "model"]

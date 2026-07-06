@@ -1,6 +1,8 @@
-"""训练器基类模块
+"""Base trainer module.
 
-提供训练器的核心功能，包括设备管理、数据加载、训练循环等。
+Provides the core trainer functionality including device management,
+data loading, training loops, callbacks, checkpointing, and metric
+logging.
 """
 
 import os
@@ -43,14 +45,15 @@ logger = get_logger(__name__)
 
 @dataclass
 class StageResult:
-    """单个训练阶段的结果。
+    """Result of a single training stage.
 
     Attributes:
-        name: 阶段名称（单阶段训练为 ``None``）。
-        best_metric: 该阶段验证集上的最佳监控指标值。
-        best_epoch: 取得最佳指标的 epoch（从 0 开始）。
-        final_epoch: 该阶段实际训练到的最后一个 epoch。
-        monitor: 监控指标名（如 ``'auc'``/``'acc'``/``'rmse'``）。
+        name: Stage name (``None`` for single-stage training).
+        best_metric: Best monitored metric value on the validation set.
+        best_epoch: Epoch (0-indexed) at which the best metric was achieved.
+        final_epoch: Last epoch actually trained in this stage.
+        monitor: Name of the monitored metric (e.g. ``"auc"``, ``"acc"``,
+            ``"rmse"``).
     """
 
     name: str | None = None
@@ -61,27 +64,28 @@ class StageResult:
 
 
 class BaseTrainer(ABC):
-    """训练器基类
+    r"""Abstract base class for trainers.
 
-    子类需要实现：
-    1. __init__: 直接初始化模型
-    2. forward_pass: 模型前向传播逻辑
+    Subclasses must implement:
+    1. ``__init__``: Directly initialize the model.
+    2. ``forward_pass``: Model forward pass logic.
 
-    示例用法：
-        trainer = MyTrainer(model) \\
-            .with_training(epochs=150, seed=42) \\
-            .with_data(train_dataset, val_dataset, batch_size=128) \\
-            .with_optimization(optimizer, loss_fn, lr_scheduler) \\
-            .with_experiment(exp_manager, hyperparams=args) \\
+    Usage::
+
+        trainer = MyTrainer(model)
+            .with_training(epochs=150, seed=42)
+            .with_data(train_dataset, val_dataset, batch_size=128)
+            .with_optimization(optimizer, loss_fn, lr_scheduler)
+            .with_experiment(exp_manager, hyperparams=args)
             .build()
         trainer.run()
     """
 
     def __init__(self, model: torch.nn.Module):
-        """初始化训练器。
+        """Initialize the base trainer.
 
         Args:
-            model: PyTorch 模型
+            model: PyTorch model to train.
         """
         self.model = model
 
@@ -117,7 +121,7 @@ class BaseTrainer(ABC):
         self._custom_callbacks: list[Callback] = []
         self._custom_callback_functions: dict[str, list[Callable]] = {}
 
-        # 多阶段训练上下文（单阶段训练时为 None / 0）
+        # Multi-stage context (None/0 for single-stage)
         self._current_stage: str | None = None
         self._metric_step_offset: int = 0
 
@@ -128,16 +132,16 @@ class BaseTrainer(ABC):
         device: torch.device | None = None,
         checkpoint_path: str | None = None,
     ) -> "BaseTrainer":
-        """配置训练参数。
+        """Configure training parameters.
 
         Args:
-            epochs: 训练 epoch 数
-            seed: 随机种子
-            device: 计算设备（None 则自动检测）
-            checkpoint_path: 检查点路径（用于断点续训）
+            epochs: Number of training epochs.
+            seed: Random seed.
+            device: Compute device (auto-detected if None).
+            checkpoint_path: Path to checkpoint for resuming training.
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         self._training_config = TrainingConfig(
             epochs=epochs,
@@ -154,16 +158,18 @@ class BaseTrainer(ABC):
         dynamic: bool | None = None,
         backend: str = "inductor",
     ) -> "BaseTrainer":
-        """配置 torch.compile 编译优化。
+        """Configure ``torch.compile`` optimization.
 
         Args:
-            mode: 编译模式 ("default", "reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs")
-            fullgraph: 是否要求将整个函数捕获为单一计算图
-            dynamic: 是否使用动态形状追踪。None 表示自动检测，True 强制动态，False 强制静态
-            backend: 编译后端
+            mode: Compilation mode (``"default"``, ``"reduce-overhead"``,
+                ``"max-autotune"``, ``"max-autotune-no-cudagraphs"``).
+            fullgraph: Whether to require a single computational graph.
+            dynamic: Dynamic shape tracing. None = auto, True = force,
+                False = static.
+            backend: Compilation backend.
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         self._compile_config = {
             "mode": mode,
@@ -178,14 +184,15 @@ class BaseTrainer(ABC):
         callbacks: list[Callback] | None = None,
         functions: dict[str, Callable | list[Callable]] | None = None,
     ) -> "BaseTrainer":
-        """配置自定义回调。
+        """Configure custom callbacks.
 
         Args:
-            callbacks: 回调对象列表（可选）
-            functions: 事件名 -> 函数或函数列表（可选）
+            callbacks: List of callback objects (optional).
+            functions: Dict mapping event names to callables or lists
+                of callables (optional).
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         if callbacks:
             self._custom_callbacks.extend(callbacks)
@@ -198,11 +205,20 @@ class BaseTrainer(ABC):
         return self
 
     def register_callback(self, callback: Callback) -> None:
-        """注册单个回调对象。"""
+        """Register a single callback object.
+
+        Args:
+            callback: Callback instance to register.
+        """
         self._custom_callbacks.append(callback)
 
     def register_callback_fn(self, event: str, func: Callable) -> None:
-        """注册单个回调函数。"""
+        """Register a single callback function for a named event.
+
+        Args:
+            event: Event name (e.g. ``"on_epoch_end"``).
+            func: Callable to invoke on the event.
+        """
         self._custom_callback_functions.setdefault(event, []).append(func)
 
     def with_data(
@@ -215,19 +231,19 @@ class BaseTrainer(ABC):
         val_collate_fn=None,
         test_collate_fn=None,
     ) -> "BaseTrainer":
-        """配置数据加载器。
+        """Configure data loaders.
 
         Args:
-            train_data: 训练数据（DataLoader 或 Dataset）
-            batch_size: 批次大小
-            val_data: 验证数据（DataLoader 或 Dataset）
-            test_data: 测试数据（DataLoader 或 Dataset，可选）
-            collate_fn: 自定义 collate 函数（可选）
-            val_collate_fn: 自定义验证 collate 函数（可选）
-            test_collate_fn: 自定义测试 collate 函数（可选）
+            train_data: Training data (DataLoader or Dataset).
+            batch_size: Batch size.
+            val_data: Validation data (DataLoader or Dataset).
+            test_data: Test data (DataLoader or Dataset, optional).
+            collate_fn: Custom collate function (optional).
+            val_collate_fn: Custom validation collate function (optional).
+            test_collate_fn: Custom test collate function (optional).
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         self._data_config = DataConfig(
             train_data=train_data,
@@ -248,17 +264,17 @@ class BaseTrainer(ABC):
         lr_scheduler=None,
         early_stopping: EarlyStoppingConfig | None = None,
     ) -> "BaseTrainer":
-        """配置优化器、损失函数和调度器。
+        """Configure optimizer, loss function, and scheduler.
 
         Args:
-            optimizer: PyTorch 优化器
-            loss_fn: 损失函数
-            max_clip_grad_norm: 最大梯度范数（可选）
-            lr_scheduler: 学习率调度器（可选）
-            early_stopping: 早停配置（可选）
+            optimizer: PyTorch optimizer.
+            loss_fn: Loss function.
+            max_clip_grad_norm: Maximum gradient norm for clipping (optional).
+            lr_scheduler: Learning rate scheduler (optional).
+            early_stopping: Early stopping configuration (optional).
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         self._optimization_config = OptimizationConfig(
             optimizer=optimizer,
@@ -279,19 +295,19 @@ class BaseTrainer(ABC):
         dataset_name: str = "",
         skip_test: bool = False,
     ) -> "BaseTrainer":
-        """配置实验管理和追踪。
+        """Configure experiment management and tracking.
 
         Args:
-            exp_manager: 实验管理器实例
-            hyperparams: 超参数（字典或对象，可选）
-            no_swanlab: 是否关闭 SwanLab（None 时从 hyperparams 读取）
-            log_batch_metrics: 是否记录每 batch loss（None 时从 hyperparams 读取）
-            model_name: 模型名称
-            dataset_name: 数据集名称
-            skip_test: 是否跳过训练完成后的测试集评估（默认 False）
+            exp_manager: Experiment manager instance.
+            hyperparams: Hyperparameters (dict or namespace, optional).
+            no_swanlab: Disable SwanLab (None = read from hyperparams).
+            log_batch_metrics: Log per-batch loss (None = read from hyperparams).
+            model_name: Model name.
+            dataset_name: Dataset name.
+            skip_test: Skip test set evaluation after training.
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         self._experiment_config = ExperimentConfig(
             exp_manager=exp_manager,
@@ -305,10 +321,14 @@ class BaseTrainer(ABC):
         return self
 
     def build(self) -> "BaseTrainer":
-        """构建训练器。
+        """Build the trainer, initializing all components.
+
+        Validates configurations, sets up device, data loaders,
+        optimization, early stopping, callbacks, logging, and
+        hyperparameters.
 
         Returns:
-            Self for method chaining
+            Self for method chaining.
         """
         if self._built:
             logger.warning("Trainer already built. Skipping rebuild.")
@@ -339,8 +359,7 @@ class BaseTrainer(ABC):
         # 2. Setup training parameters
         self.epochs = self._training_config.epochs
 
-        # 解析 no_swanlab / log_batch_metrics：显式传入优先，否则回退到 CLI 参数，
-        # 使 --no_swanlab / --log_batch_metrics 对所有模型生效。
+        # Resolve no_swanlab / log_batch_metrics
         hyperparams = self._experiment_config.hyperparams
         self.no_swanlab, self.log_batch_metrics = resolve_metric_logging_flags(
             self._experiment_config, hyperparams
@@ -378,7 +397,6 @@ class BaseTrainer(ABC):
         # 8. Initialize components
         self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
-        # 本地指标记录始终启用；SwanLab 除非 --no_swanlab
         self.metric_logger = build_default_metric_loggers(
             log_dir=self.log_dir,
             log_batch_metrics=self.log_batch_metrics,
@@ -410,12 +428,14 @@ class BaseTrainer(ABC):
         )
         if not getattr(self, "skip_test", False):
             callbacks.append(TestEvaluationCallback(use_best_model=True))
-            # 检查测试集是否未传入或为空
             if self.test_data is None:
                 logger.warning(
-                    "Test data was not provided during trainer initialization. Test evaluation will be skipped. \n"
-                    "Cause: The model's trainer was initialized without passing test_data to with_data(). \n"
-                    "Fix: Ensure to pass test_data to with_data(), or use '--skip_test' to skip test evaluation explicitly."
+                    "Test data was not provided during trainer initialization. "
+                    "Test evaluation will be skipped. "
+                    "Cause: The model's trainer was initialized without passing "
+                    "test_data to with_data(). "
+                    "Fix: Ensure to pass test_data to with_data(), or use "
+                    "'--skip_test' to skip test evaluation explicitly."
                 )
             else:
                 test_len = (
@@ -423,13 +443,17 @@ class BaseTrainer(ABC):
                 )
                 if test_len is not None and test_len == 0:
                     logger.warning(
-                        "Test set is empty (0 samples). Test evaluation will produce no results. \n"
-                        "Cause: No users were assigned to the test fold (fold=-1) during data preprocessing. \n"
-                        "This happens when: \n"
-                        "(1) add_kfold_labels() was called with test_ratio=0, or \n"
-                        "(2) test_ratio > 0 but int(num_users * test_ratio) == 0 due to small dataset size. \n"
-                        "Fix: Re-run data preprocessing with a larger test_ratio value, \n"
-                        "or use '--skip_test' to skip test evaluation explicitly."
+                        "Test set is empty (0 samples). Test evaluation will "
+                        "produce no results. "
+                        "Cause: No users were assigned to the test fold (fold=-1) "
+                        "during data preprocessing. "
+                        "This happens when: "
+                        "(1) add_kfold_labels() was called with test_ratio=0, or "
+                        "(2) test_ratio > 0 but int(num_users * test_ratio) == 0 "
+                        "due to small dataset size. "
+                        "Fix: Re-run data preprocessing with a larger test_ratio "
+                        "value, or use '--skip_test' to skip test evaluation "
+                        "explicitly."
                     )
         else:
             logger.info("Test evaluation will be skipped.")
@@ -455,7 +479,11 @@ class BaseTrainer(ABC):
         return self
 
     def _setup_data_loaders(self):
-        """设置数据加载器。"""
+        """Set up data loaders for train, validation, and test sets.
+
+        Converts Dataset instances to optimized DataLoaders; passes
+        DataLoader instances through unchanged.
+        """
         train_data = self._data_config.train_data
         val_data = self._data_config.val_data
         test_data = self._data_config.test_data
@@ -480,7 +508,7 @@ class BaseTrainer(ABC):
         self.test_data = _build_loader(test_data, False, test_collate_fn)
 
     def _setup_early_stopping(self):
-        """设置早停。"""
+        """Set up early stopping from the optimization configuration."""
         early_stopping_cfg = self._optimization_config.early_stopping
         self.early_stopping = (
             EarlyStopping(early_stopping_cfg)
@@ -489,13 +517,14 @@ class BaseTrainer(ABC):
         )
 
     def _apply_compile(self):
-        """如果已配置，则将 torch.compile 应用于模型。
+        """Apply ``torch.compile`` to the model if configured.
 
-        支持两种配置方式：
-        1. 通过 with_compile() 链式调用显式配置
-        2. 通过 args（hyperparams）中的 compile 参数自动配置
+        Supports two configuration paths:
+        1. Explicit via ``with_compile()`` chained call.
+        2. Automatic via ``hyperparams.compile`` flag.
+
+        When both are set, explicit configuration takes precedence.
         """
-        # 如果没有通过 with_compile 显式配置，尝试从 hyperparams 读取
         if self._compile_config is None:
             hyperparams = None
             if self._experiment_config is not None:
@@ -528,43 +557,52 @@ class BaseTrainer(ABC):
 
     @abstractmethod
     def forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
-        """模型前向传播。
+        """Perform a forward pass for a single batch.
 
         Args:
-            batch_data: 从 DataLoader 获取的一个批次数据
+            batch_data: A batch of data from the DataLoader.
 
         Returns:
-            包含 "y_hat", "y_label", "y_predict" 的字典
+            Dict containing at least ``"y_hat"``, ``"y_label"``,
+            ``"y_predict"``.
         """
         raise NotImplementedError("Subclasses must implement forward_pass method")
 
     def test_forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
-        """测试集前向传播。
+        """Perform a forward pass for test data.
+
+        Defaults to ``forward_pass``; override for test-specific logic
+        (e.g. multi-stage where test uses a specific sub-model).
 
         Args:
-            batch_data: 从 DataLoader 获取的一个批次数据
+            batch_data: A batch of test data from the DataLoader.
 
         Returns:
-            包含 "y_hat", "y_label", "y_predict" 的字典
+            Dict containing at least ``"y_hat"``, ``"y_label"``,
+            ``"y_predict"``.
         """
         return self.forward_pass(batch_data)
 
     @staticmethod
     def _try_gpu() -> torch.device:
-        """获取可用的 GPU 设备。"""
+        """Get the best available GPU device, falling back to CPU.
+
+        Returns:
+            A torch.device, ``"cuda"`` if available else ``"cpu"``.
+        """
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def _move_tensor_to_device(
         self, tensor: torch.Tensor, dtype: torch.dtype = None
     ) -> torch.Tensor:
-        """将张量移动到设备，并可选择类型转换。
+        """Move a tensor to the trainer's device, optionally casting dtype.
 
         Args:
-            tensor: 输入张量
-            dtype: 可选的目标类型（如 torch.bool）
+            tensor: Input tensor.
+            dtype: Target dtype (e.g. ``torch.bool``), optional.
 
         Returns:
-            移动到设备后的张量
+            Tensor moved to device and optionally cast.
         """
         result = tensor.to(self.device_)
         if dtype is not None:
@@ -578,56 +616,62 @@ class BaseTrainer(ABC):
         mask: torch.Tensor,
         same_position: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """提取有效位置的预测和标签。
+        """Extract predictions and labels at valid positions.
 
-        约定：``y_hat_full[t]`` 预测 ``response[t+1]``。提取始终按 next-item：
-        ``y_hat_full[:,:-1]`` 配 ``response[:,1:]``，相邻对掩码
-        ``mask[:,:-1] & mask[:,1:]``。
+        Convention: ``y_hat_full[t]`` predicts ``response[t+1]``
+        (next-item). Extraction always follows next-item alignment:
+        ``y_hat_full[:, :-1]`` paired with ``response[:, 1:]``, with
+        valid mask ``mask[:, :-1] & mask[:, 1:]``.
 
-        ``same_position=True`` 表示输入是同位置约定（``out[t]`` 预测 ``response[t]``），
-        此时先左移一位并在末尾补占位列（丢掉无历史的第 0 位预测）转成 next-item 视图，
-        再按同一对齐提取——仅做输入归一化，不引入第二种对齐方式。
+        When ``same_position=True``, the input uses same-position
+        convention (``out[t]`` predicts ``response[t]``). The output
+        is left-shifted by one and padded with a placeholder column
+        to normalize into next-item view before extraction — no second
+        alignment is introduced.
 
-        参数:
-            y_hat_full: 模型输出 [B, S]（默认 next-item；same_position=True 时为同位置）
-            response: 响应标签 [B, S]
-            mask: 有效位置掩码 [B, S]
-            same_position: 输入是否为同位置约定（out[t] 预测 response[t]）
+        Args:
+            y_hat_full: Model output tensor ``[B, S]``.
+            response: Response label tensor ``[B, S]``.
+            mask: Valid position mask ``[B, S]``.
+            same_position: Whether input uses same-position convention
+                (``out[t]`` predicts ``response[t]``).
 
-        返回:
-            y_hat: 有效位置的预测值
-            y_label: 有效位置的标签
-            valid_mask: 有效掩码（相邻对：当前位置与下一位置均有效）
+        Returns:
+            Tuple ``(y_hat, y_label, valid_mask)`` where:
+                y_hat: Predictions at valid positions.
+                y_label: Labels at valid positions.
+                valid_mask: Mask of valid adjacent pairs.
         """
-        # 同位置输入先归一化为 next-item 视图（丢无历史的第 0 位 + 末尾补占位）
+        # Normalize same-position input to next-item view
         if same_position:
             y_hat_full = self._pad_to_full_sequence(y_hat_full[:, 1:])
 
-        # next-item 对齐：t 时刻的预测对应 t+1 时刻的标签
+        # Next-item alignment: t-th prediction corresponds to (t+1)-th label
         y_hat_seq = y_hat_full[:, :-1]
         y_label_seq = response.float()[:, 1:]
         mask_curr = mask[:, :-1]
         mask_next = mask[:, 1:]
         valid_mask = mask_curr & mask_next
 
-        # 使用 mask 选择有效位置
+        # Select valid positions with masking
         y_hat = torch.masked_select(y_hat_seq, valid_mask)
         y_label = torch.masked_select(y_label_seq, valid_mask)
 
         return y_hat, y_label, valid_mask
 
     def _pad_to_full_sequence(self, y_hat: torch.Tensor) -> torch.Tensor:
-        """在时间维末尾补一列零占位，把 ``[B, L]`` 延长为 ``[B, L+1]``。
+        """Pad a tensor with a trailing zero column, extending ``[B, L]`` to ``[B, L+1]``.
 
-        用于 next-item 但输出长度为 ``S-1`` 的模型（如 GKT/SAKT/SGKT/MIKT/KQN）：
-        把 ``[B, S-1]`` 补到 ``[B, S]`` 以满足 :meth:`_extract_valid_predictions`
-        的契约。末尾占位列会被内置函数的 ``[:, :-1]`` 切片丢弃，永不参与评分。
+        Used for models (GKT, SAKT, SGKT, MIKT, KQN) whose output
+        length is ``S-1`` under next-item convention. The trailing
+        placeholder is discarded by ``_extract_valid_predictions``'s
+        ``[:, :-1]`` slice.
 
-        参数:
-            y_hat: 模型输出 [B, L]（next-item 约定下 y[t] 预测 response[t+1]）
+        Args:
+            y_hat: Model output ``[B, L]``.
 
-        返回:
-            [B, L+1]，末列为零占位
+        Returns:
+            Tensor ``[B, L+1]`` with a zero placeholder at the last column.
         """
         dummy = torch.zeros(y_hat.size(0), 1, device=y_hat.device)
         return torch.cat([y_hat, dummy], dim=1)
@@ -635,15 +679,17 @@ class BaseTrainer(ABC):
     def _handle_empty_batch(
         self, y_hat: torch.Tensor, y_label: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        处理空批次情况，使用占位张量避免后续计算报错
+        """Handle an empty batch by raising a descriptive error.
 
-        参数:
-            y_hat: 预测值张量
-            y_label: 标签张量
+        Args:
+            y_hat: Prediction tensor.
+            y_label: Label tensor.
 
-        返回:
-            处理后的 (y_hat, y_label) 元组
+        Returns:
+            The input ``(y_hat, y_label)`` tuple unchanged.
+
+        Raises:
+            ValueError: If the label tensor is empty.
         """
         if y_label.numel() == 0:
             raise ValueError(
@@ -656,29 +702,28 @@ class BaseTrainer(ABC):
     def _generate_binary_predictions(
         self, y_hat: torch.Tensor, threshold: float = 0.0
     ) -> torch.Tensor:
-        """
-        生成二分类预测，使用阈值将 logits 转换为 0/1 预测
+        """Generate binary predictions from logits using a threshold.
 
-        参数:
-            y_hat: 预测 logits
-            threshold: 阈值（默认 0.0）
+        Args:
+            y_hat: Prediction logits.
+            threshold: Classification threshold (default 0.0).
 
-        返回:
-            二分类预测张量（0 或 1）
+        Returns:
+            Binary prediction tensor (0 or 1).
         """
         return torch.ge(y_hat, torch.tensor(threshold).to(self.device_)).to(torch.int)
 
     def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
-        """设置并保存超参数。
+        """Set up and save hyperparameters.
 
         Args:
-            hyperparams: 超参数（字典或 Namespace 对象）
-            model_name: 模型名称（可选）
-            dataset_name: 数据集名称（可选）
+            hyperparams: Hyperparameters (dict or Namespace object).
+            model_name: Model name (optional).
+            dataset_name: Dataset name (optional).
         """
         from utils.hyperparam_manager import create_hyperparameter_manager
 
-        # 创建超参数管理器
+        # Create hyperparameter manager
         self.hyperparam_manager = create_hyperparameter_manager(
             args=hyperparams,
             save_dir=self.log_dir,
@@ -686,8 +731,8 @@ class BaseTrainer(ABC):
             dataset_name=dataset_name,
         )
 
-        # 添加训练器相关元数据
-        # 多阶段训练器在 build() 阶段尚未创建模型/优化器，此时跳过对应元数据
+        # Add trainer-related metadata
+        # Multi-stage trainers may not have model/optimizer at build time
         if self.model is not None:
             self.hyperparam_manager.add_metadata(
                 "total_params",
@@ -710,26 +755,30 @@ class BaseTrainer(ABC):
         if self.seed is not None:
             self.hyperparam_manager.add_metadata("seed", self.seed)
 
-        # 添加设备信息
+        # Add device info
         if self.device_ is not None:
             device_info = self._get_device_info()
             for key, value in device_info.items():
                 self.hyperparam_manager.add_metadata(key, value)
 
-        # 保存超参数
+        # Save hyperparameters
         self.hyperparam_manager.save()
 
-        # 打印摘要
+        # Print summary
         self.hyperparam_manager.print_summary()
 
     def _get_device_info(self):
-        """获取设备信息，包括 CUDA 设备型号。"""
+        """Get device information including CUDA device details.
+
+        Returns:
+            Dict with keys like ``cuda_available``, ``cuda_device_count``,
+            ``cuda_device_name``, etc.
+        """
         device_info = {}
 
         if self.device_.type == "cuda":
             device_info["cuda_available"] = True
             device_info["cuda_device_count"] = torch.cuda.device_count()
-            # 获取当前设备的索引
             device_index = self.device_.index if self.device_.index is not None else 0
             device_info["cuda_device_name"] = torch.cuda.get_device_name(device_index)
             device_info["cuda_device_capability"] = torch.cuda.get_device_capability(
@@ -742,7 +791,11 @@ class BaseTrainer(ABC):
         return device_info
 
     def _load_checkpoint(self, checkpoint_path: str):
-        """加载检查点。"""
+        """Load a checkpoint to resume training.
+
+        Args:
+            checkpoint_path: Path to the checkpoint file.
+        """
         logger.info(f"Loading checkpoint from {checkpoint_path}...")
         checkpoint = self.checkpoint_manager.load_checkpoint(
             checkpoint_path,
@@ -759,7 +812,11 @@ class BaseTrainer(ABC):
         logger.info(f"Resumed training from epoch {self.start_epoch}")
 
     def _init_metric_logger(self):
-        """初始化指标记录后端（本地始终启用，SwanLab 除非 --no_swanlab）。"""
+        """Initialize the metric logging backend.
+
+        Local CSV logging is always enabled; SwanLab is included unless
+        ``--no_swanlab`` was set.
+        """
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
         config = (
             self.hyperparam_manager.get_hyperparameters_dict()
@@ -771,24 +828,26 @@ class BaseTrainer(ABC):
             experiment_name=experiment_name,
             group=self.model.__class__.__name__,
             tags=["cuda" if torch.cuda.is_available() else "cpu"],
-            config=config,  # 展平后的 dict，SwanLab 要求 value 为标量
+            config=config,
         )
 
     def _finish_metric_logger(self):
-        """结束指标记录后端。"""
+        """Finalize and shut down the metric logging backend."""
         self.metric_logger.finish()
         logger.info("Metric logging finished")
 
     def run(self):
-        """运行训练循环。"""
-        # Explicit build required
+        """Run the full training loop.
+
+        Initializes metric logging, runs the training loop, and
+        finalizes logging and checkpoints.
+        """
         if not self._built:
             raise RuntimeError(
                 "Trainer has not been built. Please call build() explicitly "
                 "before run()."
             )
 
-        # Initialize metric loggers
         self._init_metric_logger()
 
         self._run_training_loop()
@@ -796,18 +855,19 @@ class BaseTrainer(ABC):
         self._finish()
 
     def _run_training_loop(self, start_epoch: int | None = None) -> StageResult:
-        """运行单个训练阶段的 epoch 循环（进度条 + epoch 循环 + 回调）。
+        """Run the epoch training loop for a single stage.
 
-        多阶段训练器通过 ``_apply_stage`` 切换 ``self.model`` / ``self.opt`` /
-        ``self.train_data`` / ``self.epochs`` / ``self.early_stopping`` 等属性后
-        重复调用本方法。
+        Includes progress bar, epoch loop, callbacks, learning rate
+        scheduling, and early stopping. Multi-stage trainers call this
+        after switching ``self.model`` / ``self.opt`` / ``self.train_data``
+        via ``_apply_stage``.
 
         Args:
-            start_epoch: 起始 epoch（``None`` 时使用 ``self.start_epoch``，
-                用于断点续训）。
+            start_epoch: Starting epoch (``None`` uses ``self.start_epoch``,
+                used for checkpoint resume).
 
         Returns:
-            本阶段的 :class:`StageResult`。
+            A :class:`StageResult` for this stage.
         """
         if start_epoch is None:
             start_epoch = self.start_epoch
@@ -815,25 +875,25 @@ class BaseTrainer(ABC):
         self.model.to(self.device_)
         self.loss = self.loss.to(self.device_)
 
-        # 触发训练开始回调
+        # Trigger training start callback
         self.callback_manager.on_train_begin(self.epochs, trainer=self)
 
-        # 创建进度条
+        # Create progress display
         progress = create_progress()
 
-        # 多阶段训练时在进度条/日志前加上阶段名前缀
+        # Stage prefix for multi-stage logging
         stage_prefix = (
             f"[{self._current_stage.upper()}] " if self._current_stage else ""
         )
         total_label = f"{stage_prefix}Epochs" if self._current_stage else "Total Epochs"
 
-        # “Best” 指标取自检查点监控（可能与早停监控不同）
+        # Get monitor name from checkpoint callback
         checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
         monitor_name = (
             checkpoint_cb._monitor_name() if checkpoint_cb else self._monitor_name()
         )
 
-        # 创建最佳指标显示
+        # Create best metric display
         best_metric_text = None
         renderables = [progress]
         if self.early_stopping is not None:
@@ -844,11 +904,9 @@ class BaseTrainer(ABC):
             renderables.insert(0, best_metric_text)
 
         with Live(Group(*renderables)):
-            # 创建进度任务
             total_task = progress.add_task(
                 f"[bold red]{total_label}", total=self.epochs, completed=start_epoch
             )
-            # 训练/验证共用同一条工作进度条，切换阶段时重置 total 与描述
             work_task = progress.add_task(
                 "[bold green]Training", total=len(self.train_data)
             )
@@ -857,10 +915,9 @@ class BaseTrainer(ABC):
             for epoch in range(start_epoch, self.epochs):
                 logger.info(f"{stage_prefix}Epoch {epoch + 1}/{self.epochs}")
 
-                # Epoch 开始回调
                 self.callback_manager.on_epoch_begin(epoch, trainer=self)
 
-                # 训练阶段
+                # Training phase
                 progress.reset(
                     work_task,
                     total=len(self.train_data),
@@ -870,7 +927,7 @@ class BaseTrainer(ABC):
                     epoch, is_train=True, progress=progress, task_id=work_task
                 )
 
-                # 验证阶段
+                # Validation phase
                 val_loss = None
                 if self.val_data is not None:
                     progress.reset(
@@ -882,12 +939,11 @@ class BaseTrainer(ABC):
                         epoch, is_train=False, progress=progress, task_id=work_task
                     )
 
-                # Epoch 结束回调
                 self.callback_manager.on_epoch_end(
                     epoch, train_loss, val_loss, trainer=self
                 )
 
-                # 更新最佳指标显示
+                # Update best metric display
                 if (
                     self.early_stopping is not None
                     and best_metric_text is not None
@@ -900,7 +956,6 @@ class BaseTrainer(ABC):
                     best_str = (
                         f"{best_metric:.4f}" if best_metric is not None else "N/A"
                     )
-
                     best_metric_text.plain = (
                         f"{stage_prefix}Best {monitor_name.upper()}: {best_str} "
                         f"(Epoch {best_epoch + 1 if best_epoch is not None else 'N/A'}, "
@@ -908,24 +963,24 @@ class BaseTrainer(ABC):
                     )
                     best_metric_text.stylize("bold yellow")
 
-                # 学习率调度器更新
+                # Learning rate scheduler step
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step()
 
-                # 更新总进度
+                # Update total progress
                 progress.advance(total_task)
 
-                # 检查是否应该停止
+                # Check early stopping
                 if self.callback_manager.should_stop(trainer=self):
                     progress.console.log(
-                        f"[bold red]{stage_prefix}Early stopping triggered at epoch {epoch + 1}"
+                        f"[bold red]{stage_prefix}Early stopping triggered at "
+                        f"epoch {epoch + 1}"
                     )
                     break
 
         logger.info("Training complete")
         self.callback_manager.on_train_end(trainer=self)
 
-        # 汇总本阶段最佳指标
         return StageResult(
             name=self._current_stage,
             best_metric=checkpoint_cb.best_metric if checkpoint_cb else None,
@@ -937,16 +992,16 @@ class BaseTrainer(ABC):
     def _process_epoch(
         self, epoch: int, is_train: bool, progress=None, task_id=None
     ) -> float:
-        """处理一个 epoch。
+        """Process a single epoch of training or validation.
 
         Args:
-            epoch: 当前 epoch
-            is_train: 是否为训练模式
-            progress: Rich Progress 对象（可选）
-            task_id: 进度任务 ID（可选）
+            epoch: Current epoch number.
+            is_train: Whether this is a training (vs validation) epoch.
+            progress: Rich Progress object (optional).
+            task_id: Progress task ID (optional).
 
         Returns:
-            总损失
+            Total loss for this epoch.
         """
         phase = "train" if is_train else "val"
         data_loader = self.train_data if is_train else self.val_data
@@ -957,10 +1012,8 @@ class BaseTrainer(ABC):
 
         total_loss = 0.0
         for batch_idx, batch_data in enumerate(data_loader):
-            # Batch 回调
             self.callback_manager.on_batch_begin(epoch, batch_idx, phase, trainer=self)
 
-            # 前向传播
             with torch.set_grad_enabled(is_train):
                 if is_train:
                     loss = self._run_train_batch(batch_data)
@@ -969,7 +1022,7 @@ class BaseTrainer(ABC):
 
             total_loss += loss
 
-            # 记录每 batch loss（可选）并更新全局训练步数
+            # Log per-batch loss (optional) and update global step
             if self.log_batch_metrics:
                 self.metric_logger.log_batch(
                     phase=phase,
@@ -982,16 +1035,14 @@ class BaseTrainer(ABC):
             if is_train:
                 self._global_step += 1
 
-            # 更新进度条
             if progress is not None and task_id is not None:
                 progress.advance(task_id)
 
-            # Batch 结束回调
             self.callback_manager.on_batch_end(
                 epoch, batch_idx, phase, loss, trainer=self
             )
 
-        # 聚合并记录指标
+        # Aggregate and log metrics
         metrics = self.metrics_accumulator.compute(phase)
         self.metric_logger.log_metrics(
             phase=phase,
@@ -1001,7 +1052,6 @@ class BaseTrainer(ABC):
             stage=self._current_stage,
         )
 
-        # Phase 结束回调
         self.callback_manager.on_phase_end(
             epoch, phase, total_loss, metrics, trainer=self
         )
@@ -1009,7 +1059,17 @@ class BaseTrainer(ABC):
         return total_loss
 
     def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """执行一个训练批次。"""
+        """Execute a single training batch.
+
+        Performs forward pass, loss computation, backpropagation,
+        gradient clipping, and optimizer step.
+
+        Args:
+            batch_data: A batch of training data.
+
+        Returns:
+            Loss value for this batch (Python scalar).
+        """
         self.opt.zero_grad()
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
@@ -1020,48 +1080,74 @@ class BaseTrainer(ABC):
             )
         self.opt.step()
 
-        # 累积预测
         self.metrics_accumulator.update("train", output)
 
         return loss.item()
 
     @torch.inference_mode()
     def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """执行一个验证批次。"""
+        """Execute a single evaluation (validation) batch.
+
+        Args:
+            batch_data: A batch of validation data.
+
+        Returns:
+            Loss value for this batch (Python scalar).
+        """
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
 
-        # 累积预测
         self.metrics_accumulator.update("val", output)
 
         return loss.item()
 
     @torch.inference_mode()
     def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """执行一个测试批次。"""
+        """Execute a single test batch.
+
+        Uses ``test_forward_pass`` instead of ``forward_pass`` to
+        support test-specific logic.
+
+        Args:
+            batch_data: A batch of test data.
+
+        Returns:
+            Loss value for this batch (Python scalar).
+        """
         output = self.test_forward_pass(batch_data)
         loss = self._compute_loss(output)
 
-        # 累积预测
         self.metrics_accumulator.update("test", output)
 
         return loss.item()
 
     @torch.inference_mode()
     def _evaluate_on_test_set(self, use_best_model: bool = True) -> dict[str, float]:
-        """训练结束后在测试集上评估并记录指标。"""
+        """Evaluate the model on the test set after training.
+
+        Optionally loads the best model before evaluation.
+
+        Args:
+            use_best_model: Whether to load the best checkpoint first.
+
+        Returns:
+            Dictionary of test metrics (e.g. auc, acc, rmse).
+            Empty dict if test data is not available.
+        """
         if self.test_data is None:
             logger.info("Test data not provided. Skipping test evaluation.")
             return {}
 
-        # 检查测试集是否为空
+        # Check if test set is empty
         test_len = len(self.test_data) if hasattr(self.test_data, "__len__") else None
         if test_len is not None and test_len == 0:
             logger.warning(
                 "Test DataLoader is empty (0 batches). Skipping test evaluation. "
                 "Cause: The test dataset contains no samples. "
-                "During data preprocessing, add_kfold_labels(test_ratio=...) assigned 0 users to the test fold (fold=-1). "
-                "Training and validation completed successfully, but no test metrics will be recorded."
+                "During data preprocessing, add_kfold_labels(test_ratio=...) "
+                "assigned 0 users to the test fold (fold=-1). "
+                "Training and validation completed successfully, but no test "
+                "metrics will be recorded."
             )
             return {}
 
@@ -1083,7 +1169,6 @@ class BaseTrainer(ABC):
         self.metrics_accumulator.reset("test")
         self.model.eval()
 
-        # 创建测试阶段进度条
         test_progress = create_progress()
 
         total_loss = 0.0
@@ -1178,19 +1263,30 @@ class BaseTrainer(ABC):
         return metrics
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
-        """计算损失。"""
+        """Compute the training loss from model outputs.
+
+        Args:
+            outputs: Dict containing ``"y_hat"`` and ``"y_label"``.
+
+        Returns:
+            Loss tensor.
+        """
         y_hat = outputs["y_hat"]
         y_label = outputs["y_label"]
         return self.loss(y_hat, y_label)
 
     def _monitor_name(self) -> str:
-        """获取早停监控指标名称。"""
+        """Get the name of the metric being monitored for early stopping.
+
+        Returns:
+            Metric name string, defaulting to ``"auc"``.
+        """
         if self.early_stopping is None:
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
 
     def _finish(self):
-        """清理资源，结束实验追踪。"""
+        """Clean up resources and finalize experiment tracking."""
         self._finish_metric_logger()
         if self.checkpoint_manager is not None:
             self.checkpoint_manager.close()

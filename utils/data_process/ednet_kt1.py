@@ -1,3 +1,5 @@
+"""EdNet-KT1 dataset handler."""
+
 import os
 
 import polars as pl
@@ -36,7 +38,13 @@ def _canonicalize_tags(tags: str, sep: str = ";") -> str | None:
 
 @register_data_source("ednet_kt1")
 class EdNetKT1Data(DataSource):
+    """EdNet-KT1 dataset handler.
+
+    Dataset source: https://github.com/riiid/ednet
+    """
+
     def __init__(self, args):
+        """Initialize the EdNet-KT1 dataset handler."""
         super().__init__(
             dataset="ednet_kt1",
             data_base_path=args.data_base_path,

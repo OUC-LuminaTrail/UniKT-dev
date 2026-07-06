@@ -1,3 +1,10 @@
+"""Process manager — experiment task lifecycle and execution queue.
+
+Manages PTY-backed subprocesses for experiment tasks, including queue-based
+concurrency control, log chunk persistence, terminal resize, and recovery
+of interrupted tasks on restart.
+"""
+
 import contextlib
 import fcntl
 import json
@@ -20,7 +27,22 @@ from services.python_env import PythonEnvManager
 
 
 class ProcessManager:
+    """Manages experiment task subprocesses with a concurrent execution queue.
+
+    Launches PTY-backed subprocesses, enforces a configurable concurrency limit,
+    stores output as LogChunks, and provides queue management, stop/kill controls,
+    terminal resize, and process recovery on restart.
+
+    Args:
+        env_manager: PythonEnvManager used to resolve task commands.
+    """
+
     def __init__(self, env_manager: PythonEnvManager):
+        """Initialize the ProcessManager.
+
+        Args:
+            env_manager: PythonEnvManager used to resolve commands.
+        """
         self._env_manager = env_manager
         self._monitors: dict[int, threading.Thread] = {}
         self._procs: dict[int, subprocess.Popen] = {}
@@ -33,10 +55,12 @@ class ProcessManager:
 
     @property
     def max_concurrent(self) -> int:
+        """Maximum number of tasks that may run simultaneously."""
         return self._max_concurrent
 
     @max_concurrent.setter
     def max_concurrent(self, value: int) -> None:
+        """Set the maximum concurrent task limit and adjust slots."""
         with self._lock:
             diff = max(1, value) - self._max_concurrent
             self._max_concurrent = max(1, value)
@@ -45,12 +69,26 @@ class ProcessManager:
 
     @property
     def running_count(self) -> int:
+        """Number of currently running tasks."""
         return len(self._procs)
 
     def get_queue(self) -> list[int]:
+        """Return a copy of the ordered task ID queue.
+
+        Returns:
+            A list of task IDs in queue order.
+        """
         return list(self._queue)
 
     def reorder_queue(self, task_ids: list[int]) -> None:
+        """Reorder the task execution queue.
+
+        Tasks in ``task_ids`` that are in the queue are moved to the front
+        in the given order; unprescribed tasks stay at the back.
+
+        Args:
+            task_ids: Desired queue order for the specified task IDs.
+        """
         with self._lock:
             task_set = set(task_ids)
             preserved = [tid for tid in self._queue if tid not in task_set]
@@ -58,6 +96,14 @@ class ProcessManager:
             self._queue = valid + preserved
 
     def remove_from_queue(self, task_id: int) -> bool:
+        """Remove a task from the queue if present.
+
+        Args:
+            task_id: The task identifier to remove.
+
+        Returns:
+            True if the task was removed, False if it was not in the queue.
+        """
         with self._lock:
             if task_id in self._queue:
                 self._queue.remove(task_id)
@@ -72,6 +118,15 @@ class ProcessManager:
         env_id: str,
         custom_python_path: str | None = None,
     ) -> None:
+        """Create a task record and enqueue it for execution.
+
+        Args:
+            task_id: The task identifier.
+            model_name: Model name for the experiment.
+            params: Training parameters including dataset.
+            env_id: Python environment identifier.
+            custom_python_path: Optional custom Python interpreter path.
+        """
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task:
@@ -98,11 +153,20 @@ class ProcessManager:
         self,
         task_id: int,
     ) -> None:
+        """Add a task ID to the end of the execution queue.
+
+        Args:
+            task_id: The task identifier to enqueue.
+        """
         with self._lock:
             self._queue.append(task_id)
         self._dequeue_next()
 
     def _dequeue_next(self) -> None:
+        """Pop the next eligible task from the queue and launch it.
+
+        Continues until the queue is empty or all slots are occupied.
+        """
         while True:
             with self._lock:
                 if not self._queue or self._available_slots <= 0:
@@ -146,6 +210,20 @@ class ProcessManager:
         env_id: str,
         custom_python_path: str | None = None,
     ) -> bool:
+        """Launch a task subprocess with a PTY.
+
+        Creates a PTY, spawns the subprocess, and starts reader/monitor threads.
+
+        Args:
+            task_id: The task identifier.
+            model_name: Model name.
+            params: Training parameters.
+            env_id: Python environment identifier.
+            custom_python_path: Optional custom Python interpreter path.
+
+        Returns:
+            True if the process launched successfully, False otherwise.
+        """
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task:
@@ -247,6 +325,14 @@ class ProcessManager:
         return True
 
     def _read_pty(self, task_id: int, master_fd: int) -> None:
+        """Read PTY output and persist as LogChunks in the database.
+
+        Runs in a daemon thread until the PTY is closed.
+
+        Args:
+            task_id: The task identifier.
+            master_fd: The PTY master file descriptor.
+        """
         offset = 0
         with SessionLocal() as session:
             last_chunk = (
@@ -280,6 +366,15 @@ class ProcessManager:
         self._master_fds.pop(task_id, None)
 
     def _build_cli_args(self, model_name: str, params: dict) -> list[str]:
+        """Build CLI argument list from model name and parameters.
+
+        Args:
+            model_name: The model name.
+            params: Training parameters dict.
+
+        Returns:
+            A list of CLI argument strings.
+        """
         args = ["train.py", "-m", model_name]
         for key, value in params.items():
             if key == "model":
@@ -300,6 +395,16 @@ class ProcessManager:
         return args
 
     def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
+        """Resize the PTY terminal window for a running task.
+
+        Args:
+            task_id: The task identifier.
+            cols: New number of columns.
+            rows: New number of rows.
+
+        Returns:
+            True if the resize succeeded, False otherwise.
+        """
         master_fd = self._master_fds.get(task_id)
         if master_fd is None:
             return False
@@ -311,6 +416,12 @@ class ProcessManager:
             return False
 
     def _kill_process_group(self, pid: int, sig: int) -> None:
+        """Send a signal to a process group, falling back to the process itself.
+
+        Args:
+            pid: Process ID whose group should receive the signal.
+            sig: Signal number to send.
+        """
         try:
             pgid = os.getpgid(pid)
             os.killpg(pgid, sig)
@@ -319,6 +430,15 @@ class ProcessManager:
                 os.kill(pid, sig)
 
     def _terminate_task_processes(self, task_id: int) -> bool:
+        """Gracefully terminate all processes for a task (SIGINT, then SIGKILL).
+
+        Args:
+            task_id: The task identifier.
+
+        Returns:
+            True if a process was found and termination was attempted,
+            False otherwise.
+        """
         proc = self._procs.get(task_id)
         if proc is None:
             return False
@@ -351,6 +471,13 @@ class ProcessManager:
         return proc_was_present
 
     def _monitor_process(self, task_id: int) -> None:
+        """Wait for a task subprocess to finish and update its DB record.
+
+        Runs in a daemon thread per task.
+
+        Args:
+            task_id: The task identifier.
+        """
         with self._lock:
             proc = self._procs.get(task_id)
         if proc is None:
@@ -390,6 +517,14 @@ class ProcessManager:
             self._dequeue_next()
 
     def stop_task(self, task_id: int) -> bool:
+        """Gracefully stop a task (queue removal or SIGINT to running process).
+
+        Args:
+            task_id: The task identifier.
+
+        Returns:
+            True if the task was stopped, False otherwise.
+        """
         if self.remove_from_queue(task_id):
             with SessionLocal() as session:
                 task = session.query(Task).get(task_id)
@@ -440,6 +575,14 @@ class ProcessManager:
         return True
 
     def kill_task(self, task_id: int) -> bool:
+        """Force-kill a task (SIGKILL to the process group).
+
+        Args:
+            task_id: The task identifier.
+
+        Returns:
+            True if the task was killed, False otherwise.
+        """
         if self.remove_from_queue(task_id):
             with SessionLocal() as session:
                 task = session.query(Task).get(task_id)
@@ -505,6 +648,10 @@ class ProcessManager:
         return True
 
     def recover_tasks(self) -> None:
+        """Recover tasks that were running or pending on last shutdown.
+
+        Orphaned processes are re-monitored; pending tasks are re-queued.
+        """
         with SessionLocal() as session:
             running_tasks = (
                 session.query(Task)
@@ -546,6 +693,12 @@ class ProcessManager:
         self._dequeue_next()
 
     def _recover_monitor(self, task_id: int, pid: int) -> None:
+        """Monitor an orphaned process that survived a restart.
+
+        Args:
+            task_id: The task identifier.
+            pid: The orphaned process ID.
+        """
         exit_code = -1
         try:
             proc = psutil.Process(pid)
@@ -571,6 +724,12 @@ class ProcessManager:
         self._monitors.pop(task_id, None)
 
     def shutdown(self) -> None:
+        """Terminate all running task processes and mark them as interrupted.
+
+        Iterates over all tracked processes, terminates them, cleans up
+        reader threads and file descriptors, and updates the database to
+        mark running/stopping tasks as interrupted.
+        """
         task_ids = list(self._procs.keys())
         for task_id in task_ids:
             self._terminate_task_processes(task_id)

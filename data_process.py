@@ -1,4 +1,4 @@
-"""数据下载和处理的命令行工具。"""
+"""Command-line tool for downloading and processing datasets."""
 
 from argparse import ArgumentParser
 
@@ -25,6 +25,7 @@ SUPPORTED_DATASETS = [
 
 
 def build_parser():
+    """Build the command-line argument parser for data processing."""
     parser = ArgumentParser(description="Data Processing CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -92,16 +93,16 @@ def cmd_download(args):
 
     logger.info(f"Downloading dataset {args.dataset} to {dp.data_folder}")
 
-    # 获取下载参数
+    # Get download parameters
     force_download = getattr(args, "force", False)
     max_retries = getattr(args, "max_retries", 3)
     num_threads = getattr(args, "num_threads", 4)
 
-    # 调用 fetch_data 并传递参数
+    # Call fetch_data with the extracted parameters
     dp.fetch_data(
         force_download=force_download, max_retries=max_retries, num_threads=num_threads
     )
-    # 持久化元信息
+    # Persist metadata
     dp.save_metadata()
     logger.info("Download complete.")
 

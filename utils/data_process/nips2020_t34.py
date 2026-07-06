@@ -1,3 +1,5 @@
+"""NeurIPS 2020 Education Challenge Task 3 & 4 dataset handler."""
+
 import os
 
 import polars as pl
@@ -19,6 +21,7 @@ class NIPS2020T34Data(DataSource):
     """
 
     def __init__(self, args):
+        """Initialize the NIPS 2020 Task 3 & 4 dataset handler."""
         super().__init__(
             dataset="nips2020_t34",
             data_base_path=args.data_base_path,

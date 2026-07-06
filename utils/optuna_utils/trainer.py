@@ -1,4 +1,4 @@
-"""与 Optuna 目标函数集成的 Trainer。"""
+"""Trainer integration with Optuna objective functions."""
 
 from argparse import Namespace
 from collections.abc import Callable
@@ -22,9 +22,7 @@ logger = get_logger(__name__)
 
 
 class TrainerObjectiveWrapper:
-    """
-    将Trainer集成到Optuna目标函数的包装器
-    """
+    """Wrapper integrating a Trainer into an Optuna objective function."""
 
     def __init__(
         self,
@@ -35,16 +33,15 @@ class TrainerObjectiveWrapper:
         max_epochs: int | None = None,
         exp_manager=None,
     ):
-        """
-        初始化Trainer包装器
+        """Initialise the Trainer wrapper.
 
         Args:
-            trainer_class: 训练器类
-            data_src_fn: 数据源工厂函数
-            base_args: 基础参数
-            metric_name: 优化指标名称
-            max_epochs: 最大epoch数
-            exp_manager: 实验管理器（用于创建trial子目录）
+            trainer_class: Trainer class.
+            data_src_fn: Data source factory function.
+            base_args: Base arguments.
+            metric_name: Metric name to optimise.
+            max_epochs: Maximum number of epochs.
+            exp_manager: Experiment manager for creating trial subdirectories.
         """
         self.trainer_class = trainer_class
         self.data_src_fn = data_src_fn
@@ -54,8 +51,17 @@ class TrainerObjectiveWrapper:
         self.max_epochs = max_epochs or getattr(base_args, "epochs", 50)
         self.exp_manager = exp_manager
 
-    def __call__(self, trial, params: dict[str, Any] = None, **kwargs) -> float:
-        """执行一次超参数组合的训练。"""
+    def __call__(self, trial, params: dict[str, Any] | None = None, **kwargs) -> float:
+        """Execute a single trial with a given hyperparameter combination.
+
+        Args:
+            trial: Optuna trial object.
+            params: Hyperparameter dictionary for this trial.
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            The optimised metric value for this trial.
+        """
         if params is None:
             params = {}
 
@@ -75,7 +81,8 @@ class TrainerObjectiveWrapper:
         trainer = self.trainer_class(
             args=args, data_src=data_src, exp_manager=trial_exp_manager
         )
-        # trainer.__init__ 末尾已 build()，回调列表已定型，需直接追加到活跃列表
+        # trainer.__init__ already calls build(), so the callback list is finalised;
+        # append directly to the active list.
         trainer.callback_manager.callbacks.append(pruning_cb)
 
         trainer.run()
@@ -90,32 +97,56 @@ class TrainerObjectiveWrapper:
         return self._extract_metric(trainer, pruning_cb)
 
     def _create_trial_args(self, params: dict[str, Any]) -> Namespace:
-        """根据trial参数创建新的args"""
+        """Create new args from trial parameters.
+
+        Args:
+            params: Hyperparameter dictionary for this trial.
+
+        Returns:
+            A Namespace with merged base args and trial params.
+        """
         import copy
 
         args = copy.deepcopy(self.base_args)
 
-        # 特殊处理batch_size（可能需要重新创建DataLoader）
+        # Special-case batch_size (may need DataLoader recreation)
         if "batch_size" in params:
             args.batch_size = params["batch_size"]
 
-        # 更新其他参数
+        # Update other parameters
         for key, value in params.items():
             if key == "batch_size":
-                continue  # 已在上方处理
+                continue  # Already handled above
             setattr(args, key, value)
 
         return args
 
     def _worst_value(self) -> float:
-        """当前优化方向下的最差目标值（失败 trial 使用）。"""
+        """Return the worst possible target value for the current optimisation direction.
+
+        Used as a fallback for failed trials.
+
+        Returns:
+            Negative infinity (maximise) or positive infinity (minimise).
+        """
         return float("-inf") if self.maximize else float("inf")
 
     def _extract_metric(self, trainer, pruning_cb) -> float:
-        """提取优化指标的原始值（方向由 study direction 决定，此处不取负）。"""
+        """Extract the raw metric value from the trainer.
+
+        Prefers the callback's tracked best value, falling back to
+        EarlyStopping's best epoch record.
+
+        Args:
+            trainer: The trainer instance.
+            pruning_cb: The Optuna trial callback.
+
+        Returns:
+            The metric value.
+        """
         metric_lower = self.metric_name.lower()
 
-        # 优先取回调追踪的最佳值，回退到 EarlyStopping 最佳 epoch 的记录
+        # Prefer callback-tracked best value
         if pruning_cb.best_value is not None:
             return pruning_cb.best_value
 
@@ -131,50 +162,98 @@ class TrainerObjectiveWrapper:
 
 
 class OptunaTunerBuilder:
-    """
-    Optuna调优器构建器，提供流畅的API
-    """
+    """Optuna tuner builder providing a fluent API."""
 
     def __init__(self):
+        """Initialise the tuner builder with default empty configuration."""
         self.config: OptunaConfig | None = None
         self.param_spaces: list[HyperparameterSpace] = []
         self.objective_fn: Callable | None = None
         self.objective_kwargs: dict[str, Any] = {}
 
     def from_config_file(self, config_path: str) -> "OptunaTunerBuilder":
-        """从JSON配置文件加载Optuna配置"""
+        """Load Optuna configuration from a JSON file.
+
+        Args:
+            config_path: Path to the JSON configuration file.
+
+        Returns:
+            Self for chaining.
+        """
         self.config = load_config_from_json(config_path)
         return self
 
     def from_param_space_file(self, space_path: str) -> "OptunaTunerBuilder":
-        """从JSON文件加载参数空间"""
+        """Load parameter space definitions from a JSON file.
+
+        Args:
+            space_path: Path to the JSON parameter space file.
+
+        Returns:
+            Self for chaining.
+        """
         self.param_spaces = load_param_space_from_json(space_path)
         return self
 
     def with_config(self, config: OptunaConfig) -> "OptunaTunerBuilder":
-        """设置Optuna配置"""
+        """Set the Optuna configuration.
+
+        Args:
+            config: An OptunaConfig instance.
+
+        Returns:
+            Self for chaining.
+        """
         self.config = config
         return self
 
     def with_param_spaces(
         self, spaces: list[HyperparameterSpace]
     ) -> "OptunaTunerBuilder":
-        """设置参数空间"""
+        """Set the parameter space definitions.
+
+        Args:
+            spaces: List of HyperparameterSpace instances.
+
+        Returns:
+            Self for chaining.
+        """
         self.param_spaces = spaces
         return self
 
     def with_objective(self, fn: Callable) -> "OptunaTunerBuilder":
-        """设置目标函数"""
+        """Set the objective function.
+
+        Args:
+            fn: Objective function.
+
+        Returns:
+            Self for chaining.
+        """
         self.objective_fn = fn
         return self
 
     def with_objective_kwargs(self, **kwargs) -> "OptunaTunerBuilder":
-        """设置传递给目标函数的额外参数"""
+        """Set extra keyword arguments to pass to the objective function.
+
+        Args:
+            **kwargs: Keyword arguments for the objective function.
+
+        Returns:
+            Self for chaining.
+        """
         self.objective_kwargs.update(kwargs)
         return self
 
     def build(self) -> OptunaTuner:
-        """构建OptunaTuner"""
+        """Build and return the OptunaTuner.
+
+        Returns:
+            A configured OptunaTuner instance.
+
+        Raises:
+            ValueError: If config, param spaces, or objective function are not set.
+        """
         if not self.config:
             raise ValueError(
                 "OptunaConfig not set. Use from_config_file() or with_config()"
@@ -195,6 +274,6 @@ class OptunaTunerBuilder:
 
 
 __all__ = [
-    "TrainerObjectiveWrapper",
     "OptunaTunerBuilder",
+    "TrainerObjectiveWrapper",
 ]

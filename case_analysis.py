@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Case Analysis Framework for KT Models.
+r"""Case Analysis Framework for KT Models.
 
 This script provides a command-line interface for:
 1. Running inference on trained models and saving predictions
@@ -245,6 +245,7 @@ def cmd_plot(args):
 
 
 def main():
+    """Run the case analysis workflow (inference, selection, plotting)."""
     parser = argparse.ArgumentParser(
         description="KT Case Analysis Framework",
         formatter_class=argparse.RawDescriptionHelpFormatter,

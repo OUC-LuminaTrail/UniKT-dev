@@ -1,4 +1,4 @@
-"""统一的知识追踪训练脚本。"""
+"""Unified knowledge tracing training script."""
 
 import argparse
 
@@ -19,23 +19,24 @@ logger = get_logger(__name__)
 
 
 def parse_args():
-    # 预解析模型名称
+    """Parse command-line arguments, dynamically adding model-specific params."""
+    # Pre-parse model name to dynamically add model-specific arguments
     temp_parser = argparse.ArgumentParser(add_help=False)
     temp_parser.add_argument("-m", "--model", type=str)
     temp_args, _ = temp_parser.parse_known_args()
 
     model_name = temp_args.model
 
-    # 构建完整的解析器
+    # Build the full argument parser
     parser = argparse.ArgumentParser(description="Knowledge Tracing Training Script")
 
-    # 添加通用参数
+    # Add common parameters
     GeneralParams.add_args(parser)
     DataParams.add_args(parser)
     EarlyStoppingParams.add_args(parser)
     CompileParams.add_args(parser)
 
-    # 添加模型选择参数
+    # Add model selection parameter
     available_models = list(TRAINERS.keys())
     parser.add_argument(
         "-m",
@@ -46,7 +47,7 @@ def parse_args():
         help=f"Model to train. Available: {', '.join(available_models)}",
     )
 
-    # 添加模型的特定参数
+    # Add model-specific parameters
     if model_name:
         model_params_cls = get_model_params(model_name)
         if model_params_cls:
@@ -61,9 +62,10 @@ def parse_args():
 
 
 def main():
+    """Train a knowledge tracing model."""
     args = parse_args()
 
-    # 创建实验管理器
+    # Create experiment manager
     exp_manager = ExperimentManager.from_args(args, ExperimentType.NORMAL)
     logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 

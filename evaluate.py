@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 
 
 def parse_args():
+    """Parse command-line arguments for evaluation mode."""
     parser = argparse.ArgumentParser(
         description="Evaluate a trained KT model on the test set",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -54,6 +55,7 @@ def parse_args():
 
 
 def main():
+    """Evaluate a trained model checkpoint on the test set."""
     args = parse_args()
     run_dir = Path(args.run_dir).resolve()
 

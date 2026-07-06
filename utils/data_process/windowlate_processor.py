@@ -1,9 +1,10 @@
-"""Windowlate 数据处理器"""
+"""Windowlate data processor for the windowlate AUC metric."""
 
 import os
 import tempfile
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
+from typing import ClassVar
 
 import numpy as np
 import polars as pl
@@ -16,18 +17,20 @@ logger = get_logger(__name__)
 
 
 class WindowlateProcessor:
-    """构建 windowlate 数据。
+    """Build windowlate evaluation data.
 
-    - 每个目标 KC 仅生成一个可评估窗口（窗口末位是目标 KC）
-    - 历史位置仅作为上下文，不参与评估（mask=0）
-    - 目标位置参与评估（mask=1）
-    - 当序列长度超过 max_seq_len 时，仅保留"以目标位置结尾"的最后一个窗口
-    - 原样保留源 sequence_data 中的所有额外列（目标位保留真实值）
+    - Each target KC generates exactly one evaluable window (target KC at the end).
+    - History positions serve as context only (mask=0).
+    - Target positions are evaluated (mask=1).
+    - When a sequence exceeds max_seq_len, only the last window ending at the
+      target position is kept.
+    - All extra columns from the source sequence_data are preserved as-is
+      (target position retains its true value).
     """
 
-    # ===== 数据结构定义 =====
-    # 核心输出列：由源数据特殊映射而来，不作为额外列重复保留。
-    CORE_DTYPE_MAP: dict[str, pl.DataType] = {
+    # ===== Data structure definitions =====
+    # Core output columns: mapped from source data, not preserved as extra columns.
+    CORE_DTYPE_MAP: ClassVar[dict[str, pl.DataType]] = {
         "sample_id": pl.Int64,
         "position": pl.Int32,
         "skill": pl.Int32,
@@ -39,37 +42,45 @@ class WindowlateProcessor:
         "true_label": pl.Int8,
         "fold": pl.Int32,
     }
-    CORE_SAMPLE_COLUMNS: list[str] = [col for col in CORE_DTYPE_MAP if col != "fold"]
-    # 源数据中已被映射为核心列的列；其余列将原样保留到输出。
-    RESERVED_COLUMNS: set[str] = {"user", "question", "label", "skills", "fold"}
+    CORE_SAMPLE_COLUMNS: ClassVar[list[str]] = [
+        col for col in CORE_DTYPE_MAP if col != "fold"
+    ]
+    # Source columns already mapped to core columns; remaining columns are preserved as-is.
+    RESERVED_COLUMNS: ClassVar[set[str]] = {
+        "user",
+        "question",
+        "label",
+        "skills",
+        "fold",
+    }
     CHUNK_ROW_LIMIT: int = 500_000
 
-    # 每次 build 时配置：需要原样保留的额外源列及其 dtype。
-    EXTRA_COLUMNS: list[str] = []
-    EXTRA_DTYPES: dict[str, pl.DataType] = {}
+    # Configured per build: extra source columns to preserve as-is and their dtypes.
+    EXTRA_COLUMNS: ClassVar[list[str]] = []
+    EXTRA_DTYPES: ClassVar[dict[str, pl.DataType]] = {}
 
     @classmethod
     def _init_worker(
         cls, extra_columns: list[str], extra_dtypes: dict[str, pl.DataType]
     ) -> None:
-        """子进程初始化：在每个 worker 中同步额外列配置。"""
+        """Initialize worker processes with the extra column configuration."""
         cls.EXTRA_COLUMNS = extra_columns
         cls.EXTRA_DTYPES = extra_dtypes
 
-    # ===== 核心算法 =====
+    # ===== Core algorithm =====
 
     @staticmethod
     def count_user_samples(skills_list: list[list[int]], max_seq_len: int) -> int:
-        """计算单个用户的样本数量，无需实际生成行。
+        """Count the number of samples for a single user without generating rows.
 
         Args:
-            skills_list: 每个交互的技能列表
-            max_seq_len: 最大序列长度
+            skills_list: Skill list for each interaction.
+            max_seq_len: Maximum sequence length.
 
         Returns:
-            该用户将生成的样本数量
+            Number of samples this user will produce.
         """
-        _ = max_seq_len  # 接口保持兼容，计数与窗口长度无关
+        _ = max_seq_len  # Interface compatibility; count is independent of window length
         return sum(len(q_skills) for q_skills in skills_list)
 
     @classmethod
@@ -84,25 +95,25 @@ class WindowlateProcessor:
         max_seq_len: int,
         extras: dict[str, list],
     ) -> Iterator[list[tuple]]:
-        """生成单个用户的所有样本数据。
+        """Generate all sample data for a single user.
 
         Args:
-            user_id: 用户ID
-            labels: 每个交互的正确性标签
-            skills_list: 每个交互的技能列表
-            questions: 每个交互的题目ID
-            sample_id_start: 起始样本ID
-            group_id_start: 起始组ID
-            max_seq_len: 最大序列长度
-            extras: 需原样保留的额外源列，键为列名，值为每个交互的取值
+            user_id: User ID.
+            labels: Correctness label for each interaction.
+            skills_list: Skill list for each interaction.
+            questions: Question ID for each interaction.
+            sample_id_start: Starting sample ID.
+            group_id_start: Starting group ID.
+            max_seq_len: Maximum sequence length.
+            extras: Extra source columns to preserve as-is, keyed by column name.
 
         Yields:
-            list[tuple]: 完整样本的所有行，每行格式为
+            list[tuple]: All rows for one complete sample, each row formatted as
                 (sample_id, position, skill, response, mask, user_id, group_id,
                  true_label, *extra_values)
         """
         extra_columns = cls.EXTRA_COLUMNS
-        # 展开技能、标签以及所有额外列（按技能展开，与 expanded_* 对齐）
+        # Expand skills, labels, and all extra columns (aligned by skill expansion)
         expanded_skills = []
         expanded_questions = []
         expanded_labels = []
@@ -141,19 +152,19 @@ class WindowlateProcessor:
                     for col in extra_columns
                 }
 
-                # 统一构建预测序列：历史 + 当前技能（目标位 response 置 0 防泄漏）。
-                # 额外列在目标位保留真实值（与 true_label 一致）。
-                full_skills = expanded_skills[:history_end] + [current_skill]
-                full_questions = expanded_questions[:history_end] + [current_question]
-                full_labels = expanded_labels[:history_end] + [0]
-                full_group_ids = expanded_group_ids[:history_end] + [current_group_id]
-                full_true_labels = expanded_labels[:history_end] + [current_label]
+                # Build prediction sequence: history + current skill (response=0 to prevent leakage).
+                # Extra columns at the target position retain their true value (same as true_label).
+                full_skills = [*expanded_skills[:history_end], current_skill]
+                full_questions = [*expanded_questions[:history_end], current_question]
+                full_labels = [*expanded_labels[:history_end], 0]
+                full_group_ids = [*expanded_group_ids[:history_end], current_group_id]
+                full_true_labels = [*expanded_labels[:history_end], current_label]
                 full_extras = {
-                    col: expanded_extras[col][:history_end] + [current_extras[col]]
+                    col: [*expanded_extras[col][:history_end], current_extras[col]]
                     for col in extra_columns
                 }
 
-                # 仅保留"以目标位结尾"的窗口
+                # Keep only the window ending at the target position
                 if len(full_skills) > max_seq_len:
                     win_skills = full_skills[-max_seq_len:]
                     win_questions = full_questions[-max_seq_len:]
@@ -191,14 +202,14 @@ class WindowlateProcessor:
                 yield rows
                 sample_id += 1
 
-    # ===== 批量处理 =====
+    # ===== Batch processing =====
 
     @classmethod
     def process_user_batch(
         cls,
         args: tuple,
     ) -> tuple[int, str | None, int]:
-        """处理一批用户，流式写入单个parquet文件。
+        """Process a batch of users, streaming into a single parquet file.
 
         Args:
             args: (batch_idx, batch_users, max_seq_len, chunk_row_limit, output_dir)
@@ -218,7 +229,7 @@ class WindowlateProcessor:
         total_rows = 0
 
         sample_columns = cls.CORE_SAMPLE_COLUMNS + cls.EXTRA_COLUMNS
-        # 初始化缓冲区（fold 由常量填充，不缓冲）
+        # Initialize buffers (fold is filled with a constant, not buffered)
         buffers = {col: [] for col in sample_columns}
 
         try:
@@ -251,7 +262,7 @@ class WindowlateProcessor:
                         for col in buffers:
                             buffers[col].clear()
 
-            # 最终刷新
+            # Final flush
             if buffers["sample_id"]:
                 writer = cls._flush_buffers(buffers, writer, output_path)
                 total_rows += len(buffers["sample_id"])
@@ -269,7 +280,7 @@ class WindowlateProcessor:
         writer: pq.ParquetWriter | None,
         output_path: str,
     ) -> pq.ParquetWriter:
-        """将缓冲区数据写入parquet文件。"""
+        """Flush buffered data to a parquet file."""
         data = {
             "sample_id": np.asarray(buffers["sample_id"], dtype=np.int64),
             "position": np.asarray(buffers["position"], dtype=np.int32),
@@ -281,7 +292,7 @@ class WindowlateProcessor:
             "group_id": np.asarray(buffers["group_id"], dtype=np.int64),
             "true_label": np.asarray(buffers["true_label"], dtype=np.int8),
         }
-        # 额外列原样保留，交由 schema 完成 dtype 转换
+        # Extra columns preserved as-is; dtype conversion handled by schema
         for col in cls.EXTRA_COLUMNS:
             data[col] = buffers[col]
         data["fold"] = np.full(len(buffers["sample_id"]), -1, dtype=np.int32)
@@ -296,7 +307,7 @@ class WindowlateProcessor:
         writer.write_table(chunk_table)
         return writer
 
-    # ===== 高层接口 =====
+    # ===== High-level interface =====
 
     @classmethod
     def build(
@@ -308,28 +319,28 @@ class WindowlateProcessor:
         num_workers: int = 0,
         users_per_batch: int = 64,
     ) -> pl.LazyFrame:
-        """构建windowlate数据并直接写入文件。
+        """Build windowlate data and write directly to file.
 
         Args:
-            test_data: 测试集序列数据
-            question_data: 题目数据（包含技能映射）
-            max_seq_len: 最大序列长度
-            output_path: 输出文件路径（流式写入）
-            num_workers: 并行worker数量（0或负数表示自动）
-            users_per_batch: 每批处理的用户数
+            test_data: Test set sequence data.
+            question_data: Question data containing skill mappings.
+            max_seq_len: Maximum sequence length.
+            output_path: Output file path (streamed write).
+            num_workers: Number of parallel workers (0 or negative for auto).
+            users_per_batch: Number of users per batch.
         """
-        # 构建题目到技能列表的映射
+        # Build question-to-skill-list mapping
         q_skill_map = (
             question_data.sort("question", "skill")
             .group_by("question")
             .agg(pl.col("skill").sort().alias("skills"))
         )
 
-        # 将技能列表映射到测试数据
+        # Map skill lists to test data
         test_data = test_data.join(q_skill_map, on="question", how="inner")
         sorted_test_data = test_data.sort(["user", "timestamp"])
 
-        # 配置动态 schema：原样保留源数据中除核心映射列外的所有列
+        # Configure dynamic schema: preserve all source columns not mapped to core columns
         cls.EXTRA_COLUMNS = [
             c for c in test_data.columns if c not in cls.RESERVED_COLUMNS
         ]
@@ -337,26 +348,26 @@ class WindowlateProcessor:
         if cls.EXTRA_COLUMNS:
             logger.debug(f"Windowlate preserving extra columns: {cls.EXTRA_COLUMNS}")
 
-        # 确定worker数量
+        # Determine worker count
         if num_workers <= 0:
             num_workers = max(1, os.cpu_count() or 1)
 
-        # 将中间分块写到输出文件同级目录，避免落在系统临时目录。
+        # Write intermediate chunks to the output file's directory to avoid system temp
         tmp_base_dir = os.path.dirname(os.path.abspath(output_path)) or "."
         os.makedirs(tmp_base_dir, exist_ok=True)
 
         with tempfile.TemporaryDirectory(
             prefix="windowlate_chunks_", dir=tmp_base_dir
         ) as tmp_dir:
-            # 预处理：提取用户数据并计算偏移
-            user_records, global_sample_id, global_group_id = cls._prepare_user_records(
-                sorted_test_data, max_seq_len
+            # Preprocess: extract user records and compute offsets
+            user_records, global_sample_id, _global_group_id = (
+                cls._prepare_user_records(sorted_test_data, max_seq_len)
             )
 
             if not user_records:
                 raise ValueError("No valid windowlate evaluation samples for test set")
 
-            # 构建批次输入
+            # Build batch inputs
             batch_inputs = cls._build_batch_inputs(
                 user_records, max_seq_len, users_per_batch, tmp_dir
             )
@@ -366,10 +377,10 @@ class WindowlateProcessor:
                 f"users={len(user_records)}"
             )
 
-            # 并行处理
+            # Parallel processing
             worker_results = cls._parallel_process(batch_inputs, num_workers)
 
-            # 直接合并到最终输出路径
+            # Merge directly to final output path
             total_rows = cls._merge_results(worker_results, output_path)
 
         logger.debug(
@@ -382,7 +393,7 @@ class WindowlateProcessor:
         sorted_test_data: pl.DataFrame,
         max_seq_len: int,
     ) -> tuple[list, int, int]:
-        """预处理用户数据并计算ID偏移。"""
+        """Preprocess user records and compute ID offsets."""
         user_records = []
         global_sample_id = 0
         global_group_id = 0
@@ -427,7 +438,7 @@ class WindowlateProcessor:
         users_per_batch: int,
         tmp_dir: str,
     ) -> list:
-        """构建批次输入参数。"""
+        """Build batch input parameters."""
         batch_inputs = []
         for idx in range(0, len(user_records), users_per_batch):
             batch_idx = len(batch_inputs)
@@ -443,7 +454,7 @@ class WindowlateProcessor:
         batch_inputs: list,
         num_workers: int,
     ) -> list:
-        """并行处理批次。"""
+        """Process batches in parallel."""
         from concurrent.futures import as_completed
 
         worker_results = [None] * len(batch_inputs)
@@ -461,12 +472,12 @@ class WindowlateProcessor:
                 initializer=cls._init_worker,
                 initargs=(cls.EXTRA_COLUMNS, cls.EXTRA_DTYPES),
             ) as executor:
-                # 提交所有任务
+                # Submit all tasks
                 futures = {
                     executor.submit(cls.process_user_batch, inp): inp[0]
                     for inp in batch_inputs
                 }
-                # 按完成顺序收集结果
+                # Collect results in completion order
                 for future in tqdm.tqdm(
                     as_completed(futures),
                     total=len(futures),
@@ -483,7 +494,7 @@ class WindowlateProcessor:
         worker_results: list,
         output_path: str,
     ) -> int:
-        """合并所有worker结果到最终文件。"""
+        """Merge all worker results into the final output file."""
         tmp_path = output_path + ".tmp"
         final_writer = None
         total_rows = 0

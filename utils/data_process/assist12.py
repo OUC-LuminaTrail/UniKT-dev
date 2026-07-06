@@ -1,3 +1,5 @@
+"""ASSISTments 2012 dataset handler."""
+
 import os
 
 import polars as pl
@@ -18,6 +20,7 @@ class Assistments2012Data(DataSource):
     """ASSISTments 2012 dataset handler."""
 
     def __init__(self, args):
+        """Initialize the ASSISTments 2012 dataset handler."""
         super().__init__(
             dataset="assistments12",
             data_base_path=args.data_base_path,

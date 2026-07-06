@@ -1,3 +1,9 @@
+"""GPU monitoring service with NVML-based status and system-level metrics.
+
+Provides a GpuMonitor class that periodically queries NVIDIA GPU devices via
+pynvml and system resources via psutil, with configurable caching.
+"""
+
 import contextlib
 import os
 import threading
@@ -9,7 +15,20 @@ from schemas import GpuInfo, GpuStatusResponse, SystemStatusResponse
 
 
 class GpuMonitor:
+    """Monitors GPU and system status with NVML and psutil.
+
+    Caches GPU status for a configurable interval to reduce NVML query frequency.
+
+    Args:
+        cache_seconds: How long to cache GPU status results (default 2.0).
+    """
+
     def __init__(self, cache_seconds: float = 2.0):
+        """Initialize the GPU monitor and attempt NVML initialisation.
+
+        Args:
+            cache_seconds: Cache lifetime in seconds for GPU status.
+        """
         self._cache_seconds = cache_seconds
         self._cached: GpuStatusResponse | None = None
         self._last_update: float = 0
@@ -22,6 +41,11 @@ class GpuMonitor:
             pass
 
     def get_status(self) -> GpuStatusResponse:
+        """Return the current GPU status, using cached data if still fresh.
+
+        Returns:
+            A GpuStatusResponse with per-GPU metrics.
+        """
         with self._lock:
             now = time.time()
             if self._cached and (now - self._last_update) < self._cache_seconds:
@@ -38,6 +62,11 @@ class GpuMonitor:
         return response
 
     def _query_nvml(self) -> list[GpuInfo]:
+        """Query all NVIDIA GPUs with NVML.
+
+        Returns:
+            A list of GpuInfo objects, or an empty list if NVML is unavailable.
+        """
         if not self._nvml_initialized:
             return []
         try:
@@ -74,6 +103,11 @@ class GpuMonitor:
             return []
 
     def get_system_status(self) -> SystemStatusResponse:
+        """Return system-level CPU, memory and GPU aggregate status.
+
+        Returns:
+            A SystemStatusResponse with CPU, memory, load, and GPU metrics.
+        """
         cpu_percent = psutil.cpu_percent(interval=0.3)
         mem = psutil.virtual_memory()
         gpus = self.get_status()
@@ -102,6 +136,10 @@ class GpuMonitor:
         )
 
     def shutdown(self):
+        """Release NVML resources.
+
+        Safe to call multiple times; suppresses errors.
+        """
         if self._nvml_initialized:
             with contextlib.suppress(Exception):
                 pynvml.nvmlShutdown()

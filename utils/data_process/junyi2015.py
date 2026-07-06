@@ -1,3 +1,5 @@
+"""Junyi Academy 2015 dataset handler."""
+
 import os
 
 import polars as pl
@@ -21,6 +23,7 @@ class Junyi2015Data(DataSource):
     """
 
     def __init__(self, args):
+        """Initialize the Junyi 2015 dataset handler."""
         super().__init__(
             dataset="junyi2015",
             data_base_path=args.data_base_path,

@@ -43,6 +43,7 @@ class HeatmapVisualizer:
         output_path: str | None = None,
         show_skill_names: bool = False,
     ) -> plt.Figure:
+        """Plot a knowledge state heatmap for a single user."""
         required_cols = {"position", "question_id", "skill", "label", "knowledge_state"}
         missing = required_cols - set(user_data.columns)
         if missing:

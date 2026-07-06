@@ -1,3 +1,9 @@
+"""Base model data class for knowledge tracing datasets.
+
+Provides the abstract foundation for preparing model-ready data, including
+K-fold splitting, difficulty calculation, and relationship matrix building.
+"""
+
 import functools
 import hashlib
 import pickle
@@ -14,21 +20,26 @@ logger = get_logger(__name__)
 
 
 class BaseModelData(ABC):
-    r"""
-    模型数据基类
+    """Abstract base class for model data preparation.
 
-    参数:
-        data_src: 数据源对象
+    Args:
+        data_src: Data source object.
+        cache: Whether to enable disk caching for expensive operations.
     """
 
     def __init__(self, data_src: DataSource, cache: bool = False):
+        """Initialise the base model data object.
+
+        Args:
+            data_src: Data source object providing raw dataset access.
+            cache: Whether to enable disk caching for prepared data.
+        """
         self.data_src = data_src
         self._cache = cache
 
     @staticmethod
     def disk_cache(cache_name: str | None = None):
-        """
-        为实例方法提供磁盘缓存的装饰器工厂。
+        """Decorator factory providing disk caching for instance methods.
 
         Usage:
             @BaseModelData.disk_cache()
@@ -39,17 +50,18 @@ class BaseModelData(ABC):
             def prepare_data(self, args):
                 ...
 
-        参数:
-            cache_name: 缓存文件名前缀（可选）。不传时使用函数名。
+        Args:
+            cache_name: Cache filename prefix (optional). Defaults to the
+                        decorated function name.
 
-        说明:
-            - 仅在实例 `self._cache` 为 True 时启用缓存
-            - 缓存键基于类名、函数名、入参（args/kwargs）构建
-            - 缓存目录: .cache/<ClassName>/
+        Notes:
+            - Caching is only enabled when the instance's ``self._cache`` is True.
+            - Cache key is built from the class name, function name, and arguments.
+            - Cache directory: ``.cache/<ClassName>/``.
         """
 
         def _normalize_for_key(obj):
-            """将对象转为稳定、可序列化的结构"""
+            """Convert an object to a stable, serialisable structure for cache keying."""
             if isinstance(obj, (str, int, float, bool, type(None))):
                 return obj
 
@@ -70,11 +82,11 @@ class BaseModelData(ABC):
                 items.sort(key=lambda kv: kv[0])
                 return items
 
-            # argparse.Namespace 或任意含 __dict__ 的参数对象
+            # argparse.Namespace or any object with __dict__
             if hasattr(obj, "__dict__"):
                 return _normalize_for_key(vars(obj))
 
-            # numpy / torch 等大型对象不直接入键，只保留类型信息和内容哈希
+            # numpy / torch large objects: keep type info and content hash
             module = getattr(type(obj), "__module__", "")
             name = getattr(type(obj), "__name__", type(obj).__name__)
             if hasattr(obj, "shape"):
@@ -83,17 +95,17 @@ class BaseModelData(ABC):
             return ("__object__", module, name)
 
         def _stable_key(obj):
-            """将规范化对象编码为稳定字节串。"""
+            """Encode a normalised object as a stable byte string."""
             normalized = _normalize_for_key(obj)
             return repr(normalized).encode("utf-8")
 
         def decorator(func):
-            @functools.wraps(func)  # 保持原函数的元数据
+            @functools.wraps(func)
             def wrapper(self, *args, **kwargs):
                 if not getattr(self, "_cache", False):
                     return func(self, *args, **kwargs)
 
-                # 缓存目录相对于项目根目录
+                # Cache directory relative to project root
                 project_root = Path(__file__).resolve().parent.parent.parent
                 cache_dir = project_root / ".cache"
                 cache_dir.mkdir(parents=True, exist_ok=True)
@@ -101,7 +113,7 @@ class BaseModelData(ABC):
                 if not gitignore_path.exists():
                     gitignore_path.write_text("*\n", encoding="utf-8")
 
-                # 获取类名
+                # Get class name
                 class_name = self.__class__.__name__
                 target_dir = cache_dir / class_name
                 target_dir.mkdir(parents=True, exist_ok=True)
@@ -117,10 +129,10 @@ class BaseModelData(ABC):
                 )
                 key_hash = hashlib.md5(_stable_key(key_payload)).hexdigest()  # nosec B324
 
-                # 构造缓存文件完整路径，避免不同参数调用相互覆盖
+                # Build the full cache file path to avoid collisions
                 file_path = target_dir / f"{method_name}_{key_hash}.pkl"
 
-                # 检查缓存是否存在
+                # Check for existing cache
                 if file_path.exists():
                     try:
                         with open(file_path, "rb") as f:
@@ -130,10 +142,10 @@ class BaseModelData(ABC):
                     except Exception as e:
                         logger.error(f"Fail to load cache, rebuilding data: {e}")
 
-                # 缓存不存在或读取失败，执行原函数逻辑
+                # Cache miss or read failure: run original logic
                 result = func(self, *args, **kwargs)
 
-                # 自动将结果写入缓存
+                # Write result to cache
                 try:
                     with open(file_path, "wb") as f:
                         pickle.dump(result, f)
@@ -145,7 +157,7 @@ class BaseModelData(ABC):
 
             return wrapper
 
-        # 兼容 @BaseModelData.disk_cache 的无参写法
+        # Support @BaseModelData.disk_cache without parentheses
         if callable(cache_name):
             func = cache_name
             cache_name = None
@@ -154,28 +166,27 @@ class BaseModelData(ABC):
         return decorator
 
     def _get_kfold_data(self):
-        r"""
-        获取当前模型数据对应的 K-fold 标签数据源。
+        """Retrieve the K-fold label data source for this model data.
 
-        子类应重写此方法以返回其使用的实际序列数据（如 split_skill_sequence 或 split_question_sequence）。
+        Subclasses should override this method to return the actual sequence
+        data they use (e.g. split_skill_sequence or split_question_sequence).
 
-        返回:
-            polars.LazyFrame: 包含 user 和 fold 列的数据
+        Returns:
+            polars.LazyFrame: Data containing user and fold columns.
         """
         return self.data_src.get_sequence_data()
 
     def _build_user_folds(self, num_users: int) -> np.ndarray:
-        r"""
-        从 K-fold 数据构建 user->fold 映射数组。
+        """Build a user-to-fold mapping array from K-fold data.
 
-        参数:
-            num_users: 用户数量
+        Args:
+            num_users: Number of users.
 
-        返回:
-            np.ndarray: user_folds[user_idx] = fold_label
+        Returns:
+            np.ndarray: user_folds[user_idx] = fold_label.
 
-        异常:
-            ValueError: 如果 fold 列不存在或用户数不匹配
+        Raises:
+            ValueError: If the fold column is missing or user counts mismatch.
         """
         data = self._get_kfold_data()
 
@@ -184,7 +195,7 @@ class BaseModelData(ABC):
                 "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
             )
 
-        # 每个 user 的 fold 必须唯一
+        # Each user must have a single consistent fold label
         inconsistent = (
             data.group_by("user")
             .agg(pl.col("fold").n_unique().alias("fold_nunique"))
@@ -217,52 +228,54 @@ class BaseModelData(ABC):
 
     @abstractmethod
     def prepare_data(self, args):
-        """
-        准备模型所需的数据
+        """Prepare data required by the model.
+
+        Args:
+            args: Configuration arguments.
         """
         raise NotImplementedError("Subclasses should implement prepare_data method")
 
     def split_kfold_data(self, *arrays, fold_idx: int):
-        r"""
-        根据K折交叉验证的fold索引获取训练集、验证集和测试集
+        """Split data into train, validation, and test sets by K-fold index.
 
-        参数:
-            *arrays: 任意个数、首维为用户数的数组或张量。
-            fold_idx: 当前的fold索引（关键字参数，必填）。
+        Args:
+            *arrays: Any number of arrays or tensors with users as the first dimension.
+            fold_idx: Current fold index (keyword-only, required).
 
-        返回:
-            train_data: 与输入相同结构的元组，包含训练集切片
-            val_data:   与输入相同结构的元组，包含验证集切片
-            test_data:  与输入相同结构的元组，包含测试集切片
+        Returns:
+            train_data: Tuple of train slices with the same structure as input.
+            val_data: Tuple of validation slices.
+            test_data: Tuple of test slices.
 
-        说明:
-            - 验证集为指定fold (fold_idx) 的数据，测试集为 fold == -1 的数据，训练集为剩余的fold数据
-            - 需要数据源中有用户到行索引的映射信息
+        Notes:
+            - Validation set uses the specified fold (fold_idx); test set uses
+              fold == -1; training set uses remaining folds.
+            - Requires user-to-row-index mapping in the data source.
         """
         import numpy as np
 
-        # 校验输入参数
+        # Validate inputs
         if len(arrays) == 0:
             raise ValueError(
                 "get_kfold_split_data requires at least one input array/tensor"
             )
 
-        # 获取有效的用户索引
+        # Get valid user indices
         num_users = arrays[0].shape[0]
-        # 校验所有输入的用户数一致
+        # Validate consistent user count across all inputs
         for i, arr in enumerate(arrays):
             if arr.shape[0] != num_users:
                 raise ValueError(
                     f"Input array {i} shape is {arr.shape}, but expected shape is (num_users, *)"
                 )
 
-        # 创建用户fold信息映射
+        # Build user fold information mapping
         user_folds = self._build_user_folds(num_users)
 
-        # 根据fold标签分割用户数据
-        # 验证集：fold == fold_idx
-        # 测试集：fold == -1
-        # 训练集：fold != fold_idx 且 fold != -1
+        # Split users by fold label:
+        # Validation: fold == fold_idx
+        # Test: fold == -1
+        # Training: fold != fold_idx and fold != -1
         train_user_indices = np.where((user_folds != fold_idx) & (user_folds != -1))[0]
         val_user_indices = np.where(user_folds == fold_idx)[0]
         test_user_indices = np.where(user_folds == -1)[0]
@@ -275,10 +288,10 @@ class BaseModelData(ABC):
         val_slices = []
         test_slices = []
         for arr in arrays:
-            # 识别 torch.Tensor
+            # Detect torch.Tensor
             is_torch_tensor = False
             try:
-                import torch  # noqa: F401
+                import torch
 
                 is_torch_tensor = hasattr(arr, "dim") and hasattr(arr, "index_select")
             except Exception:
@@ -307,40 +320,30 @@ class BaseModelData(ABC):
         return tuple(train_slices), tuple(val_slices), tuple(test_slices)
 
     def split_data(self, *arrays, val_ratio: float = 0.2, test_ratio: float = 0.0):
-        r"""
-        随机划分训练集、验证集和测试集。
+        """Randomly split data into training, validation, and test sets.
 
-        参数:
-            *arrays: 任意个数、首维为样本数的数组或张量。
-                     例如：
-                     - GIKT: (sequences, responses, masks)
-                     - SQGKT: (sequences, responses, masks, user_id_sequence)
-            val_ratio: 验证集比例(默认为0.2)
-            test_ratio: 测试集比例(默认为0.0，不分割测试集)
+        Args:
+            *arrays: Any number of arrays or tensors with samples as the first
+                     dimension.
+            val_ratio: Validation set ratio (default: 0.2).
+            test_ratio: Test set ratio (default: 0.0, no test split).
 
-        返回:
-            如果 test_ratio == 0:
-                (train_data, val_data):
-                    - train_data: 与输入相同结构的元组，包含训练集切片
-                    - val_data:   与输入相同结构的元组，包含验证集切片
-            如果 test_ratio > 0:
-                (train_data, val_data, test_data):
-                    - train_data: 与输入相同结构的元组，包含训练集切片
-                    - val_data:   与输入相同结构的元组，包含验证集切片
-                    - test_data:  与输入相同结构的元组，包含测试集切片
+        Returns:
+            If test_ratio == 0: ``(train_data, val_data)``.
+            If test_ratio > 0: ``(train_data, val_data, test_data)``.
 
-        说明:
-            - 将依据第一个输入的首维作为样本维度进行打乱与划分。
-            - 要求所有输入的首维大小一致。
-            - 同时兼容 numpy.ndarray 与 torch.Tensor（若可用）。
-            - 分割顺序：先分割测试集，再从剩余数据中分割验证集，最后为训练集
+        Notes:
+            - Uses the first dimension of the first input as the sample dimension.
+            - All inputs must have matching first dimension sizes.
+            - Compatible with both numpy.ndarray and torch.Tensor.
+            - Splitting order: test set first, then validation from remaining, then training.
         """
         import numpy as np
 
         if len(arrays) == 0:
             raise ValueError("split_data requires at least one input array/tensor")
 
-        # 校验比例参数
+        # Validate ratio parameters
         if val_ratio + test_ratio >= 1.0:
             raise ValueError(
                 f"val_ratio ({val_ratio}) + test_ratio ({test_ratio}) must be less than 1.0"
@@ -348,7 +351,7 @@ class BaseModelData(ABC):
 
         num_users = arrays[0].shape[0]
 
-        # 校验所有数组首维一致
+        # Validate consistent first dimension across all arrays
         for i, arr in enumerate(arrays):
             if arr.shape[0] != num_users:
                 raise ValueError(
@@ -359,12 +362,12 @@ class BaseModelData(ABC):
         np.random.shuffle(indices)
         indices = indices.tolist()
 
-        # 分割测试集
+        # Split test set
         test_size = int(num_users * test_ratio)
         test_indices = indices[:test_size]
         remaining_indices = indices[test_size:]
 
-        # 从剩余数据中分割验证集和训练集
+        # Split validation and training from remaining
         val_size = int(len(remaining_indices) * val_ratio)
         val_indices = remaining_indices[:val_size]
         train_indices = remaining_indices[val_size:]
@@ -374,10 +377,10 @@ class BaseModelData(ABC):
         test_slices = []
 
         for arr in arrays:
-            # 尝试识别 torch.Tensor
+            # Detect torch.Tensor
             is_torch_tensor = False
             try:
-                import torch  # noqa: F401
+                import torch
 
                 is_torch_tensor = hasattr(arr, "dim") and hasattr(arr, "index_select")
             except Exception:
@@ -397,7 +400,7 @@ class BaseModelData(ABC):
                 val_slices.append(arr.index_select(0, val_idx))
                 test_slices.append(arr.index_select(0, test_idx))
             else:
-                # 视作 numpy 数组或支持 list 索引的结构
+                # Treat as numpy array or list-indexable structure
                 train_slices.append(arr[train_indices])
                 val_slices.append(arr[val_indices])
                 test_slices.append(arr[test_indices])
@@ -411,22 +414,22 @@ class BaseModelData(ABC):
         else:
             return train_data, val_data
 
-    def calculate_question_difficulty(self, exclude_fold: int = None):
-        """
-        计算每个问题的难度指标
+    def calculate_question_difficulty(self, exclude_fold: int | None = None):
+        """Calculate difficulty metrics for each question.
 
-        基于以下特征计算难度：
-        1. 正确率（correct_rate）：正确回答次数 / 总回答次数
-        2. 平均作答时间（avg_time）：如果数据集有时间字段
-        3. 提示率（hint_rate）：如果数据集有提示字段
+        Difficulty is computed from:
+        1. Correct rate (correct_rate): correct answers / total answers
+        2. Average response time (avg_time): if the dataset has a time field
+        3. Hint rate (hint_rate): if the dataset has a hint field
 
-        参数:
-            exclude_fold: 要排除的fold索引（用于在交叉验证时排除验证集数据）
+        Args:
+            exclude_fold: Fold index to exclude (used during cross-validation
+                          to avoid data leakage from the validation fold).
 
-        返回:
-            dict: 问题ID -> 难度分数的字典，难度分数为0-1之间，越大表示越难
+        Returns:
+            dict: Question ID to difficulty score mapping (0-1, higher = harder).
 
-        公式：
+        Formula:
             difficulty = (1 - correct_rate) * 0.6 + normalized_time * 0.3 + hint_rate * 0.1
         """
         data = self.data_src.get_sequence_data()
@@ -454,38 +457,34 @@ class BaseModelData(ABC):
     def build_relationship_matrix(
         self, edge_type: tuple[str, str, str], value_type: str = "binary"
     ):
-        """
-        构建实体之间的关系矩阵
+        """Build a relationship matrix between entity types.
 
-        参数:
-            edge_type: 边类型三元组 (源节点类型, 边关系名, 目标节点类型)
-                      节点类型对应数据中的列名（如 'user', 'question', 'skill', 'template', 'assignment'等）
-                      例如: ('user', 'answers', 'question')
-                           ('question', 'has', 'skill')
-                           ('question', 'belongs_to', 'template')
-                           ('skill', 'related_to', 'assignment')
-            value_type: 矩阵值类型，可选:
-                       'binary': 二值矩阵,表示是否存在关系 (默认)
-                       'count': 计数矩阵,表示关系出现的次数
+        Args:
+            edge_type: Edge type triplet (source_node_type, relation_name, target_node_type).
+                       Node types correspond to column names in the data
+                       (e.g. 'user', 'question', 'skill', 'template', 'assignment').
+                       Examples: ('user', 'answers', 'question'),
+                                 ('question', 'has', 'skill'),
+                                 ('question', 'belongs_to', 'template'),
+                                 ('skill', 'related_to', 'assignment').
+            value_type: Matrix value type:
+                       - 'binary': Binary matrix indicating relationship existence (default).
+                       - 'count': Count matrix indicating relationship frequency.
 
-        返回:
-            data_matrix: numpy数组,形状为 (源节点数量, 目标节点数量)
+        Returns:
+            data_matrix: numpy array of shape (num_src_nodes, num_dst_nodes).
 
-        示例:
-            # 构建用户-问题二值关系矩阵
-            matrix = model_data.build_data_matrix(('user', 'answers', 'question'))
-
-            # 构建问题-技能关系矩阵
-            matrix = model_data.build_data_matrix(('question', 'has', 'skill'))
-
-            # 构建问题-模板关系矩阵
-            matrix = model_data.build_data_matrix(('question', 'belongs_to', 'template'))
-
-            # 构建技能-作业关系矩阵
-            matrix = model_data.build_data_matrix(('skill', 'related_to', 'assignment'))
-
-            # 构建用户-问题计数矩阵
-            matrix = model_data.build_data_matrix(('user', 'answers', 'question'), value_type='count')
+        Examples:
+            >>> # Build user-question binary matrix
+            >>> matrix = model_data.build_data_matrix(('user', 'answers', 'question'))
+            >>> # Build question-skill matrix
+            >>> matrix = model_data.build_data_matrix(('question', 'has', 'skill'))
+            >>> # Build question-template matrix
+            >>> matrix = model_data.build_data_matrix(('question', 'belongs_to', 'template'))
+            >>> # Build skill-assignment matrix
+            >>> matrix = model_data.build_data_matrix(('skill', 'related_to', 'assignment'))
+            >>> # Build user-question count matrix
+            >>> matrix = model_data.build_data_matrix(('user', 'answers', 'question'), value_type='count')
         """
         src_type, _, dst_type = edge_type
 

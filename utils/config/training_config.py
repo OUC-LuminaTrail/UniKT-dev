@@ -1,6 +1,6 @@
-"""训练配置模块
+"""Training configuration module.
 
-提供训练相关配置，包括早停配置。
+Provides training-related configurations, including early stopping configuration.
 """
 
 from collections.abc import Callable
@@ -12,13 +12,13 @@ import torch
 
 @dataclass
 class EarlyStoppingConfig:
-    """早停配置。
+    """Early stopping configuration.
 
     Attributes:
-        monitor: 监控的指标，可选 'auc', 'acc', 'rmse', 'loss'
-        mode: 优化模式，'max' 用于 auc/acc，'min' 用于 rmse/loss
-        patience: 容忍的 epoch 数
-        min_delta: 最小改善阈值
+        monitor: Metric to monitor, one of 'auc', 'acc', 'rmse', 'loss'
+        mode: Optimization mode, 'max' for auc/acc, 'min' for rmse/loss
+        patience: Number of epochs to tolerate without improvement
+        min_delta: Minimum improvement threshold
     """
 
     monitor: str = "auc"
@@ -28,19 +28,20 @@ class EarlyStoppingConfig:
 
 
 class EarlyStopping:
-    """通用早停工具。
+    """General-purpose early stopping utility.
 
-    用法：
+    Usage:
         >>> es = EarlyStopping(EarlyStoppingConfig(patience=5, monitor='auc', mode='max'))
         >>> should_stop = es.step(current_val_metric)
 
-    特性：
-    - 支持 min/max 模式
-    - 支持 min_delta 容忍区间
-    - 记录最佳指标值与对应 epoch
+    Features:
+    - Supports min/max mode
+    - Supports min_delta tolerance
+    - Records best metric value and corresponding epoch
     """
 
     def __init__(self, config: EarlyStoppingConfig):
+        """Initialize the early stopping monitor with the given configuration."""
         self.cfg = config
         self.best_score: float | None = None
         self.best_epoch: int | None = None
@@ -53,21 +54,21 @@ class EarlyStopping:
         self._cmp_sign = -1.0 if mode == "min" else 1.0
 
     def _is_improved(self, current: float, best: float) -> bool:
-        # 通过乘以 sign 统一比较方向
+        # Unify comparison direction by multiplying with sign
         return (current - best) * self._cmp_sign > self.cfg.min_delta
 
     def step(
         self, current: float, epoch: int | None = None, metrics: dict | None = None
     ) -> bool:
-        """输入本轮验证指标，返回是否需要早停。
+        """Feed the current validation metric and return whether to stop early.
 
         Args:
-            current: 当前 epoch 的监控指标值
-            epoch: 当前 epoch 编号（可选）
-            metrics: 当前 epoch 的完整指标字典（可选）{auc, acc, rmse}
+            current: Current epoch's monitored metric value
+            epoch: Current epoch number (optional)
+            metrics: Full metrics dictionary for the current epoch (optional) {auc, acc, rmse}
 
         Returns:
-            是否应该停止训练
+            Whether training should stop
         """
         if self.best_score is None:
             self.best_score = current
@@ -166,10 +167,10 @@ class ExperimentConfig:
 
 
 __all__ = [
+    "DataConfig",
     "EarlyStopping",
     "EarlyStoppingConfig",
-    "TrainingConfig",
-    "DataConfig",
-    "OptimizationConfig",
     "ExperimentConfig",
+    "OptimizationConfig",
+    "TrainingConfig",
 ]

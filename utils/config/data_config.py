@@ -1,6 +1,6 @@
-"""数据配置模块
+"""Data configuration module.
 
-提供 DataLoader 配置和优化函数，从 dataloader_config.py 迁移。
+Provides DataLoader configuration and optimization functions, migrated from dataloader_config.py.
 """
 
 import os
@@ -11,21 +11,21 @@ from ..core import get_logger
 
 logger = get_logger(__name__)
 
-# 类型定义
+# Type definition for number of worker processes
 NumWorkersType = int | Literal["auto"]
 
 
 @dataclass
 class DataLoaderConfig:
-    """DataLoader 配置类。
+    """DataLoader configuration class.
 
     Attributes:
-        num_workers: 数据加载的工作进程数。
-                     "auto" 表示自动设置为 CPU 核心数和 8 的较小值。
-                     0 表示禁用多进程。
-        pin_memory: 是否将张量固定在 CUDA 内存中（仅 CUDA 时有效）。
-        prefetch_factor: 每个工作进程的预取批次数（仅 num_workers > 0 时有效）。
-        persistent_workers: 是否在工作进程之间保持工作进程的存活（PyTorch >= 1.7）。
+        num_workers: Number of worker processes for data loading.
+                     "auto" sets it to min(CPU count, 8).
+                     0 disables multiprocessing.
+        pin_memory: Whether to pin tensors in CUDA memory (only effective on CUDA).
+        prefetch_factor: Number of batches to prefetch per worker (only effective when num_workers > 0).
+        persistent_workers: Whether to keep workers alive between epochs (PyTorch >= 1.7).
     """
 
     num_workers: NumWorkersType = "auto"
@@ -34,13 +34,13 @@ class DataLoaderConfig:
     persistent_workers: bool = True
 
     def get_num_workers(self, max_limit: int = 8) -> int:
-        """获取实际的 num_workers 值。
+        """Get the actual num_workers value.
 
         Args:
-            max_limit: 最大工作进程数限制
+            max_limit: Maximum number of worker processes
 
         Returns:
-            实际的 num_workers 值
+            The actual num_workers value
         """
         if self.num_workers == "auto":
             cpu_count = os.cpu_count() or 1
@@ -56,18 +56,18 @@ def create_optimized_dataloader(
     device=None,
     **kwargs,
 ):
-    """创建已优化的 DataLoader。
+    """Create an optimized DataLoader.
 
     Args:
-        dataset: 数据集
-        batch_size: 批次大小
-        shuffle: 是否打乱数据
-        config: DataLoader 配置（默认使用 DataLoaderConfig()）
-        device: 计算设备（用于确定 pin_memory）
-        **kwargs: 其他传递给 DataLoader 的参数（优先级高于 config）
+        dataset: Dataset to load
+        batch_size: Batch size
+        shuffle: Whether to shuffle the data
+        config: DataLoader configuration (defaults to DataLoaderConfig())
+        device: Compute device (used to determine pin_memory)
+        **kwargs: Additional arguments passed to DataLoader (overrides config)
 
     Returns:
-        优化后的 DataLoader
+        An optimized DataLoader
 
     Example:
         >>> from utils.config import DataLoaderConfig, create_optimized_dataloader
@@ -82,25 +82,25 @@ def create_optimized_dataloader(
     """
     from torch.utils.data import DataLoader
 
-    # 使用默认配置
+    # Use default configuration
     if config is None:
         config = DataLoaderConfig()
 
-    # 必须指定设备信息
+    # Device information is required
     if device is None:
         raise ValueError(
             "Device information is required to determine pin_memory setting."
         )
 
-    # 确定 pin_memory
+    # Determine pin_memory
     is_cuda = device.type == "cuda"
     pin_memory = config.pin_memory and is_cuda
 
-    # 获取 num_workers
+    # Get num_workers
     num_workers = config.get_num_workers()
 
-    # 准备 DataLoader 参数
-    # kwargs 中的参数优先级高于 config
+    # Prepare DataLoader arguments
+    # kwargs take priority over config
     loader_kwargs = {
         "batch_size": batch_size,
         "shuffle": shuffle,
@@ -110,17 +110,17 @@ def create_optimized_dataloader(
         "persistent_workers": config.persistent_workers if num_workers > 0 else False,
     }
 
-    # 移除无效参数（prefetch_factor 仅在 num_workers > 0 时有效）
+    # Remove invalid parameters (prefetch_factor only valid when num_workers > 0)
     if loader_kwargs["prefetch_factor"] is None:
         del loader_kwargs["prefetch_factor"]
 
-    # 用 kwargs 覆盖默认参数
+    # Override default arguments with kwargs
     loader_kwargs.update(kwargs)
 
-    # 创建 DataLoader
+    # Create DataLoader
     loader = DataLoader(dataset, **loader_kwargs)
 
-    # 记录优化信息
+    # Log optimization info
     logger.debug(
         f"Created optimized DataLoader: num_workers={loader_kwargs.get('num_workers')}, "
         f"pin_memory={loader_kwargs.get('pin_memory')}, "

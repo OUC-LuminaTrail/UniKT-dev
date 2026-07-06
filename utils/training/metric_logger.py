@@ -1,11 +1,13 @@
-"""指标记录后端模块
+"""Metric logging backend module.
 
-提供统一的指标记录抽象（MetricLogger），与项目的注册表+ABC+工厂模式一致
-（参照 DataSource / DATA_SOURCES / get_data_source）。
+Provides a unified metric logging abstraction (MetricLogger) consistent
+with the project's registry + ABC + factory pattern (see DataSource /
+DATA_SOURCES / get_data_source).
 
-后端：
-- LocalMetricLogger：本地 CSV 记录，始终启用。
-- SwanLabMetricLogger：SwanLab 记录，默认启用，可通过 --no_swanlab 关闭。
+Backends:
+- LocalMetricLogger: Local CSV logging, always enabled.
+- SwanLabMetricLogger: SwanLab remote logging, enabled by default,
+  disabled via ``--no_swanlab``.
 """
 
 import csv
@@ -20,10 +22,11 @@ logger = get_logger(__name__)
 
 
 class MetricLogger(ABC):
-    """指标记录后端抽象基类。
+    """Abstract base class for metric logging backends.
 
-    所有方法须可安全重复调用。后端初始化（如 swanlab.init）在 init_run 中完成，
-    未初始化时各 log_* 方法应静默跳过。
+    All methods must be safe to call repeatedly. Backend initialization
+    (e.g. swanlab.init) is deferred to ``init_run``; ``log_*`` methods
+    should silently skip when not initialized.
     """
 
     @abstractmethod
@@ -35,7 +38,16 @@ class MetricLogger(ABC):
         group: str,
         tags: list[str],
         config: dict[str, Any],
-    ) -> None: ...
+    ) -> None:
+        """Initialize the logging backend for a new run.
+
+        Args:
+            log_dir: Directory for storing logs.
+            experiment_name: Name of this experiment.
+            group: Experiment group for grouping runs.
+            tags: Tags for categorizing the run.
+            config: Experiment configuration dict.
+        """
 
     @abstractmethod
     def log_metrics(
@@ -46,7 +58,16 @@ class MetricLogger(ABC):
         step: int,
         epoch: int,
         stage: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Log epoch-level aggregated metrics.
+
+        Args:
+            phase: Phase name (e.g. ``"train"``, ``"val"``).
+            metrics: Metric name to value mapping.
+            step: Global step number.
+            epoch: Current epoch number.
+            stage: Stage name for multi-stage training (optional).
+        """
 
     @abstractmethod
     def log_early_stopping(
@@ -59,7 +80,18 @@ class MetricLogger(ABC):
         step: int,
         epoch: int,
         stage: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Log early stopping trajectory.
+
+        Args:
+            phase: Phase name.
+            best_score: Best monitored score so far.
+            num_bad_epochs: Number of epochs without improvement.
+            best_metrics: Best metric values (optional).
+            step: Global step number.
+            epoch: Current epoch number.
+            stage: Stage name (optional).
+        """
 
     @abstractmethod
     def log_batch(
@@ -71,30 +103,54 @@ class MetricLogger(ABC):
         batch_idx: int,
         loss: float,
         stage: str | None = None,
-    ) -> None: ...
+    ) -> None:
+        """Log per-batch loss.
+
+        Args:
+            phase: Phase name.
+            global_step: Global step number.
+            epoch: Current epoch number.
+            batch_idx: Batch index within the epoch.
+            loss: Loss value for this batch.
+            stage: Stage name (optional).
+        """
 
     @abstractmethod
-    def log_final(self, *, metrics: dict[str, float], step: int) -> None: ...
+    def log_final(self, *, metrics: dict[str, float], step: int) -> None:
+        """Log final summary metrics.
+
+        Args:
+            metrics: Final metric values.
+            step: Global step number.
+        """
 
     @abstractmethod
-    def finish(self) -> None: ...
+    def finish(self) -> None:
+        """Clean up and tear down the logging backend."""
 
 
 @register_metric_logger("local")
 class LocalMetricLogger(MetricLogger):
-    """本地 CSV 指标记录器。
+    """Local CSV metric logger.
 
-    在 log_dir 下按 phase 写入：
-      metrics_{phase}.csv           每 epoch 的聚合指标（train/val/test）
-      early_stopping[_{stage}].csv  早停轨迹（best_score / num_bad_epochs / best_*）
-      batch_metrics_{phase}.csv     每 batch 的 loss（仅 log_batch_metrics 开启时）
-      metrics_final.csv             最终摘要指标
+    Writes CSV files under ``log_dir`` per phase:
+      ``metrics_{phase}.csv``           Epoch-level aggregated metrics.
+      ``early_stopping[_{stage}].csv``   Early stopping trajectory.
+      ``batch_metrics_{phase}.csv``      Per-batch loss (when enabled).
+      ``metrics_final.csv``              Final summary metrics.
 
-    多阶段场景以 stage 区分 series：metrics_{stage}_{phase}.csv。
-    表头惰性写入，后续出现新指标列时原地扩展表头。
+    Multi-stage runs distinguish series via ``metrics_{stage}_{phase}.csv``.
+    Headers are written lazily and extended in-place when new metric
+    columns appear.
     """
 
     def __init__(self, *, log_dir: str, log_batch_metrics: bool = False):
+        """Initialize the local CSV metric logger.
+
+        Args:
+            log_dir: Directory for output CSV files.
+            log_batch_metrics: Whether to log per-batch loss.
+        """
         self._log_dir = log_dir
         self._log_batch = log_batch_metrics
         os.makedirs(log_dir, exist_ok=True)
@@ -103,23 +159,30 @@ class LocalMetricLogger(MetricLogger):
 
     @staticmethod
     def _series(phase: str, stage: str | None) -> str:
+        """Build a series identifier from phase and optional stage."""
         return f"{stage}_{phase}" if stage else phase
 
     def init_run(self, **kwargs) -> None:
-        # log_dir 已在构造时设置，无需额外初始化
+        """No-op: log_dir was already set at construction time."""
         pass
 
     def _write_row(
         self, path: str, leading: list[tuple[str, Any]], values: dict[str, Any]
     ) -> None:
-        """写入一行。leading 为固定前缀列 [(列名, 值)]，values 为动态指标列。
+        """Write a single CSV row.
 
-        表头在首次写入时确定；后续行按已存表头对齐，缺失列留空。
-        同一 series 的指标列在实际训练中保持稳定，故无需扩展表头。
+        ``leading`` columns are fixed prefix pairs ``(name, value)``,
+        ``values`` are dynamic metric columns. The header is determined
+        on first write; subsequent rows align to existing columns, with
+        missing values left blank.
+
+        Args:
+            path: CSV file path.
+            leading: Ordered list of ``(column_name, value)`` prefix pairs.
+            values: Dynamic metric column name to value mapping.
         """
         f = self._csv_files.get(path)
         if f is None:
-            # 句柄在整个 run 期间复用，按需 flush 以保证崩溃安全
             header = [c for c, _ in leading] + sorted(values.keys())
             f = open(path, "a", newline="")  # noqa: SIM115
             self._csv_files[path] = f
@@ -131,6 +194,15 @@ class LocalMetricLogger(MetricLogger):
         f.flush()
 
     def log_metrics(self, *, phase, metrics, step, epoch, stage=None) -> None:
+        """Log epoch-level metrics to a CSV file.
+
+        Args:
+            phase: Phase name (e.g. ``"train"``, ``"val"``).
+            metrics: Metric name to value mapping.
+            step: Global step (unused in CSV logging).
+            epoch: Current epoch number.
+            stage: Stage name (optional).
+        """
         values = {k: v for k, v in metrics.items() if v is not None}
         path = os.path.join(self._log_dir, f"metrics_{self._series(phase, stage)}.csv")
         self._write_row(path, [("epoch", epoch)], values)
@@ -146,6 +218,17 @@ class LocalMetricLogger(MetricLogger):
         epoch,
         stage=None,
     ) -> None:
+        """Log early stopping trajectory to a CSV file.
+
+        Args:
+            phase: Phase name.
+            best_score: Best monitored score.
+            num_bad_epochs: Consecutive epochs without improvement.
+            best_metrics: Best metric values (optional).
+            step: Global step (unused in CSV logging).
+            epoch: Current epoch number.
+            stage: Stage name (optional).
+        """
         values: dict[str, Any] = {
             "best_score": best_score if best_score is not None else "",
             "num_bad_epochs": num_bad_epochs,
@@ -159,6 +242,18 @@ class LocalMetricLogger(MetricLogger):
     def log_batch(
         self, *, phase, global_step, epoch, batch_idx, loss, stage=None
     ) -> None:
+        """Log per-batch loss to a CSV file.
+
+        Only writes when ``log_batch_metrics`` was enabled at init.
+
+        Args:
+            phase: Phase name.
+            global_step: Global step number.
+            epoch: Current epoch number.
+            batch_idx: Batch index within the epoch.
+            loss: Loss value for this batch.
+            stage: Stage name (optional).
+        """
         if not self._log_batch:
             return
         path = os.path.join(
@@ -176,12 +271,19 @@ class LocalMetricLogger(MetricLogger):
         )
 
     def log_final(self, *, metrics, step) -> None:
+        """Log final summary metrics to a CSV file.
+
+        Args:
+            metrics: Final metric values.
+            step: Global step number.
+        """
         if not metrics:
             return
         path = os.path.join(self._log_dir, "metrics_final.csv")
         self._write_row(path, [("step", step)], dict(metrics))
 
     def finish(self) -> None:
+        """Close all open CSV file handles."""
         for f in self._csv_files.values():
             with suppress(Exception):
                 f.close()
@@ -191,12 +293,26 @@ class LocalMetricLogger(MetricLogger):
 
 @register_metric_logger("swanlab")
 class SwanLabMetricLogger(MetricLogger):
-    """SwanLab 指标记录后端。swanlab 仅在方法内惰性导入，保持其为可选依赖。"""
+    """SwanLab metric logging backend.
+
+    ``swanlab`` is lazily imported inside each method to keep it an
+    optional dependency.
+    """
 
     def __init__(self):
+        """Initialize the SwanLab logger with uninitialized state."""
         self._initialized = False
 
     def init_run(self, *, log_dir, experiment_name, group, tags, config) -> None:
+        """Initialize the SwanLab run.
+
+        Args:
+            log_dir: Log directory (passed through to swanlab).
+            experiment_name: Name of this experiment.
+            group: Experiment group.
+            tags: Tags for the run.
+            config: Experiment configuration dict.
+        """
         import swanlab
         from dotenv import load_dotenv
         from swanlab.plugin.notification import LarkCallback
@@ -222,6 +338,7 @@ class SwanLabMetricLogger(MetricLogger):
 
     @staticmethod
     def _prefix(phase: str, stage: str | None) -> str:
+        """Build a SwanLab metric prefix from phase and optional stage."""
         return (
             f"{stage.upper()}/{phase.capitalize()}/"
             if stage
@@ -229,6 +346,15 @@ class SwanLabMetricLogger(MetricLogger):
         )
 
     def log_metrics(self, *, phase, metrics, step, epoch, stage=None) -> None:
+        """Log epoch-level metrics to SwanLab.
+
+        Args:
+            phase: Phase name.
+            metrics: Metric name to value mapping.
+            step: Global step number.
+            epoch: Current epoch number (unused in SwanLab).
+            stage: Stage name (optional).
+        """
         if not self._initialized:
             return
         import swanlab
@@ -253,6 +379,17 @@ class SwanLabMetricLogger(MetricLogger):
         epoch,
         stage=None,
     ) -> None:
+        """Log early stopping trajectory to SwanLab.
+
+        Args:
+            phase: Phase name.
+            best_score: Best monitored score.
+            num_bad_epochs: Consecutive epochs without improvement.
+            best_metrics: Best metric values (optional).
+            step: Global step number.
+            epoch: Current epoch number (unused in SwanLab).
+            stage: Stage name (optional).
+        """
         if not self._initialized:
             return
         import swanlab
@@ -269,10 +406,15 @@ class SwanLabMetricLogger(MetricLogger):
         swanlab.log(data, step=step)
 
     def log_batch(self, **kwargs) -> None:
-        # SwanLab 不记录 batch 级别 loss（量级过大），仅本地后端记录
-        pass
+        """No-op: SwanLab does not log per-batch metrics to avoid noise."""
 
     def log_final(self, *, metrics, step) -> None:
+        """Log final summary metrics to SwanLab.
+
+        Args:
+            metrics: Final metric values.
+            step: Global step number.
+        """
         if not self._initialized or not metrics:
             return
         import swanlab
@@ -280,6 +422,7 @@ class SwanLabMetricLogger(MetricLogger):
         swanlab.log(metrics, step=step)
 
     def finish(self) -> None:
+        """Finish the SwanLab run and clean up."""
         if not self._initialized:
             return
         import swanlab
@@ -289,12 +432,22 @@ class SwanLabMetricLogger(MetricLogger):
 
 
 class MetricLoggerComposite(MetricLogger):
-    """组合多个指标记录后端，统一 fan-out 并隔离单个后端的异常。"""
+    """Composite wrapper that fans out to multiple metric logger backends.
+
+    Each method call is forwarded to every backend; exceptions from
+    individual backends are caught and logged.
+    """
 
     def __init__(self, loggers: list[MetricLogger]):
+        """Initialize the composite logger.
+
+        Args:
+            loggers: List of MetricLogger instances to fan out to.
+        """
         self._loggers = loggers
 
     def _fanout(self, method: str, **kwargs) -> None:
+        """Call a method on all wrapped loggers, isolating exceptions."""
         for lg in self._loggers:
             try:
                 getattr(lg, method)(**kwargs)
@@ -302,26 +455,40 @@ class MetricLoggerComposite(MetricLogger):
                 logger.warning(f"{type(lg).__name__}.{method} failed: {e}")
 
     def init_run(self, **kwargs) -> None:
+        """Initialize all backends."""
         self._fanout("init_run", **kwargs)
 
     def log_metrics(self, **kwargs) -> None:
+        """Log metrics to all backends."""
         self._fanout("log_metrics", **kwargs)
 
     def log_early_stopping(self, **kwargs) -> None:
+        """Log early stopping to all backends."""
         self._fanout("log_early_stopping", **kwargs)
 
     def log_batch(self, **kwargs) -> None:
+        """Log batch metrics to all backends."""
         self._fanout("log_batch", **kwargs)
 
     def log_final(self, **kwargs) -> None:
+        """Log final metrics to all backends."""
         self._fanout("log_final", **kwargs)
 
     def finish(self) -> None:
+        """Finish logging on all backends."""
         self._fanout("finish")
 
 
 def get_metric_logger(name: str, **kwargs) -> MetricLogger:
-    """按名称实例化已注册的指标记录后端。"""
+    """Instantiate a registered metric logger backend by name.
+
+    Args:
+        name: Backend registration name (e.g. ``"local"``, ``"swanlab"``).
+        **kwargs: Arguments forwarded to the backend constructor.
+
+    Returns:
+        An instance of the requested MetricLogger subclass.
+    """
     cls = METRIC_LOGGERS.get(name)
     return cls(**kwargs)
 
@@ -329,7 +496,19 @@ def get_metric_logger(name: str, **kwargs) -> MetricLogger:
 def build_default_metric_loggers(
     *, log_dir: str, log_batch_metrics: bool, no_swanlab: bool
 ) -> MetricLogger:
-    """构建默认指标记录组合：本地始终启用，SwanLab 除非 no_swanlab。"""
+    """Build the default metric logger composite.
+
+    Local CSV logging is always enabled; SwanLab is included unless
+    ``no_swanlab`` is set.
+
+    Args:
+        log_dir: Directory for local CSV logs.
+        log_batch_metrics: Whether to log per-batch loss.
+        no_swanlab: If True, skip SwanLab backend.
+
+    Returns:
+        A MetricLoggerComposite instance.
+    """
     loggers: list[MetricLogger] = [
         get_metric_logger("local", log_dir=log_dir, log_batch_metrics=log_batch_metrics)
     ]
@@ -339,10 +518,18 @@ def build_default_metric_loggers(
 
 
 def resolve_metric_logging_flags(experiment_config, hyperparams) -> tuple[bool, bool]:
-    """解析 no_swanlab / log_batch_metrics：显式传入优先，否则回退到 CLI 参数（hyperparams）。
+    """Resolve ``no_swanlab`` and ``log_batch_metrics`` flags.
 
-    多数训练器子类调用 with_experiment 时不透传这两个参数，故统一在此回退读取，
-    使 --no_swanlab / --log_batch_metrics 对所有模型生效。
+    Explicitly passed values take precedence; otherwise fall back to
+    CLI arguments in ``hyperparams``. This ensures ``--no_swanlab``
+    and ``--log_batch_metrics`` work for all model trainers.
+
+    Args:
+        experiment_config: ExperimentConfig instance.
+        hyperparams: Hyperparameter object or namespace (optional).
+
+    Returns:
+        Tuple of ``(no_swanlab: bool, log_batch_metrics: bool)``.
     """
     no_swanlab = experiment_config.no_swanlab or bool(
         getattr(hyperparams, "no_swanlab", False)
@@ -354,11 +541,11 @@ def resolve_metric_logging_flags(experiment_config, hyperparams) -> tuple[bool, 
 
 
 __all__ = [
-    "MetricLogger",
     "LocalMetricLogger",
-    "SwanLabMetricLogger",
+    "MetricLogger",
     "MetricLoggerComposite",
-    "get_metric_logger",
+    "SwanLabMetricLogger",
     "build_default_metric_loggers",
+    "get_metric_logger",
     "resolve_metric_logging_flags",
 ]

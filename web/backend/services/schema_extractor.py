@@ -1,3 +1,9 @@
+"""Schema extractor — model discovery and parameter schema retrieval.
+
+Runs a helper subprocess that introspects available training models and their
+CLI parameter schemas, returning structured data for the schemas API.
+"""
+
 import json
 import subprocess
 import sys
@@ -9,6 +15,14 @@ HELPER_SCRIPT = str(PROJECT_ROOT / "web" / "backend" / "services" / "_schema_hel
 
 
 def _parse_group(data: dict) -> ParamGroup:
+    """Parse a raw parameter group dict into a ParamGroup model.
+
+    Args:
+        data: Raw dict with ``group_name`` and ``params`` keys.
+
+    Returns:
+        A ParamGroup instance with parsed ParamField entries.
+    """
     fields = {}
     for name, cfg in data["params"].items():
         fields[name] = ParamField(
@@ -24,21 +38,46 @@ def _parse_group(data: dict) -> ParamGroup:
 
 
 class SchemaExtractor:
+    """Extracts model names and parameter schemas by running a helper script.
+
+    Caches results after the first successful run to avoid repeated subprocess
+    invocations.
+
+    Args:
+        env_manager: A PythonEnvManager instance (or None) used to resolve
+            the Python command for the helper script.
+    """
+
     def __init__(self, env_manager):
+        """Initialize the SchemaExtractor.
+
+        Args:
+            env_manager: PythonEnvManager (or compatible) for command resolution.
+        """
         self._env_manager = env_manager
         self._models: list[str] | None = None
         self._schemas: dict[str, list[dict]] = {}
 
     def _resolve_base_cmd(self) -> list[str]:
+        """Resolve the base Python command for the helper script.
+
+        Returns:
+            A command list, defaulting to ``sys.executable``.
+        """
         if self._env_manager:
             return self._env_manager.resolve_default_command()
         return [sys.executable]
 
     def _run_helper(self) -> None:
+        """Run the schema helper subprocess and cache the results.
+
+        Parses stdout lines into model lists and parameter schemas.
+        Errors are recorded so errored models are excluded from the model list.
+        """
         if self._models is not None:
             return
         base = self._resolve_base_cmd()
-        cmd = base + [HELPER_SCRIPT]
+        cmd = [*base, HELPER_SCRIPT]
         try:
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
@@ -64,10 +103,26 @@ class SchemaExtractor:
         self._models = [m for m in all_models if m not in errored]
 
     def list_models(self) -> list[str]:
+        """Return the list of available model names.
+
+        Returns:
+            A list of model name strings.
+        """
         self._run_helper()
         return self._models
 
     def get_model_schema(self, model_name: str) -> ModelSchemaResponse:
+        """Return the parameter schema for a specific model.
+
+        Args:
+            model_name: The model name to look up.
+
+        Returns:
+            A ModelSchemaResponse with parameter groups and fields.
+
+        Raises:
+            KeyError: If the model name is not found.
+        """
         self._run_helper()
         raw_groups = self._schemas.get(model_name)
         if raw_groups is None:

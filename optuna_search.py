@@ -1,3 +1,10 @@
+"""Optuna hyperparameter search runner.
+
+Provides a command-line interface for running Optuna-based hyperparameter
+searches on KT models. Supports configurable parameter spaces, multiple
+optimization metrics, and trial history export.
+"""
+
 import argparse
 import os
 
@@ -23,18 +30,18 @@ logger = get_logger(__name__)
 
 
 def parse_args():
-    """解析命令行参数"""
-    # 预解析模型名称
+    """Parse command-line arguments."""
+    # Pre-parse model name to dynamically add model-specific arguments
     temp_parser = argparse.ArgumentParser(add_help=False)
     temp_parser.add_argument("-m", "--model", type=str)
     temp_args, _ = temp_parser.parse_known_args()
 
     model_name = temp_args.model
 
-    # 构建完整的解析器
+    # Build the full argument parser
     parser = argparse.ArgumentParser(description="Unified Optuna Hyperparameter Search")
 
-    # 模型选择
+    # Model selection
     available_models = TRAINERS.keys()
     parser.add_argument(
         "-m",
@@ -45,7 +52,7 @@ def parse_args():
         help=f"Model to search hyperparameters for. Available: {', '.join(available_models)}",
     )
 
-    # Optuna配置
+    # Optuna configuration
     optuna_group = parser.add_argument_group("Optuna Configuration")
     optuna_group.add_argument(
         "--optuna_config",
@@ -67,16 +74,16 @@ def parse_args():
         help="Metric to optimize",
     )
 
-    # 数据参数
+    # Data parameters
     DataParams.add_args(parser)
 
-    # 基础训练参数
+    # Base training parameters
     EarlyStoppingParams.add_args(parser)
 
-    # 通用参数
+    # Common parameters
     GeneralParams.add_args(parser)
 
-    # 如果指定了模型，动态添加该模型的特定参数
+    # If model is specified, dynamically add model-specific parameters
     if model_name:
         model_params_cls = get_model_params(model_name)
         if model_params_cls:
@@ -84,7 +91,7 @@ def parse_args():
 
     args = parser.parse_args()
 
-    # 设置默认参数空间路径
+    # Set default parameter space path
     if args.param_space is None:
         args.param_space = f"./configs/optuna/param_space_{args.model.lower()}.json"
 
@@ -92,14 +99,14 @@ def parse_args():
 
 
 def main():
-    """主函数。"""
+    """Main entry point."""
     args = parse_args()
 
-    # 先加载配置，以便用 n_trials 标注实验目录
+    # Load config first to annotate experiment directory with n_trials
     logger.info(f"Loading Optuna config from: {args.optuna_config}")
     optuna_config = load_config_from_json(args.optuna_config)
 
-    # 创建实验管理器
+    # Create experiment manager
     exp_manager = ExperimentManager(
         exp_type=ExperimentType.HYPERPARAM_SEARCH,
         model_name=args.model,
@@ -115,22 +122,22 @@ def main():
     logger.info("=" * 60)
 
     optuna_config.save_dir = exp_manager.get_log_dir()
-    # 优化方向由指标决定，覆盖配置文件中的 direction
+    # Optimization direction is determined by the metric, overriding the config file's direction
     optuna_config.directions = [direction_for_metric(args.metric)]
     logger.info(f"Optimizing metric '{args.metric}' ({optuna_config.directions[0]})")
 
-    # 加载参数空间
+    # Load parameter space
     logger.info(f"Loading parameter space from: {args.param_space}")
     param_spaces = load_param_space_from_json(args.param_space)
 
-    # 创建数据源工厂函数
+    # Create data source factory function
     def data_src_factory():
         return get_data_source(dataset_name=args.dataset, args=args)
 
-    # 获取训练器类
+    # Get trainer class
     trainer_class = TRAINERS.get(args.model)
 
-    # 创建目标函数包装器
+    # Create objective function wrapper
     objective_wrapper = TrainerObjectiveWrapper(
         trainer_class=trainer_class,
         data_src_fn=data_src_factory,
@@ -140,7 +147,7 @@ def main():
         exp_manager=exp_manager,
     )
 
-    # 使用构建器创建OptunaTuner
+    # Use the builder to create an OptunaTuner
     tuner = (
         OptunaTunerBuilder()
         .with_config(optuna_config)
@@ -149,16 +156,16 @@ def main():
         .build()
     )
 
-    # 执行超参数搜索
+    # Execute hyperparameter search
     logger.info(
         f"Starting hyperparameter search with {optuna_config.n_trials} trials..."
     )
     best_params = tuner.search()
 
-    # 打印结果
+    # Print results
     tuner.print_summary()
 
-    # 获取和保存数据框
+    # Get and save dataframe
     df = tuner.get_dataframe()
     if df is not None:
         log_dir = exp_manager.get_log_dir()

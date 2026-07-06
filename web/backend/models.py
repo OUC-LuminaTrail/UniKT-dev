@@ -1,3 +1,9 @@
+"""SQLAlchemy ORM models for the task and log database.
+
+Defines the ``Task`` and ``LogChunk`` tables used throughout the web backend
+for tracking experiment runs and their output logs.
+"""
+
 from datetime import datetime
 
 from database import Base
@@ -6,6 +12,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 
 class Task(Base):
+    """An experiment task tracked by the process manager.
+
+    Stores metadata, status, command, and timing information for each
+    experiment run.
+    """
+
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -28,6 +40,12 @@ class Task(Base):
 
 
 class LogChunk(Base):
+    """A chunk of log output for a task or preprocess operation.
+
+    Stores raw binary output with byte-level offset tracking for efficient
+    streaming and partial reads.
+    """
+
     __tablename__ = "log_chunks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

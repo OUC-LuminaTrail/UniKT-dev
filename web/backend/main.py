@@ -1,3 +1,9 @@
+"""FastAPI application entry point for the KT Experiment Manager.
+
+Configures the FastAPI app with CORS, error handling, pagination, static file
+serving for the frontend dist directory, and registers all API routers.
+"""
+
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,6 +31,11 @@ from routers import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage application startup and shutdown lifecycle.
+
+    Initializes the database, creates manager/dependency singletons, and
+    recovers interrupted tasks on startup. Shuts down all managers on exit.
+    """
     import dependencies as deps
 
     init_db()

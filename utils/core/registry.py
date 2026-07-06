@@ -1,38 +1,53 @@
-"""统一注册表系统:装饰器注册 + 静态发现懒加载。
+"""Unified registry system: decorator-based registration with lazy static discovery.
 
-每个注册表维护两张表:
+Each registry maintains two tables:
 
-- ``_registry``: 名字 -> 类,由 ``@register_<role>(...)`` 装饰器在模块导入时填充。
-- ``_index``: 名字 -> 模块路径,由 :mod:`utils.core.discovery` 在**不导入模块**的前提下
-  扫描源码填充。
+- ``_registry``: name -> class, populated at module import time by the
+  ``@register_<role>(...)`` decorator.
+- ``_index``: name -> module path, populated by :mod:`utils.core.discovery`
+  via static source scanning **without importing** the module.
 """
 
 from collections.abc import Callable
 
 
 class UniversalRegistry:
-    """通用注册表:支持装饰器注册与静态发现懒加载。
+    """A generic registry supporting decorator registration and lazy static discovery.
 
     Example:
         >>> TRAINERS = UniversalRegistry("trainers")
         >>> @register_trainer("GIKT")
         ... class GIKTTrainer: ...
         >>> TRAINERS.get("GIKT")
+
+    Attributes:
+        _name: Human-readable name of this registry (e.g. ``"trainers"``).
+        _registry: Mapping from registered name to class.
+        _index: Mapping from registered name to dotted module path for lazy
+            loading.
     """
 
     def __init__(self, name: str):
+        """Initialize the registry.
+
+        Args:
+            name: Human-readable registry name (e.g. ``"trainers"``).
+        """
         self._name = name
         self._registry: dict[str, type] = {}
         self._index: dict[str, str] = {}
 
     def register(self, name: str | None = None) -> Callable[[type], type]:
-        """装饰器:把类绑定到 ``name``,在模块导入时触发。
+        """Return a decorator that binds a class to ``name`` at import time.
 
         Args:
-            name: 注册名。为 ``None`` 时取类名。
+            name: Registration name. If ``None``, the class name is used.
 
         Raises:
-            KeyError: 该名字已绑定到**另一个**类。
+            KeyError: The name is already bound to a **different** class.
+
+        Returns:
+            A decorator that registers the class.
         """
 
         def decorator(cls: type) -> type:
@@ -41,20 +56,23 @@ class UniversalRegistry:
             if prev is not None and prev is not cls:
                 raise KeyError(f"'{n}' already registered in '{self._name}'")
             self._registry[n] = cls
-            self._index.pop(n, None)  # 已实例化,懒索引不再需要
+            self._index.pop(n, None)  # Instantiated, lazy index no longer needed
             return cls
 
         return decorator
 
     def index(self, name: str, module_path: str) -> None:
-        """静态发现入口:记录 ``name`` 所在模块路径,**不导入模块**。
+        """Record the module path of an entry **without importing** the module.
+
+        This is the entry point for static discovery.
 
         Args:
-            name: 注册名。
-            module_path: 该名字所在模块的点分路径(如 ``model.GIKT.GIKT_trainer``)。
+            name: Registration name.
+            module_path: Dotted module path where the name resides
+                (e.g. ``model.GIKT.GIKT_trainer``).
 
         Raises:
-            KeyError: 同一名字被索引到两个不同模块。
+            KeyError: The same name was indexed from two different modules.
         """
         prev = self._index.get(name)
         if prev is not None and prev != module_path:
@@ -64,10 +82,16 @@ class UniversalRegistry:
         self._index.setdefault(name, module_path)
 
     def get(self, name: str) -> type:
-        """按名取类;必要时按 ``_index`` 懒导入对应模块。
+        """Look up a class by name; lazy-import the module if necessary.
+
+        Args:
+            name: Registration name.
 
         Raises:
-            KeyError: 名字未注册。
+            KeyError: The name is not registered.
+
+        Returns:
+            The registered class.
         """
         cls = self._registry.get(name)
         if cls is not None:
@@ -76,7 +100,9 @@ class UniversalRegistry:
         if module_path is not None:
             import importlib
 
-            importlib.import_module(module_path)  # 触发装饰器 -> 填充 _registry
+            importlib.import_module(
+                module_path
+            )  # Triggers decorator -> populates _registry
             cls = self._registry.get(name)
             if cls is not None:
                 return cls
@@ -85,20 +111,37 @@ class UniversalRegistry:
         )
 
     def keys(self) -> list[str]:
-        """全部已注册名字(已加载与懒索引取并集,去重)。"""
+        """Return all registered names (loaded and lazy-indexed, deduplicated).
+
+        Returns:
+            A list of all known registered names.
+        """
         seen = list(self._registry.keys())
         seen += [k for k in self._index if k not in self._registry]
         return seen
 
     def __contains__(self, name: object) -> bool:
+        """Check whether a name is registered.
+
+        Args:
+            name: Registration name to look up.
+
+        Returns:
+            ``True`` if the name is in the registry or the index.
+        """
         return name in self._registry or name in self._index
 
     def __repr__(self) -> str:
+        """Return a string representation of the registry.
+
+        Returns:
+            A string showing the registry name and its registered items.
+        """
         return f"UniversalRegistry('{self._name}', items={self.keys()})"
 
 
 # ============================================================================
-# 全局注册表
+# Global registries
 # ============================================================================
 
 TRAINERS = UniversalRegistry("trainers")
@@ -109,30 +152,65 @@ METRIC_LOGGERS = UniversalRegistry("metric_loggers")
 
 
 # ============================================================================
-# 便捷装饰器:统一为 @register_<role>("name") 词汇
+# Convenience decorators: unified @register_<role>("name") vocabulary
 # ============================================================================
 
 
 def register_trainer(name: str | None = None):
-    """注册训练器到 ``TRAINERS``。"""
+    """Register a trainer into ``TRAINERS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``TRAINERS``.
+    """
     return TRAINERS.register(name)
 
 
 def register_model_params(name: str | None = None):
-    """注册模型参数配置到 ``PARAM_CONFIGS``。"""
+    """Register model parameters into ``PARAM_CONFIGS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``PARAM_CONFIGS``.
+    """
     return PARAM_CONFIGS.register(name)
 
 
 def register_data_source(name: str | None = None):
-    """注册数据源到 ``DATA_SOURCES``。"""
+    """Register a data source into ``DATA_SOURCES``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``DATA_SOURCES``.
+    """
     return DATA_SOURCES.register(name)
 
 
 def register_analyzer(name: str | None = None):
-    """注册案例分析器到 ``ANALYZERS``。"""
+    """Register an analysis case into ``ANALYZERS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``ANALYZERS``.
+    """
     return ANALYZERS.register(name)
 
 
 def register_metric_logger(name: str | None = None):
-    """注册指标记录后端到 ``METRIC_LOGGERS``。"""
+    """Register a metric logging backend into ``METRIC_LOGGERS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``METRIC_LOGGERS``.
+    """
     return METRIC_LOGGERS.register(name)

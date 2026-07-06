@@ -11,4 +11,4 @@ from .base_analyzer import BaseCaseAnalyzer
 from .result_collector import ResultCollector
 from .visualizers import HeatmapVisualizer
 
-__all__ = ["BaseCaseAnalyzer", "ResultCollector", "HeatmapVisualizer"]
+__all__ = ["BaseCaseAnalyzer", "HeatmapVisualizer", "ResultCollector"]

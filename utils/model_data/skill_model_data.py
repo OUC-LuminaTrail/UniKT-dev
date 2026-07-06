@@ -1,3 +1,10 @@
+"""Skill-level model data module.
+
+Provides the SkillModelData class for skill-based knowledge tracing model data
+preparation, including sequence building, windowlate evaluation data loading,
+and iterable dataset streaming from parquet files.
+"""
+
 import os
 from collections.abc import Iterator
 
@@ -15,7 +22,7 @@ logger = get_logger(__name__)
 
 
 class WindowlateIterableDataset(IterableDataset):
-    """Stream windowlate samples from parquet."""
+    """Stream windowlate samples from a parquet file."""
 
     def __init__(
         self,
@@ -23,6 +30,13 @@ class WindowlateIterableDataset(IterableDataset):
         max_seq_len: int,
         batch_read_rows: int = 200_000,
     ):
+        """Initialise the iterable dataset.
+
+        Args:
+            parquet_path: Path to the parquet file containing windowlate data.
+            max_seq_len: Maximum sequence length (window size).
+            batch_read_rows: Number of rows to read per batch (default: 200000).
+        """
         super().__init__()
         self.parquet_path = parquet_path
         self.max_seq_len = max_seq_len
@@ -31,7 +45,7 @@ class WindowlateIterableDataset(IterableDataset):
         self._num_row_groups = None
 
     def _init_metadata(self) -> None:
-        """延迟初始化元数据"""
+        """Lazily initialise metadata from the parquet file."""
         if self._num_samples is None:
             import polars as pl
 
@@ -45,6 +59,7 @@ class WindowlateIterableDataset(IterableDataset):
             self._num_row_groups = parquet_file.num_row_groups
 
     def __len__(self) -> int:
+        """Return the total number of samples."""
         self._init_metadata()
         return self._num_samples
 
@@ -58,7 +73,12 @@ class WindowlateIterableDataset(IterableDataset):
         torch.Tensor,
         torch.Tensor,
     ]:
-        """构建单个样本张量，返回 (sequence, response, mask, late_group_id, label, question)"""
+        """Build a single sample tensor.
+
+        Returns:
+            Tuple of (sequence, response, mask, late_group_id, label, question)
+            tensors, each of shape (max_seq_len,).
+        """
         positions = sample["position"]
 
         sequence = np.zeros(self.max_seq_len, dtype=np.int64)
@@ -85,13 +105,27 @@ class WindowlateIterableDataset(IterableDataset):
         )
 
     def _read_batch_arrays(self, table: pa.Table) -> dict[str, np.ndarray]:
-        """读取 Table 所有列为 numpy 数组"""
+        """Read all columns of a Table as numpy arrays.
+
+        Args:
+            table: PyArrow Table.
+
+        Returns:
+            Dictionary mapping column names to numpy arrays.
+        """
         return {col: table.column(col).to_numpy() for col in table.column_names}
 
     def _iter_row_groups(
         self, row_group_indices: list[int]
     ) -> Iterator[dict[str, np.ndarray]]:
-        """迭代指定的 row groups，返回批量数据"""
+        """Iterate over specified row groups, yielding batched data.
+
+        Args:
+            row_group_indices: List of row group indices to read.
+
+        Yields:
+            Dictionary of column name to numpy array for each row group.
+        """
         parquet_file = pq.ParquetFile(self.parquet_path)
 
         for rg_idx in row_group_indices:
@@ -110,7 +144,14 @@ class WindowlateIterableDataset(IterableDataset):
             torch.Tensor,
         ]
     ]:
-        """处理一个批量数据，逐个 yield 样本"""
+        """Process a batch of data, yielding individual samples.
+
+        Args:
+            batch: Dictionary of column arrays for one row group.
+
+        Yields:
+            Tensors for each sample in the batch.
+        """
         sample_ids = batch["sample_id"]
         if sample_ids.size == 0:
             return
@@ -126,6 +167,7 @@ class WindowlateIterableDataset(IterableDataset):
             yield self._build_single_tensor(sample)
 
     def __iter__(self):
+        """Iterate over samples, with multi-worker data loading support."""
         self._init_metadata()
         worker_info = get_worker_info()
 
@@ -142,29 +184,31 @@ class WindowlateIterableDataset(IterableDataset):
 
 
 class SkillModelData(BaseModelData):
-    """
-    技能序列数据基类
+    """Skill sequence data base class.
 
-    用于构建基于技能（skill/concept）的知识追踪模型数据
+    Used to build skill-based (skill/concept) knowledge tracing model data.
     """
 
     def __init__(self, data_src: DataSource, cache: bool = False):
+        """Initialise the skill-level model data object.
+
+        Args:
+            data_src: Data source object.
+            cache: Whether to enable disk caching.
+        """
         super().__init__(data_src, cache=cache)
 
     def _get_kfold_data(self):
-        r"""重写：从技能序列数据获取 K-fold 标签。"""
+        """Override: retrieve K-fold labels from skill sequence data."""
         return self.data_src.get_split_skill_sequence_data()
 
     def build_sequence_data(self):
-        r"""
-        从切分后的技能序列数据加载用户技能序列
+        """Load user skill sequences from split skill sequence data.
 
-        返回:
-            user_sequence: 用户技能ID序列，shape为(num_split_users, max_seq_len)
-            user_response: 用户响应序列，shape为(num_split_users, max_seq_len)
-            user_mask: 用户掩码序列，shape为(num_split_users, max_seq_len)
-            user_id_sequence: 用户ID序列，shape为(num_split_users, max_seq_len)
-            user_question: 用户题目ID序列，shape为(num_split_users, max_seq_len)
+        Returns:
+            Tuple of (user_sequence, user_response, user_mask,
+                      user_id_sequence, user_question) as numpy arrays,
+            each of shape (num_split_users, max_seq_len).
         """
         import numpy as np
         import polars as pl
@@ -199,22 +243,19 @@ class SkillModelData(BaseModelData):
         return user_sequence, user_response, user_mask, user_id_sequence, user_question
 
     def load_windowlate_data(self, max_seq_len: int):
-        r"""
-        加载用于 windowlateauc_mean 评估的样本。
+        """Load windowlate evaluation samples.
 
-        从预处理的 Parquet 文件加载滑动窗口数据，并转换为 numpy 数组。
+        Loads sliding window data from a preprocessed parquet file and
+        converts it to numpy arrays.
 
-        参数:
-            max_seq_len: 最大序列长度（窗口大小）
+        Args:
+            max_seq_len: Maximum sequence length (window size).
 
-        返回:
-            user_sequence: 技能序列，shape=(num_samples, max_seq_len)
-            user_response: 响应序列，shape=(num_samples, max_seq_len)
-            user_mask: 预测掩码，shape=(num_samples, max_seq_len)，1 表示需要预测
-            user_id_sequence: 用户ID序列，shape=(num_samples, max_seq_len)
-            late_group_id: 题目级分组ID，shape=(num_samples, max_seq_len)
-            user_true_labels: 真实标签序列，shape=(num_samples, max_seq_len)
-            user_question: 题目ID序列，shape=(num_samples, max_seq_len)
+        Returns:
+            Tuple of (user_sequence, user_response, user_mask,
+                      user_id_sequence, late_group_id, user_true_labels,
+                      user_question) as numpy arrays,
+            each of shape (num_samples, max_seq_len).
         """
         import numpy as np
 
@@ -282,6 +323,15 @@ class SkillModelData(BaseModelData):
         max_seq_len: int,
         batch_read_rows: int = 200_000,
     ) -> WindowlateIterableDataset:
+        """Create a WindowlateIterableDataset from the windowlate parquet file.
+
+        Args:
+            max_seq_len: Maximum sequence length (window size).
+            batch_read_rows: Number of rows to read per batch (default: 200000).
+
+        Returns:
+            A configured WindowlateIterableDataset instance.
+        """
         parquet_path = os.path.join(
             self.data_src.data_folder, f"{self.data_src.dataset}_windowlate.parquet"
         )

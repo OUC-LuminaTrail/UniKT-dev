@@ -1,3 +1,9 @@
+"""Logs router — task log retrieval and WebSocket streaming.
+
+Provides a REST endpoint for fetching paginated log chunks by task ID and a
+WebSocket endpoint for live log streaming with offset tracking.
+"""
+
 from database import SessionLocal
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from models import LogChunk, Task
@@ -13,6 +19,19 @@ router = APIRouter(tags=["logs"])
 
 @router.get("/api/tasks/{task_id}/logs")
 def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=100000)):
+    """Fetch paginated log content for a given task.
+
+    Args:
+        task_id: The task identifier.
+        offset: Byte offset to start reading from.
+        limit: Maximum number of log chunks to return (1-100000).
+
+    Returns:
+        A dict with ``content`` (decoded text) and ``total_lines`` (chunk count).
+
+    Raises:
+        HTTPException: 404 if the task does not exist.
+    """
     with SessionLocal() as session:
         task = session.query(Task).get(task_id)
         if not task:
@@ -42,6 +61,16 @@ def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=1
 
 @router.websocket("/api/tasks/{task_id}/logs/stream")
 async def stream_logs(websocket: WebSocket, task_id: int, from_offset: int = Query(0)):
+    """Stream task logs live over a WebSocket connection.
+
+    Sends JSON messages of type ``data`` with decoded text and offset tracking,
+    and a final ``done`` message when the stream ends.
+
+    Args:
+        websocket: The WebSocket connection.
+        task_id: The task identifier.
+        from_offset: Starting byte offset for the log stream.
+    """
     await websocket.accept()
     with SessionLocal() as session:
         task = session.query(Task).get(task_id)

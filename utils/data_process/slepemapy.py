@@ -1,3 +1,5 @@
+"""Slepemapy (Geography) dataset handler."""
+
 import os
 
 import polars as pl
@@ -44,6 +46,7 @@ class SlepemapyData(DataSource):
     """
 
     def __init__(self, args):
+        """Initialize the Slepemapy dataset handler."""
         super().__init__(
             dataset="slepemapy",
             data_base_path=args.data_base_path,

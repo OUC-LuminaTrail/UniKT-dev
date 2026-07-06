@@ -43,6 +43,7 @@ class ResultCollector:
         self._df = None  # Cached DataFrame
 
     def add_batch(self, case_data: dict):
+        """Add a batch of inference results to the collector."""
         required_keys = ["user_ids", "question_ids", "labels", "predictions", "logits"]
         missing_keys = [k for k in required_keys if k not in case_data]
         if missing_keys:

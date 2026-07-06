@@ -1,12 +1,12 @@
-"""指标计算与聚合模块
+"""Metric computation and accumulation module.
 
-处理训练/验证指标的累积、计算和记录。
+Handles aggregation, computation, and logging of training/validation metrics.
 
-各模型的 forward_pass 输出须包含以下字段：
-    y_label   : 真实标签（0/1）
-    y_predict : 二元预测（0/1），用于 ACC
-    y_score   : 排序分数（任意实数均可），用于 AUC
-    y_prob    : 预测概率（[0,1]），用于 RMSE
+Each model's forward_pass output must contain the following fields:
+    y_label   : ground-truth labels (0/1)
+    y_predict : binary predictions (0/1), used for ACC
+    y_score   : ranking scores (any real number), used for AUC
+    y_prob    : predicted probabilities ([0,1]), used for RMSE
 """
 
 import numpy as np
@@ -15,10 +15,23 @@ from sklearn.metrics import accuracy_score, roc_auc_score, root_mean_squared_err
 
 
 def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
-    """按 fusion_type 计算每个 group 的聚合分数。
+    """Compute aggregated scores per group according to fusion_type.
 
-    mean: 组内均值；vote: 按组内多数对/错方向取相应子集均值，子集为空时回退整组；
-    all: 全对/全错组取整组均值，其余组按多数方向取子集均值。
+    Args:
+        y_score: Per-instance scores.
+        inverse: Inverse mapping from instance to group index.
+        num_groups: Total number of groups.
+        fusion_type: Aggregation strategy — ``"mean"`` (group mean),
+            ``"vote"`` (majority direction subset mean), or ``"all"``
+            (whole-group mean for unanimous groups, otherwise majority
+            subset mean).
+        threshold: Classification threshold.
+
+    Returns:
+        Array of aggregated scores, one per group.
+
+    Raises:
+        ValueError: If fusion_type is unsupported.
     """
     group_count = np.bincount(inverse, minlength=num_groups).astype(np.float64)
     if fusion_type == "mean":
@@ -58,13 +71,14 @@ def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
 
 
 class MetricsAccumulator:
-    """指标累积器。
+    """Accumulator for batch-level predictions and epoch-level metrics.
 
-    职责：
-    1. 收集 batch 级别的预测和标签
-    2. 计算 epoch 级别的聚合指标
+    Responsibilities:
+    1. Collect batch-level predictions and labels.
+    2. Compute epoch-level aggregated metrics.
 
-    指标的持久化记录由 MetricLogger 负责，本类只负责计算。
+    Metric persistence is handled by MetricLogger; this class only
+    performs computation.
 
     Example:
         >>> accum = MetricsAccumulator()
@@ -76,10 +90,15 @@ class MetricsAccumulator:
     """
 
     def __init__(self):
+        """Initialize the accumulator with an empty internal store."""
         self._accumulators: dict[str, dict[str, list]] = {}
 
     def reset(self, phase: str):
-        """重置指定 phase 的累积器。"""
+        """Reset accumulators for a given phase.
+
+        Args:
+            phase: Phase name, e.g. ``"train"`` or ``"val"``.
+        """
         self._accumulators[phase] = {
             "y_label": [],
             "y_pred": [],
@@ -89,11 +108,12 @@ class MetricsAccumulator:
         }
 
     def update(self, phase: str, outputs: dict[str, torch.Tensor]):
-        """更新累积器。
+        """Update accumulators with a batch of model outputs.
 
         Args:
-            phase: "train" 或 "val"
-            outputs: 须包含 "y_label", "y_predict", "y_score", "y_prob"
+            phase: Phase name, e.g. ``"train"`` or ``"val"``.
+            outputs: Dict containing ``"y_label"``, ``"y_predict"``,
+                ``"y_score"``, and ``"y_prob"`` tensors.
         """
         if phase not in self._accumulators:
             self.reset(phase)
@@ -108,10 +128,18 @@ class MetricsAccumulator:
             accum["group_id"].append(group_id.detach().cpu())
 
     def compute(self, phase: str) -> dict[str, float]:
-        """计算 epoch 级别指标。
+        """Compute epoch-level metrics for the given phase.
 
-        train/val 返回 acc/auc/rmse；test 且提供 group_id 时，对 mean/vote/all
-        三种 group 聚合分别返回 {fusion}_acc/{fusion}_auc/{fusion}_rmse。
+        For train/val phases, returns acc/auc/rmse.
+        For test phase with group_id provided, returns per-fusion
+        metrics (``{fusion}_acc``, ``{fusion}_auc``, ``{fusion}_rmse``).
+
+        Args:
+            phase: Phase name, e.g. ``"train"``, ``"val"``, or ``"test"``.
+
+        Returns:
+            Dictionary mapping metric names to values. Empty dict if
+            no data has been accumulated for the given phase.
         """
         if phase not in self._accumulators:
             return {}
@@ -120,7 +148,7 @@ class MetricsAccumulator:
         if not accum["y_label"]:
             return {}
 
-        # test 阶段提供 group_id 时，对 mean/vote/all 三种 group 聚合分别计算指标
+        # Test phase with group_id: compute per-fusion metrics
         if phase == "test" and accum["group_id"]:
             group_id: np.ndarray = torch.cat(accum["group_id"]).numpy()
             y_label_raw: np.ndarray = torch.cat(accum["y_label"]).numpy()
@@ -129,7 +157,7 @@ class MetricsAccumulator:
             uniq_groups, inverse = np.unique(group_id, return_inverse=True)
             num_groups = uniq_groups.shape[0]
 
-            # 标签取每个 group 首个值；同时校验一致性
+            # Label: take the first value per group; verify consistency
             first_idx = np.full(num_groups, inverse.shape[0], dtype=np.int64)
             np.minimum.at(first_idx, inverse, np.arange(inverse.shape[0]))
             group_label = y_label_raw[first_idx].astype(np.float64)

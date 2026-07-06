@@ -1,9 +1,25 @@
+"""Pydantic request/response models for the web API.
+
+Defines all data transfer objects (DTOs) used by the FastAPI endpoints,
+including task, environment, GPU, schema, and experiment schemas.
+"""
+
 from datetime import datetime
 
 from pydantic import BaseModel
 
 
 class TaskCreate(BaseModel):
+    """Request model for creating a new experiment task.
+
+    Attributes:
+        name: A human-readable name for the task.
+        env_id: Identifier of the Python environment to use.
+        custom_python_path: An optional custom Python interpreter path.
+        model_name: The model name to train.
+        params: Additional training parameters as a dictionary.
+    """
+
     name: str = ""
     env_id: str
     custom_python_path: str | None = None
@@ -12,6 +28,28 @@ class TaskCreate(BaseModel):
 
 
 class TaskResponse(BaseModel):
+    """Response model representing a task's full state.
+
+    Attributes:
+        id: Unique task identifier.
+        name: Task name.
+        command: The command string that was launched.
+        model_name: Model being trained.
+        dataset_name: Dataset used for training.
+        env_type: Environment type (e.g. pixi, conda, custom).
+        env_name: Environment name within its type.
+        python_path: Python interpreter path used.
+        status: Current task status (pending, running, completed, etc.).
+        pid: Process ID of the running task, or None.
+        exp_dir: Experiment output directory.
+        started_at: When the task started, or None.
+        finished_at: When the task finished, or None.
+        exit_code: Process exit code, or None.
+        created_at: When the task record was created.
+        tags: JSON-encoded list of tags.
+        extra_params: JSON-encoded dictionary of extra parameters.
+    """
+
     id: int
     name: str
     command: str
@@ -34,6 +72,16 @@ class TaskResponse(BaseModel):
 
 
 class EnvironmentInfo(BaseModel):
+    """Information about a detected Python environment.
+
+    Attributes:
+        id: Unique environment identifier (e.g. "pixi:default").
+        type: Environment type (pixi, conda, custom).
+        name: Short name of the environment.
+        display_name: Human-readable display label.
+        python_path: Optional Python interpreter path.
+    """
+
     id: str
     type: str
     name: str
@@ -42,11 +90,29 @@ class EnvironmentInfo(BaseModel):
 
 
 class EnvHealthCheckRequest(BaseModel):
+    """Request model for performing an environment health check.
+
+    Attributes:
+        env_id: The environment identifier to check.
+        custom_python_path: An optional custom Python path override.
+    """
+
     env_id: str
     custom_python_path: str | None = None
 
 
 class EnvHealthResult(BaseModel):
+    """Result of an environment health check.
+
+    Attributes:
+        env_id: The checked environment identifier.
+        python_available: Whether Python is reachable in the environment.
+        python_version: Python version string, or None.
+        torch_available: Whether PyTorch is installed.
+        torch_version: PyTorch version string, or None.
+        error: Error message if the check failed, or None.
+    """
+
     env_id: str
     python_available: bool
     python_version: str | None = None
@@ -56,6 +122,18 @@ class EnvHealthResult(BaseModel):
 
 
 class ParamField(BaseModel):
+    """Metadata for a single CLI parameter.
+
+    Attributes:
+        type: Parameter type string (e.g. "str", "int", "float").
+        default: Default value.
+        help: Help text describing the parameter.
+        required: Whether the parameter is required.
+        choices: Allowed choices for the parameter, or None.
+        short: Short flag alias, or None.
+        nargs: Number of arguments consumed, or None.
+    """
+
     type: str
     default: object = None
     help: str = ""
@@ -66,16 +144,41 @@ class ParamField(BaseModel):
 
 
 class ParamGroup(BaseModel):
+    """A named group of related CLI parameters.
+
+    Attributes:
+        group_name: Display name for the parameter group.
+        params: Mapping of parameter names to their metadata.
+    """
+
     group_name: str
     params: dict[str, ParamField]
 
 
 class ModelSchemaResponse(BaseModel):
+    """Response model for a complete model schema definition.
+
+    Attributes:
+        model_name: The model name.
+        param_groups: List of parameter groups for the model.
+    """
+
     model_name: str
     param_groups: list[ParamGroup]
 
 
 class ExperimentInfo(BaseModel):
+    """Summary information about an experiment.
+
+    Attributes:
+        name: Experiment name.
+        path: Filesystem path to the experiment directory.
+        model_name: Model used, or None.
+        dataset_name: Dataset used, or None.
+        timestamp: Experiment timestamp, or None.
+        type: Experiment type label.
+    """
+
     name: str
     path: str
     model_name: str | None = None
@@ -85,6 +188,15 @@ class ExperimentInfo(BaseModel):
 
 
 class ExperimentDetail(BaseModel):
+    """Detailed information about an experiment.
+
+    Attributes:
+        name: Experiment name.
+        path: Filesystem path to the experiment directory.
+        files: List of files in the experiment directory.
+        hyperparams: Dictionary of hyperparameters, or None.
+    """
+
     name: str
     path: str
     files: list[str]
@@ -92,6 +204,19 @@ class ExperimentDetail(BaseModel):
 
 
 class GpuInfo(BaseModel):
+    """Information about a single GPU device.
+
+    Attributes:
+        index: GPU device index.
+        name: GPU model name.
+        utilization_percent: GPU utilization percentage.
+        memory_used_mb: Used GPU memory in megabytes.
+        memory_total_mb: Total GPU memory in megabytes.
+        temperature_c: GPU temperature in Celsius.
+        power_usage_w: Power usage in watts.
+        processes: List of running processes on this GPU.
+    """
+
     index: int
     name: str
     utilization_percent: float
@@ -103,11 +228,33 @@ class GpuInfo(BaseModel):
 
 
 class GpuStatusResponse(BaseModel):
+    """Response model for GPU status endpoint.
+
+    Attributes:
+        gpus: List of GPU information entries.
+        updated_at: Timestamp of the status snapshot.
+    """
+
     gpus: list[GpuInfo]
     updated_at: str
 
 
 class SystemStatusResponse(BaseModel):
+    """Response model for system status (CPU, memory, GPU).
+
+    Attributes:
+        cpu_percent: Overall CPU usage percentage.
+        memory_used_gb: Used system memory in gigabytes.
+        memory_total_gb: Total system memory in gigabytes.
+        memory_percent: Memory usage percentage.
+        gpu_utilization: Primary GPU utilization percentage.
+        gpu_memory_percent: Primary GPU memory usage percentage.
+        load_1m: System load average over 1 minute.
+        load_5m: System load average over 5 minutes.
+        load_15m: System load average over 15 minutes.
+        updated_at: Timestamp of the snapshot.
+    """
+
     cpu_percent: float
     memory_used_gb: float
     memory_total_gb: float

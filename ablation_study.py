@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 
 
 def main():
+    """Run the ablation study workflow."""
     parser = argparse.ArgumentParser(
         description="Run ablation studies using model variants"
     )

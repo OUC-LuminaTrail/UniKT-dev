@@ -1,6 +1,7 @@
-"""
-通用超参数管理模块
-支持超参数的保存、加载和验证
+"""General hyperparameter management module.
+
+Supports saving, loading, and validating hyperparameters for experiment
+configuration and tracking.
 """
 
 import json
@@ -21,34 +22,33 @@ logger = get_logger(__name__)
 
 
 class HyperparameterManager:
-    """
-    超参数管理器
+    """Hyperparameter manager.
 
-    功能：
-    1. 保存超参数到JSON/YAML文件
-    2. 从文件加载超参数
-    3. 验证超参数的完整性
-    4. 生成超参数摘要
-    5. 支持版本控制和实验追踪
+    Features:
+    1. Save hyperparameters to JSON/YAML files
+    2. Load hyperparameters from files
+    3. Validate hyperparameter completeness
+    4. Generate hyperparameter summaries
+    5. Support version control and experiment tracking
     """
 
     def __init__(self, save_dir: str | None = None):
-        """
-        初始化超参数管理器
+        """Initialise the hyperparameter manager.
 
         Args:
-            save_dir: 保存目录，如果为None则使用默认的runs目录
+            save_dir: Save directory. If None, uses the default runs directory.
         """
         self.save_dir = save_dir
         self.hyperparams: dict[str, Any] = {}
         self.metadata: dict[str, Any] = {
             "created_at": datetime.now().isoformat(),
         }
-        # 摘要渲染专用终端，与日志 RichHandler 共享宽度/颜色探测
+        # Dedicated console for summary rendering, sharing width/colour detection
+        # with the RichHandler logger.
         self._console = Console()
 
     def get_hyperparameters_dict(self) -> dict[str, Any]:
-        """获取展平后的超参数字典。"""
+        """Return the flattened hyperparameter dictionary."""
         result: dict[str, Any] = {}
         for group_params in self.hyperparams.values():
             if isinstance(group_params, dict):
@@ -56,12 +56,12 @@ class HyperparameterManager:
         return result
 
     def add_hyperparams(self, params: dict | Namespace, group: str | None = None):
-        """
-        添加超参数（自动识别并序列化所有传入的参数）
+        """Add hyperparameters, automatically serialising all passed parameters.
 
         Args:
-            params: 超参数字典或argparse.Namespace对象
-            group: 参数组名称（如'model', 'training', 'data'）。如果为None，参数将添加到根级别
+            params: Hyperparameter dictionary or argparse.Namespace.
+            group: Parameter group name (e.g. 'model', 'training', 'data').
+                   If None, parameters are added at the root level.
         """
         if isinstance(params, Namespace):
             params = vars(params)
@@ -76,24 +76,22 @@ class HyperparameterManager:
             self.hyperparams.update(serialized_params)
 
     def add_metadata(self, key: str, value: Any):
-        """
-        添加元数据信息
+        """Add metadata information.
 
         Args:
-            key: 元数据键
-            value: 元数据值
+            key: Metadata key.
+            value: Metadata value.
         """
         self.metadata[key] = self._serialize_value(value)
 
     def _serialize_value(self, value: Any) -> Any:
-        """
-        序列化单个值，使其可以JSON化
+        """Serialise a single value to a JSON-compatible representation.
 
         Args:
-            value: 要序列化的值
+            value: Value to serialise.
 
         Returns:
-            序列化后的值
+            Serialised value.
         """
         if value is None:
             return None
@@ -125,24 +123,22 @@ class HyperparameterManager:
                 return f"<{type(value).__name__} object>"
 
     def _serialize_params(self, params: dict) -> dict:
-        """
-        序列化参数字典
+        """Serialise a parameter dictionary.
 
         Args:
-            params: 参数字典
+            params: Parameter dictionary.
 
         Returns:
-            序列化后的参数字典
+            Serialised parameter dictionary.
         """
         return {k: self._serialize_value(v) for k, v in params.items()}
 
     def save(self, filename: str = "hyperparameters.json", format: str = "json"):
-        """
-        保存超参数到文件
+        """Save hyperparameters to a file.
 
         Args:
-            filename: 文件名
-            format: 保存格式 ('json' 或 'yaml')
+            filename: File name.
+            format: Save format ('json' or 'yaml').
         """
         if self.save_dir is None:
             raise ValueError("Save directory not set. Please set save_dir first.")
@@ -174,14 +170,13 @@ class HyperparameterManager:
         logger.info(f"Hyperparameters saved to: {filepath}")
 
     def load(self, filepath: str) -> dict:
-        """
-        从文件加载超参数
+        """Load hyperparameters from a file.
 
         Args:
-            filepath: 文件路径
+            filepath: File path.
 
         Returns:
-            加载的超参数字典
+            Loaded hyperparameter dictionary.
         """
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Hyperparameter file not found: {filepath}")
@@ -209,10 +204,10 @@ class HyperparameterManager:
         return self.hyperparams
 
     def render_summary(self) -> Panel:
-        """渲染超参数摘要为 rich Panel：外层卡片 + 分组 + 双列 key/value。"""
+        """Render a hyperparameter summary as a rich Panel with groups and key/value pairs."""
         sections: list = []
 
-        # 元数据压缩为一行
+        # Compact metadata row
         meta_pairs = [
             f"{k}={v}"
             for k, v in self.metadata.items()
@@ -225,7 +220,7 @@ class HyperparameterManager:
         for group, params in self.hyperparams.items():
             if not params:
                 continue
-            sections.append(Text(f"■ {group}", style="bold magenta"))
+            sections.append(Text(f"\u25a0 {group}", style="bold magenta"))
             sections.append(self._param_grid(params))
             sections.append(Text(""))
 
@@ -239,11 +234,11 @@ class HyperparameterManager:
         )
 
     def print_summary(self, console: Console | None = None) -> None:
-        """打印 rich 超参数摘要卡片。"""
+        """Print a rich hyperparameter summary card."""
         (console or self._console).print(self.render_summary())
 
     def _param_grid(self, params: dict) -> Table:
-        """把组内参数排成双列 key/value 网格，行数减半。"""
+        """Arrange group parameters into a two-column key/value grid, halving row count."""
         items = list(params.items())
         half = (len(items) + 1) // 2
         left, right = items[:half], items[half:]
@@ -264,28 +259,27 @@ class HyperparameterManager:
         return grid
 
     def _build_title(self) -> str:
-        """构造卡片标题，拼接可用的 model/dataset 元信息。"""
+        """Build the card title, appending available model/dataset metadata."""
         model = self.metadata.get("model_name")
         dataset = self.metadata.get("dataset_name")
         if model and dataset:
-            return f"Hyperparameters · {model} @ {dataset}"
+            return f"Hyperparameters \u00b7 {model} @ {dataset}"
         if model:
-            return f"Hyperparameters · {model}"
+            return f"Hyperparameters \u00b7 {model}"
         if dataset:
-            return f"Hyperparameters · @{dataset}"
+            return f"Hyperparameters \u00b7 @{dataset}"
         return "Hyperparameters"
 
     def _flatten_dict(self, d: dict, parent_key: str = "", sep: str = ".") -> dict:
-        """
-        将嵌套字典展平
+        """Flatten a nested dictionary.
 
         Args:
-            d: 要展平的字典
-            parent_key: 父键名
-            sep: 分隔符
+            d: Dictionary to flatten.
+            parent_key: Parent key name.
+            sep: Separator.
 
         Returns:
-            展平后的字典
+            Flattened dictionary.
         """
         items = []
         for k, v in d.items():
@@ -297,14 +291,13 @@ class HyperparameterManager:
         return dict(items)
 
     def to_namespace(self, group: str | None = None) -> Namespace:
-        """
-        将超参数转换为Namespace对象
+        """Convert hyperparameters to a Namespace object.
 
         Args:
-            group: 如果指定，只转换特定组的参数
+            group: If specified, only convert parameters from the given group.
 
         Returns:
-            Namespace对象
+            Namespace object.
         """
         params = (
             self.hyperparams.get(group, {})
@@ -315,14 +308,14 @@ class HyperparameterManager:
         return Namespace(**params)
 
     def validate_required(self, required_params: list) -> bool:
-        """
-        验证必需的参数是否存在
+        """Validate that all required parameters exist.
 
         Args:
-            required_params: 必需参数列表（支持点号表示法，如'model.hidden_dim'）
+            required_params: List of required parameter names (dot notation
+                             supported, e.g. 'model.hidden_dim').
 
         Returns:
-            是否所有必需参数都存在
+            True if all required parameters exist, False otherwise.
         """
         flat_params = self._flatten_dict(self.hyperparams)
         missing = []
@@ -345,18 +338,18 @@ def create_hyperparameter_manager(
     dataset_name: str | None = None,
     auto_group: bool = True,
 ) -> HyperparameterManager:
-    """
-    便捷函数：创建并配置超参数管理器
+    """Create and configure a HyperparameterManager.
 
     Args:
-        args: 超参数（字典或Namespace）
-        save_dir: 保存目录
-        model_name: 模型名称
-        dataset_name: 数据集名称
-        auto_group: 是否自动分组参数（默认True）。根据参数来源（BaseParamConfig子类）自动分组
+        args: Hyperparameters (dictionary or Namespace).
+        save_dir: Save directory.
+        model_name: Model name.
+        dataset_name: Dataset name.
+        auto_group: Whether to automatically group parameters based on their
+                    source (BaseParamConfig subclasses). Defaults to True.
 
     Returns:
-        配置好的HyperparameterManager实例
+        A configured HyperparameterManager instance.
     """
     from utils.config.param_config import get_param_sources
 

@@ -28,6 +28,7 @@ class BaseCaseAnalyzer(BaseTrainer):
     """
 
     def __init__(self, model: torch.nn.Module, checkpoint_path: str):
+        """Initialize the case analyzer with a model and checkpoint path."""
         super().__init__(model)
         self.checkpoint_path = checkpoint_path
         self.result_collector = None
@@ -36,6 +37,7 @@ class BaseCaseAnalyzer(BaseTrainer):
     def with_inference(
         self, data, batch_size: int, collate_fn=None, device: torch.device | None = None
     ) -> "BaseCaseAnalyzer":
+        """Configure inference data and device settings."""
         self._data_config = DataConfig(
             train_data=None, val_data=data, batch_size=batch_size, collate_fn=collate_fn
         )
@@ -103,6 +105,7 @@ class BaseCaseAnalyzer(BaseTrainer):
 
     @torch.no_grad()
     def run_inference(self) -> ResultCollector:
+        """Run inference over the configured data and collect results."""
         if not self._is_built_for_inference:
             raise RuntimeError(
                 "Analyzer not built for inference. Call build_for_inference() first."

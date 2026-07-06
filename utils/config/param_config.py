@@ -1,6 +1,6 @@
-"""参数配置模块
+"""Parameter configuration module.
 
-提供模型参数配置基类和注册表。
+Provides model parameter configuration base class and registry.
 """
 
 import argparse
@@ -13,9 +13,9 @@ _PARAM_SOURCES: dict[str, str] = {}
 
 
 class BaseParamConfig(ABC):
-    """参数配置基类。
+    """Base class for parameter configuration.
 
-    子类必须实现 `define_params()` 方法，返回参数定义。
+    Subclasses must implement `define_params()` to return parameter definitions.
 
     Example:
         >>> class MyModelParams(BaseParamConfig):
@@ -26,29 +26,30 @@ class BaseParamConfig(ABC):
     """
 
     def __init__(self):
+        """Initialize the parameter configuration from the instance method definition."""
         super().__init__()
-        # 从实例方法定义初始化
+        # Initialize from the instance method definition
         group, params = self.define_params()
         self.group_name: str = group
         self.params: dict[str, dict[str, Any]] = params
 
     @abstractmethod
     def define_params(self) -> tuple[str, dict]:
-        """定义参数。
+        """Define parameters.
 
-        子类必须实现此方法，返回参数组名称和参数字典。
+        Subclasses must implement this method to return the parameter group name and parameter dictionary.
 
         Returns:
-            (group_name, params_dict): 参数组名称和参数定义字典
+            (group_name, params_dict): Parameter group name and parameter definition dictionary
         """
         raise NotImplementedError("Subclasses must implement define_params method.")
 
     @classmethod
     def add_args(cls, parser: argparse.ArgumentParser) -> None:
-        """添加所有参数到 ArgumentParser。
+        """Add all parameters to an ArgumentParser.
 
         Args:
-            parser: ArgumentParser 实例
+            parser: ArgumentParser instance
         """
         inst = cls()
         group_name = inst.group_name or f"{cls.__name__} Parameters"
@@ -57,7 +58,7 @@ class BaseParamConfig(ABC):
 
         for name, cfg in params.items():
             arg_names = [f"--{name}"]
-            if "short" in cfg and cfg["short"]:
+            if cfg.get("short"):
                 arg_names.insert(0, f"-{cfg['short']}")
 
             kwargs = {k: v for k, v in cfg.items() if k not in {"short", "type"}}
@@ -79,22 +80,22 @@ class BaseParamConfig(ABC):
 
 
 def get_param_sources() -> dict[str, str]:
-    """获取参数名到来源配置组名称的映射。
+    """Get the mapping of parameter names to their source config group names.
 
     Returns:
-        参数名到来源组名称的字典
+        Dictionary mapping parameter names to source group names
     """
     return dict(_PARAM_SOURCES)
 
 
 def get_model_params(model_name: str) -> type[BaseParamConfig] | None:
-    """获取模型参数配置类。
+    """Get the model parameter configuration class.
 
     Args:
-        model_name: 模型名称
+        model_name: Name of the model
 
     Returns:
-        模型参数配置类，如果未找到则返回 None
+        Model parameter configuration class, or None if not found
     """
     try:
         return PARAM_CONFIGS.get(model_name)
@@ -103,23 +104,28 @@ def get_model_params(model_name: str) -> type[BaseParamConfig] | None:
 
 
 def list_models() -> list[str]:
-    """列出所有已注册的模型参数配置。
+    """List all registered model parameter configurations.
 
     Returns:
-        模型名称列表
+        List of model names
     """
     return PARAM_CONFIGS.keys()
 
 
 # ============================================================================
-# 预定义的参数配置类
+# Predefined parameter configuration classes
 # ============================================================================
 
 
 class DataParams(BaseParamConfig):
-    """数据处理参数配置。"""
+    """Data processing parameter configuration."""
 
     def define_params(self) -> tuple[str, dict]:
+        """Define data processing parameters.
+
+        Returns:
+            (group_name, params_dict): Parameter group name and parameter definition dictionary
+        """
         group_name = "Data Parameters"
         params = {
             "dataset": {
@@ -182,9 +188,14 @@ class DataParams(BaseParamConfig):
 
 
 class EarlyStoppingParams(BaseParamConfig):
-    """早停参数配置。"""
+    """Early stopping parameter configuration."""
 
     def define_params(self) -> tuple[str, dict]:
+        """Define early stopping parameters.
+
+        Returns:
+            (group_name, params_dict): Parameter group name and parameter definition dictionary
+        """
         group_name = "Early Stopping Parameters"
         params = {
             "es_monitor": {
@@ -223,9 +234,14 @@ class EarlyStoppingParams(BaseParamConfig):
 
 
 class GeneralParams(BaseParamConfig):
-    """通用参数配置（日志、设备、种子等）。"""
+    """General parameter configuration (logging, device, seed, etc.)."""
 
     def define_params(self) -> tuple[str, dict]:
+        """Define general parameters.
+
+        Returns:
+            (group_name, params_dict): Parameter group name and parameter definition dictionary
+        """
         group_name = "General Parameters"
         params = {
             "log_dir": {
@@ -287,9 +303,14 @@ class GeneralParams(BaseParamConfig):
 
 
 class CompileParams(BaseParamConfig):
-    """torch.compile 编译参数配置。"""
+    """torch.compile compilation parameter configuration."""
 
     def define_params(self) -> tuple[str, dict]:
+        """Define compilation parameters.
+
+        Returns:
+            (group_name, params_dict): Parameter group name and parameter definition dictionary
+        """
         group_name = "Compile Parameters"
         params = {
             "compile": {
@@ -328,9 +349,14 @@ class CompileParams(BaseParamConfig):
 
 
 class SamplingParams(BaseParamConfig):
-    """数据抽样参数配置。"""
+    """Data sampling parameter configuration."""
 
     def define_params(self) -> tuple[str, dict]:
+        """Define sampling parameters.
+
+        Returns:
+            (group_name, params_dict): Parameter group name and parameter definition dictionary
+        """
         group_name = "Sampling Parameters"
         params = {
             "sample_size": {
@@ -372,8 +398,8 @@ __all__ = [
     "EarlyStoppingParams",
     "GeneralParams",
     "SamplingParams",
-    "register_model_params",
     "get_model_params",
     "get_param_sources",
     "list_models",
+    "register_model_params",
 ]

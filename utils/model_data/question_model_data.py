@@ -1,3 +1,10 @@
+"""Question-level model data module.
+
+Provides the QuestionModelData class for preparing question-level knowledge
+tracing model data, including sequence building and heterogeneous graph
+construction.
+"""
+
 from abc import abstractmethod
 
 from utils.core import get_logger
@@ -8,45 +15,49 @@ logger = get_logger(__name__)
 
 
 class QuestionModelData(BaseModelData):
-    """
-    问题级模型数据基类
-    """
+    """Base class for question-level model data preparation."""
 
     def __init__(self, data_src: DataSource, cache: bool = False):
+        """Initialise the question-level model data object.
+
+        Args:
+            data_src: Data source object.
+            cache: Whether to enable disk caching.
+        """
         super().__init__(data_src, cache=cache)
 
     def _get_kfold_data(self):
-        r"""重写：从问题序列数据获取 K-fold 标签。"""
+        """Override: retrieve K-fold labels from question sequence data."""
         return self.data_src.get_split_question_sequence_data()
 
     @abstractmethod
     def prepare_data(self, args):
-        """
-        准备问题级模型所需的数据
+        """Prepare data required by question-level models.
+
+        Args:
+            args: Configuration arguments.
         """
         raise NotImplementedError("Subclasses should implement prepare_data method")
 
     def load_sequence_data(self):
-        """
-        加载用户答题序列
+        """Load user response sequences.
 
-        参数:
-            max_seq_len: 最大序列长度
+        Loads split question sequence data from disk and builds sequence arrays.
 
-        说明：
-            - 从磁盘加载切分后的序列数据
-            - 构建序列数组
+        Returns:
+            tuple: (user_sequence, user_response, user_mask, user_id_sequence)
+                   as numpy arrays of shape (num_users, max_seq_len).
         """
         import numpy as np
 
         logger.info("Building response sequences from split data...")
 
-        # 加载切分后的序列数据
+        # Load split sequence data
         data = self.data_src.get_split_question_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_users = data["user"].nunique()
 
-        # 构建序列数组
+        # Build sequence arrays
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_response = np.zeros((num_users, max_seq_len), dtype=int)
@@ -65,49 +76,44 @@ class QuestionModelData(BaseModelData):
     def build_hetero_graph(
         self,
         edge_types: list[tuple[str, str, str]],
-        edge_attrs: dict[tuple[str, str, str], list[str]] = None,
+        edge_attrs: dict[tuple[str, str, str], list[str]] | None = None,
         directed: bool = False,
-        node_features: dict[str, any] = None,
+        node_features: dict[str, any] | None = None,
     ):
-        """
-        构建异构图，支持灵活配置节点类型和边类型
+        """Build a heterogeneous graph with flexible node and edge type configuration.
 
-        参数:
-            edge_types: 边类型列表，每个元素为三元组 (源节点类型, 边关系名, 目标节点类型)
-                       例如: [('user', 'answers', 'question'), ('question', 'has', 'skill')]
-            edge_attrs: 边属性字典，键为边类型三元组，值为属性列名列表
-                       例如: {('user', 'answers', 'question'): ['label', 'timestamp']}
-                       默认为 None（不添加边属性）
-            directed: 是否构建有向图，默认为 False（无向图）
-            node_features: 节点特征字典，键为节点类型，值为特征张量或None
-                          例如: {'question': question_difficulty_tensor}
-                          默认使用节点ID作为特征
+        Args:
+            edge_types: List of edge type triplets (source_type, relation, target_type).
+                        Example: [('user', 'answers', 'question'), ('question', 'has', 'skill')].
+            edge_attrs: Edge attribute dictionary. Keys are edge type triplets,
+                        values are lists of attribute column names.
+                        Example: {('user', 'answers', 'question'): ['label', 'timestamp']}.
+                        Defaults to None (no edge attributes).
+            directed: Whether to build a directed graph. Defaults to False (undirected).
+            node_features: Node feature dictionary. Keys are node types, values
+                           are feature tensors or None.
+                           Defaults to using node IDs as features.
 
-        返回:
-            HeteroData: PyTorch Geometric 异构图对象
+        Returns:
+            HeteroData: PyTorch Geometric heterogeneous graph object.
 
-        示例:
-            # 示例1: 构建问题-技能无向图
-            graph = model_data.build_hetero_graph(
-                edge_types=[('question', 'has', 'skill')],
-                directed=False
-            )
-
-            # 示例2: 构建学生-问题和问题-技能的组合图
-            graph = model_data.build_hetero_graph(
-                edge_types=[
-                    ('user', 'answers', 'question'),
-                    ('question', 'has', 'skill')
-                ],
-                directed=False
-            )
-
-            # 示例3: 构建带边属性的图
-            graph = model_data.build_hetero_graph(
-                edge_types=[('user', 'answers', 'question')],
-                edge_attrs={('user', 'answers', 'question'): ['label', 'timestamp']},
-                directed=True
-            )
+        Examples:
+            >>> # Build question-skill undirected graph
+            >>> graph = model_data.build_hetero_graph(
+            ...     edge_types=[('question', 'has', 'skill')],
+            ...     directed=False
+            ... )
+            >>> # Build combined student-question and question-skill graph
+            >>> graph = model_data.build_hetero_graph(
+            ...     edge_types=[('user', 'answers', 'question'), ('question', 'has', 'skill')],
+            ...     directed=False
+            ... )
+            >>> # Build graph with edge attributes
+            >>> graph = model_data.build_hetero_graph(
+            ...     edge_types=[('user', 'answers', 'question')],
+            ...     edge_attrs={('user', 'answers', 'question'): ['label', 'timestamp']},
+            ...     directed=True
+            ... )
         """
         import numpy as np
         import torch
@@ -120,21 +126,20 @@ class QuestionModelData(BaseModelData):
 
         graph = HeteroData()
 
-        # 收集所有需要的节点类型
+        # Collect all needed node types
         node_types = set()
         for src_type, _, dst_type in edge_types:
             node_types.add(src_type)
             node_types.add(dst_type)
 
-        # 获取每种节点类型的数量
+        # Get node counts for each type
         node_counts = {}
         for node_type in node_types:
-            # 尝试从元数据获取
             meta_key = f"num_{node_type}s"
             try:
                 node_counts[node_type] = self.data_src.get_metadata(meta_key)
             except (KeyError, AttributeError):
-                # 从 relation tables 中查找
+                # Look up in relation tables
                 found = False
                 for rel_df in self.data_src.relation_data.values():
                     if node_type in rel_df.columns:
@@ -146,63 +151,62 @@ class QuestionModelData(BaseModelData):
                         f"Cannot determine node count for type '{node_type}'"
                     )
 
-        # 设置节点数量和特征
+        # Set node counts and features
         for node_type in node_types:
             graph[node_type].num_nodes = node_counts[node_type]
 
-            # 设置节点特征
+            # Set node features
             if node_features and node_type in node_features:
                 graph[node_type].x = node_features[node_type]
             else:
-                # 默认使用节点ID作为特征
+                # Default to using node IDs as features
                 graph[node_type].x = (
                     torch.arange(node_counts[node_type]).view(-1, 1).float()
                 )
 
-        # 为每种边类型构建边
+        # Build edges for each edge type
         for edge_type in edge_types:
             src_type, relation, dst_type = edge_type
 
-            # 使用 build_relationship_matrix 构建关联矩阵
+            # Build relationship matrix
             logger.info(
                 f"Building relationship matrix for {src_type}-{relation}-{dst_type}"
             )
             rel_matrix = self.build_relationship_matrix(edge_type, value_type="binary")
 
-            # 从关联矩阵中提取边索引
-            # nonzero 返回非零元素的行列索引
+            # Extract edge indices from the matrix
             src_indices, dst_indices = np.nonzero(rel_matrix)
 
             if len(src_indices) == 0:
                 logger.warning(f"No edges found for {edge_type}")
                 continue
 
-            # 转换为 PyTorch 张量
+            # Convert to PyTorch tensors
             edge_index = torch.tensor(
                 np.vstack([src_indices, dst_indices]), dtype=torch.long
             ).contiguous()
 
-            # 添加边索引到图
+            # Add edge index to graph
             graph[src_type, relation, dst_type].edge_index = edge_index
 
-            # 处理边属性
+            # Handle edge attributes
             attr_cols = edge_attrs.get(edge_type, [])
             if attr_cols:
-                # 需要从原始数据中提取边属性
+                # Extract edge attributes from raw data
                 data = self.data_src.get_sequence_data().to_pandas()
                 src_col = src_type
                 dst_col = dst_type
 
-                # 检查列是否存在
+                # Check column existence
                 if src_col not in data.columns or dst_col not in data.columns:
                     logger.warning(
                         f"Columns {src_col} or {dst_col} not found. Skipping edge attributes."
                     )
                     continue
 
-                # 构建边到属性的映射
+                # Build edge-to-attribute mapping
                 edge_attr_dict = {}
-                cols_to_select = [src_col, dst_col] + attr_cols
+                cols_to_select = [src_col, dst_col, *attr_cols]
 
                 for row in tqdm(
                     data[cols_to_select].itertuples(index=False),
@@ -213,12 +217,12 @@ class QuestionModelData(BaseModelData):
                     dst_id = int(getattr(row, dst_col))
                     edge_key = (src_id, dst_id)
 
-                    # 如果边已存在，更新属性（取最后一次出现）
+                    # Update edge attributes (last occurrence wins)
                     edge_attr_dict[edge_key] = {
                         attr: getattr(row, attr) for attr in attr_cols
                     }
 
-                # 按照 edge_index 的顺序提取属性值
+                # Extract attribute values in edge_index order
                 for attr in attr_cols:
                     attr_values = []
                     for i in range(edge_index.shape[1]):
@@ -229,18 +233,16 @@ class QuestionModelData(BaseModelData):
                         if edge_key in edge_attr_dict:
                             attr_values.append(edge_attr_dict[edge_key][attr])
                         else:
-                            # 如果找不到属性，使用默认值 0
                             attr_values.append(0.0)
 
                     attr_tensor = torch.tensor(attr_values, dtype=torch.float32)
-                    # 边属性存储为 edge_attr_<attr_name>
                     setattr(
                         graph[src_type, relation, dst_type],
                         f"edge_attr_{attr}",
                         attr_tensor,
                     )
 
-        # 如果需要无向图，应用转换
+        # Apply ToUndirected if needed
         if not directed:
             graph = ToUndirected()(graph)
 
@@ -249,70 +251,54 @@ class QuestionModelData(BaseModelData):
     def build_hyper_graph(
         self,
         edge_type: tuple[str, str, str],
-        vertex_type: str = None,
+        vertex_type: str | None = None,
     ):
-        """
-        构建超图，支持灵活配置超边类型
+        """Build a hypergraph with flexible hyperedge type configuration.
 
-        超图定义：
-            - 顶点(vertices): 通常是问题(question)节点
-            - 超边(hyperedges): 每个超边连接一组相关的顶点
-              例如：具有相同知识点/技能的题目、属于相同模板的题目等
+        Hypergraph definition:
+            - Vertices: Typically question nodes.
+            - Hyperedges: Each hyperedge connects a group of related vertices,
+              e.g. questions sharing the same skill/template/assignment.
 
-        参数:
-            edge_type: 边类型三元组 (顶点类型, 边关系名, 超边类型)
-                      例如: ('question', 'has', 'skill') - 知识点超边
-                           ('question', 'belongs_to', 'template') - 模板超边
-                           ('question', 'in', 'assignment') - 作业超边
-            vertex_type: 顶点类型（可选），默认使用 edge_type 的第一个元素
-                        通常是 'question'
+        Args:
+            edge_type: Edge type triplet (vertex_type, relation, hyperedge_type).
+                       Examples: ('question', 'has', 'skill'),
+                                 ('question', 'belongs_to', 'template'),
+                                 ('question', 'in', 'assignment').
+            vertex_type: Vertex type (optional). Defaults to the first element
+                         of edge_type (typically 'question').
 
-        返回:
-            dhg.Hypergraph: DHG框架的超图对象
+        Returns:
+            dhg.Hypergraph: DHG framework hypergraph object.
 
-        工作原理:
-            1. 从数据中提取顶点-超边的关联关系
-            2. 将相同超边类型(如相同skill_id)的所有顶点分组
-            3. 每组顶点形成一个超边
-            4. 使用DHG框架创建超图对象
-
-        示例:
-            # 构建知识点超图：每个知识点连接包含它的所有题目
-            skill_hg = model_data.build_hypergraph(
-                ('question', 'has', 'skill')
-            )
-
-            # 构建模板超图：每个模板连接属于它的所有题目
-            template_hg = model_data.build_hypergraph(
-                ('question', 'belongs_to', 'template')
-            )
-
-            # 构建作业超图：每个作业连接其中的所有题目
-            assignment_hg = model_data.build_hypergraph(
-                ('question', 'in', 'assignment')
-            )
+        Examples:
+            >>> # Build skill hypergraph: each skill connects all questions containing it
+            >>> skill_hg = model_data.build_hypergraph(('question', 'has', 'skill'))
+            >>> # Build template hypergraph: each template connects all questions belonging to it
+            >>> template_hg = model_data.build_hypergraph(('question', 'belongs_to', 'template'))
+            >>> # Build assignment hypergraph: each assignment connects all questions in it
+            >>> assignment_hg = model_data.build_hypergraph(('question', 'in', 'assignment'))
         """
         import numpy as np
         from dhg import Hypergraph
         from tqdm import tqdm
 
-        vertex_node_type, relation, hyperedge_node_type = edge_type
+        vertex_node_type, _relation, hyperedge_node_type = edge_type
 
-        # 如果未指定顶点类型，使用边类型的第一个元素
+        # Default vertex type to the first element of the edge type
         if vertex_type is None:
             vertex_type = vertex_node_type
 
-        # 获取关联矩阵
+        # Get relationship matrix
         H = self.build_relationship_matrix(edge_type, value_type="binary")
 
-        # 获取顶点数量
+        # Get vertex count
         num_vertices = H.shape[0]
 
-        # 将关联矩阵转换为超边列表
+        # Convert matrix to hyperedge list
         rows, cols = np.nonzero(H)
 
-        # 按列（超边类型）分组，每个超边类型对应一个超边
-        # 使用字典收集每个超边包含的顶点
+        # Group by column (hyperedge type): each column index is one hyperedge
         edge_dict = {}
         for vertex_idx, hyperedge_idx in tqdm(
             zip(rows, cols),
@@ -323,18 +309,17 @@ class QuestionModelData(BaseModelData):
                 edge_dict[hyperedge_idx] = []
             edge_dict[hyperedge_idx].append(int(vertex_idx))
 
-        # 转换为超边列表（过滤空超边）
+        # Convert to hyperedge list (filter empty hyperedges)
         e_list = [vertices for vertices in edge_dict.values() if len(vertices) > 0]
 
-        # 处理没有超边的情况
+        # Handle no-hyperedge case
         if len(e_list) == 0:
             logger.warning(
                 f"No hyperedges found for {edge_type}. Creating self-loop hypergraph."
             )
-            # 创建自环超图：每个顶点自成一个超边
             e_list = [[i] for i in range(num_vertices)]
 
-        # 使用 DHG 框架创建超图
+        # Create hypergraph using DHG
         hypergraph = Hypergraph(num_v=num_vertices, e_list=e_list)
 
         logger.info(f"{hyperedge_node_type.capitalize()} Hypergraph constructed:")

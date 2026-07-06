@@ -1,7 +1,8 @@
-"""多阶段训练器模块。
+"""Multi-stage trainer module.
 
-在 :class:`BaseTrainer` 之上提供顺序多阶段训练：每个阶段拥有独立的
-模型 / 优化器 / 损失 / 数据 / 早停配置，阶段之间通过钩子传递数据。
+Provides sequential multi-stage training on top of :class:`BaseTrainer`:
+each stage has its own model / optimizer / loss / data / early stopping
+configuration, and stages communicate via hooks.
 
 Example:
     >>> @register_trainer("ABKT")
@@ -53,25 +54,30 @@ logger = get_logger(__name__)
 
 @dataclass
 class StageComponents:
-    """单个阶段的已构建组件。
+    """Pre-built components for a single training stage.
 
-    由阶段构建器（``StageConfig.build``）返回，描述该阶段使用的模型、优化器、
-    损失、数据、epoch 数与早停配置等。
+    Returned by a stage builder (``StageConfig.build``). Describes
+    the model, optimizer, loss, data, epochs, and early stopping
+    configuration for one stage.
 
     Attributes:
-        model: 该阶段的 PyTorch 模型。
-        optimizer: 该阶段的优化器。
-        loss_fn: 该阶段的损失函数。
-        train_data: 训练数据（DataLoader 或 Dataset）。
-        val_data: 验证数据（可选）。
-        test_data: 测试数据（可选，多阶段训练通常用末阶段的 val 充当测试）。
-        epochs: 该阶段的训练轮数。
-        lr_scheduler: 学习率调度器（可选）。
-        early_stopping: 早停配置（可选，传配置而非已构建对象）。
-        max_clip_grad_norm: 梯度裁剪最大范数（可选）。
-        checkpoint_monitor: 保存最佳模型时监控的指标（可选）。默认与早停指标一致；
-            显式传入可解耦“保存最佳模型”与“早停”所监控的指标。
-        checkpoint_mode: 最佳模型指标方向 ``'max'``/``'min'``（可选）。
+        model: PyTorch model for this stage.
+        optimizer: Optimizer for this stage.
+        loss_fn: Loss function for this stage.
+        train_data: Training data (DataLoader or Dataset).
+        val_data: Validation data (optional).
+        test_data: Test data (optional; multi-stage typically uses the
+            final stage's validation as the test proxy).
+        epochs: Number of training epochs for this stage.
+        lr_scheduler: Learning rate scheduler (optional).
+        early_stopping: Early stopping configuration — passes the config
+            object, not a constructed instance (optional).
+        max_clip_grad_norm: Maximum gradient norm for clipping (optional).
+        checkpoint_monitor: Metric to monitor for best model saving
+            (optional). Defaults to the early stopping monitor; set
+            explicitly to decouple checkpoint saving from early stopping.
+        checkpoint_mode: Direction for the checkpoint monitor, ``"max"``
+            or ``"min"`` (optional).
     """
 
     model: torch.nn.Module
@@ -90,14 +96,17 @@ class StageComponents:
 
 @dataclass
 class StageConfig:
-    """一个训练阶段的声明：名称 + 延迟构建器。
+    """Declaration of a training stage: name + lazy builder.
 
-    ``build`` 是一个无参可调用对象，仅在阶段**即将开始训练时**才被调用，
-    因此可以基于前序阶段结束后才确定的数据（例如 boosting 残差）来构建。
+    ``build`` is a zero-argument callable invoked just before the stage
+    starts training. This allows the builder to depend on data that is
+    only determined after the previous stage completes (e.g. boosting
+    residuals).
 
     Attributes:
-        name: 阶段名称（用于日志前缀、检查点文件名、指标 series 区分）。
-        build: 返回 :class:`StageComponents` 的无参可调用对象。
+        name: Stage name (used for log prefixes, checkpoint filenames,
+            and metric series).
+        build: Zero-argument callable returning :class:`StageComponents`.
     """
 
     name: str
@@ -105,22 +114,23 @@ class StageConfig:
 
 
 class MultiTrainer(BaseTrainer):
-    """多阶段训练器。
+    """Multi-stage trainer.
 
-    子类需要实现：
+    Subclasses must implement:
+    1. :meth:`build_stages`: Return the ordered list of stages.
+    2. :meth:`forward_pass`: ``forward_pass(batch_data)``, distinguishing
+       the current stage via ``self._current_stage``.
 
-    1. :meth:`build_stages`：返回按顺序执行的阶段列表。
-    2. :meth:`forward_pass`：``forward_pass(batch_data)``，通过 ``self._current_stage``
-       区分当前阶段。
+    Optional overrides:
+    3. :meth:`on_stage_begin`: Preparation before a stage (default no-op).
+    4. :meth:`on_stage_complete`: Post-stage processing (default no-op),
+       often used to pass data to the next stage.
+    5. :meth:`_compute_loss`: Custom loss computation (defaults to
+       ``self.loss(y_hat, y_label)``).
 
-    可选重写：
-
-    3. :meth:`on_stage_begin`：阶段开始前的准备（默认空）。
-    4. :meth:`on_stage_complete`：阶段结束后的处理（默认空），常用于向下一阶段传递数据。
-    5. :meth:`_compute_loss`：自定义损失（默认 ``self.loss(y_hat, y_label)``）。
-
-    构造时通过 ``device`` / ``seed`` 指定设备与随机种子，再链式调用
-    :meth:`with_experiment` 与 :meth:`build` 完成基础设施初始化。
+    Construction accepts ``device`` / ``seed`` for device and random
+    seed, then uses chained :meth:`with_experiment` and :meth:`build`
+    for infrastructure initialization.
     """
 
     def __init__(
@@ -130,25 +140,39 @@ class MultiTrainer(BaseTrainer):
         seed: int | None = None,
         deterministic: bool = True,
     ):
-        # 多阶段训练没有单一模型：模型在各阶段构建后挂到 self.model
+        """Initialize the multi-stage trainer.
+
+        Unlike the base trainer, no single model is passed — models
+        are created per stage and attached to ``self.model`` at runtime.
+
+        Args:
+            device: Compute device (auto-detected if None).
+            seed: Random seed (optional).
+            deterministic: Whether to use deterministic algorithms.
+        """
         super().__init__(model=None)
 
         self._device: str | torch.device | None = device
         self._seed: int | None = seed
         self._deterministic: bool = deterministic
 
-        # 阶段状态
+        # Stage state
         self._stages: list[StageConfig] = []
         self._stage_results: dict[str, StageResult] = {}
         self._elapsed_epochs: int = 0
 
-    # ==================== 构建 ====================
+    # ==================== Build ====================
 
     def build(self) -> "MultiTrainer":
-        """构建多阶段训练器的基础设施（设备 / 种子 / 日志 / 超参数）。
+        """Build the multi-stage trainer infrastructure.
 
-        与 :meth:`BaseTrainer.build` 不同，这里**不**配置模型 / 数据 / 优化器
-        （它们随阶段切换），只初始化跨阶段共享的设施。
+        Unlike :meth:`BaseTrainer.build`, this does **not** configure
+        model / data / optimizer (they change per stage). It only
+        initializes cross-stage shared facilities (device, seed, log
+        directory, metrics, checkpoints).
+
+        Returns:
+            Self for method chaining.
         """
         if self._built:
             logger.warning("MultiTrainer already built. Skipping rebuild.")
@@ -159,18 +183,18 @@ class MultiTrainer(BaseTrainer):
                 "Experiment configuration not set. Call with_experiment() first."
             )
 
-        # 1. 设备
+        # 1. Device
         self.device_ = (
             torch.device(self._device) if self._device is not None else self._try_gpu()
         )
 
-        # 2. 解析日志开关（显式传入优先，否则回退到 CLI 参数）
+        # 2. Resolve logging flags
         hyperparams = self._experiment_config.hyperparams
         self.no_swanlab, self.log_batch_metrics = resolve_metric_logging_flags(
             self._experiment_config, hyperparams
         )
 
-        # 3. 随机种子
+        # 3. Random seed
         seed = self._seed
         if seed is None and hyperparams is not None:
             seed = getattr(hyperparams, "seed", 42)
@@ -179,24 +203,24 @@ class MultiTrainer(BaseTrainer):
             deterministic = getattr(hyperparams, "deterministic", True)
         self.seed = seed_everything(seed, deterministic=deterministic)
 
-        # 4. 日志目录
+        # 4. Log directory
         exp_manager = self._experiment_config.exp_manager
         if exp_manager is None:
             raise ValueError("exp_manager is required.")
         self.log_dir = exp_manager.get_log_dir()
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # 5. 共享组件
+        # 5. Shared components
         self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
-        # 本地指标记录始终启用；SwanLab 除非 --no_swanlab
         self.metric_logger = build_default_metric_loggers(
             log_dir=self.log_dir,
             log_batch_metrics=self.log_batch_metrics,
             no_swanlab=self.no_swanlab,
         )
 
-        # 6. 超参数（model/opt 此时为 None，_setup_hyperparameters 会自动跳过）
+        # 6. Hyperparameters (model/opt may be None at this point;
+        #    _setup_hyperparameters skips them gracefully)
         if hyperparams is not None:
             self._setup_hyperparameters(
                 hyperparams,
@@ -208,32 +232,44 @@ class MultiTrainer(BaseTrainer):
         self._built = True
         return self
 
-    # ==================== 子类钩子 ====================
+    # ==================== Subclass hooks ====================
 
     def build_stages(self) -> list[StageConfig]:
-        """返回按顺序执行的阶段列表（子类必须实现）。"""
+        """Return the ordered list of stages (must be implemented by subclasses).
+
+        Returns:
+            List of StageConfig objects defining the training pipeline.
+
+        Raises:
+            NotImplementedError: Must be overridden by subclasses.
+        """
         raise NotImplementedError("Subclasses must implement build_stages()")
 
     def on_stage_begin(self, name: str) -> None:
-        """阶段开始前的钩子（可选重写）。"""
-        pass
-
-    def on_stage_complete(self, name: str, result: StageResult) -> None:
-        """阶段结束后的钩子（可选重写）。
-
-        在该阶段最佳模型已加载回 ``self.model`` 之后调用，常用于为下一阶段
-        准备数据（如计算 boosting 残差）。
+        """Hook called before a stage starts (optional override).
 
         Args:
-            name: 刚结束的阶段名称。
-            result: 该阶段的 :class:`StageResult`。
+            name: Name of the stage about to begin.
         """
         pass
 
-    # ==================== 运行 ====================
+    def on_stage_complete(self, name: str, result: StageResult) -> None:
+        """Hook called after a stage completes (optional override).
+
+        Invoked after the best model of the stage has been loaded back
+        into ``self.model``. Commonly used to prepare data for the next
+        stage (e.g. computing boosting residuals).
+
+        Args:
+            name: Name of the stage that just completed.
+            result: :class:`StageResult` for the completed stage.
+        """
+        pass
+
+    # ==================== Run ====================
 
     def run(self) -> None:
-        """顺序执行所有阶段。"""
+        """Execute all stages sequentially."""
         if not self._built:
             raise RuntimeError(
                 "MultiTrainer has not been built. Please call build() explicitly "
@@ -262,13 +298,13 @@ class MultiTrainer(BaseTrainer):
             self._current_stage = stage.name
             self.on_stage_begin(stage.name)
 
-            # 延迟构建：阶段组件可能依赖前序阶段的输出
+            # Lazy build: stage components may depend on previous stages
             setup = stage.build()
             self._apply_stage(stage.name, setup)
 
             result = self._run_training_loop()
 
-            # 把该阶段最佳模型载回 self.model，供后续阶段 / 收尾使用
+            # Load the best model back into self.model for subsequent stages
             checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
             if checkpoint_cb is not None and checkpoint_cb.best_model_state is not None:
                 self.model.load_state_dict(checkpoint_cb.best_model_state)
@@ -283,7 +319,12 @@ class MultiTrainer(BaseTrainer):
         self._finish()
 
     def _apply_stage(self, name: str, setup: StageComponents) -> None:
-        """将阶段组件挂到实例属性上，并重建该阶段的回调管理器。"""
+        """Attach stage components to instance attributes and rebuild callbacks.
+
+        Args:
+            name: Stage name.
+            setup: Pre-built StageComponents for this stage.
+        """
         self.model = setup.model
         self.opt = setup.optimizer
         self.loss = setup.loss_fn
@@ -298,7 +339,7 @@ class MultiTrainer(BaseTrainer):
         )
 
         self.start_epoch = 0
-        # 指标记录 step 在阶段间累计，保证 SwanLab x 轴单调
+        # Metric steps accumulate across stages to keep SwanLab x-axis monotonic
         self._metric_step_offset = self._elapsed_epochs
 
         self.callback_manager = self._build_stage_callbacks(name, setup)
@@ -315,7 +356,15 @@ class MultiTrainer(BaseTrainer):
     def _build_stage_callbacks(
         self, name: str, setup: StageComponents
     ) -> CallbackManager:
-        """构建单个阶段的回调列表（含阶段独立的早停与检查点）。"""
+        """Build the callback list for a single stage, including stage-specific early stopping and checkpointing.
+
+        Args:
+            name: Stage name.
+            setup: StageComponents for this stage.
+
+        Returns:
+            A CallbackManager configured for this stage.
+        """
         callbacks: list[Callback] = []
         callbacks.extend(self._custom_callbacks)
         if self._custom_callback_functions:
@@ -342,10 +391,14 @@ class MultiTrainer(BaseTrainer):
         )
         return CallbackManager(callbacks)
 
-    # ==================== 指标记录 / 收尾 ====================
+    # ==================== Metric logging / Cleanup ====================
 
     def _init_metric_logger(self) -> None:
-        """初始化指标记录后端（本地始终启用，SwanLab 除非 --no_swanlab）。"""
+        """Initialize the metric logging backend.
+
+        Local CSV logging is always enabled; SwanLab is included unless
+        ``--no_swanlab`` was set.
+        """
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
         config = (
             self.hyperparam_manager.get_hyperparameters_dict()
@@ -358,11 +411,15 @@ class MultiTrainer(BaseTrainer):
             experiment_name=experiment_name,
             group=group,
             tags=["cuda" if torch.cuda.is_available() else "cpu", "multi-stage"],
-            config=config,  # 展平后的 dict，SwanLab 要求 value 为标量
+            config=config,
         )
 
     def _finish(self) -> None:
-        """收尾：汇总各阶段最佳指标并结束指标记录。"""
+        """Summarize stage results and finalize metric logging.
+
+        Logs the best metric per stage, records final metrics, and
+        shuts down the metric logger and checkpoint manager.
+        """
         logger.info("=" * 60)
         logger.info("Multi-stage training complete")
         for name, result in self._stage_results.items():
@@ -390,4 +447,4 @@ class MultiTrainer(BaseTrainer):
             self.checkpoint_manager.close()
 
 
-__all__ = ["MultiTrainer", "StageConfig", "StageComponents"]
+__all__ = ["MultiTrainer", "StageComponents", "StageConfig"]

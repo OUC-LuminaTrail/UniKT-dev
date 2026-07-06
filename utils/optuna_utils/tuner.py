@@ -1,4 +1,4 @@
-"""Optuna 调优器包装器和辅助工具。"""
+"""Optuna tuner wrapper and utility tools."""
 
 import json
 import os
@@ -18,9 +18,7 @@ logger = get_logger(__name__)
 
 
 class OptunaTuner:
-    """
-    Optuna超参数搜索器
-    """
+    """Optuna hyperparameter search engine."""
 
     def __init__(
         self,
@@ -29,24 +27,29 @@ class OptunaTuner:
         objective_fn: Callable[[optuna.trial.Trial, dict[str, Any]], float],
         objective_kwargs: dict[str, Any] | None = None,
     ):
-        """
-        初始化Optuna调优器
+        """Initialise the Optuna tuner.
+
+        Args:
+            config: Optuna search configuration.
+            param_space: List of hyperparameter space definitions.
+            objective_fn: Objective function to optimise.
+            objective_kwargs: Extra keyword arguments for the objective function.
         """
         self.config = config
         self.param_space = param_space
         self.objective_fn = objective_fn
         self.objective_kwargs = objective_kwargs or {}
 
-        # 验证参数空间
+        # Validate parameter space
         for space in self.param_space:
             space.validate()
 
-        # 创建学习目标
+        # Create study
         self.study: optuna.Study | None = None
         self._setup_logging()
 
     def _setup_logging(self):
-        """设置日志"""
+        """Configure Optuna logging verbosity."""
         if self.config.verbose == 0:
             optuna.logging.set_verbosity(optuna.logging.WARNING)
         elif self.config.verbose == 1:
@@ -55,22 +58,34 @@ class OptunaTuner:
             optuna.logging.set_verbosity(optuna.logging.DEBUG)
 
     def _objective(self, trial: optuna.trial.Trial) -> float:
-        """Optuna目标函数包装"""
-        # 从参数空间中采样超参数
+        """Optuna objective function wrapper.
+
+        Samples hyperparameters from the search space and invokes the
+        user-defined objective function.
+
+        Args:
+            trial: Optuna trial object.
+
+        Returns:
+            The objective score for this trial.
+        """
+        # Sample hyperparameters from the search space
         params = {}
         for space in self.param_space:
             params[space.name] = space.suggest(trial)
 
-        # 调用用户定义的目标函数
+        # Call user-defined objective function
         score = self.objective_fn(trial, params=params, **self.objective_kwargs)
 
         return score
 
     def search(self) -> dict[str, Any]:
+        """Execute the hyperparameter search.
+
+        Returns:
+            Dictionary of the best found parameters.
         """
-        执行超参数搜索
-        """
-        # 创建Study
+        # Create study
         sampler = self.config.get_sampler()
         pruner = self.config.get_pruner()
 
@@ -110,7 +125,7 @@ class OptunaTuner:
 
         self.study = optuna.create_study(**study_kwargs)
 
-        # GridSampler 穷举所有组合，无需用 default 种子
+        # GridSampler exhausts all combinations; no default seed needed
         if not isinstance(sampler, GridSampler):
             self._enqueue_defaults()
 
@@ -121,7 +136,7 @@ class OptunaTuner:
                 "only for CPU models or a dedicated multi-GPU setup."
             )
 
-        # 优化；失败的 trial 标记为 FAIL 而非中断整个搜索
+        # Optimise; failed trials are marked FAIL without stopping the search
         self.study.optimize(
             self._objective,
             n_trials=self.config.n_trials,
@@ -131,16 +146,17 @@ class OptunaTuner:
             show_progress_bar=(self.config.verbose > 0),
         )
 
-        # 保存结果
+        # Save results
         if self.config.save_dir:
             self._save_results()
 
         return self._best_params()
 
     def _enqueue_defaults(self):
-        """将参数空间中声明的 default 入队为启动 trial，加速采样器收敛。
+        """Enqueue declared defaults as a startup trial.
 
-        未声明 default 的参数在 trial 运行时照常采样。
+        Speeds up sampler convergence. Parameters without declared defaults
+        are sampled normally during the trial.
         """
         defaults = {
             space.name: space.default
@@ -153,7 +169,13 @@ class OptunaTuner:
         logger.info(f"Enqueued {len(defaults)} default params as a startup trial")
 
     def _best_params(self) -> dict[str, Any]:
-        """返回最佳参数，兼容多目标研究与无完成 trial 的情况。"""
+        """Return the best parameters.
+
+        Compatible with multi-objective studies and studies with no completed trials.
+
+        Returns:
+            Dictionary of best parameters, or empty dict if unavailable.
+        """
         if len(self.study.directions) > 1:
             pareto = self.study.best_trials
             return pareto[0].params if pareto else {}
@@ -164,18 +186,18 @@ class OptunaTuner:
             return {}
 
     def _save_results(self):
-        """保存搜索结果"""
+        """Save search results to disk."""
         if not self.study or not self.config.save_dir:
             return
 
         os.makedirs(self.config.save_dir, exist_ok=True)
 
-        # 保存最佳参数
+        # Save best parameters
         best_params_path = os.path.join(self.config.save_dir, "best_params.json")
         with open(best_params_path, "w") as f:
             json.dump(self._best_params(), f, indent=2)
 
-        # 保存搜索历史
+        # Save search history
         history_path = os.path.join(self.config.save_dir, "search_history.json")
         trials_data = []
         for trial in self.study.trials:
@@ -190,7 +212,7 @@ class OptunaTuner:
         with open(history_path, "w") as f:
             json.dump(trials_data, f, indent=2)
 
-        # 保存配置
+        # Save configuration
         config_path = os.path.join(self.config.save_dir, "optuna_config.json")
         config_dict = asdict(self.config)
         config_dict["sampler_kwargs"] = str(config_dict.get("sampler_kwargs", {}))
@@ -201,13 +223,17 @@ class OptunaTuner:
         logger.info(f"Results saved to {self.config.save_dir}")
 
     def get_best_trial(self) -> optuna.Trial | None:
-        """获取最佳trial"""
+        """Retrieve the best trial from the study.
+
+        Returns:
+            The best Trial, or None if no study exists.
+        """
         if not self.study:
             return None
         return self.study.best_trial
 
     def print_summary(self):
-        """打印搜索结果摘要"""
+        """Print a summary of the search results."""
         if not self.study:
             logger.warning("No study found. Run search() first.")
             return
@@ -235,7 +261,11 @@ class OptunaTuner:
         logger.info("\n".join(log))
 
     def get_dataframe(self):
-        """获取试验数据框（需要pandas）"""
+        """Get the trials dataframe (requires pandas).
+
+        Returns:
+            DataFrame of trial results, or None if unavailable.
+        """
         if not self.study:
             return None
         try:

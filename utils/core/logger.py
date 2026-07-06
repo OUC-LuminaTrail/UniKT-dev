@@ -1,7 +1,8 @@
-"""KT 实验框架的统一日志模块。
+"""Unified logging module for the KT experiment framework.
 
-此模块为所有框架组件提供一致的日志接口。
-日志级别由 LOG_LEVEL 环境变量控制（默认：INFO）。
+This module provides a consistent logging interface for all framework
+components. The log level is controlled by the ``LOG_LEVEL`` environment
+variable (default: INFO).
 
 Usage:
     from utils.core import get_logger
@@ -12,7 +13,8 @@ Usage:
     logger.error("Model loading failed")
 
 Environment Variables:
-    LOG_LEVEL: 控制日志详细程度（DEBUG、INFO、WARNING、ERROR）。默认：INFO
+    LOG_LEVEL: Controls logging verbosity (DEBUG, INFO, WARNING, ERROR).
+               Default: INFO
 
 Log Format:
     [HH:MM:SS][LEVEL][module_name] message
@@ -28,10 +30,10 @@ _loggers: dict = {}
 
 
 def _get_log_level_from_env() -> int:
-    """从环境变量 LOG_LEVEL 获取日志级别。
+    """Get the log level from the ``LOG_LEVEL`` environment variable.
 
     Returns:
-        int: 日志级别常量（logging.DEBUG、logging.INFO 等）
+        A logging level constant (``logging.DEBUG``, ``logging.INFO``, etc.).
     """
     log_level_str = os.getenv("LOG_LEVEL", "INFO").upper()
     level_mapping = {
@@ -45,18 +47,18 @@ def _get_log_level_from_env() -> int:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """获取具有统一配置的日志记录器实例。
+    """Get a logger instance with a unified configuration.
 
-    日志记录器将配置为：
-    - 来自 LOG_LEVEL 环境变量的级别（默认：INFO）
-    - 仅控制台输出（SwanLab 处理训练指标的文件日志记录）
-    - 统一格式：[HH:MM:SS][LEVEL][module_name] message
+    The returned logger is configured with:
+    - A level from the ``LOG_LEVEL`` environment variable (default: INFO).
+    - Console-only output (SwanLab handles file logging for training metrics).
+    - A uniform format: ``[HH:MM:SS][LEVEL][module_name] message``.
 
     Args:
-        name: 日志记录器名称，通常对模块级日志记录使用 __name__
+        name: Logger name, typically ``__name__`` for module-level logging.
 
     Returns:
-        logging.Logger: 配置的日志记录器实例
+        A configured ``logging.Logger`` instance.
 
     Example:
         >>> from utils.core import get_logger
@@ -87,12 +89,13 @@ def get_logger(name: str) -> logging.Logger:
 
 
 def set_log_level(level: int) -> None:
-    """以编程方式设置全局日志级别。
+    """Set the global log level programmatically.
 
-    这将更新所有缓存的日志记录器及其处理程序。
+    This updates all cached loggers and their handlers.
 
     Args:
-        level: 日志级别常量（例如 logging.DEBUG、logging.INFO）
+        level: A logging level constant (e.g. ``logging.DEBUG``,
+               ``logging.INFO``).
 
     Example:
         >>> from utils.core import get_logger, set_log_level
@@ -109,9 +112,10 @@ def set_log_level(level: int) -> None:
 
 
 def reset_loggers() -> None:
-    """重置所有缓存的日志记录器。
+    """Reset all cached loggers.
 
-    这对于测试或需要重新初始化日志记录器时很有用。
+    Useful during testing or whenever a full re-initialization of loggers
+    is required.
 
     Example:
         >>> from utils.core import reset_loggers
@@ -124,4 +128,4 @@ def reset_loggers() -> None:
     root_logger.handlers.clear()
 
 
-__all__ = ["get_logger", "set_log_level", "reset_loggers"]
+__all__ = ["get_logger", "reset_loggers", "set_log_level"]

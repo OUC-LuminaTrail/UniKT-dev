@@ -1,3 +1,10 @@
+"""Python environment manager — discovery and command resolution.
+
+Discovers pixi and conda environments, resolves Python interpreter commands
+for a given environment, and provides async health checks (Python + PyTorch
+availability).
+"""
+
 import asyncio
 import json
 import os
@@ -10,6 +17,13 @@ from services.settings_manager import SettingsManager
 
 
 def _find_pixi() -> str | None:
+    """Locate the pixi binary on the system.
+
+    Checks PATH first, then common installation locations.
+
+    Returns:
+        The pixi binary path, or None if not found.
+    """
     path = shutil.which("pixi")
     if path:
         return path
@@ -24,14 +38,38 @@ def _find_pixi() -> str | None:
 
 
 def _find_conda() -> str | None:
+    """Locate the conda binary on PATH.
+
+    Returns:
+        The conda binary path, or None if not found.
+    """
     return shutil.which("conda")
 
 
 class PythonEnvManager:
+    """Discovers Python environments and resolves commands for subprocess launch.
+
+    Supports pixi, conda, and custom-path Python environments, including
+    async health checks that verify Python and PyTorch availability.
+    """
+
     def __init__(self, settings_manager: SettingsManager):
+        """Initialize the environment manager.
+
+        Args:
+            settings_manager: SettingsManager used for default environment lookups.
+        """
         self._settings_manager = settings_manager
 
     def discover(self) -> list[EnvironmentInfo]:
+        """Discover all available Python environments.
+
+        Scans pixi environments, conda environments, and adds a custom
+        Python path option.
+
+        Returns:
+            A list of EnvironmentInfo objects.
+        """
         envs: list[EnvironmentInfo] = []
 
         pixi_bin = _find_pixi()
@@ -55,6 +93,17 @@ class PythonEnvManager:
     def resolve_command(
         self, env_id: str, custom_python_path: str | None = None
     ) -> list[str]:
+        """Resolve the Python interpreter command for the given environment.
+
+        Args:
+            env_id: Environment identifier (e.g. ``pixi:default``,
+                ``conda:base``, ``custom:0``).
+            custom_python_path: Optional custom Python interpreter path
+                (used for ``custom`` type environments).
+
+        Returns:
+            A command list suitable for subprocess execution.
+        """
         parts = env_id.split(":", 1)
         env_type = parts[0]
         env_name = parts[1] if len(parts) > 1 else ""
@@ -71,6 +120,12 @@ class PythonEnvManager:
         return ["python"]
 
     def resolve_default_command(self) -> list[str]:
+        """Resolve the Python interpreter command for the default environment.
+
+        Returns:
+            A command list using the default environment, or ``['python']``
+            if no default is set.
+        """
         default_env = self._settings_manager.get_default_env()
         if default_env:
             custom_path = self._settings_manager.get_custom_python_path()
@@ -80,6 +135,18 @@ class PythonEnvManager:
     async def health_check(
         self, env_id: str, custom_python_path: str | None = None
     ) -> dict:
+        """Run an asynchronous health check on a Python environment.
+
+        Checks Python availability, version, and PyTorch availability.
+
+        Args:
+            env_id: Environment identifier.
+            custom_python_path: Optional custom Python interpreter path.
+
+        Returns:
+            A dict with ``env_id``, ``python_available``, ``python_version``,
+            ``torch_available``, ``torch_version``, and ``error``.
+        """
         cmd = self.resolve_command(env_id, custom_python_path)
 
         python_available = False
@@ -154,6 +221,14 @@ class PythonEnvManager:
         }
 
     def _scan_pixi(self, pixi_bin: str) -> list[EnvironmentInfo]:
+        """Scan pixi environments via ``pixi info --json``.
+
+        Args:
+            pixi_bin: Path to the pixi binary.
+
+        Returns:
+            A list of EnvironmentInfo objects for pixi environments.
+        """
         envs = []
         try:
             result = subprocess.run(
@@ -184,6 +259,14 @@ class PythonEnvManager:
         return envs
 
     def _scan_conda(self, conda_bin: str) -> list[EnvironmentInfo]:
+        """Scan conda environments via ``conda env list --json``.
+
+        Args:
+            conda_bin: Path to the conda binary.
+
+        Returns:
+            A list of EnvironmentInfo objects for conda environments.
+        """
         envs = []
         try:
             result = subprocess.run(

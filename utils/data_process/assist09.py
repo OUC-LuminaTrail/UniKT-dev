@@ -1,3 +1,5 @@
+"""ASSISTments 2009-2010 dataset handler."""
+
 import os
 
 import polars as pl
@@ -21,6 +23,7 @@ class Assistments2009Data(DataSource):
     """
 
     def __init__(self, args):
+        """Initialize the ASSISTments 2009-2010 dataset handler."""
         super().__init__(
             dataset="assistments09",
             data_base_path=args.data_base_path,
@@ -150,6 +153,7 @@ class Assistments2009Data(DataSource):
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):
+        """Clean raw sequence data."""
         if self.raw_data is None:
             self.load_src_data()
 

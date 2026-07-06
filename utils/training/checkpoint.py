@@ -1,6 +1,6 @@
-"""检查点管理模块
+"""Checkpoint management module.
 
-提供模型检查点的保存和加载功能。
+Provides model checkpoint save and load functionality.
 """
 
 import atexit
@@ -16,7 +16,17 @@ logger = get_logger(__name__)
 
 
 def _detach_to_cpu(obj):
-    """递归把 state_dict 中的张量克隆到 CPU（model/optimizer/scheduler 通用）。"""
+    """Recursively clone tensors in a state dict to CPU.
+
+    Works for model, optimizer, and scheduler state dicts.
+
+    Args:
+        obj: A tensor, dict, list, or tuple potentially containing tensors.
+
+    Returns:
+        The same structure with all tensors detached, moved to CPU,
+        and cloned.
+    """
     if torch.is_tensor(obj):
         return obj.detach().cpu().clone()
     if isinstance(obj, dict):
@@ -29,12 +39,12 @@ def _detach_to_cpu(obj):
 
 
 class CheckpointManager:
-    """检查点管理器。
+    """Manager for model checkpoints.
 
-    职责：
-    1. 保存模型检查点
-    2. 加载模型检查点
-    3. 管理检查点文件
+    Responsibilities:
+    1. Save model checkpoints.
+    2. Load model checkpoints.
+    3. Manage checkpoint files.
 
     Example:
         >>> ckpt_mgr = CheckpointManager(log_dir="./runs/exp1")
@@ -47,10 +57,10 @@ class CheckpointManager:
     """
 
     def __init__(self, log_dir: str):
-        """初始化检查点管理器。
+        """Initialize the checkpoint manager.
 
         Args:
-            log_dir: 日志目录，用于保存检查点
+            log_dir: Directory path for saving checkpoint files.
         """
         self.log_dir = log_dir
         os.makedirs(log_dir, exist_ok=True)
@@ -71,16 +81,16 @@ class CheckpointManager:
         early_stopping_state: dict | None = None,
         filename: str = "checkpoint.pth",
     ):
-        """保存完整检查点。
+        """Save a full checkpoint including model, optimizer, and scheduler states.
 
         Args:
-            epoch: 当前 epoch
-            model: PyTorch 模型
-            optimizer: 优化器
-            scheduler: 学习率调度器（可选）
-            additional_state: 额外的状态信息（可选）
-            early_stopping_state: 早停状态（可选）
-            filename: 文件名
+            epoch: Current epoch number.
+            model: PyTorch model.
+            optimizer: Optimizer.
+            scheduler: Learning rate scheduler (optional).
+            additional_state: Extra state information (optional).
+            early_stopping_state: Early stopping state (optional).
+            filename: Checkpoint file name.
         """
         state = {
             "epoch": epoch,
@@ -101,14 +111,14 @@ class CheckpointManager:
         self._submit_save(state, filepath)
 
     def save_weights(self, model: torch.nn.Module, filename: str = "model.pth") -> dict:
-        """仅保存模型权重，返回 CPU 快照供调用方复用（避免重复克隆）。
+        """Save model weights only and return a CPU snapshot.
 
         Args:
-            model: PyTorch 模型
-            filename: 文件名
+            model: PyTorch model.
+            filename: Output file name.
 
         Returns:
-            model state_dict 的 CPU 克隆（与异步落盘内容一致）。
+            CPU-cloned model state_dict (same content as the file).
         """
         snapshot = cast(dict, _detach_to_cpu(model.state_dict()))
         filepath = os.path.join(self.log_dir, filename)
@@ -116,7 +126,14 @@ class CheckpointManager:
         return snapshot
 
     def _submit_save(self, obj, filepath: str) -> None:
-        """提交一次后台原子写入；已关闭则回退为同步写。"""
+        """Submit an atomic save to the background thread.
+
+        Falls back to synchronous write if the manager is already closed.
+
+        Args:
+            obj: Data to save.
+            filepath: Destination file path.
+        """
         if self._closed:
             self._write_atomic(obj, filepath)
             return
@@ -125,13 +142,14 @@ class CheckpointManager:
 
     @staticmethod
     def _write_atomic(obj, filepath: str) -> None:
+        """Atomically write data to a file via temp + replace."""
         tmp = filepath + ".tmp"
         torch.save(obj, tmp)
         os.replace(tmp, filepath)
         logger.info(f"Checkpoint saved to {filepath}")
 
     def flush(self) -> None:
-        """等待所有已提交的保存完成，逐个上报异常（不抛出）。"""
+        """Wait for all pending saves to complete, logging any exceptions."""
         futures = self._save_futures
         self._save_futures = []
         for future in futures:
@@ -141,7 +159,10 @@ class CheckpointManager:
                 logger.exception("Async checkpoint save failed")
 
     def close(self) -> None:
-        """drain 队列并关闭执行器；幂等（_finish 与 atexit 均会调用）。"""
+        """Drain the save queue and shut down the executor.
+
+        Idempotent — safe to call from both ``_finish`` and ``atexit``.
+        """
         if self._closed:
             return
         self._closed = True
@@ -199,18 +220,21 @@ class CheckpointManager:
         early_stopping: object | None = None,
         device: torch.device = None,
     ) -> dict:
-        """加载检查点。
+        """Load a full checkpoint and restore model, optimizer, and scheduler states.
 
         Args:
-            checkpoint_path: 检查点文件路径
-            model: PyTorch 模型
-            optimizer: 优化器（可选）
-            scheduler: 学习率调度器（可选）
-            early_stopping: 早停对象（可选）
-            device: 计算设备（可选）
+            checkpoint_path: Path to the checkpoint file.
+            model: PyTorch model.
+            optimizer: Optimizer (optional).
+            scheduler: Learning rate scheduler (optional).
+            early_stopping: Early stopping object (optional).
+            device: Compute device for map_location (optional).
 
         Returns:
-            检查点字典
+            The checkpoint dictionary.
+
+        Raises:
+            FileNotFoundError: If the checkpoint file does not exist.
         """
         if not os.path.isfile(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
@@ -221,18 +245,18 @@ class CheckpointManager:
         else:
             checkpoint = torch.load(checkpoint_path)
 
-        # 加载模型状态
+        # Restore model state
         model.load_state_dict(checkpoint["model_state_dict"])
 
-        # 加载优化器状态
+        # Restore optimizer state
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        # 加载调度器状态
+        # Restore scheduler state
         if scheduler is not None and "scheduler_state_dict" in checkpoint:
             scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
-        # 加载早停状态
+        # Restore early stopping state
         if early_stopping is not None and "early_stopping_state" in checkpoint:
             es_state = checkpoint["early_stopping_state"]
             early_stopping.best_score = es_state.get("best_score")

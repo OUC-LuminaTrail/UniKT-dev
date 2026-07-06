@@ -1,3 +1,10 @@
+"""Log streaming watcher for WebSocket-based log delivery.
+
+Reads log chunks from the database for a given source/source_id and streams
+them over a WebSocket connection with byte-offset tracking and safe UTF-8
+boundary detection.
+"""
+
 import asyncio
 
 from database import SessionLocal
@@ -8,6 +15,19 @@ INITIAL_CHUNK_SIZE = 65536
 
 
 def _find_safe_boundary(data: bytes, intended_end: int) -> int:
+    """Find a safe UTF-8 character boundary near the intended end.
+
+    Walks backward from ``intended_end`` to avoid splitting a multi-byte
+    UTF-8 character.
+
+    Args:
+        data: The raw bytes to search in.
+        intended_end: The desired cut position.
+
+    Returns:
+        A safe byte offset not exceeding ``intended_end`` that falls on a
+        character boundary.
+    """
     i = intended_end
     while i > 0:
         b = data[i - 1]
@@ -29,6 +49,13 @@ def _find_safe_boundary(data: bytes, intended_end: int) -> int:
 
 
 class LogWatcher:
+    """Streams log chunks from the database over a WebSocket.
+
+    Reads stored log chunks for a given source and source_id and sends
+    them as JSON messages over the WebSocket, polling for new data when
+    the process is still alive.
+    """
+
     async def stream_log(
         self,
         source: str,
@@ -37,6 +64,19 @@ class LogWatcher:
         check_alive=None,
         from_offset: int = 0,
     ):
+        """Stream log chunks over a WebSocket connection.
+
+        Sends ``data`` JSON messages with decoded text and the next byte offset,
+        followed by a final ``done`` message.
+
+        Args:
+            source: The log source type (e.g. "task" or "preprocess").
+            source_id: The source entity identifier.
+            websocket: The WebSocket connection to send messages to.
+            check_alive: Optional callable returning whether the source process
+                is still running.
+            from_offset: Starting byte offset for reading log chunks.
+        """
         offset = from_offset
         chunks = await asyncio.to_thread(self._read_chunks, source, source_id, offset)
         for raw_data, chunk_offset in chunks:
@@ -116,6 +156,16 @@ class LogWatcher:
     def _read_chunks(
         self, source: str, source_id: int, from_offset: int
     ) -> list[tuple[bytes, int]]:
+        """Read log chunks from the database starting at the given offset.
+
+        Args:
+            source: The log source type.
+            source_id: The source entity identifier.
+            from_offset: Minimum byte offset to start reading from.
+
+        Returns:
+            A list of ``(raw_data, byte_offset)`` tuples ordered by offset.
+        """
         with SessionLocal() as session:
             rows = (
                 session.query(LogChunk.raw_data, LogChunk.byte_offset)

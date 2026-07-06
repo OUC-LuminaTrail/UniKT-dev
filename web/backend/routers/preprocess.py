@@ -1,3 +1,9 @@
+"""Preprocess router — data download/processing tasks.
+
+Provides CRUD endpoints for launching and managing preprocess tasks (download
+or process actions), including WebSocket log streaming and PTY resize.
+"""
+
 from dependencies import get_preprocess_manager
 from fastapi import (
     APIRouter,
@@ -19,6 +25,16 @@ router = APIRouter(prefix="/api/preprocess", tags=["preprocess"])
 
 
 class PreprocessStartRequest(BaseModel):
+    """Request model for starting a preprocess task.
+
+    Attributes:
+        action: The action to perform (``download`` or ``process``).
+        dataset: Name of the dataset to preprocess.
+        params: Additional parameters for the action.
+        env_id: Optional environment identifier.
+        custom_python_path: Optional custom Python interpreter path.
+    """
+
     action: str
     dataset: str
     params: dict = {}
@@ -27,6 +43,13 @@ class PreprocessStartRequest(BaseModel):
 
 
 class ResizeRequest(BaseModel):
+    """Request model for resizing a PTY terminal.
+
+    Attributes:
+        cols: Number of terminal columns.
+        rows: Number of terminal rows.
+    """
+
     cols: int
     rows: int
 
@@ -36,6 +59,18 @@ def start_preprocess(
     body: PreprocessStartRequest,
     pm: PreprocessManager = Depends(get_preprocess_manager),
 ):
+    """Start a new preprocess task (download or process).
+
+    Args:
+        body: The preprocess start request.
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A dict with the task ``id``, ``command``, ``status``, and ``started_at``.
+
+    Raises:
+        HTTPException: 400 if the action or dataset is invalid.
+    """
     if body.action not in ("download", "process"):
         raise HTTPException(400, "action must be 'download' or 'process'")
     if not body.dataset:
@@ -53,6 +88,14 @@ def start_preprocess(
 
 @router.get("")
 def list_preprocess(pm: PreprocessManager = Depends(get_preprocess_manager)):
+    """List all preprocess tasks.
+
+    Args:
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A list of task dicts with ``id``, ``command``, ``status``, etc.
+    """
     tasks = []
     for t in pm.list_all():
         tasks.append(
@@ -72,6 +115,18 @@ def list_preprocess(pm: PreprocessManager = Depends(get_preprocess_manager)):
 def get_preprocess(
     task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)
 ):
+    """Return details for a specific preprocess task.
+
+    Args:
+        task_id: The preprocess task identifier.
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A task dict with ``id``, ``command``, ``status``, etc.
+
+    Raises:
+        HTTPException: 404 if the task does not exist.
+    """
     task = pm.get(task_id)
     if not task:
         raise HTTPException(404, "Preprocess task not found")
@@ -89,6 +144,18 @@ def get_preprocess(
 def stop_preprocess(
     task_id: int, pm: PreprocessManager = Depends(get_preprocess_manager)
 ):
+    """Stop a running preprocess task.
+
+    Args:
+        task_id: The preprocess task identifier.
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A dict with ``status`` set to ``stopping``.
+
+    Raises:
+        HTTPException: 400 if the task cannot be stopped.
+    """
     if not pm.stop(task_id):
         raise HTTPException(400, "Cannot stop task")
     return {"status": "stopping"}
@@ -99,6 +166,18 @@ def delete_preprocess(
     task_id: int,
     pm: PreprocessManager = Depends(get_preprocess_manager),
 ):
+    """Delete a preprocess task and its log chunks.
+
+    Args:
+        task_id: The preprocess task identifier.
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A dict with ``status`` set to ``deleted``.
+
+    Raises:
+        HTTPException: 400 if the task cannot be deleted.
+    """
     if not pm.delete(task_id):
         raise HTTPException(400, "Cannot delete preprocess task")
     return {"status": "deleted"}
@@ -110,6 +189,16 @@ def resize_preprocess(
     body: ResizeRequest,
     pm: PreprocessManager = Depends(get_preprocess_manager),
 ):
+    """Resize the PTY terminal for a running preprocess task.
+
+    Args:
+        task_id: The preprocess task identifier.
+        body: The resize request (cols, rows).
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A dict with ``ok`` set to ``True``.
+    """
     pm.resize_pty(task_id, body.cols, body.rows)
     return {"ok": True}
 
@@ -121,6 +210,14 @@ async def stream_preprocess_logs(
     from_offset: int = Query(0),
     pm: PreprocessManager = Depends(get_preprocess_manager),
 ):
+    """Stream preprocess task logs live over a WebSocket connection.
+
+    Args:
+        websocket: The WebSocket connection.
+        task_id: The preprocess task identifier.
+        from_offset: Starting byte offset for the log stream.
+        pm: Injected PreprocessManager singleton.
+    """
     await websocket.accept()
     task = pm.get(task_id)
     if not task:

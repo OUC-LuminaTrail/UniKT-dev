@@ -1,3 +1,9 @@
+"""Preprocess task and manager — data download/processing lifecycle.
+
+Manages PTY-based subprocesses for dataset download and processing tasks,
+including log chunk storage, terminal resize, and graceful shutdown.
+"""
+
 import contextlib
 import fcntl
 import os
@@ -18,6 +24,20 @@ from services.python_env import PythonEnvManager
 
 
 class PreprocessTask:
+    """Represents a single preprocess (download/process) task.
+
+    Attributes:
+        id: Unique task identifier.
+        command: Command list that was launched.
+        env_id: Optional environment identifier.
+        custom_python_path: Optional custom Python interpreter path.
+        status: Current task status (running, stopping, completed, etc.).
+        exit_code: Process exit code, or None.
+        started_at: Timestamp when the task started.
+        finished_at: Timestamp when the task finished, or None.
+        pid: Process ID of the running subprocess, or None.
+    """
+
     def __init__(
         self,
         task_id: int,
@@ -25,6 +45,14 @@ class PreprocessTask:
         env_id: str | None = None,
         custom_python_path: str | None = None,
     ):
+        """Initialize a PreprocessTask.
+
+        Args:
+            task_id: Unique task identifier.
+            command: Command list to execute.
+            env_id: Optional environment identifier.
+            custom_python_path: Optional custom Python interpreter path.
+        """
         self.id = task_id
         self.command = command
         self.env_id = env_id
@@ -37,7 +65,18 @@ class PreprocessTask:
 
 
 class PreprocessManager:
+    """Manages lifecycle of preprocess subprocesses.
+
+    Launches PTY-backed subprocesses for data download/processing,
+    stores output as LogChunks, and provides stop/delete/resize controls.
+    """
+
     def __init__(self, env_manager: PythonEnvManager):
+        """Initialize the preprocess manager.
+
+        Args:
+            env_manager: PythonEnvManager used to resolve commands.
+        """
         self._env_manager = env_manager
         self._tasks: dict[int, PreprocessTask] = {}
         self._procs: dict[int, subprocess.Popen] = {}
@@ -55,6 +94,22 @@ class PreprocessManager:
         env_id: str | None = None,
         custom_python_path: str | None = None,
     ) -> PreprocessTask:
+        """Start a new preprocess task.
+
+        Creates a PTY, launches the subprocess, and starts reader/monitor
+        threads.
+
+        Args:
+            action: The action to perform (``download`` or ``process``).
+            dataset: Name of the dataset.
+            params: Additional parameters for the action.
+            env_id: Optional environment identifier.
+            custom_python_path: Optional custom Python interpreter path.
+
+        Returns:
+            The created PreprocessTask (may be in ``failed`` status if
+            launch failed).
+        """
         with self._lock:
             task_id = self._next_id
             self._next_id += 1
@@ -136,6 +191,14 @@ class PreprocessManager:
         return task
 
     def _read_pty(self, task_id: int, master_fd: int) -> None:
+        """Read PTY output and store as LogChunks.
+
+        Runs in a daemon thread until the PTY is closed.
+
+        Args:
+            task_id: The preprocess task identifier.
+            master_fd: The PTY master file descriptor.
+        """
         offset = 0
         with SessionLocal() as session:
             last_chunk = (
@@ -169,6 +232,16 @@ class PreprocessManager:
         self._master_fds.pop(task_id, None)
 
     def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
+        """Resize the PTY terminal window for a task.
+
+        Args:
+            task_id: The preprocess task identifier.
+            cols: New number of columns.
+            rows: New number of rows.
+
+        Returns:
+            True if the resize succeeded, False otherwise.
+        """
         master_fd = self._master_fds.get(task_id)
         if master_fd is None:
             return False
@@ -180,12 +253,33 @@ class PreprocessManager:
             return False
 
     def get(self, task_id: int) -> PreprocessTask | None:
+        """Look up a preprocess task by ID.
+
+        Args:
+            task_id: The preprocess task identifier.
+
+        Returns:
+            The PreprocessTask, or None if not found.
+        """
         return self._tasks.get(task_id)
 
     def list_all(self) -> list[PreprocessTask]:
+        """Return all tracked preprocess tasks.
+
+        Returns:
+            A list of all PreprocessTask instances.
+        """
         return list(self._tasks.values())
 
     def delete(self, task_id: int) -> bool:
+        """Delete a preprocess task and its log chunks.
+
+        Args:
+            task_id: The preprocess task identifier.
+
+        Returns:
+            True if deleted, False if the task does not exist or is running.
+        """
         task = self._tasks.get(task_id)
         if not task or task.status == "running":
             return False
@@ -207,6 +301,14 @@ class PreprocessManager:
         return True
 
     def stop(self, task_id: int) -> bool:
+        """Stop a running preprocess task.
+
+        Args:
+            task_id: The preprocess task identifier.
+
+        Returns:
+            True if the task was stopped, False if not found or not running.
+        """
         task = self._tasks.get(task_id)
         if not task or task.status != "running":
             return False
@@ -222,11 +324,23 @@ class PreprocessManager:
         env_id: str | None = None,
         custom_python_path: str | None = None,
     ) -> list[str]:
+        """Build the command list for a preprocess action.
+
+        Args:
+            action: ``download`` or ``process``.
+            dataset: Dataset name.
+            params: Action-specific parameters.
+            env_id: Optional environment identifier.
+            custom_python_path: Optional custom Python interpreter path.
+
+        Returns:
+            The command list ready for subprocess execution.
+        """
         if env_id:
             base = self._env_manager.resolve_command(env_id, custom_python_path)
         else:
             base = self._env_manager.resolve_default_command()
-        cmd = base + ["data_process.py", action, "-d", dataset]
+        cmd = [*base, "data_process.py", action, "-d", dataset]
         if action == "download":
             if params.get("force"):
                 cmd.append("--force")
@@ -263,6 +377,13 @@ class PreprocessManager:
         return cmd
 
     def _monitor(self, task_id: int) -> None:
+        """Wait for a preprocess subprocess to finish and update its status.
+
+        Runs in a daemon thread per task.
+
+        Args:
+            task_id: The preprocess task identifier.
+        """
         proc = self._procs.get(task_id)
         if proc is None:
             return
@@ -296,6 +417,11 @@ class PreprocessManager:
             task.pid = None
 
     def _terminate_process(self, task_id: int) -> None:
+        """Send SIGINT (then SIGKILL) to a preprocess subprocess group.
+
+        Args:
+            task_id: The preprocess task identifier.
+        """
         proc = self._procs.get(task_id)
         if proc is None:
             return
@@ -314,6 +440,11 @@ class PreprocessManager:
                 proc.wait(timeout=3)
 
     def shutdown(self) -> None:
+        """Terminate all running preprocess subprocesses and clean up.
+
+        Iterates over all tracked processes, terminates them, waits for
+        reader threads, and closes PTY master file descriptors.
+        """
         for task_id in list(self._procs.keys()):
             self._terminate_process(task_id)
             self._procs.pop(task_id, None)

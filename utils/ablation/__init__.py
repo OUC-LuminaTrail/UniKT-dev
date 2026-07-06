@@ -9,7 +9,7 @@ from utils.ablation.runner import AblationRunner
 
 __all__ = [
     "AblationConfig",
+    "AblationRunner",
     "AblationStudyConfig",
     "load_config",
-    "AblationRunner",
 ]

@@ -1,3 +1,10 @@
+"""Data source management for knowledge tracing datasets.
+
+Provides the base DataSource class and utility functions for downloading,
+loading, processing, and saving dataset files with metadata tracking and
+integrity checks.
+"""
+
 import hashlib
 import json
 import os
@@ -30,8 +37,13 @@ class DataSource(ABC):
     """
 
     def __init__(
-        self, dataset: str, data_base_path: str, data_url: str = None, seed: int = 42
+        self,
+        dataset: str,
+        data_base_path: str,
+        data_url: str | None = None,
+        seed: int = 42,
     ):
+        """Initialize the DataSource with dataset configuration."""
         super().__init__()
         self.dataset = dataset.lower()
         self.data_base_path = data_base_path
@@ -51,7 +63,7 @@ class DataSource(ABC):
         # e.g., "question_skill", "question_assignment", "question_template"
         self.relation_data: dict[str, pl.DataFrame] = {}
 
-        # 数据缓存
+        # Data cache
         self._data_cache: dict[str, pl.DataFrame | pl.LazyFrame] = {}
         self._data_config: dict[str, dict] = {
             "sequence": {"lazy": False},
@@ -367,7 +379,6 @@ class DataSource(ABC):
             max_retries: Maximum number of download retry attempts.
             num_threads: Number of threads for multi-threaded download.
         """
-
         if self.data_url is None:
             raise ValueError("Data URL is not provided.")
 
@@ -480,16 +491,14 @@ class DataSource(ABC):
         raise NotImplementedError("Subclasses should implement load_data method")
 
     def _validate_saved_data(self, data_name: str) -> str:
-        """
-        Validate that processed data files exist and have correct integrity.
-        """
-        # 拼接得到路径
+        """Validate that processed data files exist and have correct integrity."""
+        # Construct the file path
         data_path = os.path.join(
             self.data_folder, f"{self.dataset}_{data_name}.parquet"
         )
-        # 检查文件是否存在
+        # Check if the file exists
         self._validate_data_files_exist([data_path])
-        # 检查文件一致性
+        # Validate file integrity
         self._validate_data_integrity(data_name, data_name + "_md5")
 
         return data_path
@@ -536,7 +545,7 @@ class DataSource(ABC):
 
     @abstractmethod
     def transform_data(self):
-        """transform cleaned data into standard format. Must be implemented by subclasses."""
+        """Transform cleaned data into standard format. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses should implement transform_data method")
 
     @abstractmethod
@@ -560,33 +569,33 @@ class DataSource(ABC):
         return hash_md5.hexdigest()
 
     def _load_data(self, data_type: str) -> pl.DataFrame | pl.LazyFrame:
-        """加载数据
+        """Load data by type using the configured lazy/eager policy.
 
         Args:
-            data_type: 数据类型，对应配置字典的键名
+            data_type: Data type key corresponding to the configuration dict.
 
         Returns:
-            DataFrame 或 LazyFrame
+            DataFrame or LazyFrame.
 
         Raises:
-            ValueError: 当 data_type 不在配置字典中时
+            ValueError: If data_type is not in the configuration dict.
         """
         if data_type not in self._data_config:
             raise ValueError(f"Unknown data type: {data_type}")
 
-        # 检查缓存
+        # Check cache
         if data_type in self._data_cache:
             return self._data_cache[data_type]
 
         config = self._data_config[data_type]
         data_path = self._validate_saved_data(data_type)
 
-        # 根据配置选择读取方式
+        # Read according to configuration (lazy vs eager)
         read_func = pl.scan_parquet if config["lazy"] else pl.read_parquet
         logger.info(f"Loading {data_type} data: {data_path}")
         data = read_func(data_path)
 
-        # 缓存数据
+        # Cache the loaded data
         self._data_cache[data_type] = data
 
         return data
@@ -864,13 +873,14 @@ class DataSource(ABC):
         return pl.concat(parts, how="vertical")
 
     def build_split_question_sequence_data(self):
-        """构建切分后的序列数据（按问题）。
+        """Build split sequence data by question.
 
-        将长度大于 ``max_seq_len`` 的用户序列切分成多个子序列，丢弃长度不足
-        ``min_seq_len`` 的切分，并为每个保留的切分分配新的稠密用户 ID。
+        Splits user sequences longer than ``max_seq_len`` into multiple
+        sub-sequences, drops splits shorter than ``min_seq_len``, and assigns
+        new dense user IDs to each retained split.
 
-        处理按用户分批进行（每批对齐到用户边界），峰值内存受批次大小约束，
-        输出语义与整框处理完全一致。
+        Processing is done in user-aligned batches to bound peak memory,
+        while producing output identical to whole-frame processing.
         """
         if self.sequence_data is None:
             raise ValueError(
@@ -884,15 +894,17 @@ class DataSource(ABC):
         logger.debug(f"Split into {final_num_users} question sub-sequences")
 
     def build_split_skill_sequence_data(self):
-        """构建切分后的技能序列数据。
+        """Build split skill sequence data.
 
-        将问题序列展开为技能序列（一个问题可能对应多个技能），保留 question 列，
-        然后按 ``max_seq_len`` 切分长序列，丢弃长度不足 ``min_seq_len`` 的切分。
+        Expands question sequences into skill sequences (one question may map
+        to multiple skills), preserving the question column, then splits long
+        sequences by ``max_seq_len`` and drops splits shorter than
+        ``min_seq_len``.
 
-        处理按用户分批进行（每批对齐到用户边界），峰值内存受批次大小约束，
-        输出语义与整框处理完全一致。
+        Processing is done in user-aligned batches to bound peak memory,
+        while producing output identical to whole-frame processing.
 
-        输出列: sequence_data 原始列 + skill + seq_pos
+        Output columns: original sequence_data columns + skill + seq_pos
         """
         if self.sequence_data is None:
             raise ValueError(
@@ -908,9 +920,9 @@ class DataSource(ABC):
         )
 
     def build_windowlate_data(self):
-        """构建用于 windowlate_auc_mean 评估的样本数据。
+        """Build windowlate evaluation samples for windowlate_auc_mean scoring.
 
-        数据在此方法中直接流式保存到文件。
+        Data is streamed directly to file in this method.
         """
         if self.sequence_data is None:
             raise ValueError(
@@ -923,7 +935,7 @@ class DataSource(ABC):
                 "K-fold labels not found in data. Please call add_kfold_labels() first."
             )
 
-        # 筛选测试集数据
+        # Filter test set data
         test_data = self.sequence_data.filter(pl.col("fold") == -1)
         if len(test_data) == 0:
             raise ValueError("No test-set interactions (fold == -1) found")
@@ -931,16 +943,16 @@ class DataSource(ABC):
         max_seq_len = self.args.max_seq_len
         logger.info(f"Building windowlate data (max_seq_len={max_seq_len})...")
 
-        # 准备输出路径
+        # Prepare output path
         os.makedirs(self.data_folder, exist_ok=True)
         output_path = os.path.join(
             self.data_folder, f"{self.dataset}_windowlate.parquet"
         )
 
-        # 获取配置参数
+        # Get configuration parameters
         users_per_batch = getattr(self.args, "windowlate_users_per_batch", 1)
 
-        # 构建并直接保存到文件
+        # Build and save directly to file
         WindowlateProcessor.build(
             test_data=test_data,
             question_data=self.relation_data["question_skill"],
@@ -978,19 +990,19 @@ class DataSource(ABC):
                 "No processed data available. Please call load_processed_data() or clear_data() first."
             )
 
-        # 获取唯一用户ID
+        # Get unique user IDs
         unique_users = self.sequence_data["user"].unique().sort()
         num_users = len(unique_users)
         num_test_users = int(num_users * test_ratio)
 
-        # 随机打乱用户ID顺序
+        # Shuffle user IDs randomly
         user_indices = np.arange(num_users)
         self._np_rng.shuffle(user_indices)
-        # 打乱后取非测试集用户的索引
+        # Get indices of non-test users after shuffling
         non_test_indices = user_indices[num_test_users:]
-        # 初始化折标签
+        # Initialize fold assignment array
         fold_assignment = np.full(num_users, -1, dtype=np.int32)
-        # 对非测试集用户进行K折交叉验证
+        # Perform K-fold cross-validation on non-test users
         logger.debug(
             f"Splitting {num_users - num_test_users} users into {n_splits} folds..."
         )
@@ -1051,8 +1063,8 @@ class DataSource(ABC):
 
     def sample(
         self,
-        sample_size: int = None,
-        sample_ratio: float = None,
+        sample_size: int | None = None,
+        sample_ratio: float | None = None,
         sample_strategy: str = "random",
         attempts_bins: list = [20, 100],
         correct_bins: list = [0.4, 0.8],
@@ -1365,7 +1377,7 @@ class DataSource(ABC):
         # Step 3: Remap entity IDs in each relation
         for name in list(self.relation_data.keys()):
             df = self.relation_data[name]
-            entity_col = [c for c in df.columns if c != "question"][0]
+            entity_col = next(c for c in df.columns if c != "question")
             entity_id_map = (
                 df.select(pl.col(entity_col).unique())
                 .sort(entity_col)

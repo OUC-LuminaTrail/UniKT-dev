@@ -1,7 +1,9 @@
-"""数据处理包。
+"""Data processing package.
 
-导入本包触发静态注册发现(扫描源码,不导入数据源代码),把所有 ``@register_data_source``
-注册项写入 ``DATA_SOURCES`` 懒索引。数据源代码在 ``get_data_source(...)`` 时才按需导入。
+Importing this package triggers static registration discovery (scans source files
+without importing them), writing all ``@register_data_source`` entries into the
+``DATA_SOURCES`` lazy index. Data source code is imported on demand only when
+``get_data_source(...)`` is called.
 """
 
 from pathlib import Path
@@ -15,17 +17,17 @@ discover_registrations(Path(__file__).parent, "utils.data_process")
 
 
 def get_data_source(dataset_name: str, args: Any) -> DataSource:
-    """按名取数据源实例(按需懒导入对应模块)。
+    """Get a data source instance by name with on-demand lazy import.
 
     Args:
-        dataset_name: 数据集名(如 ``"assistments09"``、``"ednet_kt1"``)。
-        args: 数据源配置参数。
+        dataset_name: Dataset name (e.g. ``"assistments09"``, ``"ednet_kt1"``).
+        args: Data source configuration parameters.
 
     Returns:
-        配置好的 ``DataSource`` 实例。
+        A configured ``DataSource`` instance.
 
     Raises:
-        ValueError: 数据集名未注册。
+        ValueError: If the dataset name is not registered.
     """
     if dataset_name not in DATA_SOURCES:
         available = ", ".join(DATA_SOURCES.keys())

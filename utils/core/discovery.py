@@ -1,10 +1,11 @@
-"""静态注册发现:在不导入模块的前提下扫描源码,建立名字->模块的懒索引。
+"""Static registration discovery: scans source code without importing modules to build a name->module lazy index.
 
-扫描 ``@register_<role>("name")`` 装饰器,把发现的 ``(name, module_path)`` 写入对应注册表的
-``index``。这样 ``keys()`` 在启动期即可列出全部组件,而组件代码只在 ``get()`` 时才被导入
-(懒加载,多环境安全)。
+Scans for ``@register_<role>("name")`` decorators and populates the corresponding
+registry's ``index``. This allows ``keys()`` to list all components at startup while
+component code is only imported on ``get()`` (lazy loading, multi-environment safe).
 
-只识别 ``@register_<role>("字面量")`` 这一统一形式;非字面量参数(变量、表达式)会被忽略。
+Only recognizes the uniform ``@register_<role>("literal")`` form; non-literal arguments
+(variables, expressions) are ignored.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from .registry import (
 
 _logger = get_logger(__name__)
 
-# @register_<role>("name") -> 目标注册表
+# @register_<role>("name") -> target registry
 _DECORATORS: dict[str, UniversalRegistry] = {
     "register_trainer": TRAINERS,
     "register_model_params": PARAM_CONFIGS,
@@ -33,11 +34,11 @@ _DECORATORS: dict[str, UniversalRegistry] = {
 
 
 def discover_registrations(root: str | Path, package: str) -> None:
-    """扫描 ``root`` 下所有 ``.py``(不含 ``__init__``),把装饰器注册写入懒索引。
+    """Scan all ``.py`` files under ``root`` (excluding ``__init__``) and write decorator registrations into the lazy index.
 
     Args:
-        root: 要扫描的目录(传 ``__file__`` 所在目录即可,与当前工作目录无关)。
-        package: 该目录对应的点分模块名(如 ``"model"``、``"utils.data_process"``)。
+        root: Directory to scan (pass ``__file__``'s parent directory, independent of the current working directory).
+        package: Dotted module name for the directory (e.g. ``"model"``, ``"utils.data_process"``).
     """
     root_path = Path(root)
     found = 0
@@ -66,7 +67,7 @@ def _to_module_path(py: Path, root: Path, package: str) -> str:
 
 
 def _target_registry(dec: ast.expr) -> UniversalRegistry | None:
-    """识别 ``@register_<role>("字面量")``,返回目标注册表;否则 ``None``。"""
+    """Identify ``@register_<role>("literal")`` and return the target registry, or ``None``."""
     if not isinstance(dec, ast.Call) or not dec.args:
         return None
     if not (
