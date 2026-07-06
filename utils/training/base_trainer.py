@@ -893,13 +893,13 @@ class BaseTrainer(ABC):
                     and best_metric_text is not None
                     and self.val_data is not None
                 ):
-                    best_epoch = getattr(self, "_best_epoch", None)
+                    best_metric = checkpoint_cb.best_metric if checkpoint_cb else None
+                    best_epoch = checkpoint_cb.best_epoch if checkpoint_cb else None
                     patience = self.early_stopping.cfg.patience
                     remaining = max(0, patience - self.early_stopping.num_bad_epochs)
-                    if getattr(self, "_best_metric", None) is not None:
-                        best_str = f"{self._best_metric:.4f}"
-                    else:
-                        best_str = "N/A"
+                    best_str = (
+                        f"{best_metric:.4f}" if best_metric is not None else "N/A"
+                    )
 
                     best_metric_text.plain = (
                         f"{stage_prefix}Best {monitor_name.upper()}: {best_str} "

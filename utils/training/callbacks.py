@@ -340,10 +340,6 @@ class CheckpointCallback(Callback):
         )
         self.best_model_state = snapshot if self.keep_best_state else None
 
-        # 与原训练器字段保持兼容，供 UI 展示复用
-        trainer._best_metric = current
-        trainer._best_epoch = epoch
-
     def on_epoch_end(self, epoch: int, train_loss: float, val_loss: float, **kwargs):
         """每个 epoch 结束时保存 last checkpoint。"""
         trainer = kwargs.get("trainer")

@@ -300,8 +300,6 @@ class MultiTrainer(BaseTrainer):
         self.start_epoch = 0
         # 指标记录 step 在阶段间累计，保证 SwanLab x 轴单调
         self._metric_step_offset = self._elapsed_epochs
-        self._best_metric = None
-        self._best_epoch = None
 
         self.callback_manager = self._build_stage_callbacks(name, setup)
 

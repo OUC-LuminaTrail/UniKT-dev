@@ -81,9 +81,10 @@ class TrainerObjectiveWrapper:
         trainer.run()
 
         if pruning_cb.pruned:
+            es = trainer.early_stopping
+            best_epoch = es.best_epoch if es is not None else None
             raise optuna.TrialPruned(
-                f"Trial {trial.number} pruned at epoch "
-                f"{getattr(trainer, '_best_epoch', None)}"
+                f"Trial {trial.number} pruned at epoch {best_epoch}"
             )
 
         return self._extract_metric(trainer, pruning_cb)
