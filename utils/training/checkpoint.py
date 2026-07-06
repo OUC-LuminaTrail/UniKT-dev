@@ -3,13 +3,29 @@
 提供模型检查点的保存和加载功能。
 """
 
+import atexit
 import os
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import cast
 
 import torch
 
 from ..core import get_logger
 
 logger = get_logger(__name__)
+
+
+def _detach_to_cpu(obj):
+    """递归把 state_dict 中的张量克隆到 CPU（model/optimizer/scheduler 通用）。"""
+    if torch.is_tensor(obj):
+        return obj.detach().cpu().clone()
+    if isinstance(obj, dict):
+        return {k: _detach_to_cpu(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_detach_to_cpu(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_detach_to_cpu(v) for v in obj)
+    return obj
 
 
 class CheckpointManager:
@@ -38,6 +54,12 @@ class CheckpointManager:
         """
         self.log_dir = log_dir
         os.makedirs(log_dir, exist_ok=True)
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="ckpt-saver"
+        )
+        self._save_futures: list[Future] = []
+        self._closed = False
+        atexit.register(self.close)
 
     def save_checkpoint(
         self,
@@ -62,12 +84,12 @@ class CheckpointManager:
         """
         state = {
             "epoch": epoch,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
+            "model_state_dict": _detach_to_cpu(model.state_dict()),
+            "optimizer_state_dict": _detach_to_cpu(optimizer.state_dict()),
         }
 
         if scheduler is not None:
-            state["scheduler_state_dict"] = scheduler.state_dict()
+            state["scheduler_state_dict"] = _detach_to_cpu(scheduler.state_dict())
 
         if early_stopping_state is not None:
             state["early_stopping_state"] = early_stopping_state
@@ -76,19 +98,55 @@ class CheckpointManager:
             state.update(additional_state)
 
         filepath = os.path.join(self.log_dir, filename)
-        torch.save(state, filepath)
-        logger.info(f"Checkpoint saved to {filepath}")
+        self._submit_save(state, filepath)
 
-    def save_weights(self, model: torch.nn.Module, filename: str = "model.pth"):
-        """仅保存模型权重。
+    def save_weights(self, model: torch.nn.Module, filename: str = "model.pth") -> dict:
+        """仅保存模型权重，返回 CPU 快照供调用方复用（避免重复克隆）。
 
         Args:
             model: PyTorch 模型
             filename: 文件名
+
+        Returns:
+            model state_dict 的 CPU 克隆（与异步落盘内容一致）。
         """
+        snapshot = cast(dict, _detach_to_cpu(model.state_dict()))
         filepath = os.path.join(self.log_dir, filename)
-        torch.save(model.state_dict(), filepath)
-        logger.info(f"Model weights saved to {filepath}")
+        self._submit_save(snapshot, filepath)
+        return snapshot
+
+    def _submit_save(self, obj, filepath: str) -> None:
+        """提交一次后台原子写入；已关闭则回退为同步写。"""
+        if self._closed:
+            self._write_atomic(obj, filepath)
+            return
+        future = self._executor.submit(self._write_atomic, obj, filepath)
+        self._save_futures.append(future)
+
+    @staticmethod
+    def _write_atomic(obj, filepath: str) -> None:
+        tmp = filepath + ".tmp"
+        torch.save(obj, tmp)
+        os.replace(tmp, filepath)
+        logger.info(f"Checkpoint saved to {filepath}")
+
+    def flush(self) -> None:
+        """等待所有已提交的保存完成，逐个上报异常（不抛出）。"""
+        futures = self._save_futures
+        self._save_futures = []
+        for future in futures:
+            try:
+                future.result()
+            except Exception:
+                logger.exception("Async checkpoint save failed")
+
+    def close(self) -> None:
+        """drain 队列并关闭执行器；幂等（_finish 与 atexit 均会调用）。"""
+        if self._closed:
+            return
+        self._closed = True
+        self.flush()
+        self._executor.shutdown(wait=True)
 
     @staticmethod
     def load_weights(

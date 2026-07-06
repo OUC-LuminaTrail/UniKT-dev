@@ -1192,6 +1192,8 @@ class BaseTrainer(ABC):
     def _finish(self):
         """清理资源，结束实验追踪。"""
         self._finish_metric_logger()
+        if self.checkpoint_manager is not None:
+            self.checkpoint_manager.close()
 
 
 __all__ = ["BaseTrainer", "StageResult"]

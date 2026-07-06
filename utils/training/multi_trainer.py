@@ -388,6 +388,8 @@ class MultiTrainer(BaseTrainer):
 
         self.metric_logger.finish()
         logger.info("Metric logging finished")
+        if self.checkpoint_manager is not None:
+            self.checkpoint_manager.close()
 
 
 __all__ = ["MultiTrainer", "StageConfig", "StageComponents"]

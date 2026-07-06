@@ -335,15 +335,10 @@ class CheckpointCallback(Callback):
 
         self.best_metric = current
         self.best_epoch = epoch
-        self.checkpoint_manager.save_weights(trainer.model, self.best_filename)
-
-        if self.keep_best_state:
-            self.best_model_state = {
-                key: value.detach().cpu().clone()
-                for key, value in trainer.model.state_dict().items()
-            }
-        else:
-            self.best_model_state = None
+        snapshot = self.checkpoint_manager.save_weights(
+            trainer.model, self.best_filename
+        )
+        self.best_model_state = snapshot if self.keep_best_state else None
 
         # 与原训练器字段保持兼容，供 UI 展示复用
         trainer._best_metric = current
