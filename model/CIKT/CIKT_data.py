@@ -51,8 +51,7 @@ class CIKTDataset(Dataset):
 def cikt_collate_fn(batch, concept_question_table, concept_q_count):
     """批合并 + 同概念随机替换 QR 采样。
 
-    对每个位置从其概念对应的候选题目中均匀采样一个（含自身，与原 ``replace_question``
-    一致）。无候选或填充位置保留原题目（这些位置随后被掩码忽略）。
+    对每个位置从其概念对应的候选题目中均匀采样一个。
     """
     q, y, mask, c = default_collate(batch)
     count = concept_q_count[c]  # [B, L]
@@ -75,7 +74,6 @@ class CIKTModelData(QuestionModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
-    # ---------- data-derived tables ----------
     def _question_to_concept(self, q_matrix: np.ndarray) -> np.ndarray:
         """问题 → 单概念（首个技能）；无技能的问题映射到 0。"""
         first_skill = np.argmax(q_matrix, axis=1)
@@ -83,7 +81,7 @@ class CIKTModelData(QuestionModelData):
         return np.where(has_skill, first_skill, 0).astype(np.int64)
 
     def _build_difficulty_table(self, num_levels: int, fold_idx: int) -> torch.Tensor:
-        """题目难度分箱表（复刻原 ``build_difficulty_dict``）。
+        """题目难度分箱表。
 
         仅用训练交互（排除验证折与测试折）计算每题正确率，按正确率升序均分到
         ``num_levels`` 个等级，最低正确率（最难）=0。训练集中未出现的题目默认 0。
@@ -112,7 +110,6 @@ class CIKTModelData(QuestionModelData):
             table[qids[start:end]] = level
         logger.info(
             f"CIKT difficulty table: {n_q} questions binned into {num_levels} levels "
-            f"(unseen -> 0)."
         )
         return torch.as_tensor(table, dtype=torch.long)
 
@@ -139,7 +136,6 @@ class CIKTModelData(QuestionModelData):
             torch.as_tensor(counts, dtype=torch.long),
         )
 
-    # ---------- prepare ----------
     @override
     def prepare_data(self, args: Any) -> tuple:
         """准备训练 / 验证 / 测试数据及 CIKT 专用查表。"""

@@ -88,12 +88,7 @@ class CIKTModelParams(BaseParamConfig):
 
 @register_trainer("CIKT")
 class CIKTTrainer(BaseTrainer):
-    """CIKT 模型训练器。
-
-    四路预测融合（causal / intervention / replace 平均）做指标，多任务损失在
-    ``_compute_loss`` 中按原实现权重加权。NEXT_ITEM 对齐：模型输出 ``[B, L-1]``
-    对齐到 ``response[:, 1:]``。
-    """
+    """CIKT 模型训练器。"""
 
     def __init__(
         self, args: Any = None, data_src: Any = None, exp_manager: Any = None
@@ -177,7 +172,7 @@ class CIKTTrainer(BaseTrainer):
             exp_manager=exp_manager,
             hyperparams=args,
             model_name="CIKT",
-            dataset_name=getattr(args, "dataset", ""),
+            dataset_name=args.dataset,
         ).build()
 
     def forward_pass(self, batch_data):
@@ -194,14 +189,12 @@ class CIKTTrainer(BaseTrainer):
 
         out = self.model(q, y, c, qr, mask)
 
-        # NEXT_ITEM 对齐：pad 到 [B, L] 后由框架提取 valid_mask（mask[:-1] & mask[1:]）
+        # pad 到 [B, L] 后由框架提取 valid_mask（mask[:-1] & mask[1:]）
         y_pred_full = self._pad_to_full_sequence(out["y_pred"])
         y_hat, y_label, valid_mask = self._extract_valid_predictions(
             y_pred_full, y, mask
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
-
-        # 四路分支与 y_pred 共享 [B, L-1]（trivial 为 [B, L-1, nd]），用同一 valid_mask 选位
         a_true_full = self.model.difficulty_table[q][:, 1:]  # [B, L-1]
 
         return {
@@ -209,7 +202,7 @@ class CIKTTrainer(BaseTrainer):
             "y_label": y_label,
             "y_predict": self._generate_binary_predictions(y_hat, threshold=0.5),
             "y_score": y_hat,
-            "y_prob": y_hat,  # 已过 sigmoid
+            "y_prob": y_hat,
             "_aux_causal": out["y_causal"][valid_mask],
             "_aux_intervention": out["y_intervention"][valid_mask],
             "_aux_replace": out["y_replace"][valid_mask],
@@ -218,7 +211,7 @@ class CIKTTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, outputs):
-        """多任务损失：0.7·BCE(causal)+0.6·BCE(inter)+0.1·CE(trivial)+0.8·BCE(replace)。"""
+        """多任务损失"""
         y_label = outputs["y_label"]
         bce = self.loss
         loss_causal = bce(outputs["_aux_causal"], y_label)

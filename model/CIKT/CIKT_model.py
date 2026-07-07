@@ -1,18 +1,4 @@
-"""CIKT: Disentangling Response Sequences with Causal Invariance for Knowledge Tracing.
-
-Faithful port of the standalone implementation in ``kt-base-lines/CIKT/``. The model
-disentangles every interaction into a *causal* and a *trivial* factor through a
-Gumbel-softmax attention, then runs four intervention LSTM expansions (causal,
-trivial-remove, response-invert, question-replace) and fuses three of them for the
-next-item prediction.
-
-Adaptations to UniKT (behaviour-preserving):
-    * No ``.cuda()`` / hardcoded device — initial LSTM states are built from the
-      input tensor; static masks and the data-derived lookup tables are registered
-      as buffers so they follow ``.to(device)`` and land in ``state_dict``.
-    * ``forward`` returns prediction tensors only; the multi-task loss lives in the
-      trainer (see ``CIKT_trainer.py``), following the QIKT pattern.
-"""
+"""CIKT: Disentangling Response Sequences with Causal Invariance for Knowledge Tracing."""
 
 from __future__ import annotations
 
@@ -21,9 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# ====================================================================================
-# Graph modules (ported from gcn.py)
-# ====================================================================================
 class GraphConvolution(nn.Module):
     """单层图卷积：output = LayerNorm(adj @ (x W))."""
 
@@ -59,23 +42,22 @@ class GCN(nn.Module):
         return x
 
 
-# ====================================================================================
-# Disentanglement modules (ported from dis_causal.py)
-# ====================================================================================
 class AttentionScoreQcWeight(nn.Module):
     """问题-概念联合权重：attention = (Q·K^T)(Q_c·K_c^T)，缩放后逐元素相乘。"""
 
     def __init__(self, hidden_size, dropout_p=0.0):
         super().__init__()
         self.hidden_size = hidden_size
-        self.linear_q = nn.Linear(hidden_size, hidden_size)
-        self.linear_k = nn.Linear(hidden_size, hidden_size)
+        self.linear_q1 = nn.Linear(hidden_size, hidden_size)
+        self.linear_k1 = nn.Linear(hidden_size, hidden_size)
+        self.linear_q2 = nn.Linear(hidden_size, hidden_size)
+        self.linear_k2 = nn.Linear(hidden_size, hidden_size)
 
     def forward(self, ques_state, conc_state):
-        q1 = self.linear_q(ques_state[:, 1:].contiguous())
-        k1 = self.linear_k(ques_state[:, :-1].contiguous())
-        q2 = self.linear_q(conc_state[:, 1:].contiguous())
-        k2 = self.linear_k(conc_state[:, :-1].contiguous())
+        q1 = self.linear_q1(ques_state[:, 1:].contiguous())
+        k1 = self.linear_k1(ques_state[:, :-1].contiguous())
+        q2 = self.linear_q2(conc_state[:, 1:].contiguous())
+        k2 = self.linear_k2(conc_state[:, :-1].contiguous())
         scaling = self.hidden_size**-0.5
         attention1 = torch.bmm(q1, k1.transpose(-2, -1)) * scaling
         attention2 = torch.bmm(q2, k2.transpose(-2, -1)) * scaling
@@ -167,9 +149,6 @@ class DisentangleCausal(nn.Module):
         return causal_mask, trivial_mask
 
 
-# ====================================================================================
-# Embedding / prediction heads (ported from model.py)
-# ====================================================================================
 class EncoderEmbedding(nn.Module):
     """问题 / 作答 / 概念联合嵌入，按 pattern 输出不同视图。"""
 
@@ -247,23 +226,8 @@ class PredictHeadClassifier(nn.Module):
         return self.out_fc(torch.cat([x, q], dim=-1))
 
 
-# ====================================================================================
-# CIKT main model (ported from Model_exp)
-# ====================================================================================
 class CIKT(nn.Module):
-    """CIKT 主模型。
-
-    Args:
-        num_questions: 题目数量 q_num。
-        num_concepts: 概念/技能数量。
-        d_model: 隐藏维度。
-        seq_len: 完整序列长度 L（= max_seq_len）；响应窗口长度为 L-1。
-        dropout: GCN dropout（与原实现一致固定为 0.5）。
-        num_difficulty_levels: 平凡分类头的类别数 nd（题目难度分箱数）。
-        difficulty_table: ``[num_questions]`` long，题目 → 难度等级 (0..nd-1)；仅作查表，
-            训练器据此取 ``a_true``。同概念替换题表 ``concept_question_table`` 仅在
-            collate 阶段（CPU）使用，故不在此注册。
-    """
+    """CIKT 主模型。"""
 
     def __init__(
         self,
@@ -281,7 +245,7 @@ class CIKT(nn.Module):
         self.seq_len = int(seq_len) - 1  # response window length
         self.num_difficulty_levels = num_difficulty_levels
 
-        # ---- static masks / adjacency (built once, follow .to(device)) ----
+        # static masks / adjacency
         fixed_edge = self._build_fixed_edge(self.length)
         self.register_buffer("fixed_edge", fixed_edge, persistent=False)
         att_mask = torch.triu(torch.ones(self.seq_len, self.seq_len), diagonal=1).to(
@@ -298,7 +262,7 @@ class CIKT(nn.Module):
         all_mask = torch.cat([torch.cat([one_mask, one_mask], dim=-1)] * 2, dim=0)
         self.register_buffer("all_mask", all_mask, persistent=False)
 
-        # ---- modules ----
+        # modules
         self.gcn = GCN(d_model, d_model, d_model, num_layers=2, dropout=dropout)
         self.x_encoder_num_layers = 2
         self.q_encoder_num_layers = 2
@@ -326,13 +290,13 @@ class CIKT(nn.Module):
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
 
-        # ---- data-derived lookup tables ----
+        # data-derived lookup tables
         if difficulty_table is not None:
             self.register_buffer("difficulty_table", difficulty_table, persistent=False)
 
     @staticmethod
     def _build_fixed_edge(length):
-        """构造 2L 节点的固定图邻接（与原 get_fixed_edge + to_undirected + to_dense_adj 等价）。
+        """构造 2L 节点的固定图邻接。
 
         节点布局：``[0, L)`` 题目节点，``[L, 2L)`` 概念节点。
         """
@@ -417,7 +381,7 @@ class CIKT(nn.Module):
         batch_size = q.size(0)
         padding_response = mask[:, :-1] == 0
 
-        # ---- Embedding ----
+        # Embedding
         x_embed = self.encoder_embedding(
             exercises=q_response,
             response=y_response,
@@ -428,7 +392,7 @@ class CIKT(nn.Module):
             exercises=q_predict, concept=c_predict, pattern="only_q"
         )
 
-        # ---- Graph node & edge ----
+        # Graph node & edge
         c_node = torch.cat([c, c], dim=-1)
         dynamic_edge = (c_node.unsqueeze(-1) - c_node.unsqueeze(-2) == 0).to(
             dtype=torch.float32
@@ -440,7 +404,7 @@ class CIKT(nn.Module):
         ques_state = qc_state[:, : self.length, :]
         conc_state = qc_state[:, self.length :, :]
 
-        # ---- Attention / disentanglement ----
+        # Attention / disentanglement
         q_state, _ = self.rnn_q(
             q_embed, self._zero_q_states(batch_size, q_embed.device, q_embed.dtype)
         )
@@ -456,15 +420,15 @@ class CIKT(nn.Module):
             conc_state=conc_state,
         )
 
-        # ---- Causal encoding ----
+        # Causal encoding
         x_embed_causal = x_embed.unsqueeze(1) * causal_mask.unsqueeze(-1)
         x_causal_ave = self._expand_and_average(x_embed_causal, batch_size)
 
-        # ---- Intervention: remove ----
+        # Intervention: remove
         x_embed_trivial = x_embed.unsqueeze(1) * trivial_mask.unsqueeze(-1)
         x_trivial_ave = self._expand_and_average(x_embed_trivial, batch_size)
 
-        # ---- Intervention: invert ----
+        # Intervention: invert
         x_embed_intervention = self.encoder_embedding(
             exercises=q_response,
             response=y_response,
@@ -475,7 +439,7 @@ class CIKT(nn.Module):
         )
         x_intervention_ave = self._expand_and_average(x_embed_intervention, batch_size)
 
-        # ---- Intervention: replace ----
+        # Intervention: replace
         x_embed_replace = self.encoder_embedding(
             exercises=q_response,
             response=y_response,
@@ -487,8 +451,8 @@ class CIKT(nn.Module):
         )
         x_replace_ave = self._expand_and_average(x_embed_replace, batch_size)
 
-        # ---- Predict ----
-        # 原实现对 intervention/replace 复用 norm1（与源码一致），trivial 用 norm2。
+        # Predict
+        # 对 intervention/replace 复用 norm1，trivial 用 norm2。
         x_causal_ave = self.norm1(x_causal_ave)
         x_trivial_ave = self.norm2(x_trivial_ave)
         x_intervention_ave = self.norm1(x_intervention_ave)
