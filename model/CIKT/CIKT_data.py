@@ -1,0 +1,200 @@
+"""CIKT 模型数据处理模块。
+
+构建 CIKT 所需的全部输入：
+    * 问题 / 作答 / 掩码序列（来自 ``QuestionModelData.load_sequence_data``）；
+    * 单概念序列 C（由问题-技能关系矩阵取首个技能得到）；
+    * 题目难度查表 ``difficulty_table``（按训练交互正确率分箱，0=最难）；
+    * 概念 → 候选题目表 ``concept_question_table``（用于 collate 阶段同概念随机替换 QR）。
+"""
+
+from functools import partial
+from typing import Any
+
+import numpy as np
+import polars as pl
+import torch
+from torch.utils.data import Dataset
+from torch.utils.data.dataloader import default_collate
+from typing_extensions import override
+
+from utils.core import get_logger
+from utils.data_process import DataSource
+from utils.model_data import QuestionModelData
+
+logger = get_logger(__name__)
+
+
+class CIKTDataset(Dataset):
+    """CIKT 训练 / 验证 / 测试数据集。
+
+    ``__getitem__`` 返回 ``(Q, Y, mask, C)``；同概念替换题 ``QR`` 由 collate_fn 注入。
+    """
+
+    def __init__(self, sequences, responses, masks, concepts):
+        self.sequences = sequences
+        self.responses = responses
+        self.masks = masks
+        self.concepts = concepts
+
+    def __len__(self) -> int:
+        return len(self.sequences)
+
+    def __getitem__(self, idx: int):
+        return (
+            torch.tensor(self.sequences[idx], dtype=torch.long),
+            torch.tensor(self.responses[idx], dtype=torch.long),
+            torch.tensor(self.masks[idx], dtype=torch.bool),
+            torch.tensor(self.concepts[idx], dtype=torch.long),
+        )
+
+
+def cikt_collate_fn(batch, concept_question_table, concept_q_count):
+    """批合并 + 同概念随机替换 QR 采样。
+
+    对每个位置从其概念对应的候选题目中均匀采样一个（含自身，与原 ``replace_question``
+    一致）。无候选或填充位置保留原题目（这些位置随后被掩码忽略）。
+    """
+    q, y, mask, c = default_collate(batch)
+    count = concept_q_count[c]  # [B, L]
+    rand = torch.rand(c.shape, generator=None)
+    idx = (
+        (rand * count.float())
+        .long()
+        .clamp(min=0, max=concept_question_table.size(1) - 1)
+    )
+    row = concept_question_table[c]  # [B, L, K]
+    qr = row.gather(-1, idx.unsqueeze(-1)).squeeze(-1)
+    valid = count > 0
+    qr = torch.where(valid, qr, q)
+    return q, y, mask, c, qr
+
+
+class CIKTModelData(QuestionModelData):
+    """CIKT 模型数据加载器。"""
+
+    def __init__(self, data_src: DataSource):
+        super().__init__(data_src)
+
+    # ---------- data-derived tables ----------
+    def _question_to_concept(self, q_matrix: np.ndarray) -> np.ndarray:
+        """问题 → 单概念（首个技能）；无技能的问题映射到 0。"""
+        first_skill = np.argmax(q_matrix, axis=1)
+        has_skill = np.any(q_matrix == 1, axis=1)
+        return np.where(has_skill, first_skill, 0).astype(np.int64)
+
+    def _build_difficulty_table(self, num_levels: int, fold_idx: int) -> torch.Tensor:
+        """题目难度分箱表（复刻原 ``build_difficulty_dict``）。
+
+        仅用训练交互（排除验证折与测试折）计算每题正确率，按正确率升序均分到
+        ``num_levels`` 个等级，最低正确率（最难）=0。训练集中未出现的题目默认 0。
+        """
+        num_questions = self.data_src.get_metadata("num_questions")
+        data = self.data_src.get_split_question_sequence_data()
+        train = data.filter((pl.col("fold") != fold_idx) & (pl.col("fold") != -1))
+
+        stats = (
+            train.group_by("question")
+            .agg(
+                pl.col("label").sum().alias("correct"),
+                pl.col("label").count().alias("n"),
+            )
+            .with_columns((pl.col("correct") / pl.col("n")).alias("acc"))
+        )
+        stats = stats.sort("acc")
+
+        qids = stats["question"].to_numpy()
+        n_q = len(qids)
+        n_per = max(1, n_q // num_levels)
+        table = np.zeros(num_questions, dtype=np.int64)
+        for level in range(num_levels):
+            start = level * n_per
+            end = start + n_per if level < num_levels - 1 else n_q
+            table[qids[start:end]] = level
+        logger.info(
+            f"CIKT difficulty table: {n_q} questions binned into {num_levels} levels "
+            f"(unseen -> 0)."
+        )
+        return torch.as_tensor(table, dtype=torch.long)
+
+    def _build_concept_question_table(self, q_matrix: np.ndarray):
+        """概念 → 候选题目表（pad 到等长）与每概念真实候选数。"""
+        num_skills = q_matrix.shape[1]
+        concept_questions = []
+        max_k = 1
+        for s in range(num_skills):
+            qs = np.sort(np.where(q_matrix[:, s] > 0)[0])
+            concept_questions.append(qs)
+            max_k = max(max_k, len(qs))
+        table = np.zeros((num_skills, max_k), dtype=np.int64)
+        counts = np.zeros(num_skills, dtype=np.int64)
+        for s, qs in enumerate(concept_questions):
+            if len(qs) == 0:
+                continue
+            padded = np.full(max_k, qs[0], dtype=np.int64)
+            padded[: len(qs)] = qs
+            table[s] = padded
+            counts[s] = len(qs)
+        return (
+            torch.as_tensor(table, dtype=torch.long),
+            torch.as_tensor(counts, dtype=torch.long),
+        )
+
+    # ---------- prepare ----------
+    @override
+    def prepare_data(self, args: Any) -> tuple:
+        """准备训练 / 验证 / 测试数据及 CIKT 专用查表。"""
+        fold_idx = args.fold if args.fold >= 0 else None
+
+        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
+
+        q_matrix = self.build_relationship_matrix(("question", "has", "skill"))
+        question_to_concept = self._question_to_concept(q_matrix)
+        user_concept = question_to_concept[user_sequence]
+
+        difficulty_table = self._build_difficulty_table(
+            args.num_difficulty_levels, args.fold
+        )
+        concept_question_table, concept_q_count = self._build_concept_question_table(
+            q_matrix
+        )
+
+        if fold_idx is not None:
+            kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
+            if fold_idx < 0 or fold_idx >= kfold_n_splits:
+                raise ValueError(
+                    f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
+                )
+            logger.info(
+                f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
+            )
+            train_data, val_data, test_data = self.split_kfold_data(
+                user_sequence,
+                user_response,
+                user_mask,
+                user_concept,
+                fold_idx=fold_idx,
+            )
+        else:
+            raise ValueError("K-fold cross-validation is not enabled.")
+
+        train_dataset = CIKTDataset(*train_data)
+        val_dataset = CIKTDataset(*val_data)
+        test_dataset = CIKTDataset(*test_data)
+
+        collate_fn = partial(
+            cikt_collate_fn,
+            concept_question_table=concept_question_table,
+            concept_q_count=concept_q_count,
+        )
+
+        logger.info(
+            f"CIKT dataset sizes: train={len(train_dataset)}, "
+            f"val={len(val_dataset)}, test={len(test_dataset)}"
+        )
+        return (
+            train_dataset,
+            val_dataset,
+            test_dataset,
+            difficulty_table,
+            collate_fn,
+        )
