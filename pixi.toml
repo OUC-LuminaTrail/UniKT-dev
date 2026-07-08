@@ -56,6 +56,8 @@ cuda-cccl = ">=12.8,<12.9"
 [feature.xlstm.pypi-dependencies]
 xlstm = "==2.0.5"
 mlstm_kernels = "==2.0.4"
+[feature.xlstm.activation]
+scripts = ["scripts/activation_xlstm.sh"]
 
 [feature.cpu]
 platforms = ["linux-64"]
