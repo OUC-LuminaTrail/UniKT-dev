@@ -46,6 +46,14 @@ platforms = ["gpu"]
 mamba-ssm = { url = "https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
 causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.1.post4/causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl" }
 
+[feature.xlstm]
+platforms = ["gpu"]
+[feature.xlstm.dependencies]
+antlr4-python3-runtime = ">=4.13.2,<5"
+[feature.xlstm.pypi-dependencies]
+xlstm = "==2.0.5"
+mlstm_kernels = "==2.0.4"
+
 [feature.cpu]
 platforms = ["linux-64"]
 [feature.cpu.pypi-dependencies]
@@ -116,6 +124,7 @@ dhg-cpu = { features = ["dhg", "dhg-cpu"], no-default-feature = true }
 dhg-gpu = { features = ["dhg", "dhg-gpu"], no-default-feature = true }
 cpu = { features = ["base", "cpu"] }
 mamba = { features = ["base", "gpu", "mamba"] }
+xlstm = { features = ["base", "gpu", "xlstm"] }
 web = { features = ["base", "web"] }
 default = { features = ["base", "gpu"] }
 
