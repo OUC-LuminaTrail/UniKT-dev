@@ -50,6 +50,9 @@ causal-conv1d = { url = "https://github.com/Dao-AILab/causal-conv1d/releases/dow
 platforms = ["gpu"]
 [feature.xlstm.dependencies]
 antlr4-python3-runtime = ">=4.13.2,<5"
+cuda-nvcc = ">=12.8,<12.9"
+cuda-libraries-dev = ">=12.8,<12.9"
+cuda-cccl = ">=12.8,<12.9"
 [feature.xlstm.pypi-dependencies]
 xlstm = "==2.0.5"
 mlstm_kernels = "==2.0.4"
