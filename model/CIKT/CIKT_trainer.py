@@ -35,23 +35,23 @@ class CIKTModelParams(BaseParamConfig):
             },
             "loss_w_causal": {
                 "type": float,
-                "default": 0.7,
-                "help": "Loss weight for the causal branch.",
+                "default": 0.1,
+                "help": "Loss weight for the causal branch (lambda_1 in paper).",
             },
             "loss_w_intervention": {
                 "type": float,
-                "default": 0.6,
-                "help": "Loss weight for the response-invert intervention branch.",
+                "default": 0.2,
+                "help": "Loss weight for the response-invert intervention branch (lambda_3 in paper).",
             },
             "loss_w_trivial": {
                 "type": float,
-                "default": 0.1,
-                "help": "Loss weight for the trivial (difficulty) branch.",
+                "default": 0.6,
+                "help": "Loss weight for the trivial (difficulty) branch (lambda_4 in paper).",
             },
             "loss_w_replace": {
                 "type": float,
-                "default": 0.8,
-                "help": "Loss weight for the question-replace intervention branch.",
+                "default": 0.3,
+                "help": "Loss weight for the question-replace intervention branch (lambda_2 in paper).",
             },
             "epochs": {
                 "type": int,
@@ -78,7 +78,7 @@ class CIKTModelParams(BaseParamConfig):
             },
             "batch_size": {
                 "type": int,
-                "default": 32,
+                "default": 8,
                 "short": "bs",
                 "help": "Batch size.",
             },
