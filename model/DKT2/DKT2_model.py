@@ -1,5 +1,3 @@
-"""DKT2：以 xLSTM 为序列主干的 DKT 式知识追踪模型。"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -92,12 +90,11 @@ class DKT2(nn.Module):
     def _build_xlstm(self):
         """构造 xLSTM 块栈。
 
-        sLSTM 的 cuda 后端依赖即时编译的 fused kernel，部分工具链下可能链接失败；
-        此时回退到 vanilla（纯 PyTorch）后端，数学等价、可在 GPU 上运行。
+        sLSTM 的 cuda 后端依赖即时编译的 fused kernel，部分工具链下可能链接失败。
         """
         try:
             return xLSTMBlockStack(self._make_xlstm_config(self.slstm_backend))
-        except Exception as e:
+        except (RuntimeError, OSError) as e:
             if self.slstm_backend == "cuda":
                 logger.warning(
                     f"sLSTM 'cuda' backend unavailable ({type(e).__name__}: {e}); "

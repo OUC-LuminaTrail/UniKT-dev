@@ -75,9 +75,9 @@ class DKT2ModelParams(BaseParamConfig):
             # 训练
             "epochs": {
                 "type": int,
-                "default": 200,
+                "default": 300,
                 "short": "ep",
-                "help": "Number of training epochs (default: 200)",
+                "help": "Number of training epochs (default: 300)",
             },
             "learning_rate": {
                 "type": float,
@@ -91,11 +91,17 @@ class DKT2ModelParams(BaseParamConfig):
                 "short": "wd",
                 "help": "Weight decay (default: 0.0)",
             },
+            "max_grad_norm": {
+                "type": float,
+                "default": 2.0,
+                "short": "mgn",
+                "help": "Max gradient norm for clipping, 0 to disable (default: 2.0)",
+            },
             "batch_size": {
                 "type": int,
-                "default": 128,
+                "default": 512,
                 "short": "bs",
-                "help": "Batch size (default: 128)",
+                "help": "Batch size (default: 512)",
             },
         }
 
@@ -160,6 +166,7 @@ class DKT2Trainer(BaseTrainer):
         ).with_optimization(
             optimizer=optimizer,
             loss_fn=torch.nn.BCELoss(),
+            max_clip_grad_norm=args.max_grad_norm or None,
             early_stopping=early_stopping_cfg,
         ).with_experiment(
             exp_manager=exp_manager,
