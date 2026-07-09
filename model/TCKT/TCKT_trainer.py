@@ -89,6 +89,12 @@ class TCKTModelParams(BaseParamConfig):
                 "short": "wd",
                 "help": "Weight decay",
             },
+            "max_grad_norm": {
+                "type": float,
+                "default": 1.0,
+                "short": "mgn",
+                "help": "Max gradient norm for clipping, 0 disables",
+            },
             "lr_decay_step": {
                 "type": int,
                 "default": 10,
@@ -139,6 +145,17 @@ class TCKTTrainer(BaseTrainer):
     ) -> None:
         from model.TCKT.TCKT_data import TCKTModelData
         from model.TCKT.TCKT_model import TCKTNet
+
+        # Force the math SDP backend for nn.MultiheadAttention. PyTorch >=2.x
+        # defaults to flash / memory-efficient attention, whose backward kernel
+        # returns NaN gradients once this model's attention becomes peaked (which
+        # happens as weights grow on large datasets such as assistments12). The NaN
+        # gradient silently corrupts the embedding weights, and the next forward
+        # feeds NaN predictions into BCELoss -> device-side assert. The math backend
+        # computes the same attention with a numerically robust backward.
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_math_sdp(True)
 
         # 数据
         model_data = TCKTModelData(data_src)
@@ -201,6 +218,7 @@ class TCKTTrainer(BaseTrainer):
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
+            max_clip_grad_norm=args.max_grad_norm or None,
             early_stopping=early_stopping_cfg,
         ).with_experiment(
             exp_manager=exp_manager,
@@ -239,8 +257,9 @@ class TCKTTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
-        """BCE 逐元素后按 batch 内所有有效位置求和（与参考代码一致）。"""
-        return self.loss(outputs["y_hat"], outputs["y_label"]).sum()
+        """BCE 逐元素后按 batch 内所有有效位置求和。"""
+        y_hat = outputs["y_hat"].clamp(1e-7, 1.0 - 1e-7)
+        return self.loss(y_hat, outputs["y_label"]).sum()
 
     @torch.inference_mode()
     def refresh_global_dict(self) -> None:
