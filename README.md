@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/i18n/README_zh-CN.md">简体中文</a> | <b>English</b>
+  <a href="https://github.com/szhhwh/UniKT/blob/main/i18n/README_zh-CN.md">简体中文</a> | <b>English</b>
 </p>
 
 <p align="center">
@@ -28,7 +28,7 @@
   <a href="#-supported-models">Models</a> •
   <a href="#-installation">Installation</a> •
   <a href="#-quick-start">Quick Start</a> •
-  <a href="#-documentation">Documentation</a> •
+  <a href="#-documentation">Documentation</a>
 </p>
 
 ---
@@ -72,8 +72,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/OUC-LuminaTrail/kt-exp-graph.git
-cd kt-exp-graph
+git clone https://github.com/szhhwh/UniKT.git
+cd UniKT
 
 # Activate GPU environment (CUDA 12.8, Python 3.12, PyTorch 2.10)
 pixi shell
@@ -94,8 +94,8 @@ Use the provided setup script for automatic environment configuration:
 
 ```bash
 # Clone the repository
-git clone https://github.com/OUC-LuminaTrail/kt-exp-graph.git
-cd kt-exp-graph
+git clone https://github.com/szhhwh/UniKT.git
+cd UniKT
 
 # Auto-detect GPU and create environment (recommended)
 ./scripts/setup_env.sh
@@ -239,25 +239,17 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 
 ## 📚 Documentation
 
-| Document | Description |
-|----------|-------------|
-| [Quick Start](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/quick_start.md) | Environment setup and minimal example |
-| [Data Processing](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/data_processing.md) | Download, cleaning, and K-fold splitting |
-| [Training](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/training.md) | Training pipeline, K-fold, early stopping |
-| [Hyperparameter Search](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/hyperparameter_search.md) | Optuna configuration and visualization |
-| [Ablation Study](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/ablation_study.md) | Component analysis framework |
-| [Case Analysis](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/case_analysis.md) | Inference, user selection, visualization |
-| [Architecture](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/architecture.md) | Framework design and extension guide |
+Full documentation is available at **[UniKT](https://unikt.lionhao.top/)**.
 
 ## 📁 Project Structure
 
 ```
-kt-exp-graph/
+UniKT/
 ├── configs/           # Configuration files
 │   ├── ablation/      # Ablation configs
 │   └── optuna/        # Optuna search spaces
 ├── data/              # Processed datasets
-├── docs/              # Documentation
+├── docs/              # Documentation site
 ├── model/             # Model implementations
 │   ├── DKT/
 │   └── layers/        # Shared components
@@ -266,6 +258,7 @@ kt-exp-graph/
 │   ├── training/      # Training infrastructure
 │   ├── config/        # Configuration management
 │   └── data_process/  # Data processing tools
+├── web/               # Web management panel
 ├── train.py           # Training entry point
 ├── data_process.py    # Data processing entry
 ├── optuna_search.py   # Hyperparameter search
