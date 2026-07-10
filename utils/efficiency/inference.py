@@ -129,28 +129,19 @@ def synchronize(device: torch.device) -> None:
         torch.cuda.synchronize(device)
 
 
-def extract_mask(batch) -> torch.Tensor | None:
-    """从原始 batch 提取训练 mask ``[B, S]``。
+def count_valid_interactions(trainer, sample_batch) -> int:
+    """模型一次前向中真正参与 loss 的有效交互数，用作吞吐量分母。
 
-    tuple 形式 mask 在索引 2（SAKT/AKT/DKT/DKTForget 一致）；GIKT 是 dict，键 "mask"。
+    跑一次 forward_pass，从对齐+掩码后的 1D ``y_label`` 取 numel，等于
+    ``_extract_valid_predictions`` 经相邻对掩码选择后保留的交互数，即 ``_compute_loss``
+    实际计算的样本数。
     """
-    if isinstance(batch, dict):
-        return batch.get("mask")
-    if isinstance(batch, (tuple, list)) and len(batch) > 2:
-        return batch[2]
-    return None
-
-
-def count_valid_tokens(batch) -> int:
-    """有效交互数。
-
-    序列级模型（有 ``[B,S]`` mask）：``mask.sum()``。
-    交互级模型（无 mask，如 DyGKT，每行一个交互）：batch 行数 B。
-    """
-    mask = extract_mask(batch)
-    if mask is not None and isinstance(mask, torch.Tensor):
-        return int(mask.sum().item())
-    return batch_size_of(batch)
+    trainer.model.eval()
+    with torch.inference_mode():
+        out = trainer.forward_pass(sample_batch)
+        n = int(out["y_label"].numel())
+    synchronize(trainer.device_)
+    return n
 
 
 def batch_size_of(batch) -> int:

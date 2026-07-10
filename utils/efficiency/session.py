@@ -12,8 +12,7 @@ from .environment import ResourceSampler, collect_environment
 from .inference import (
     batch_size_of,
     benchmark_inference,
-    count_valid_tokens,
-    extract_mask,
+    count_valid_interactions,
 )
 from .model_profile import profile_model
 from .report import EfficiencyReport
@@ -71,8 +70,8 @@ class EfficiencySession:
         # 预取一个 representative batch；计时循环复用它以规避 DataLoader IPC 噪声
         sample_batch = _to_device(next(iter(self.trainer.train_data)), device)
         batch_size = batch_size_of(sample_batch)
-        valid_tokens = count_valid_tokens(sample_batch)
-        seq_len = _seq_len_of(sample_batch)
+        valid_tokens = count_valid_interactions(self.trainer, sample_batch)
+        seq_len = getattr(self.args, "max_seq_len", None)
         logger.info(
             f"[Setup] batch_size={batch_size} seq_len={seq_len} "
             f"valid_tokens={valid_tokens}"
@@ -161,11 +160,3 @@ def _to_device(batch, device: torch.device):
     if isinstance(batch, dict):
         return {k: _to_device(v, device) for k, v in batch.items()}
     return batch
-
-
-def _seq_len_of(batch) -> int | None:
-    """序列长度：仅序列级模型有 ``[B,S]`` mask 时定义；交互级模型（无 mask，如 DyGKT）返回 None。"""
-    mask = extract_mask(batch)
-    if isinstance(mask, torch.Tensor) and mask.dim() >= 2:
-        return int(mask.size(1))
-    return None
