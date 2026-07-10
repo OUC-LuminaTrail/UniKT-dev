@@ -12,7 +12,7 @@ from pathlib import Path
 
 import model  # noqa: F401
 from case_analysis import load_model_params
-from utils.core import TRAINERS, get_logger
+from utils.core import TRAINERS, get_logger, seed_everything
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager
 
@@ -88,6 +88,12 @@ def main():
         model_args.batch_size = args.batch_size
     if args.data_base_path is not None:
         model_args.data_base_path = args.data_base_path
+
+    # Seed for reproducibility (eval is deterministic; defensive)
+    seed_everything(
+        getattr(model_args, "seed", 42),
+        deterministic=getattr(model_args, "deterministic", False),
+    )
 
     # Step 3: Create experiment manager pointing to existing run dir
     exp_manager = ExperimentManager.from_run_dir(run_dir)

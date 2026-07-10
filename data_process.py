@@ -3,7 +3,7 @@
 from argparse import ArgumentParser
 
 from utils.config import DataParams, GeneralParams, SamplingParams
-from utils.core import get_logger
+from utils.core import get_logger, seed_everything
 from utils.data_process import get_data_source
 
 logger = get_logger(__name__)
@@ -94,6 +94,7 @@ def cmd_download(args):
 
 def cmd_process(args):
     """Handle `process` subcommand."""
+    seed_everything(args.seed, deterministic=False)
     dp = get_data_source(args.dataset, args)
     dp.clean_raw_data()
     # The raw interaction frame is no longer needed after cleaning; release it so

@@ -11,7 +11,7 @@ from utils.config import (
     get_model_params,
     list_models,
 )
-from utils.core import TRAINERS, get_logger
+from utils.core import TRAINERS, get_logger, seed_everything
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
@@ -64,6 +64,10 @@ def parse_args():
 def main():
     """Train a knowledge tracing model."""
     args = parse_args()
+
+    # Seed as early as possible so model weight init, data loading, and
+    # training-time RNG are all reproducible.
+    seed_everything(args.seed, deterministic=args.deterministic)
 
     # Create experiment manager
     exp_manager = ExperimentManager.from_args(args, ExperimentType.NORMAL)

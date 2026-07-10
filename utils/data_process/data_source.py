@@ -8,7 +8,6 @@ integrity checks.
 import hashlib
 import json
 import os
-import random
 import shutil
 import time
 import zipfile
@@ -54,7 +53,6 @@ class DataSource(ABC):
         self.data_url = data_url
         self.metadata = {}
         self.seed = seed
-        self._init_rng()
 
         # ID mapping storage
         self._id_mappings: dict = {}
@@ -71,13 +69,6 @@ class DataSource(ABC):
             "split_skill_sequence": {"lazy": False},
             "windowlate": {"lazy": True},
         }
-
-    def _init_rng(self):
-        """Initialize dedicated RNG instances for reproducibility."""
-        seed = self.seed if self.seed is not None else 42
-        self._py_rng = random.Random(seed)
-        self._np_rng = np.random.RandomState(seed)
-        logger.debug(f"Dedicated RNGs initialized with seed {seed}")
 
     def _build_id_mapping(self, data: pl.DataFrame, columns: list[str]):
         """Build ID mappings from data.
@@ -997,7 +988,7 @@ class DataSource(ABC):
 
         # Shuffle user IDs randomly
         user_indices = np.arange(num_users)
-        self._np_rng.shuffle(user_indices)
+        np.random.shuffle(user_indices)
         # Get indices of non-test users after shuffling
         non_test_indices = user_indices[num_test_users:]
         # Initialize fold assignment array

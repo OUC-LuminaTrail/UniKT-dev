@@ -136,6 +136,7 @@ class OptunaConfig:
     # Sampler configuration
     sampler: str = "tpe"  # 'tpe', 'random', 'grid', 'cmaes'
     sampler_kwargs: dict[str, Any] = field(default_factory=dict)
+    seed: int = 42  # Seed for stochastic samplers (tpe/random/cmaes); grid is exhaustive
 
     # Pruner configuration
     pruner: str = "median"  # 'median', 'percentile', 'successive_halving', None
@@ -166,6 +167,9 @@ class OptunaConfig:
         """
         sampler_name = self.sampler.lower()
         kwargs = self.sampler_kwargs.copy()
+        # Stochastic samplers are seeded for reproducibility (grid is exhaustive)
+        if sampler_name != "grid" and "seed" not in kwargs:
+            kwargs["seed"] = self.seed
 
         if sampler_name == "tpe":
             return TPESampler(**kwargs)

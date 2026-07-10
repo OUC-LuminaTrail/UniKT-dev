@@ -33,13 +33,22 @@ def seed_everything(seed: int | None, deterministic: bool = True) -> int | None:
     if seed is None:
         return None
 
-    # Set environment variable
+    # Only affects child processes started after this point (e.g. DataLoader
+    # workers); the current interpreter's hash randomization is fixed at startup.
     os.environ["PYTHONHASHSEED"] = str(seed)
 
     # Seed individual libraries
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+    # Polars global seed (shuffle / sample ordering)
+    try:
+        import polars as pl
+
+        pl.set_random_seed(seed)
+    except ImportError:
+        pass
 
     # Seed CUDA-related seeds
     if torch.cuda.is_available():

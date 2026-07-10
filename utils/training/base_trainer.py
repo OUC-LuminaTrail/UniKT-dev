@@ -25,7 +25,7 @@ from ..config import (
     TrainingConfig,
     create_optimized_dataloader,
 )
-from ..core import get_logger, seed_everything
+from ..core import get_logger
 from ..progress import create_progress
 from .callbacks import (
     Callback,
@@ -100,7 +100,6 @@ class BaseTrainer(ABC):
         self._compile_config: dict | None = None
         self.device_: torch.device | None = None
         self.epochs: int | None = None
-        self.seed: int | None = None
         self.train_data = None
         self.val_data = None
         self.opt = None
@@ -365,28 +364,20 @@ class BaseTrainer(ABC):
             self._experiment_config, hyperparams
         )
 
-        # 3. Set random seed
-        seed = self._training_config.seed
-        if seed is None and hyperparams is not None:
-            seed = getattr(hyperparams, "seed", 42)
-        deterministic = True
-        if hyperparams is not None:
-            deterministic = getattr(hyperparams, "deterministic", True)
-        self.seed = seed_everything(seed, deterministic=deterministic)
 
-        # 4. Setup data loaders
+        # 3. Setup data loaders
         self._setup_data_loaders()
 
-        # 5. Setup optimization
+        # 4. Setup optimization
         self.opt = self._optimization_config.optimizer
         self.loss = self._optimization_config.loss_fn
         self.max_clip_grad_norm = self._optimization_config.max_clip_grad_norm
         self.lr_scheduler = self._optimization_config.lr_scheduler
 
-        # 6. Setup early stopping
+        # 5. Setup early stopping
         self._setup_early_stopping()
 
-        # 7. Create log directory
+        # 6. Create log directory
         exp_manager = self._experiment_config.exp_manager
         if exp_manager is None:
             raise ValueError("exp_manager is required.")
@@ -394,7 +385,7 @@ class BaseTrainer(ABC):
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir)
 
-        # 8. Initialize components
+        # 7. Initialize components
         self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
         self.metric_logger = build_default_metric_loggers(
@@ -403,7 +394,7 @@ class BaseTrainer(ABC):
             no_swanlab=self.no_swanlab,
         )
 
-        # 9. Initialize callbacks
+        # 8. Initialize callbacks
         callbacks: list[Callback] = []
         callbacks.extend(self._custom_callbacks)
         if self._custom_callback_functions:
@@ -752,8 +743,8 @@ class BaseTrainer(ABC):
             self.hyperparam_manager.add_metadata(
                 "weight_decay", self.opt.defaults["weight_decay"]
             )
-        if self.seed is not None:
-            self.hyperparam_manager.add_metadata("seed", self.seed)
+        if hyperparams is not None and getattr(hyperparams, "seed", None) is not None:
+            self.hyperparam_manager.add_metadata("seed", hyperparams.seed)
 
         # Add device info
         if self.device_ is not None:

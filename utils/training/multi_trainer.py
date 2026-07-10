@@ -8,7 +8,7 @@ Example:
     >>> @register_trainer("ABKT")
     ... class ABKTTrainer(MultiTrainer):
     ...     def __init__(self, args, data_src, exp_manager):
-    ...         super().__init__(device=args.device, seed=args.seed)
+    ...         super().__init__(device=args.device)
     ...         self.with_experiment(exp_manager, hyperparams=args,
     ...                               model_name="ABKT").build()
     ...
@@ -35,7 +35,7 @@ from typing import Any
 import torch
 
 from ..config import EarlyStopping, EarlyStoppingConfig
-from ..core import get_logger, seed_everything
+from ..core import get_logger
 from .base_trainer import BaseTrainer, StageResult
 from .callbacks import (
     Callback,
@@ -137,8 +137,6 @@ class MultiTrainer(BaseTrainer):
         self,
         *,
         device: str | torch.device | None = None,
-        seed: int | None = None,
-        deterministic: bool = True,
     ):
         """Initialize the multi-stage trainer.
 
@@ -147,14 +145,10 @@ class MultiTrainer(BaseTrainer):
 
         Args:
             device: Compute device (auto-detected if None).
-            seed: Random seed (optional).
-            deterministic: Whether to use deterministic algorithms.
         """
         super().__init__(model=None)
 
         self._device: str | torch.device | None = device
-        self._seed: int | None = seed
-        self._deterministic: bool = deterministic
 
         # Stage state
         self._stages: list[StageConfig] = []
@@ -194,23 +188,15 @@ class MultiTrainer(BaseTrainer):
             self._experiment_config, hyperparams
         )
 
-        # 3. Random seed
-        seed = self._seed
-        if seed is None and hyperparams is not None:
-            seed = getattr(hyperparams, "seed", 42)
-        deterministic = self._deterministic
-        if hyperparams is not None:
-            deterministic = getattr(hyperparams, "deterministic", True)
-        self.seed = seed_everything(seed, deterministic=deterministic)
 
-        # 4. Log directory
+        # 3. Log directory
         exp_manager = self._experiment_config.exp_manager
         if exp_manager is None:
             raise ValueError("exp_manager is required.")
         self.log_dir = exp_manager.get_log_dir()
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # 5. Shared components
+        # 4. Shared components
         self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
         self.metric_logger = build_default_metric_loggers(
@@ -219,7 +205,7 @@ class MultiTrainer(BaseTrainer):
             no_swanlab=self.no_swanlab,
         )
 
-        # 6. Hyperparameters (model/opt may be None at this point;
+        # 5. Hyperparameters (model/opt may be None at this point;
         #    _setup_hyperparameters skips them gracefully)
         if hyperparams is not None:
             self._setup_hyperparameters(

@@ -246,8 +246,7 @@ class ABKTTrainer(MultiTrainer):
             exp_manager: 实验管理器（可选；提供时会在构造末尾自动 build）。
         """
         device = getattr(args, "device", None) if args is not None else None
-        seed = getattr(args, "seed", None) if args is not None else None
-        super().__init__(device=device, seed=seed)
+        super().__init__(device=device)
 
         self.args = args
 

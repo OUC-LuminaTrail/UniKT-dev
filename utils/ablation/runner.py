@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from utils.ablation.config import AblationStudyConfig
-from utils.core import TRAINERS, get_logger
+from utils.core import TRAINERS, get_logger, seed_everything
 
 logger = get_logger(__name__)
 
@@ -92,6 +92,12 @@ class AblationRunner:
         args.dataset = self.config.dataset
         args.model = ablation.variant  # Use variant as model name
         args.ablation_name = ablation.name
+
+        # Reseed before constructing the trainer for reproducible weight init.
+        seed_everything(
+            getattr(args, "seed", 42),
+            deterministic=getattr(args, "deterministic", True),
+        )
 
         # Create experiment manager with ABLATION type
         # Use subdirectory within the top-level ablation study directory
