@@ -54,3 +54,28 @@ class LogChunk(Base):
     byte_offset: Mapped[int] = mapped_column(Integer, nullable=False)
     raw_data: Mapped[bytes] = mapped_column(BLOB, nullable=False)
     created_at: Mapped[float] = mapped_column(nullable=False)
+
+
+class PreprocessTask(Base):
+    """A data download/processing task tracked by the preprocess manager.
+
+    Persists across restarts so interrupted preprocess runs can be observed
+    after the backend restarts.
+    """
+
+    __tablename__ = "preprocess_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    dataset: Mapped[str] = mapped_column(String(64), nullable=False)
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    env_type: Mapped[str] = mapped_column(String(16), default="")
+    env_name: Mapped[str] = mapped_column(String(64), default="")
+    python_path: Mapped[str] = mapped_column(String(512), default="")
+    status: Mapped[str] = mapped_column(String(16), default="running", index=True)
+    pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    params: Mapped[str] = mapped_column(Text, default="{}")

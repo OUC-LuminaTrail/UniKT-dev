@@ -204,6 +204,7 @@ watch(
       initDone.value = true
     }
   },
+  { immediate: true },
 )
 
 watch(() => settingsQuery.isError.value, (isError) => {

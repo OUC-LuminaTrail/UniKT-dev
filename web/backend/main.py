@@ -20,6 +20,7 @@ from routers import (
     capabilities,
     datasets,
     environments,
+    events,
     gpu,
     logs,
     preprocess,
@@ -36,32 +37,43 @@ async def lifespan(app: FastAPI):
     Initializes the database, creates manager/dependency singletons, and
     recovers interrupted tasks on startup. Shuts down all managers on exit.
     """
-    import dependencies as deps
+    import asyncio
 
-    init_db()
-    deps.settings_manager = __import__(
-        "services.settings_manager", fromlist=["SettingsManager"]
-    ).SettingsManager()
-    deps.python_env_manager = __import__(
-        "services.python_env", fromlist=["PythonEnvManager"]
-    ).PythonEnvManager(settings_manager=deps.settings_manager)
-    deps.process_manager = __import__(
-        "services.process_manager", fromlist=["ProcessManager"]
-    ).ProcessManager(env_manager=deps.python_env_manager)
-    deps.process_manager.recover_tasks()
-    deps.gpu_monitor = __import__(
-        "services.gpu_monitor", fromlist=["GpuMonitor"]
-    ).GpuMonitor()
-    deps.preprocess_manager = __import__(
-        "services.preprocess_manager", fromlist=["PreprocessManager"]
-    ).PreprocessManager(env_manager=deps.python_env_manager)
-    yield
-    if deps.preprocess_manager:
-        deps.preprocess_manager.shutdown()
-    if deps.process_manager:
-        deps.process_manager.shutdown()
-    if deps.gpu_monitor:
-        deps.gpu_monitor.shutdown()
+    import dependencies as deps
+    from services import app_lock, event_bus
+
+    app_lock.acquire()
+    try:
+        init_db()
+        event_bus.set_loop(asyncio.get_running_loop())
+
+        deps.settings_manager = __import__(
+            "services.settings_manager", fromlist=["SettingsManager"]
+        ).SettingsManager()
+        deps.python_env_manager = __import__(
+            "services.python_env", fromlist=["PythonEnvManager"]
+        ).PythonEnvManager(settings_manager=deps.settings_manager)
+        deps.process_manager = __import__(
+            "services.process_manager", fromlist=["ProcessManager"]
+        ).ProcessManager(env_manager=deps.python_env_manager)
+        deps.process_manager.max_concurrent = deps.settings_manager.get_max_concurrent()
+        deps.process_manager.recover_tasks()
+        deps.gpu_monitor = __import__(
+            "services.gpu_monitor", fromlist=["GpuMonitor"]
+        ).GpuMonitor()
+        deps.preprocess_manager = __import__(
+            "services.preprocess_manager", fromlist=["PreprocessManager"]
+        ).PreprocessManager(env_manager=deps.python_env_manager)
+        deps.preprocess_manager.recover_tasks()
+        yield
+        if deps.preprocess_manager:
+            deps.preprocess_manager.shutdown()
+        if deps.process_manager:
+            deps.process_manager.shutdown()
+        if deps.gpu_monitor:
+            deps.gpu_monitor.shutdown()
+    finally:
+        app_lock.release()
 
 
 app = FastAPI(title="KT Experiment Manager", lifespan=lifespan)
@@ -85,6 +97,7 @@ add_pagination(app)
 
 app.include_router(tasks.router)
 app.include_router(logs.router)
+app.include_router(events.router)
 app.include_router(environments.router)
 app.include_router(schemas_api.router)
 app.include_router(gpu.router)

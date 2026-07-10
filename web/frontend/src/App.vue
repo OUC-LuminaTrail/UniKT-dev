@@ -17,6 +17,9 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SetupWizard from '@/components/setup/SetupWizard.vue'
 import { getInitStatus } from '@/api/settings'
+import { useTaskEvents } from '@/composables/useTaskEvents'
+
+useTaskEvents()
 
 const showWizard = ref(false)
 

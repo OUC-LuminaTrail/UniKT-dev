@@ -5,7 +5,7 @@ configures WAL mode and NORMAL synchronous pragma on connection, and provides
 the Base declarative model class along with an init_db helper.
 """
 
-from config import DATABASE_PATH
+from config import DATABASE_PATH, PREPROCESS_LOGS_DIR, TASK_LOGS_DIR
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -30,6 +30,8 @@ event.listen(engine, "connect", _on_connect)
 
 
 def init_db():
-    """Create the database directory and all tables if they do not exist."""
+    """Create the database directory, log directories, and tables if absent."""
     DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    PREPROCESS_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)

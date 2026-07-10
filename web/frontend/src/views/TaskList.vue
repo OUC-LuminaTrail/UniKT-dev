@@ -369,7 +369,7 @@ const allDataQuery = useQuery({
       }
     }
   },
-  refetchInterval: 5000,
+  refetchInterval: 30000,
 })
 
 const tasks = computed(() => allDataQuery.data.value?.tasks ?? [])
@@ -446,7 +446,7 @@ const handleStop = async (id: number) => {
   ElMessage.success('已发送停止信号')
   await stopTask(id)
   ElMessage.success('任务已停止')
-  setTimeout(invalidateTasks, 2000)
+  invalidateTasks()
 }
 
 const handleCancelQueue = async (id: number) => {
@@ -521,7 +521,7 @@ const handleBatchStop = async () => {
   await Promise.all(selectedRunningTasks.value.map(t => stopTask(t.id)))
   ElMessage.success(`已停止 ${count} 个任务`)
   clearRunningSelection()
-  setTimeout(invalidateTasks, 2000)
+  invalidateTasks()
 }
 
 // --- Queue multi-select ---

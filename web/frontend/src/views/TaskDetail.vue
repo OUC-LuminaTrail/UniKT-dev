@@ -119,12 +119,14 @@ const goBack = () => {
   }
 }
 
-const { data: task, isPending: loading, refetch } = useQuery({
+const { data: task, isPending: loading } = useQuery({
   queryKey: ['task', taskId],
   queryFn: () => getTask(taskId),
   refetchInterval: (query) => {
-    const data = query.state.data as TaskInfo | undefined
-    return data?.status === 'running' ? 5000 : false
+    const status = (query.state.data as TaskInfo | undefined)?.status
+    return status && ['running', 'pending', 'stopping'].includes(status)
+      ? 3000
+      : false
   },
 })
 
@@ -136,6 +138,7 @@ const statusMap: Record<string, { color: string; label: string }> = {
   completed: { color: 'var(--accent-green)', label: '已完成' },
   failed: { color: 'var(--accent-red)', label: '已失败' },
   stopped: { color: 'var(--accent-orange)', label: '已停止' },
+  stopping: { color: 'var(--accent-orange)', label: '停止中' },
   pending: { color: 'var(--text-tertiary)', label: '等待中' },
 }
 
@@ -156,7 +159,6 @@ const handleStop = async () => {
   try {
     await stopTask(taskId)
     ElMessage.success('已发送停止信号')
-    await pollUntilDone()
   } finally { stopping.value = false }
 }
 
@@ -168,16 +170,7 @@ const handleKill = async () => {
   try {
     await killTask(taskId)
     ElMessage.success('已强制终止')
-    await pollUntilDone()
   } finally { killing.value = false }
-}
-
-const pollUntilDone = async () => {
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 500))
-    await refetch()
-    if (task.value && task.value.status !== 'running' && task.value.status !== 'stopping') break
-  }
 }
 </script>
 

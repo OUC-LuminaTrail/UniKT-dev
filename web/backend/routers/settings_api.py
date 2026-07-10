@@ -35,33 +35,37 @@ class SettingsUpdate(BaseModel):
 
 
 @router.get("")
-def get_settings(pm: ProcessManager = Depends(get_process_manager)):
+def get_settings(sm: SettingsManager = Depends(get_settings_manager)):
     """Return current application settings.
 
     Args:
-        pm: Injected ProcessManager singleton.
+        sm: Injected SettingsManager singleton.
 
     Returns:
         A SettingsResponse with the current max_concurrent value.
     """
-    return SettingsResponse(max_concurrent=pm.max_concurrent)
+    return SettingsResponse(max_concurrent=sm.get_max_concurrent())
 
 
 @router.put("")
 def update_settings(
-    body: SettingsUpdate, pm: ProcessManager = Depends(get_process_manager)
+    body: SettingsUpdate,
+    pm: ProcessManager = Depends(get_process_manager),
+    sm: SettingsManager = Depends(get_settings_manager),
 ):
     """Update application settings.
 
     Args:
         body: The settings update request.
         pm: Injected ProcessManager singleton.
+        sm: Injected SettingsManager singleton.
 
     Returns:
         An updated SettingsResponse.
     """
-    pm.max_concurrent = body.max_concurrent
-    return SettingsResponse(max_concurrent=pm.max_concurrent)
+    value = sm.set_max_concurrent(body.max_concurrent)
+    pm.max_concurrent = value
+    return SettingsResponse(max_concurrent=value)
 
 
 class DefaultEnvUpdate(BaseModel):

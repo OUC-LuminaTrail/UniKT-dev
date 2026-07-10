@@ -4,6 +4,9 @@ Provides CRUD endpoints for launching and managing preprocess tasks (download
 or process actions), including WebSocket log streaming and PTY resize.
 """
 
+import logging
+
+from config import PREPROCESS_LOGS_DIR
 from dependencies import get_preprocess_manager
 from fastapi import (
     APIRouter,
@@ -14,12 +17,10 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel
-from services.log_watcher import LogWatcher
+from services.log_reader import stream_log
 from services.preprocess_manager import PreprocessManager
 
-from utils.core import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/preprocess", tags=["preprocess"])
 
@@ -80,9 +81,9 @@ def start_preprocess(
     )
     return {
         "id": task.id,
-        "command": " ".join(task.command),
+        "command": task.command,
         "status": task.status,
-        "started_at": task.started_at.isoformat(),
+        "started_at": task.started_at.isoformat() if task.started_at else None,
     }
 
 
@@ -101,7 +102,7 @@ def list_preprocess(pm: PreprocessManager = Depends(get_preprocess_manager)):
         tasks.append(
             {
                 "id": t.id,
-                "command": " ".join(t.command),
+                "command": t.command,
                 "status": t.status,
                 "exit_code": t.exit_code,
                 "started_at": t.started_at.isoformat() if t.started_at else None,
@@ -132,7 +133,7 @@ def get_preprocess(
         raise HTTPException(404, "Preprocess task not found")
     return {
         "id": task.id,
-        "command": " ".join(task.command),
+        "command": task.command,
         "status": task.status,
         "exit_code": task.exit_code,
         "started_at": task.started_at.isoformat() if task.started_at else None,
@@ -227,13 +228,11 @@ async def stream_preprocess_logs(
 
     def check_alive():
         t = pm.get(task_id)
-        return t is not None and t.status == "running"
+        return t is not None and t.status in ("running", "stopping")
 
-    watcher = LogWatcher()
     try:
-        await watcher.stream_log(
-            "preprocess",
-            task_id,
+        await stream_log(
+            PREPROCESS_LOGS_DIR / f"{task_id}.log",
             websocket,
             check_alive=check_alive,
             from_offset=from_offset,

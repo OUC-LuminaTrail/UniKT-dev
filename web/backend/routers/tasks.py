@@ -4,9 +4,11 @@ Provides endpoints to create, list, get, stop, kill, delete, and resize tasks,
 as well as managing the task execution queue (list and reorder).
 """
 
+import contextlib
 import json
 from datetime import datetime
 
+from config import TASK_LOGS_DIR
 from database import SessionLocal
 from dependencies import get_process_manager
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +17,7 @@ from pagination import Page, Params
 from pydantic import BaseModel
 from schemas import TaskCreate, TaskResponse
 from services.process_manager import ProcessManager
+from services.task_state import transition
 from sqlalchemy import desc, select
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -62,11 +65,14 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         )
     except Exception:
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
-            if task and task.status == "pending":
-                task.status = "failed"
-                task.finished_at = datetime.now()
-                session.commit()
+            transition(
+                session,
+                Task,
+                task_id,
+                "pending",
+                "failed",
+                finished_at=datetime.now(),
+            )
         raise HTTPException(500, "Failed to launch task")
 
     with SessionLocal() as session:
@@ -193,7 +199,7 @@ def resize_terminal(
 
 @router.delete("/{task_id}")
 def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
-    """Delete a task and its associated log chunks.
+    """Delete a task and its associated logs.
 
     Args:
         task_id: The task identifier.
@@ -217,6 +223,11 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
         session.query(LogChunk).filter_by(source="task", source_id=task_id).delete()
         session.delete(task)
         session.commit()
+
+    log_path = TASK_LOGS_DIR / f"{task_id}.log"
+    if log_path.is_file():
+        with contextlib.suppress(OSError):
+            log_path.unlink()
     return {"status": "deleted"}
 
 

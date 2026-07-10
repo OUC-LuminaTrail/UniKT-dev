@@ -1,33 +1,29 @@
-"""Logs router — task log retrieval and WebSocket streaming.
+"""Logs router — task log retrieval and WebSocket streaming (file-backed)."""
 
-Provides a REST endpoint for fetching paginated log chunks by task ID and a
-WebSocket endpoint for live log streaming with offset tracking.
-"""
+import logging
 
+from config import TASK_LOGS_DIR
 from database import SessionLocal
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
-from models import LogChunk, Task
-from services.log_watcher import LogWatcher
-from sqlalchemy import asc
+from models import Task
+from services.log_reader import read_log_text, stream_log
 
-from utils.core import get_logger
-
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["logs"])
 
 
 @router.get("/api/tasks/{task_id}/logs")
 def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=100000)):
-    """Fetch paginated log content for a given task.
+    """Fetch log content for a task from its log file.
 
     Args:
         task_id: The task identifier.
         offset: Byte offset to start reading from.
-        limit: Maximum number of log chunks to return (1-100000).
+        limit: Maximum number of 64KB chunks to return (1-100000).
 
     Returns:
-        A dict with ``content`` (decoded text) and ``total_lines`` (chunk count).
+        A dict with ``content`` (decoded text) and ``total_bytes``.
 
     Raises:
         HTTPException: 404 if the task does not exist.
@@ -36,35 +32,12 @@ def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=1
         task = session.query(Task).get(task_id)
         if not task:
             raise HTTPException(404, "Task not found")
-        rows = (
-            session.query(LogChunk.raw_data, LogChunk.byte_offset)
-            .filter(LogChunk.source == "task", LogChunk.source_id == task_id)
-            .order_by(asc(LogChunk.byte_offset))
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-        if not rows:
-            return {"content": "", "total_lines": 0}
-        chunks = b"".join(row[0] for row in rows)
-        try:
-            text = chunks.decode("utf-8")
-        except UnicodeDecodeError:
-            text = chunks.decode("utf-8", errors="replace")
-        total = (
-            session.query(LogChunk)
-            .filter(LogChunk.source == "task", LogChunk.source_id == task_id)
-            .count()
-        )
-        return {"content": text, "total_lines": total}
+    return read_log_text(TASK_LOGS_DIR / f"{task_id}.log", offset, limit)
 
 
 @router.websocket("/api/tasks/{task_id}/logs/stream")
 async def stream_logs(websocket: WebSocket, task_id: int, from_offset: int = Query(0)):
-    """Stream task logs live over a WebSocket connection.
-
-    Sends JSON messages of type ``data`` with decoded text and offset tracking,
-    and a final ``done`` message when the stream ends.
+    """Stream task logs live over a WebSocket from the task's log file.
 
     Args:
         websocket: The WebSocket connection.
@@ -86,11 +59,9 @@ async def stream_logs(websocket: WebSocket, task_id: int, from_offset: int = Que
                 return False
             return t.pid is not None and t.status in ("running", "stopping")
 
-    watcher = LogWatcher()
     try:
-        await watcher.stream_log(
-            "task",
-            task_id,
+        await stream_log(
+            TASK_LOGS_DIR / f"{task_id}.log",
             websocket,
             check_alive=check_alive,
             from_offset=from_offset,
