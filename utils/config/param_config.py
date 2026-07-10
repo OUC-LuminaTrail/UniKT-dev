@@ -7,7 +7,7 @@ import argparse
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..core import PARAM_CONFIGS, register_model_params
+from ..core import DATA_SOURCES, PARAM_CONFIGS, register_model_params
 
 _PARAM_SOURCES: dict[str, str] = {}
 
@@ -133,24 +133,10 @@ class DataParams(BaseParamConfig):
                 "default": None,
                 "short": "d",
                 "required": True,
-                "choices": [
-                    "algebra2005",
-                    "algebra2006",
-                    "assistments09",
-                    "assistments12",
-                    "assistments15",
-                    "assistments17",
-                    "bridge2006",
-                    "ednet_kt1",
-                    "junyi2015",
-                    "nips2020_t34",
-                    "slepemapy",
-                ],
-                "help": (
-                    "Dataset name to use (choices: algebra2005, algebra2006, "
-                    "assistments09, assistments12, assistments15, assistments17, "
-                    "bridge2006, ednet_kt1, junyi2015, nips2020_t34, slepemapy)"
+                "help": "Dataset name (required, choices: {})".format(
+                    ", ".join(DATA_SOURCES.keys())
                 ),
+                "choices": list(DATA_SOURCES.keys()),
             },
             "data_base_path": {
                 "type": str,

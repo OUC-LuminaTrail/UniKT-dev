@@ -4,11 +4,15 @@ Provides endpoints to list all available datasets and retrieve metadata
 for a specific dataset by name.
 """
 
-import importlib
 import json
 
 from config import PROJECT_ROOT
 from fastapi import APIRouter, HTTPException
+
+from utils.core import DATA_SOURCES, discover_registrations
+
+# Trigger static discovery so DATA_SOURCES index is populated before first use
+discover_registrations(PROJECT_ROOT / "utils" / "data_process", "utils.data_process")
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
@@ -16,16 +20,12 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 
 def _get_supported_datasets() -> list[str]:
-    """Discover supported datasets by inspecting the data_process module.
+    """Discover supported datasets from the DATA_SOURCES registry.
 
     Returns:
-        A list of supported dataset names, or an empty list on failure.
+        A list of registered dataset names.
     """
-    try:
-        mod = importlib.import_module("data_process")
-        return list(getattr(mod, "SUPPORTED_DATASETS", []))
-    except Exception:
-        return []
+    return list(DATA_SOURCES.keys())
 
 
 @router.get("")
@@ -39,7 +39,7 @@ def list_datasets():
     """
     supported = _get_supported_datasets()
     if not supported:
-        supported = sorted(p.name for p in DATA_DIR.iterdir() if p.is_dir())
+        raise HTTPException(500, "No datasets registered in DATA_SOURCES")
 
     result = []
     for name in supported:
