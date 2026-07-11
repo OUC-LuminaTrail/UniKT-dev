@@ -1,4 +1,11 @@
-"""ASSISTments 2017 dataset handler."""
+"""ASSISTments 2017 datasets, built from one raw release at two granularities.
+
+- ``assistments17``: original action-level (one row per student action).
+- ``assistments17_per_que``: per-encounter rebuild. Scaffolding substeps
+  (``scaffold=1``) reuse the main problem's ``problemId``, so they are shifted
+  to independent question ids before aggregation -- otherwise their
+  correctness leaks into the main problem's label.
+"""
 
 import os
 
@@ -14,23 +21,32 @@ from .data_source import (
 
 logger = get_logger(__name__)
 
+_RAW_CSV = "anonymized_full_release_competition_dataset.csv"
 
-@register_data_source("assistments17")
-class Assistments2017Data(DataSource):
-    """ASSISTments 2017 dataset handler."""
+# Shifts scaffold=1 actions to independent question ids; max(problemId)=22761.
+_SCAFFOLD_OFFSET = 10_000_000
 
-    def __init__(self, args):
-        """Initialize the ASSISTments 2017 dataset handler."""
+
+class Assistments2017Base(DataSource):
+    """Shared raw loading and transform; subclasses implement clean_raw_data."""
+
+    def __init__(self, args, dataset: str):
+        """Initialize the shared AS17 handler."""
         super().__init__(
-            dataset="assistments17",
+            dataset=dataset,
             data_base_path=args.data_base_path,
             data_url="http://cdn.lionhao.top/KTDataset/assistments17.zip",
             seed=args.seed,
         )
+        # Both granularities live in the AS17 folder; non-default variants
+        # write a separate metadata file so AS17's metadata.json is untouched.
+        self.data_folder = os.path.join(self.data_base_path, "assistments17")
+        if dataset != "assistments17":
+            self.metadata_path = os.path.join(
+                self.data_folder, f"{dataset}_metadata.json"
+            )
         self.args = args
-        self.raw_data_path = os.path.join(
-            self.data_folder, "raw", "anonymized_full_release_competition_dataset.csv"
-        )
+        self.raw_data_path = os.path.join(self.data_folder, "raw", _RAW_CSV)
 
     @override
     def load_src_data(self):
@@ -47,13 +63,11 @@ class Assistments2017Data(DataSource):
 
     @override
     def transform_data(self):
-        """Clean data and build question_data and sequence_data."""
-        logger.info("Processing ASSISTments 2017 data...")
+        logger.info(f"Processing {self.dataset} data...")
 
         if self.cleaned_raw_data is None:
             raise ValueError("clean_raw_data must be called before transform_data")
 
-        # Build question ID mapping
         question_map_df = (
             self.cleaned_raw_data.select("question")
             .unique()
@@ -61,7 +75,6 @@ class Assistments2017Data(DataSource):
             .with_row_index("question_id")
         )
 
-        # Save question mapping
         question_map = dict(
             zip(
                 question_map_df["question"].to_list(),
@@ -71,7 +84,6 @@ class Assistments2017Data(DataSource):
         self._id_mappings["question"] = question_map
         logger.debug(f"Built question ID mapping: {len(question_map)} unique questions")
 
-        # Apply question mapping
         mapped_data = (
             self.cleaned_raw_data.join(question_map_df, on="question", how="left")
             .with_columns(pl.col("question_id").cast(pl.Int32))
@@ -79,18 +91,13 @@ class Assistments2017Data(DataSource):
             .rename({"question_id": "question"})
         )
 
-        # Build normalized relation tables
         question_skill = mapped_data.select(["question", "skill"]).unique(
             subset=["question", "skill"], keep="first"
         )
-        logger.debug(f"question_skill shape: {question_skill.shape}")
-
         question_assignment = mapped_data.select(["question", "assignment"]).unique(
             subset=["question", "assignment"]
         )
-        logger.debug(f"question_assignment shape: {question_assignment.shape}")
 
-        # Build ID mappings
         self._build_id_mapping(question_skill, ["skill"])
         self._build_id_mapping(question_assignment, ["assignment"])
         logger.debug(
@@ -98,13 +105,11 @@ class Assistments2017Data(DataSource):
             f"assignments={self._get_mapped_count('assignment')}"
         )
 
-        # Apply ID mappings
         question_skill = self._apply_id_mapping(question_skill, columns=["skill"])
         question_assignment = self._apply_id_mapping(
             question_assignment, columns=["assignment"]
         )
 
-        # Build sequence_data
         sequence_data = mapped_data.select(
             [
                 "user",
@@ -117,24 +122,30 @@ class Assistments2017Data(DataSource):
             ]
         )
 
-        # Build ID mapping for user in sequence_data
         self._build_id_mapping(sequence_data, ["user"])
         sequence_data = self._apply_id_mapping(sequence_data, columns=["user"])
         logger.debug(f"Built user ID mapping: {self._get_mapped_count('user')} users")
 
-        # Store processed data
         self.relation_data = {
             "question_skill": question_skill,
             "question_assignment": question_assignment,
         }
         self.sequence_data = sequence_data
 
+
+@register_data_source("assistments17")
+class Assistments2017Data(Assistments2017Base):
+    """Original action-level granularity."""
+
+    def __init__(self, args):
+        """Initialize the action-level AS17 handler."""
+        super().__init__(args=args, dataset="assistments17")
+
     def clean_raw_data(self):
-        """Clean raw sequence data."""
+        """Clean raw action-level data."""
         if self.raw_data is None:
             self.load_src_data()
 
-        # Drop unnecessary columns
         data = self.raw_data.drop(
             [
                 "MiddleSchoolId",
@@ -210,10 +221,7 @@ class Assistments2017Data(DataSource):
                 "Selective",
                 "isSTEM",
             ]
-        )
-
-        # Rename columns
-        data = data.rename(
+        ).rename(
             {
                 "studentId": "user",
                 "problemId": "question",
@@ -227,22 +235,14 @@ class Assistments2017Data(DataSource):
             }
         )
 
-        data = data.unique()
-        data = data.collect()
+        data = data.unique().collect()
 
-        # Convert Unix seconds to milliseconds for consistency
         data = data.with_columns(
-            (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp")
-        )
-
-        # Convert response time from seconds to milliseconds
-        data = data.with_columns(
+            (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp"),
             (pl.col("ms_first_response") * 1000)
             .cast(pl.Int64)
-            .alias("ms_first_response")
+            .alias("ms_first_response"),
         )
-
-        # Convert to global relative time (dataset-wise earliest timestamp as zero)
         data = data.with_columns(
             (pl.col("timestamp") - pl.col("timestamp").min())
             .cast(pl.Int64)
@@ -250,14 +250,112 @@ class Assistments2017Data(DataSource):
         )
 
         data = data.sort(["user", "timestamp"])
-        data = data.with_columns([pl.col("user").cast(pl.Int32)])
+        data = data.with_columns(pl.col("user").cast(pl.Int32))
         data = data.filter(pl.col("skill").is_not_null())
         data = data.filter(pl.col("label").is_in([0, 1]))
 
-        # Exclude sequences that are too short
         data = exclude_short_sequences(data, self.args.min_seq_len)
 
         self.cleaned_raw_data = data
 
 
-__all__ = ["Assistments2017Data"]
+@register_data_source("assistments17_per_que")
+class Assistments2017PerQueData(Assistments2017Base):
+    """Per-encounter rebuild with scaffolding split into independent questions."""
+
+    def __init__(self, args):
+        """Initialize the per-encounter AS17 handler."""
+        super().__init__(args=args, dataset="assistments17_per_que")
+
+    def clean_raw_data(self):
+        """Aggregate action-level rows into per-encounter rows."""
+        if self.raw_data is None:
+            self.load_src_data()
+
+        data = self.raw_data.select(
+            [
+                "studentId",
+                "problemId",
+                "assignmentId",
+                "action_num",
+                "skill",
+                "correct",
+                "scaffold",
+                "hint",
+                "startTime",
+                "timeTaken",
+            ]
+        )
+
+        max_pid = data.select(pl.col("problemId").max()).collect().item()
+        if max_pid is not None and max_pid >= _SCAFFOLD_OFFSET:
+            raise ValueError(
+                f"problemId max ({max_pid}) >= SCAFFOLD_OFFSET "
+                f"({_SCAFFOLD_OFFSET}); increase the offset"
+            )
+
+        logger.info(
+            "Rebuilding AS17 to per-encounter granularity (scaffold offset=%d)...",
+            _SCAFFOLD_OFFSET,
+        )
+
+        data = data.with_columns(
+            pl.when(pl.col("scaffold") == 1)
+            .then(pl.col("problemId") + _SCAFFOLD_OFFSET)
+            .otherwise(pl.col("problemId"))
+            .alias("question")
+        )
+
+        data = (
+            data.sort(["studentId", "question", "assignmentId", "action_num"])
+            .group_by(["studentId", "question", "assignmentId"])
+            .agg(
+                pl.col("correct").filter(pl.col("hint") == 0).first().alias("label"),
+                (pl.col("hint") == 0).sum().cast(pl.Int64).alias("attempt_count"),
+                (pl.col("hint") == 1).sum().cast(pl.Int64).alias("hint_count"),
+                pl.col("timeTaken")
+                .filter(pl.col("hint") == 0)
+                .first()
+                .alias("ms_first_response"),
+                pl.col("startTime").min().alias("timestamp"),
+                pl.col("skill").first().alias("skill"),
+            )
+            .filter(pl.col("label").is_in([0, 1]))
+        )
+
+        data = data.collect()
+        n_scaff_q = (
+            data.filter(pl.col("question") >= _SCAFFOLD_OFFSET)
+            .select(pl.col("question").n_unique())
+            .item()
+        )
+        logger.info(
+            "Per-encounter rebuild: %d encounters, %d scaffolding questions",
+            data.height,
+            n_scaff_q or 0,
+        )
+
+        data = data.rename({"studentId": "user", "assignmentId": "assignment"})
+
+        data = data.with_columns(
+            (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp"),
+            (pl.col("ms_first_response") * 1000)
+            .cast(pl.Int64)
+            .alias("ms_first_response"),
+        )
+        data = data.with_columns(
+            (pl.col("timestamp") - pl.col("timestamp").min())
+            .cast(pl.Int64)
+            .alias("timestamp")
+        )
+
+        data = data.sort(["user", "timestamp"])
+        data = data.with_columns(pl.col("user").cast(pl.Int32))
+        data = data.filter(pl.col("skill").is_not_null())
+
+        data = exclude_short_sequences(data, self.args.min_seq_len)
+
+        self.cleaned_raw_data = data
+
+
+__all__ = ["Assistments2017Base", "Assistments2017Data", "Assistments2017PerQueData"]
