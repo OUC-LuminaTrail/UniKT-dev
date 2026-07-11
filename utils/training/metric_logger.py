@@ -576,13 +576,15 @@ class AsyncMetricLoggerProxy(MetricLogger):
                 logger.warning(f"Async metric logging failed: {e}")
 
     def finish(self) -> None:
-        """Finish the wrapped backend and block until it completes.
+        """Drain pending logs, then finish the backend on the main thread.
 
-        The executor stays alive so post-finish log calls (e.g. an external
-        ``evaluate()``) still work; teardown is deferred to ``close``/atexit.
+        ``swanlab.finish`` restores its SIGINT handler via ``signal.signal``
+        (main-thread-only) and blocks on upload confirmation that is only
+        interruptible via SIGINT — both require the main thread, so finish
+        must run here, not on the worker.
         """
-        self._submit("finish")
         self.flush()
+        self._inner.finish()
 
     def close(self) -> None:
         """Drain the queue and shut down the executor (atexit-only).
