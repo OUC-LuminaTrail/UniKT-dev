@@ -44,9 +44,9 @@ class GRKTModelData(QuestionModelData):
     - time sequences [num_users, max_seq_len]  (absolute seconds from millisecond
       timestamps / 1000 when available, else 1-indexed seq_pos + 1 as fallback)
     - mask sequences [num_users, max_seq_len]
-    Also computes rel_map and pre_map (skill relationship and prerequisite graphs)
-    from the full dataset, following the original GRKT co-occurrence
-    statistics method.
+    Also computes rel_map and pre_map (skill relationship and prerequisite
+    graphs) from train-fold co-occurrence statistics, matching
+    split_kfold_data's train definition.
     """
 
     def __init__(self, data_src: DataSource):
@@ -128,9 +128,14 @@ class GRKTModelData(QuestionModelData):
         val_dataset = GRKTDataset(*val_data)
         test_dataset = GRKTDataset(*test_data)
 
-        # Build rel_map and pre_map from the full dataset
+        user_folds = self._build_user_folds(num_users)
+        train_user_indices = np.where((user_folds != fold_idx) & (user_folds != -1))[0]
         rel_map, pre_map = self._build_skill_graph(
-            user_sequence, user_knows, user_response, user_mask, num_skills
+            user_sequence[train_user_indices],
+            user_knows[train_user_indices],
+            user_response[train_user_indices],
+            user_mask[train_user_indices],
+            num_skills,
         )
 
         return (
