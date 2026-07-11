@@ -136,10 +136,12 @@ class SGKTModelData(QuestionModelData):
 
         logger.info("Building question-skill neighbors for HRG")
 
+        user_folds = self._build_user_folds(user_sequence.shape[0])
+        train_user_indices = np.where((user_folds != args.fold) & (user_folds != -1))[0]
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix=question_skill_matrix,
-            user_sequence=user_sequence,
-            user_mask=user_mask,
+            user_sequence=user_sequence[train_user_indices],
+            user_mask=user_mask[train_user_indices],
             num_skills=num_skills,
             num_questions=num_questions,
             question_neighbor_num=getattr(args, "question_neighbor_num", 4),
@@ -234,8 +236,7 @@ class SGKTModelData(QuestionModelData):
             (valid_questions >= 0) & (valid_questions < num_questions)
         ]
 
-        # 2) Build question->skill and skill->question edges from all visible
-        # interactions (transductive setting aligned with original implementation).
+        # 2) Build question<->skill edges for questions appearing in the given sequences.
         if valid_questions.size > 0:
             appeared_questions = np.unique(valid_questions)
             for q_id in appeared_questions.tolist():
@@ -245,8 +246,7 @@ class SGKTModelData(QuestionModelData):
                 for skill_id in skill_neighbors_for_q:
                     adj_sets[skill_id].add(q_node)
 
-        # Build adjacency on real interactions only (exclude padded positions),
-        # while keeping the original SGKT transductive behavior (use all visible sequences).
+        # Add question-question co-occurrence edges within each sequence (real interactions only).
         for seq, mask in zip(user_sequence, user_mask):
             valid_seq = seq[mask.astype(bool)]
             if valid_seq.size == 0:
