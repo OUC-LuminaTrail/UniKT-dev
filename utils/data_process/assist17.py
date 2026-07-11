@@ -2,9 +2,8 @@
 
 - ``assistments17``: original action-level (one row per student action).
 - ``assistments17_per_que``: per-encounter rebuild. Scaffolding substeps
-  (``scaffold=1``) reuse the main problem's ``problemId``, so they are shifted
-  to independent question ids before aggregation -- otherwise their
-  correctness leaks into the main problem's label.
+  (``scaffold=1``) are dropped: they reuse the main problem's ``problemId`` and
+  are guided retries, not independent questions.
 """
 
 import os
@@ -22,9 +21,6 @@ from .data_source import (
 logger = get_logger(__name__)
 
 _RAW_CSV = "anonymized_full_release_competition_dataset.csv"
-
-# Shifts scaffold=1 actions to independent question ids; max(problemId)=22761.
-_SCAFFOLD_OFFSET = 10_000_000
 
 
 class Assistments2017Base(DataSource):
@@ -287,28 +283,13 @@ class Assistments2017PerQueData(Assistments2017Base):
             ]
         )
 
-        max_pid = data.select(pl.col("problemId").max()).collect().item()
-        if max_pid is not None and max_pid >= _SCAFFOLD_OFFSET:
-            raise ValueError(
-                f"problemId max ({max_pid}) >= SCAFFOLD_OFFSET "
-                f"({_SCAFFOLD_OFFSET}); increase the offset"
-            )
+        data = data.filter(pl.col("scaffold") == 0)
 
-        logger.info(
-            "Rebuilding AS17 to per-encounter granularity (scaffold offset=%d)...",
-            _SCAFFOLD_OFFSET,
-        )
-
-        data = data.with_columns(
-            pl.when(pl.col("scaffold") == 1)
-            .then(pl.col("problemId") + _SCAFFOLD_OFFSET)
-            .otherwise(pl.col("problemId"))
-            .alias("question")
-        )
+        logger.info("Rebuilding AS17 per-encounter data (scaffold dropped)...")
 
         data = (
-            data.sort(["studentId", "question", "assignmentId", "action_num"])
-            .group_by(["studentId", "question", "assignmentId"])
+            data.sort(["studentId", "problemId", "assignmentId", "action_num"])
+            .group_by(["studentId", "problemId", "assignmentId"])
             .agg(
                 pl.col("correct").filter(pl.col("hint") == 0).first().alias("label"),
                 (pl.col("hint") == 0).sum().cast(pl.Int64).alias("attempt_count"),
@@ -324,18 +305,11 @@ class Assistments2017PerQueData(Assistments2017Base):
         )
 
         data = data.collect()
-        n_scaff_q = (
-            data.filter(pl.col("question") >= _SCAFFOLD_OFFSET)
-            .select(pl.col("question").n_unique())
-            .item()
-        )
-        logger.info(
-            "Per-encounter rebuild: %d encounters, %d scaffolding questions",
-            data.height,
-            n_scaff_q or 0,
-        )
+        logger.info("Per-encounter rebuild: %d encounters", data.height)
 
-        data = data.rename({"studentId": "user", "assignmentId": "assignment"})
+        data = data.rename(
+            {"studentId": "user", "problemId": "question", "assignmentId": "assignment"}
+        )
 
         data = data.with_columns(
             (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp"),
