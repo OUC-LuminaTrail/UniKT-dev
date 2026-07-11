@@ -67,16 +67,22 @@
     <div class="section">
       <div class="section-label-row">
         <div class="section-label">模型</div>
-        <el-button
-          class="refresh-btn"
-          :loading="refreshing"
-          @click="emit('refresh')"
-        >
-          <el-icon><Refresh /></el-icon>
-          刷新
-        </el-button>
+        <div class="section-actions">
+          <el-radio-group v-model="viewMode" class="view-toggle">
+            <el-radio-button value="grid"><el-icon><Grid /></el-icon></el-radio-button>
+            <el-radio-button value="list"><el-icon><Menu /></el-icon></el-radio-button>
+          </el-radio-group>
+          <el-button
+            class="refresh-btn"
+            :loading="refreshing"
+            @click="emit('refresh')"
+          >
+            <el-icon><Refresh /></el-icon>
+            刷新
+          </el-button>
+        </div>
       </div>
-      <div class="card-grid">
+      <div class="card-grid" v-if="viewMode === 'grid'">
         <div
           v-for="name in models"
           :key="name"
@@ -90,12 +96,24 @@
           <div class="card-name" :title="name">{{ name }}</div>
         </div>
       </div>
+      <div class="select-list" v-else>
+        <div
+          v-for="name in models"
+          :key="name"
+          class="list-item"
+          :class="{ active: modelName === name }"
+          @click="emit('update:modelName', name)"
+        >
+          <span class="list-badge" :style="{ background: getGradient(name) }">{{ name.charAt(0) }}</span>
+          <span class="list-name" :title="name">{{ name }}</span>
+        </div>
+      </div>
     </div>
 
     <div class="section">
       <div class="section-label">数据集</div>
       <div class="dataset-layout">
-        <div class="dataset-cards" v-if="datasets.length">
+        <div class="dataset-cards" v-if="datasets.length && viewMode === 'grid'">
           <div
             v-for="name in datasets"
             :key="name"
@@ -107,6 +125,20 @@
               <el-icon :size="18"><Coin /></el-icon>
             </div>
             <div class="card-name" :title="name">{{ name }}</div>
+          </div>
+        </div>
+        <div class="select-list" v-else-if="datasets.length">
+          <div
+            v-for="name in datasets"
+            :key="name"
+            class="list-item"
+            :class="{ active: dataset === name }"
+            @click="onDatasetClick(name)"
+          >
+            <span class="list-badge icon-dataset" :style="{ background: getGradient('ds-' + name) }">
+              <el-icon :size="14"><Coin /></el-icon>
+            </span>
+            <span class="list-name" :title="name">{{ name }}</span>
           </div>
         </div>
 
@@ -125,7 +157,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { Coin, Refresh } from '@element-plus/icons-vue'
+import { Coin, Refresh, Grid, Menu } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
 import { getDatasetMetadata, type DatasetMetadata } from '@/api/datasets'
 import { getGpuStatus } from '@/api/gpu'
@@ -156,6 +188,12 @@ const emit = defineEmits<{
 }>()
 
 const { hasGpu, gpuCount } = useSystemCapabilities()
+
+const VIEW_MODE_KEY = 'kt-web:selection-view-mode'
+const viewMode = ref<'grid' | 'list'>(
+  localStorage.getItem(VIEW_MODE_KEY) === 'list' ? 'list' : 'grid',
+)
+watch(viewMode, (v) => localStorage.setItem(VIEW_MODE_KEY, v))
 
 const gpuStatusQuery = useQuery({
   queryKey: ['gpu-status'],
@@ -246,6 +284,21 @@ defineExpose({ clearCache })
 
 .refresh-btn {
   font-size: 13px;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.view-toggle :deep(.el-radio-button__inner) {
+  height: 32px;
+  padding: 0 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .env-select {
@@ -349,5 +402,74 @@ defineExpose({ clearCache })
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.dataset-layout .select-list {
+  flex: 1;
+  min-width: 0;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  user-select: none;
+}
+
+.list-item:hover {
+  background: var(--bg-elevated);
+}
+
+.list-item.active {
+  background: rgba(88, 166, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.4);
+}
+
+.list-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.list-badge.icon-dataset {
+  font-size: 0;
+}
+
+.list-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  letter-spacing: 0.2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list-item.active .list-name {
+  color: var(--accent-blue);
 }
 </style>
