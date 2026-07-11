@@ -126,6 +126,17 @@ class MetricLogger(ABC):
         """
 
     @abstractmethod
+    def log_timing(
+        self,
+        *,
+        step: int,
+        epoch: int,
+        timings: dict[str, float],
+        stage: str | None = None,
+    ) -> None:
+        """Log per-epoch timing breakdown (train/val/total) for a stage."""
+
+    @abstractmethod
     def finish(self) -> None:
         """Clean up and tear down the logging backend."""
 
@@ -283,6 +294,11 @@ class LocalMetricLogger(MetricLogger):
         path = os.path.join(self._log_dir, "metrics_final.csv")
         self._write_row(path, [("step", step)], dict(metrics))
 
+    def log_timing(self, *, step, epoch, timings, stage=None) -> None:
+        filename = f"timing_{stage}.csv" if stage else "timing.csv"
+        path = os.path.join(self._log_dir, filename)
+        self._write_row(path, [("epoch", epoch)], dict(timings))
+
     def finish(self) -> None:
         """Close all open CSV file handles."""
         for f in self._csv_files.values():
@@ -420,6 +436,20 @@ class SwanLabMetricLogger(MetricLogger):
 
         swanlab.log(metrics, step=step)
 
+    def log_timing(self, *, step, epoch, timings, stage=None) -> None:
+        if not self._initialized:
+            return
+        import swanlab
+
+        sp = f"{stage.upper()}/" if stage else ""
+        data = {
+            f"{sp}Time/{k.replace('_time', '').title()}": v
+            for k, v in timings.items()
+            if v is not None
+        }
+        if data:
+            swanlab.log(data, step=step)
+
     def finish(self) -> None:
         """Finish the SwanLab run and clean up."""
         if not self._initialized:
@@ -472,6 +502,9 @@ class MetricLoggerComposite(MetricLogger):
     def log_final(self, **kwargs) -> None:
         """Log final metrics to all backends."""
         self._fanout("log_final", **kwargs)
+
+    def log_timing(self, **kwargs) -> None:
+        self._fanout("log_timing", **kwargs)
 
     def finish(self) -> None:
         """Finish logging on all backends."""
@@ -562,6 +595,10 @@ class AsyncMetricLoggerProxy(MetricLogger):
     def log_final(self, **kwargs) -> None:
         """Log final metrics asynchronously."""
         self._submit("log_final", **kwargs)
+
+    def log_timing(self, **kwargs) -> None:
+        """Log per-epoch timing asynchronously."""
+        self._submit("log_timing", **kwargs)
 
     def flush(self) -> None:
         """Wait for all pending log calls to finish, logging any exceptions."""

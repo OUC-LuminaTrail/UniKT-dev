@@ -5,7 +5,9 @@ data loading, training loops, callbacks, checkpointing, and metric
 logging.
 """
 
+import datetime
 import os
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
@@ -131,6 +133,10 @@ class BaseTrainer(ABC):
         # Multi-stage context (None/0 for single-stage)
         self._current_stage: str | None = None
         self._metric_step_offset: int = 0
+
+        # 用时统计
+        self._run_start_time: float | None = None
+        self._epoch_times: list[float] = []
 
     # ==================== Subclass hooks ====================
 
@@ -574,11 +580,16 @@ class BaseTrainer(ABC):
                 "before run()."
             )
 
+        self._run_start_time = time.perf_counter()
         self._init_metric_logger()
 
-        self._run_training_loop()
+        self._train_core()
 
         self._finish()
+
+    def _train_core(self) -> None:
+        """训练核心。单阶段为一次 epoch 循环；多阶段训练器重写本方法串联多个阶段。"""
+        self._run_training_loop()
 
     def _run_training_loop(self, start_epoch: int | None = None) -> StageResult:
         """Run the epoch training loop for a single stage.
@@ -640,6 +651,7 @@ class BaseTrainer(ABC):
             epoch = start_epoch
             for epoch in range(start_epoch, self.epochs):
                 logger.info(f"{stage_prefix}Epoch {epoch + 1}/{self.epochs}")
+                epoch_start = time.perf_counter()
 
                 self.callback_manager.on_epoch_begin(epoch, trainer=self)
 
@@ -649,24 +661,47 @@ class BaseTrainer(ABC):
                     total=len(self.train_data),
                     description="[bold green]Training",
                 )
+                phase_start = time.perf_counter()
                 train_loss = self._process_epoch(
                     epoch, is_train=True, progress=progress, task_id=work_task
                 )
+                train_time = time.perf_counter() - phase_start
 
                 # Validation phase
                 val_loss = None
+                val_time = 0.0
                 if self.val_data is not None:
                     progress.reset(
                         work_task,
                         total=len(self.val_data),
                         description="[bold cyan]Validation",
                     )
+                    phase_start = time.perf_counter()
                     val_loss = self._process_epoch(
                         epoch, is_train=False, progress=progress, task_id=work_task
                     )
+                    val_time = time.perf_counter() - phase_start
 
                 self.callback_manager.on_epoch_end(
                     epoch, train_loss, val_loss, trainer=self
+                )
+
+                # 记录本 epoch 用时（train/val/总）
+                epoch_time = time.perf_counter() - epoch_start
+                self._epoch_times.append(epoch_time)
+                self.metric_logger.log_timing(
+                    step=epoch + self._metric_step_offset,
+                    epoch=epoch,
+                    timings={
+                        "train_time": train_time,
+                        "val_time": val_time,
+                        "epoch_time": epoch_time,
+                    },
+                    stage=self._current_stage,
+                )
+                logger.info(
+                    f"{stage_prefix}Epoch {epoch + 1}/{self.epochs} took "
+                    f"{epoch_time:.2f}s (train {train_time:.2f}s, val {val_time:.2f}s)"
                 )
 
                 # Update best metric display
@@ -1010,8 +1045,21 @@ class BaseTrainer(ABC):
             return "auc"
         return (self.early_stopping.cfg.monitor or "auc").lower()
 
+    def _print_timing_summary(self) -> None:
+        """打印训练总用时与平均每 epoch 用时。"""
+        if self._run_start_time is None:
+            return
+        total = time.perf_counter() - self._run_start_time
+        n_epochs = len(self._epoch_times)
+        avg = total / n_epochs if n_epochs else 0.0
+        logger.info(
+            f"Total time: {datetime.timedelta(seconds=int(total))} | {n_epochs} epochs | "
+            f"avg {avg:.2f}s/epoch"
+        )
+
     def _finish(self):
         """Clean up resources and finalize experiment tracking."""
+        self._print_timing_summary()
         self._finish_metric_logger()
         if self.checkpoint_manager is not None:
             self.checkpoint_manager.close()

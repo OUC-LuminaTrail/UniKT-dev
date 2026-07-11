@@ -249,18 +249,14 @@ class MultiTrainer(BaseTrainer):
         """
         pass
 
-    # ==================== Run ====================
+    # ==================== 训练核心 ====================
 
-    def run(self) -> None:
-        """Execute all stages sequentially."""
-        if not self._built:
-            raise RuntimeError(
-                "MultiTrainer has not been built. Please call build() explicitly "
-                "before run()."
-            )
+    def _train_core(self) -> None:
+        """顺序执行所有阶段。
 
-        self._init_metric_logger()
-
+        构建检查、指标后端初始化、总用时统计与收尾由 :meth:`BaseTrainer.run`
+        统一驱动，本方法只负责阶段循环。
+        """
         self._stages = self.build_stages()
         if not self._stages:
             raise ValueError("build_stages() returned no stages.")
@@ -299,7 +295,6 @@ class MultiTrainer(BaseTrainer):
             self.on_stage_complete(stage.name, result)
 
         self._current_stage = None
-        self._finish()
 
     def _apply_stage(self, name: str, setup: StageComponents) -> None:
         """Attach stage components to instance attributes and rebuild callbacks.
@@ -423,10 +418,8 @@ class MultiTrainer(BaseTrainer):
         if final_metrics:
             self.metric_logger.log_final(metrics=final_metrics, step=self._global_step)
 
-        self.metric_logger.finish()
-        logger.info("Metric logging finished")
-        if self.checkpoint_manager is not None:
-            self.checkpoint_manager.close()
+        # 总用时摘要与指标后端关闭统一由 BaseTrainer._finish 处理
+        super()._finish()
 
 
 __all__ = ["MultiTrainer", "StageComponents", "StageConfig"]
