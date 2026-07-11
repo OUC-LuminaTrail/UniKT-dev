@@ -1,4 +1,4 @@
-"""Static model profile: parameter counts, disk size, FLOPs/MACs."""
+"""Static model profile: parameter counts, disk size, FLOPs."""
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,7 +19,6 @@ class ModelProfile:
     trainable_params: int = 0
     model_size_mb: float = 0.0
     flops_forward: int | None = None
-    macs_forward: int | None = None
     op_breakdown: dict[str, int] = field(default_factory=dict)
     flops_note: str | None = None
 
@@ -30,7 +29,7 @@ def profile_model(
     device: torch.device,
     count_flops: bool = True,
 ) -> ModelProfile:
-    """统计参数量、磁盘大小，可选前向 FLOPs/MACs。
+    """统计参数量、磁盘大小，可选前向 FLOPs。
 
     Args:
         model: PyTorch 模型。
@@ -50,9 +49,8 @@ def profile_model(
     )
 
     if count_flops:
-        flops, macs, breakdown, note = _count_flops(forward_fn, device)
+        flops, breakdown, note = _count_flops(forward_fn, device)
         profile.flops_forward = flops
-        profile.macs_forward = macs
         profile.op_breakdown = breakdown
         profile.flops_note = note
 
@@ -86,8 +84,8 @@ def _estimate_disk_size_mb(model: torch.nn.Module) -> float:
 def _count_flops(
     forward_fn: Callable[[], Any],
     device: torch.device,
-) -> tuple[int | None, int | None, dict[str, int], str | None]:
-    """用 ``torch.utils.flop_counter.FlopCounterMode`` 统计前向 FLOPs/MACs。
+) -> tuple[int | None, dict[str, int], str | None]:
+    """用 ``torch.utils.flop_counter.FlopCounterMode`` 统计前向 FLOPs。
 
     cuDNN 下 ``aten::_cudnn_lstm`` 等融合算子不可分解、FlopCounterMode 漏计，故测量期间
     临时关闭 cuDNN，强制 LSTM 分解为可计数的 ``aten::mm``/``addmm``。延迟/显存测量仍用默认
@@ -116,10 +114,10 @@ def _count_flops(
 
         flops = flop_counter.get_total_flops()
         breakdown = _format_breakdown(flop_counter)
-        return flops, (flops // 2 if flops else None), breakdown, note
+        return flops, breakdown, note
     except Exception as e:
         logger.warning(f"[Profile] FLOPs measurement failed (non-fatal): {e}")
-        return None, None, {}, note
+        return None, {}, note
     finally:
         torch.backends.cudnn.enabled = saved_cudnn
 

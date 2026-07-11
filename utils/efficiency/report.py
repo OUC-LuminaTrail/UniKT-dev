@@ -88,8 +88,6 @@ def _profile_table(profile: ModelProfile) -> Table:
     table.add_row("Model size", f"{profile.model_size_mb:.2f} MB")
     if profile.flops_forward is not None:
         table.add_row("FLOPs / forward", _format_flops(profile.flops_forward))
-    if profile.macs_forward is not None:
-        table.add_row("MACs / forward", _format_flops(profile.macs_forward))
     if profile.op_breakdown:
         top = list(profile.op_breakdown.items())[:3]
         breakdown = ", ".join(f"{k}={_format_flops(v)}" for k, v in top)
