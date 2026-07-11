@@ -1,10 +1,14 @@
-"""Process manager — experiment task lifecycle with a single scheduler thread.
+"""Process manager — experiment task lifecycle with a multi-GPU scheduler.
 
 One background thread owns the queue, the running-process table, and the PTY
-file descriptors, so concurrency is tracked by ``len(_running) vs
-_max_concurrent`` rather than a hand-maintained slot counter. Task output is
-appended to per-task ``.log`` files. All status writes go through the CAS state
-machine in ``task_state.transition``.
+file descriptors. Each GPU is a scheduling lane with ``gpu_slots`` concurrent
+slots; tasks request either a specific GPU or auto-assignment and are
+dispatched once a lane has a free slot. Per-lane occupancy is derived from the
+DB (rows whose status is running/stopping/interrupted, grouped by
+``gpu_assigned``) rather than a hand counter, so lifecycle code never touches
+slot accounting. With no GPUs the scheduler collapses to a single CPU lane.
+Task output is appended to per-task ``.log`` files. All status writes go
+through the CAS state machine in ``task_state.transition``.
 """
 
 import contextlib
@@ -27,6 +31,7 @@ from config import TASK_LOGS_DIR
 from database import SessionLocal
 from models import Task
 
+from services.gpu_monitor import GpuMonitor
 from services.python_env import PythonEnvManager
 from services.task_state import transition
 
@@ -36,21 +41,23 @@ PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
 
 
 class ProcessManager:
-    """Manages experiment task subprocesses with a concurrent execution queue.
+    """Manages experiment task subprocesses with a multi-GPU execution queue.
 
     Args:
         env_manager: PythonEnvManager used to resolve task commands.
+        gpu_monitor: GpuMonitor used to detect the number of GPU lanes.
     """
 
-    def __init__(self, env_manager: PythonEnvManager):
+    def __init__(self, env_manager: PythonEnvManager, gpu_monitor: GpuMonitor):
         """Initialize the manager and start the background scheduler thread."""
         self._env_manager = env_manager
-        self._queue: deque[int] = deque()
+        self._gpu_monitor = gpu_monitor
+        self._queue: deque[tuple[int, int | None]] = deque()
         self._running: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
         self._recover_monitors: dict[int, threading.Thread] = {}
-        self._max_concurrent = 1
+        self._gpu_slots_capacity = 1
         self._lock = threading.RLock()
         self._wake = threading.Event()
         self._stopping = False
@@ -58,40 +65,37 @@ class ProcessManager:
         self._thread.start()
 
     @property
-    def max_concurrent(self) -> int:
-        """Maximum number of tasks that may run simultaneously."""
-        return self._max_concurrent
+    def gpu_slots(self) -> int:
+        """Concurrent task slots available on each GPU (or the CPU lane)."""
+        return self._gpu_slots_capacity
 
-    @max_concurrent.setter
-    def max_concurrent(self, value: int) -> None:
+    @gpu_slots.setter
+    def gpu_slots(self, value: int) -> None:
         with self._lock:
-            self._max_concurrent = max(1, value)
+            self._gpu_slots_capacity = max(1, value)
         self._wake.set()
-
-    @property
-    def running_count(self) -> int:
-        """Number of currently running tasks."""
-        return len(self._running)
 
     def get_queue(self) -> list[int]:
         """Return a copy of the ordered task ID queue."""
         with self._lock:
-            return list(self._queue)
+            return [tid for tid, _ in self._queue]
 
     def reorder_queue(self, task_ids: list[int]) -> None:
         """Move the given task IDs to the front of the queue in order."""
         with self._lock:
-            task_set = set(task_ids)
-            preserved = [tid for tid in self._queue if tid not in task_set]
-            valid = [tid for tid in task_ids if tid in self._queue]
+            by_id = dict(self._queue)
+            front = set(task_ids)
+            preserved = [(tid, req) for tid, req in self._queue if tid not in front]
+            valid = [(tid, by_id[tid]) for tid in task_ids if tid in by_id]
             self._queue = deque(valid + preserved)
 
     def remove_from_queue(self, task_id: int) -> bool:
         """Remove a task from the queue; return True if it was present."""
         with self._lock:
-            if task_id in self._queue:
-                self._queue.remove(task_id)
-                return True
+            for idx, (tid, _) in enumerate(self._queue):
+                if tid == task_id:
+                    del self._queue[idx]
+                    return True
             return False
 
     def launch_task(
@@ -119,9 +123,10 @@ class ProcessManager:
             task.env_name = env_name
             task.extra_params = json.dumps(params)
             session.commit()
+            gpu_request = task.gpu_request
 
         with self._lock:
-            self._queue.append(task_id)
+            self._queue.append((task_id, gpu_request))
         self._wake.set()
 
     def _loop(self) -> None:
@@ -135,14 +140,103 @@ class ProcessManager:
             self._wake.clear()
 
     def _launch_pending(self) -> None:
+        lanes = self._lanes()
+        cap = self._gpu_slots_capacity
+        usage = self._slot_usage()
         while True:
-            with self._lock:
-                if len(self._running) >= self._max_concurrent or not self._queue:
-                    return
-                task_id = self._queue.popleft()
-            self._do_launch(task_id)
+            tid, assigned = self._pop_dispatchable(lanes, cap, usage)
+            if tid is None:
+                return
+            self._do_launch(tid, assigned)
 
-    def _do_launch(self, task_id: int) -> bool:
+    def _gpu_count(self) -> int:
+        """Return the stable GPU device count (0 if NVML is unavailable)."""
+        return self._gpu_monitor.device_count
+
+    def _lanes(self) -> list[int | None]:
+        """Return the scheduling lanes: one per GPU, or a single CPU lane."""
+        count = self._gpu_count()
+        return list(range(count)) if count > 0 else [None]
+
+    def _slot_usage(self) -> dict[int | None, int]:
+        """Count tasks occupying each lane (running/stopping/interrupted)."""
+        with SessionLocal() as session:
+            rows = (
+                session.query(Task.gpu_assigned)
+                .filter(Task.status.in_(["running", "stopping", "interrupted"]))
+                .all()
+            )
+        usage: dict[int | None, int] = {}
+        for (gpu,) in rows:
+            usage[gpu] = usage.get(gpu, 0) + 1
+        return usage
+
+    def _pick_lane(
+        self,
+        request: int | None,
+        lanes: list[int | None],
+        cap: int,
+        usage: dict[int | None, int],
+    ) -> tuple[bool, int | None]:
+        """Resolve a task to a lane with a free slot.
+
+        Returns ``(True, lane)`` when a dispatchable lane exists (``lane`` may be
+        ``None`` for the CPU lane), or ``(False, None)`` when the task is
+        blocked. Pinned requests target their GPU only; auto requests pick the
+        least-loaded lane that still has capacity (ties favor the lower index,
+        preserved by lane order).
+        """
+        if request is not None and request in lanes:
+            return (usage.get(request, 0) < cap, request)
+        best: int | None = None
+        best_load = cap
+        found = False
+        for lane in lanes:
+            load = usage.get(lane, 0)
+            if load < cap and load < best_load:
+                best = lane
+                best_load = load
+                found = True
+        return (found, best)
+
+    def _pop_dispatchable(
+        self,
+        lanes: list[int | None],
+        cap: int,
+        usage: dict[int | None, int],
+    ) -> tuple[int | None, int | None]:
+        """Pop the first queue task that can be dispatched now.
+
+        ``lanes``/``cap``/``usage`` are computed once per scheduler pass by the
+        caller; this only takes the lock for the in-memory queue scan (no I/O
+        under the lock) and mutates ``usage`` in place so multiple pops in one
+        pass account for just-dispatched tasks without re-querying. Scans in
+        order, skipping tasks whose target lane is full so a blocked pinned task
+        does not stall later dispatchable tasks.
+        """
+        with self._lock:
+            for idx, (tid, request) in enumerate(self._queue):
+                fallback = request is not None and request not in lanes
+                ok, target = self._pick_lane(
+                    None if fallback else request, lanes, cap, usage
+                )
+                if not ok:
+                    continue
+                if fallback:
+                    logger.warning(
+                        "task %s requested GPU %s but only %d lane(s) exist; "
+                        "auto-assigned to lane %s",
+                        tid,
+                        request,
+                        len(lanes),
+                        target,
+                    )
+                del self._queue[idx]
+                usage[target] = usage.get(target, 0) + 1
+                return tid, target
+            return None, None
+
+    def _do_launch(self, task_id: int, assigned_gpu: int | None) -> bool:
         with SessionLocal() as session:
             task = session.query(Task).get(task_id)
             if not task:
@@ -174,6 +268,8 @@ class ProcessManager:
                 env = os.environ.copy()
                 env["TERM"] = "xterm-256color"
                 env["FORCE_COLOR"] = "1"
+                if assigned_gpu is not None:
+                    env["CUDA_VISIBLE_DEVICES"] = str(assigned_gpu)
                 proc = subprocess.Popen(
                     cmd,
                     stdin=slave_fd,
@@ -208,6 +304,7 @@ class ProcessManager:
                 "running",
                 pid=proc.pid,
                 started_at=datetime.now(),
+                gpu_assigned=assigned_gpu,
                 **extra,
             ):
                 logger.warning(
@@ -504,8 +601,45 @@ class ProcessManager:
         return False
 
     def recover_tasks(self) -> None:
-        """Reattach live orphan processes and requeue pending tasks at startup."""
+        """Reattach live orphans, reap stale interrupted rows, and requeue pending.
+
+        ``interrupted`` rows left by a prior shutdown carry ``pid=None`` (dead),
+        so they are reaped here — otherwise ``_slot_usage`` would keep counting
+        them and their GPU slots would leak. Snapshot interrupted before the
+        running/stopping loop, since that loop transitions live tasks into
+        ``interrupted`` and must not be processed twice.
+        """
         with SessionLocal() as session:
+            interrupted = (
+                session.query(Task.id, Task.pid)
+                .filter(Task.status == "interrupted")
+                .all()
+            )
+            for task_id, pid in interrupted:
+                if pid and psutil.pid_exists(pid):
+                    try:
+                        if psutil.Process(pid).is_running():
+                            t = threading.Thread(
+                                target=self._recover_monitor,
+                                args=(task_id, pid),
+                                daemon=True,
+                            )
+                            t.start()
+                            with self._lock:
+                                self._recover_monitors[task_id] = t
+                            continue
+                    except psutil.NoSuchProcess:
+                        pass
+                transition(
+                    session,
+                    Task,
+                    task_id,
+                    "interrupted",
+                    "failed",
+                    finished_at=datetime.now(),
+                    pid=None,
+                )
+
             running = (
                 session.query(Task.id, Task.pid, Task.status)
                 .filter(Task.status.in_(["running", "stopping"]))
@@ -540,18 +674,15 @@ class ProcessManager:
                     pid=None,
                 )
 
-            pending_ids = [
-                row[0]
-                for row in (
-                    session.query(Task.id)
-                    .filter(Task.status == "pending")
-                    .order_by(Task.created_at)
-                    .all()
-                )
-            ]
+            pending = (
+                session.query(Task.id, Task.gpu_request)
+                .filter(Task.status == "pending")
+                .order_by(Task.created_at)
+                .all()
+            )
             with self._lock:
-                for task_id in pending_ids:
-                    self._queue.append(task_id)
+                for task_id, gpu_request in pending:
+                    self._queue.append((task_id, gpu_request))
         self._wake.set()
 
     def _recover_monitor(self, task_id: int, pid: int) -> None:

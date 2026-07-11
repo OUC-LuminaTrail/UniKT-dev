@@ -49,6 +49,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
             status="pending",
             tags="[]",
             extra_params=json.dumps(body.params),
+            gpu_request=body.gpu,
         )
         session.add(task)
         session.commit()
@@ -256,6 +257,7 @@ def get_queue(pm: ProcessManager = Depends(get_process_manager)):
                 "dataset_name": t.dataset_name,
                 "env_name": t.env_name,
                 "status": t.status,
+                "gpu_request": t.gpu_request,
                 "created_at": t.created_at.isoformat() if t.created_at else None,
             }
             for t in tasks

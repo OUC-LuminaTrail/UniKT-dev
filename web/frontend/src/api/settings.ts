@@ -1,7 +1,7 @@
 import api from './index'
 
 export interface AppSettings {
-  max_concurrent: number
+  gpu_slots: number
 }
 
 export const getSettings = () =>
@@ -17,6 +17,7 @@ export interface QueueItem {
   dataset_name: string
   env_name: string
   status: string
+  gpu_request: number | null
   created_at: string | null
 }
 

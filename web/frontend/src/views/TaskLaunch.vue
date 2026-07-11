@@ -41,6 +41,7 @@
             :customPythonPath="customPythonPath"
             :modelName="modelName"
             :dataset="dataset"
+            :gpu="gpu"
             :environments="environments"
             :models="models"
             :datasets="datasets"
@@ -49,6 +50,7 @@
             @update:customPythonPath="customPythonPath = $event"
             @update:modelName="onModelChange"
             @update:dataset="dataset = $event"
+            @update:gpu="gpu = $event"
             @confirm="onSelectConfirm"
             @refresh="refreshAll"
           />
@@ -142,6 +144,7 @@ const envId = ref('')
 const customPythonPath = ref('')
 const modelName = ref('')
 const dataset = ref('')
+const gpu = ref<number | null>(null)
 
 const kfoldCount = ref<number | null>(null)
 const selectedFolds = ref<number[]>([])
@@ -258,6 +261,7 @@ async function onStartTraining() {
           custom_python_path: customPythonPath.value || null,
           model_name: modelName.value,
           params: { ...taskParams, fold },
+          gpu: gpu.value,
         })
         created += 1
       }
@@ -274,6 +278,7 @@ async function onStartTraining() {
         custom_python_path: customPythonPath.value || null,
         model_name: modelName.value,
         params: { ...taskParams, fold },
+        gpu: gpu.value,
       })
       if (task.status === 'pending') {
         ElMessage.success('任务已加入队列')
@@ -291,6 +296,7 @@ async function onStartTraining() {
       custom_python_path: customPythonPath.value || null,
       model_name: modelName.value,
       params: taskParams,
+      gpu: gpu.value,
     })
     if (task.status === 'pending') {
       ElMessage.success('任务已加入队列')

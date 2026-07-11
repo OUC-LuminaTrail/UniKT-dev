@@ -18,6 +18,7 @@ class TaskCreate(BaseModel):
         custom_python_path: An optional custom Python interpreter path.
         model_name: The model name to train.
         params: Additional training parameters as a dictionary.
+        gpu: Requested GPU index for pinning, or None for auto-assignment.
     """
 
     name: str = ""
@@ -25,6 +26,7 @@ class TaskCreate(BaseModel):
     custom_python_path: str | None = None
     model_name: str
     params: dict
+    gpu: int | None = None
 
 
 class TaskResponse(BaseModel):
@@ -48,6 +50,8 @@ class TaskResponse(BaseModel):
         created_at: When the task record was created.
         tags: JSON-encoded list of tags.
         extra_params: JSON-encoded dictionary of extra parameters.
+        gpu_request: Requested GPU index (None = auto), set at creation.
+        gpu_assigned: Actual GPU index the task was dispatched to, or None.
     """
 
     id: int
@@ -67,6 +71,8 @@ class TaskResponse(BaseModel):
     created_at: datetime
     tags: str
     extra_params: str
+    gpu_request: int | None = None
+    gpu_assigned: int | None = None
 
     model_config = {"from_attributes": True}
 

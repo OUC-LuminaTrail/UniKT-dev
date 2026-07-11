@@ -53,14 +53,16 @@ async def lifespan(app: FastAPI):
         deps.python_env_manager = __import__(
             "services.python_env", fromlist=["PythonEnvManager"]
         ).PythonEnvManager(settings_manager=deps.settings_manager)
-        deps.process_manager = __import__(
-            "services.process_manager", fromlist=["ProcessManager"]
-        ).ProcessManager(env_manager=deps.python_env_manager)
-        deps.process_manager.max_concurrent = deps.settings_manager.get_max_concurrent()
-        deps.process_manager.recover_tasks()
         deps.gpu_monitor = __import__(
             "services.gpu_monitor", fromlist=["GpuMonitor"]
         ).GpuMonitor()
+        deps.process_manager = __import__(
+            "services.process_manager", fromlist=["ProcessManager"]
+        ).ProcessManager(
+            env_manager=deps.python_env_manager, gpu_monitor=deps.gpu_monitor
+        )
+        deps.process_manager.gpu_slots = deps.settings_manager.get_gpu_slots()
+        deps.process_manager.recover_tasks()
         deps.preprocess_manager = __import__(
             "services.preprocess_manager", fromlist=["PreprocessManager"]
         ).PreprocessManager(env_manager=deps.python_env_manager)

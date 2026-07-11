@@ -35,19 +35,19 @@
             </span>
             <span class="section-title">任务队列</span>
           </div>
-          <span class="section-desc">控制训练任务的并发执行数量。修改后立即生效，如果增大并发数，队列中的等待任务会自动启动。</span>
+          <span class="section-desc">{{ concurrencyDesc }}</span>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-key">最大并发任务数</span>
-            <span class="setting-help">同时运行的训练任务上限</span>
+            <span class="setting-key">{{ concurrencyLabel }}</span>
+            <span class="setting-help">{{ concurrencyHelp }}</span>
           </div>
           <div class="setting-control">
             <el-input-number
-              v-model="maxConcurrent"
+              v-model="gpuSlots"
               :min="1"
-              :max="8"
+              :max="16"
               controls-position="right"
               style="width: 140px"
             />
@@ -170,14 +170,34 @@ import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import Cookies from 'universal-cookie'
 import { getSettings, updateSettings, getDefaultEnv, setDefaultEnv } from '@/api/settings'
 import { listEnvironments, healthCheckEnv, type EnvironmentInfo, type EnvHealthResult } from '@/api/environments'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const queryClient = useQueryClient()
 const cookies = new Cookies()
+const { hasGpu, gpuCount } = useSystemCapabilities()
 
 const COOKIE_KEY = 'kt-settings'
 
-const maxConcurrent = ref(1)
+const gpuSlots = ref(1)
 const saved = ref(false)
+
+const totalConcurrency = computed(
+  () => (hasGpu.value ? gpuCount.value : 1) * gpuSlots.value,
+)
+
+const concurrencyLabel = computed(() =>
+  hasGpu.value ? '每卡并发数' : '并发任务数',
+)
+const concurrencyHelp = computed(() =>
+  hasGpu.value
+    ? `单张 GPU 同时运行的任务上限 · 共 ${gpuCount.value} 张 GPU，总并发 ${totalConcurrency.value}`
+    : '同时运行的训练任务上限',
+)
+const concurrencyDesc = computed(() =>
+  hasGpu.value
+    ? '控制每张 GPU 同时运行的任务数。修改后立即生效，空闲槽位会被自动填补。'
+    : '控制同时运行的训练任务数。修改后立即生效，队列中的等待任务会自动启动。',
+)
 
 const selectedEnvId = ref<string | null>(null)
 const customPythonPath = ref('')
@@ -197,7 +217,7 @@ watch(
   ({ s, e }) => {
     if (initDone.value) return
     if (s && e) {
-      maxConcurrent.value = s.max_concurrent
+      gpuSlots.value = s.gpu_slots
       selectedEnvId.value = e.default_env_id
       customPythonPath.value = e.custom_python_path || ''
       rememberLastEnv.value = e.remember_last_env
@@ -209,9 +229,9 @@ watch(
 
 watch(() => settingsQuery.isError.value, (isError) => {
   if (isError && !initDone.value) {
-    const cached = cookies.get<{ max_concurrent: number }>(COOKIE_KEY)
-    if (cached?.max_concurrent) {
-      maxConcurrent.value = cached.max_concurrent
+    const cached = cookies.get<{ gpu_slots: number }>(COOKIE_KEY)
+    if (cached?.gpu_slots) {
+      gpuSlots.value = cached.gpu_slots
     }
     initDone.value = true
   }
@@ -221,7 +241,7 @@ const updateSettingsMutation = useMutation({
   mutationFn: (data: Parameters<typeof updateSettings>[0]) => updateSettings(data),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['settings'] })
-    cookies.set(COOKIE_KEY, { max_concurrent: maxConcurrent.value }, { maxAge: 365 * 86400, path: '/' })
+    cookies.set(COOKIE_KEY, { gpu_slots: gpuSlots.value }, { maxAge: 365 * 86400, path: '/' })
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
     ElMessage.success('设置已保存')
@@ -232,7 +252,7 @@ const saving = computed(() => updateSettingsMutation.isPending.value)
 
 const onSave = () => {
   saved.value = false
-  updateSettingsMutation.mutate({ max_concurrent: maxConcurrent.value })
+  updateSettingsMutation.mutate({ gpu_slots: gpuSlots.value })
 }
 
 const setDefaultEnvMutation = useMutation({

@@ -18,6 +18,8 @@ export interface TaskInfo {
   created_at: string
   tags: string
   extra_params: string
+  gpu_request: number | null
+  gpu_assigned: number | null
 }
 
 export interface TaskCreateRequest {
@@ -26,6 +28,7 @@ export interface TaskCreateRequest {
   custom_python_path?: string | null
   model_name: string
   params: Record<string, any>
+  gpu?: number | null
 }
 
 export const createTask = (data: TaskCreateRequest) =>

@@ -18,7 +18,7 @@ _DEFAULT_SETTINGS = {
     "custom_python_path": None,
     "setup_completed": False,
     "remember_last_env": False,
-    "max_concurrent": 1,
+    "gpu_slots": 1,
 }
 
 
@@ -132,27 +132,27 @@ class SettingsManager:
         """
         self.save({"remember_last_env": value})
 
-    def get_max_concurrent(self) -> int:
-        """Return the persisted maximum concurrent task count.
+    def get_gpu_slots(self) -> int:
+        """Return the persisted per-GPU concurrency slot count.
 
         Returns:
-            The concurrency limit, clamped to at least 1. Falls back to 1 if
+            The per-GPU slot count, clamped to at least 1. Falls back to 1 if
             the stored value is missing or invalid.
         """
         try:
-            return max(1, int(self.load().get("max_concurrent", 1)))
+            return max(1, int(self.load().get("gpu_slots", 1)))
         except (TypeError, ValueError):
             return 1
 
-    def set_max_concurrent(self, value: int) -> int:
-        """Persist the maximum concurrent task count.
+    def set_gpu_slots(self, value: int) -> int:
+        """Persist the per-GPU concurrency slot count.
 
         Args:
-            value: The concurrency limit (clamped to >= 1).
+            value: The per-GPU slot count (clamped to >= 1).
 
         Returns:
             The clamped value that was persisted.
         """
         clamped = max(1, int(value))
-        self.save({"max_concurrent": clamped})
+        self.save({"gpu_slots": clamped})
         return clamped

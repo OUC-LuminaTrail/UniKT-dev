@@ -1,5 +1,12 @@
 import api from './index'
 
+export interface GpuProcess {
+  id: number
+  name: string
+  status: string
+  pid: number | null
+}
+
 export interface GpuInfo {
   index: number
   name: string
@@ -8,7 +15,7 @@ export interface GpuInfo {
   memory_total_mb: number
   temperature_c: number
   power_usage_w: number
-  processes: any[]
+  processes: GpuProcess[]
 }
 
 export interface GpuStatus {

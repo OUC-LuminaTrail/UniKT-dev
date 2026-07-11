@@ -42,6 +42,28 @@
       </div>
     </div>
 
+    <div class="section" v-if="hasGpu && gpuCount > 0">
+      <div class="section-label">GPU 分配</div>
+      <el-radio-group
+        :model-value="gpuChoice"
+        @update:model-value="gpuChoice = $event"
+        class="gpu-radio-group"
+      >
+        <el-radio value="auto" class="gpu-radio">自动分配</el-radio>
+        <el-radio
+          v-for="i in gpuCount"
+          :key="i - 1"
+          :value="String(i - 1)"
+          class="gpu-radio"
+        >
+          GPU {{ i - 1 }}
+          <span class="gpu-occ" v-if="gpuOccupancy[i - 1]">
+            · 占用 {{ gpuOccupancy[i - 1] }}
+          </span>
+        </el-radio>
+      </el-radio-group>
+    </div>
+
     <div class="section">
       <div class="section-label-row">
         <div class="section-label">模型</div>
@@ -102,17 +124,21 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useQuery } from '@tanstack/vue-query'
 import { Coin, Refresh } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
 import { getDatasetMetadata, type DatasetMetadata } from '@/api/datasets'
+import { getGpuStatus } from '@/api/gpu'
 import DatasetMetadataPanel from './DatasetMetadataPanel.vue'
 import { getGradient } from '@/composables/useGradient'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const props = defineProps<{
   envId: string
   customPythonPath: string
   modelName: string
   dataset: string
+  gpu: number | null
   environments: EnvironmentInfo[]
   models: string[]
   datasets: string[]
@@ -124,9 +150,34 @@ const emit = defineEmits<{
   (e: 'update:customPythonPath', val: string): void
   (e: 'update:modelName', val: string): void
   (e: 'update:dataset', val: string): void
+  (e: 'update:gpu', val: number | null): void
   (e: 'confirm'): void
   (e: 'refresh'): void
 }>()
+
+const { hasGpu, gpuCount } = useSystemCapabilities()
+
+const gpuStatusQuery = useQuery({
+  queryKey: ['gpu-status'],
+  queryFn: getGpuStatus,
+  refetchInterval: 5000,
+})
+const gpuOccupancy = computed<Record<number, number>>(() => {
+  const map: Record<number, number> = {}
+  for (const g of gpuStatusQuery.data.value?.gpus ?? []) {
+    map[g.index] = g.processes.length
+  }
+  return map
+})
+
+// el-radio values must be string/number/boolean (null is treated as absent by
+// Element Plus), so the radio group works in strings and translates to/from
+// the number|null contract on the way in and out.
+const gpuChoice = computed<string>({
+  get: () =>
+    props.gpu === null || props.gpu === undefined ? 'auto' : String(props.gpu),
+  set: (v: string) => emit('update:gpu', v === 'auto' ? null : Number(v)),
+})
 
 const metadata = ref<DatasetMetadata | null>(null)
 const metadataLoading = ref(false)
@@ -199,6 +250,22 @@ defineExpose({ clearCache })
 
 .env-select {
   max-width: 400px;
+}
+
+.gpu-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.gpu-radio {
+  margin-right: 0;
+}
+
+.gpu-occ {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-family: var(--font-mono);
 }
 
 .custom-path-row {

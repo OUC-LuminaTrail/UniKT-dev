@@ -81,6 +81,17 @@
             <div class="stat-value">{{ gpu.power_usage_w.toFixed(1) }}W</div>
           </div>
         </div>
+
+        <div class="occupancy">
+          <div class="occupancy-label">占用任务</div>
+          <div v-if="gpu.processes.length === 0" class="occupancy-empty">空闲</div>
+          <div v-else class="occupancy-list">
+            <div v-for="p in gpu.processes" :key="p.id" class="occ-item">
+              <span class="occ-dot" :class="`occ-${p.status}`"></span>
+              <span class="occ-name" :title="p.name">{{ p.name }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -303,5 +314,68 @@ const tempColor = (temp: number) => {
   font-size: 11px;
   color: var(--text-tertiary);
   text-align: right;
+}
+
+.occupancy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-muted);
+}
+
+.occupancy-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: 0.4px;
+}
+
+.occupancy-empty {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.occupancy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.occ-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.occ-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent-blue);
+}
+
+.occ-dot.occ-running {
+  background: var(--accent-blue);
+  box-shadow: 0 0 5px var(--accent-blue);
+}
+
+.occ-dot.occ-stopping {
+  background: var(--accent-orange);
+}
+
+.occ-dot.occ-interrupted {
+  background: var(--text-tertiary);
+}
+
+.occ-name {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

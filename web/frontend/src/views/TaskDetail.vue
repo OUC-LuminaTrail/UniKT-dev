@@ -68,6 +68,10 @@
         <span class="meta-key">运行环境</span>
         <span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span>
       </div>
+      <div class="meta-cell" v-if="hasGpu">
+        <span class="meta-key">GPU</span>
+        <span class="meta-val">{{ gpuDisplay }}</span>
+      </div>
       <div class="meta-cell">
         <span class="meta-key">进程 ID</span>
         <span class="meta-val mono">{{ task.pid || '—' }}</span>
@@ -105,6 +109,9 @@ import { ArrowLeft, SwitchButton, Bottom } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/date'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
+
+const { hasGpu } = useSystemCapabilities()
 
 const route = useRoute()
 const router = useRouter()
@@ -145,6 +152,16 @@ const statusMap: Record<string, { color: string; label: string }> = {
 const exitCodeClass = computed(() => {
   if (task.value?.exit_code == null) return ''
   return task.value.exit_code === 0 ? 'exit-ok' : 'exit-err'
+})
+
+const gpuDisplay = computed(() => {
+  const t = task.value
+  if (!t) return '—'
+  const val = t.gpu_assigned ?? t.gpu_request
+  if (val === null || val === undefined) {
+    return t.status === 'pending' ? '自动' : '—'
+  }
+  return `GPU ${val}`
 })
 
 const copyCommand = () => {
@@ -308,7 +325,7 @@ const handleKill = async () => {
 
 .meta-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 1px;
   background: var(--border-muted);
   border: 1px solid var(--border-default);

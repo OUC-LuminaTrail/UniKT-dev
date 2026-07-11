@@ -1,7 +1,7 @@
 """Settings API router — application settings management.
 
-Provides endpoints for reading and updating global settings (max concurrent
-tasks, default environment, setup status), as well as managing the default
+Provides endpoints for reading and updating global settings (per-GPU task
+slots, default environment, setup status), as well as managing the default
 Python environment selection.
 """
 
@@ -18,20 +18,20 @@ class SettingsResponse(BaseModel):
     """Response model for current settings.
 
     Attributes:
-        max_concurrent: Maximum number of concurrent tasks.
+        gpu_slots: Concurrent task slots per GPU (or the CPU lane).
     """
 
-    max_concurrent: int
+    gpu_slots: int
 
 
 class SettingsUpdate(BaseModel):
     """Request model for updating settings.
 
     Attributes:
-        max_concurrent: New maximum concurrent tasks value.
+        gpu_slots: New per-GPU slot count.
     """
 
-    max_concurrent: int
+    gpu_slots: int
 
 
 @router.get("")
@@ -42,9 +42,9 @@ def get_settings(sm: SettingsManager = Depends(get_settings_manager)):
         sm: Injected SettingsManager singleton.
 
     Returns:
-        A SettingsResponse with the current max_concurrent value.
+        A SettingsResponse with the current gpu_slots value.
     """
-    return SettingsResponse(max_concurrent=sm.get_max_concurrent())
+    return SettingsResponse(gpu_slots=sm.get_gpu_slots())
 
 
 @router.put("")
@@ -63,9 +63,9 @@ def update_settings(
     Returns:
         An updated SettingsResponse.
     """
-    value = sm.set_max_concurrent(body.max_concurrent)
-    pm.max_concurrent = value
-    return SettingsResponse(max_concurrent=value)
+    value = sm.set_gpu_slots(body.gpu_slots)
+    pm.gpu_slots = value
+    return SettingsResponse(gpu_slots=value)
 
 
 class DefaultEnvUpdate(BaseModel):

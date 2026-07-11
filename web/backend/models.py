@@ -37,6 +37,8 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     tags: Mapped[str] = mapped_column(Text, default="[]")
     extra_params: Mapped[str] = mapped_column(Text, default="{}")
+    gpu_request: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gpu_assigned: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class LogChunk(Base):

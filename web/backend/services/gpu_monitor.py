@@ -34,11 +34,23 @@ class GpuMonitor:
         self._last_update: float = 0
         self._lock = threading.Lock()
         self._nvml_initialized = False
+        self._device_count = 0
         try:
             pynvml.nvmlInit()
             self._nvml_initialized = True
+            self._device_count = pynvml.nvmlDeviceGetCount()
         except (pynvml.NVMLError, Exception):
             pass
+
+    @property
+    def device_count(self) -> int:
+        """Stable GPU count captured at init.
+
+        Used for scheduling-lane sizing so a transient NVML miss in the cached
+        ``get_status`` (which returns ``[]`` on any query error) cannot collapse
+        all GPU lanes to the CPU lane mid-dispatch.
+        """
+        return self._device_count
 
     def get_status(self) -> GpuStatusResponse:
         """Return the current GPU status, using cached data if still fresh.

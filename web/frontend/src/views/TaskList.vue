@@ -66,6 +66,11 @@
               <span class="env-tag">{{ row.env_name }}</span>
             </template>
           </el-table-column>
+          <el-table-column v-if="hasGpu" label="GPU" width="80">
+            <template #default="{ row }">
+              <span class="gpu-tag">{{ formatGpu(row.gpu_assigned) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="110">
             <template #default>
               <span class="status-cell">
@@ -143,6 +148,11 @@
           </el-table-column>
           <el-table-column prop="model_name" label="模型" width="110" sortable />
           <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
+          <el-table-column v-if="hasGpu" label="GPU" width="80">
+            <template #default="{ row }">
+              <span class="gpu-tag">{{ formatGpu(row.gpu_request) }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="created_at" label="创建时间" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
@@ -284,6 +294,9 @@ import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document } from '
 import { formatDateTime } from '@/utils/date'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
+import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
+
+const { hasGpu } = useSystemCapabilities()
 
 const route = useRoute()
 const router = useRouter()
@@ -322,6 +335,9 @@ const statusLabels: Record<string, string> = {
 }
 
 const statusLabel = (s: string) => statusLabels[s] || s
+
+const formatGpu = (val: number | null) =>
+  val === null || val === undefined ? '自动' : `GPU ${val}`
 
 interface TasksData {
   tasks: TaskInfo[]
@@ -751,6 +767,17 @@ html.dark .btn-primary:hover {
   font-family: var(--font-mono);
   color: var(--text-secondary);
   border: 1px solid var(--border-muted);
+}
+
+.gpu-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(63, 185, 80, 0.08);
+  border-radius: 20px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-green);
+  border: 1px solid rgba(63, 185, 80, 0.2);
 }
 
 .status-cell {
