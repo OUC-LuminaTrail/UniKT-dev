@@ -364,7 +364,6 @@ class BaseTrainer(ABC):
             self._experiment_config, hyperparams
         )
 
-
         # 3. Setup data loaders
         self._setup_data_loaders()
 

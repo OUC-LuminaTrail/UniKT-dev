@@ -188,7 +188,6 @@ class MultiTrainer(BaseTrainer):
             self._experiment_config, hyperparams
         )
 
-
         # 3. Log directory
         exp_manager = self._experiment_config.exp_manager
         if exp_manager is None:
