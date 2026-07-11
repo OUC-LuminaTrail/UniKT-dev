@@ -690,25 +690,21 @@ class ProcessManager:
             self._recover_monitors.pop(task_id, None)
 
     def shutdown(self) -> None:
-        """Stop the scheduler, kill running tasks, and mark them interrupted.
+        """Stop the scheduler, gracefully stop running tasks, mark them interrupted.
 
-        Running subprocess groups are SIGKILLed so no orphans survive the
-        backend exit and get double-run after ``recover_tasks`` re-queues them.
-        On the next start, recover_tasks puts these interrupted rows back to
-        ``pending`` so they re-run instead of being lost.
+        Each running task gets the same graceful stop the UI uses (SIGINT to its
+        process group, then SIGKILL only if it does not exit in time), so the
+        trainer can clean up and no orphans survive the backend exit. ``pid`` is
+        cleared; on the next start ``recover_tasks`` re-queues these interrupted
+        rows as ``pending`` and re-dispatches them against the current GPU set.
         """
         self._stopping = True
         self._wake.set()
         with contextlib.suppress(Exception):
             self._thread.join(timeout=10)
 
-        for proc in list(self._running.values()):
-            with contextlib.suppress(Exception):
-                self._kill_process_group(proc.pid, signal.SIGKILL)
-            with contextlib.suppress(Exception):
-                proc.wait(timeout=3)
         for task_id in list(self._running):
-            self._cleanup(task_id)
+            self._terminate(task_id)
 
         with SessionLocal() as session:
             session.query(Task).filter(Task.status.in_(["running", "stopping"])).update(
