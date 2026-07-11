@@ -136,6 +136,7 @@ class BaseTrainer(ABC):
 
         # 用时统计
         self._run_start_time: float | None = None
+        self._train_end_time: float | None = None
         self._epoch_times: list[float] = []
 
     # ==================== Subclass hooks ====================
@@ -740,6 +741,7 @@ class BaseTrainer(ABC):
                     break
 
         logger.info("Training complete")
+        self._train_end_time = time.perf_counter()
         self.callback_manager.on_train_end(trainer=self)
 
         return StageResult(
@@ -1049,7 +1051,7 @@ class BaseTrainer(ABC):
         """打印训练总用时与平均每 epoch 用时。"""
         if self._run_start_time is None:
             return
-        total = time.perf_counter() - self._run_start_time
+        total = self._train_end_time - self._run_start_time
         n_epochs = len(self._epoch_times)
         avg = total / n_epochs if n_epochs else 0.0
         logger.info(
