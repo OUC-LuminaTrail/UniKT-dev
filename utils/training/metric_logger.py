@@ -10,9 +10,11 @@ Backends:
   disabled via ``--no_swanlab``.
 """
 
+import atexit
 import csv
 import os
 from abc import ABC, abstractmethod
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import suppress
 from typing import IO, Any
 
@@ -479,6 +481,125 @@ class MetricLoggerComposite(MetricLogger):
         self._fanout("finish")
 
 
+class AsyncMetricLoggerProxy(MetricLogger):
+    """Offload metric logging to a single background thread.
+
+    Wraps any backend and forwards every ``log_*`` call via a one-worker
+    ``ThreadPoolExecutor`` so network/disk I/O (SwanLab uploads, per-row CSV
+    flushes) never blocks the training thread. Mirrors the lifecycle of
+    ``CheckpointManager``: submit-to-queue, ``flush`` drains tracked futures,
+    idempotent ``close`` registered with ``atexit``.
+
+    Not registered — wired directly by ``build_default_metric_loggers``, like
+    ``MetricLoggerComposite``.
+    """
+
+    def __init__(self, inner: MetricLogger):
+        """Initialize the proxy around ``inner``.
+
+        Args:
+            inner: The wrapped backend. Touched only by the background worker
+                (plus the main thread during sync ``init_run`` and the
+                post-close fallback), so no locking is needed.
+        """
+        self._inner = inner
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="metric-log"
+        )
+        self._futures: list[Future] = []
+        self._closed = False
+        self._creator_pid = os.getpid()
+        atexit.register(self.close)
+
+    def init_run(self, **kwargs) -> None:
+        """Initialize the wrapped backend synchronously.
+
+        ``swanlab.init`` is network I/O; a failure must surface immediately
+        rather than after a silent run. The composite's ``_fanout`` turns an
+        exception here into a warning while other backends keep working.
+        """
+        self._inner.init_run(**kwargs)
+
+    def _check_completed(self) -> None:
+        """Drop finished futures, surfacing their exceptions as warnings.
+
+        Bounds memory — without this, ``log_batch``-per-batch would retain
+        every future until ``finish`` — and restores near-inline error
+        visibility (within one submit) instead of deferring to ``flush``.
+        """
+        if not self._futures:
+            return
+        pending: list[Future] = []
+        for fut in self._futures:
+            if fut.done():
+                try:
+                    fut.result()
+                except Exception as e:
+                    logger.warning(f"Async metric logging failed: {e}")
+            else:
+                pending.append(fut)
+        self._futures = pending
+
+    def _submit(self, method: str, **kwargs) -> None:
+        """Forward a backend method to the worker, or run it sync after close."""
+        self._check_completed()
+        if self._closed:
+            getattr(self._inner, method)(**kwargs)
+            return
+        self._futures.append(
+            self._executor.submit(getattr(self._inner, method), **kwargs)
+        )
+
+    def log_metrics(self, **kwargs) -> None:
+        """Log epoch metrics asynchronously."""
+        self._submit("log_metrics", **kwargs)
+
+    def log_early_stopping(self, **kwargs) -> None:
+        """Log early stopping trajectory asynchronously."""
+        self._submit("log_early_stopping", **kwargs)
+
+    def log_batch(self, **kwargs) -> None:
+        """Log per-batch metrics asynchronously."""
+        self._submit("log_batch", **kwargs)
+
+    def log_final(self, **kwargs) -> None:
+        """Log final metrics asynchronously."""
+        self._submit("log_final", **kwargs)
+
+    def flush(self) -> None:
+        """Wait for all pending log calls to finish, logging any exceptions."""
+        futures, self._futures = self._futures, []
+        for fut in futures:
+            try:
+                fut.result()
+            except Exception as e:
+                logger.warning(f"Async metric logging failed: {e}")
+
+    def finish(self) -> None:
+        """Finish the wrapped backend and block until it completes.
+
+        The executor stays alive so post-finish log calls (e.g. an external
+        ``evaluate()``) still work; teardown is deferred to ``close``/atexit.
+        """
+        self._submit("finish")
+        self.flush()
+
+    def close(self) -> None:
+        """Drain the queue and shut down the executor (atexit-only).
+
+        Idempotent and fork-safe: skipped in child processes (the worker
+        thread does not survive ``fork``) and never raises.
+        """
+        if os.getpid() != self._creator_pid or self._closed:
+            return
+        self._closed = True
+        try:
+            self.flush()
+        finally:
+            with suppress(Exception):
+                self._executor.shutdown(wait=True)
+
+
 def get_metric_logger(name: str, **kwargs) -> MetricLogger:
     """Instantiate a registered metric logger backend by name.
 
@@ -493,27 +614,53 @@ def get_metric_logger(name: str, **kwargs) -> MetricLogger:
     return cls(**kwargs)
 
 
+def _async_enabled() -> bool:
+    """Read the ``METRIC_LOGGING_ASYNC`` env var (default enabled).
+
+    Disabled by ``0``/``false``/``no``/``""`` (case-insensitive); any other
+    value enables it. Treated as infrastructure (like ``LOG_LEVEL``), not an
+    experiment parameter, so no CLI plumbing.
+    """
+    val = os.getenv("METRIC_LOGGING_ASYNC", "1").strip().lower()
+    return val not in ("0", "false", "no", "")
+
+
 def build_default_metric_loggers(
-    *, log_dir: str, log_batch_metrics: bool, no_swanlab: bool
+    *,
+    log_dir: str,
+    log_batch_metrics: bool,
+    no_swanlab: bool,
+    async_io: bool | None = None,
 ) -> MetricLogger:
     """Build the default metric logger composite.
 
     Local CSV logging is always enabled; SwanLab is included unless
-    ``no_swanlab`` is set.
+    ``no_swanlab`` is set. Each backend is wrapped in
+    :class:`AsyncMetricLoggerProxy` when async I/O is enabled (default), so a
+    slow SwanLab upload cannot serialize the local CSV write.
 
     Args:
         log_dir: Directory for local CSV logs.
         log_batch_metrics: Whether to log per-batch loss.
         no_swanlab: If True, skip SwanLab backend.
+        async_io: Override async I/O. ``None`` reads ``METRIC_LOGGING_ASYNC``
+            (default enabled).
 
     Returns:
         A MetricLoggerComposite instance.
     """
+    if async_io is None:
+        async_io = _async_enabled()
+
     loggers: list[MetricLogger] = [
         get_metric_logger("local", log_dir=log_dir, log_batch_metrics=log_batch_metrics)
     ]
     if not no_swanlab:
         loggers.append(get_metric_logger("swanlab"))
+
+    if async_io:
+        logger.info("Async metric logging: ENABLED (METRIC_LOGGING_ASYNC=0 to disable)")
+        loggers = [AsyncMetricLoggerProxy(lg) for lg in loggers]
     return MetricLoggerComposite(loggers)
 
 
@@ -541,6 +688,7 @@ def resolve_metric_logging_flags(experiment_config, hyperparams) -> tuple[bool, 
 
 
 __all__ = [
+    "AsyncMetricLoggerProxy",
     "LocalMetricLogger",
     "MetricLogger",
     "MetricLoggerComposite",
