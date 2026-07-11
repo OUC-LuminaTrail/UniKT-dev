@@ -5,6 +5,10 @@ including registries (trainers, model params, data sources, analyzers,
 metric loggers), logging utilities, and seed setting.
 """
 
+# isort: off
+from .env import load_env
+# isort: on
+
 from .discovery import discover_registrations
 from .logger import get_logger, reset_loggers, set_log_level
 from .random import seed_everything
@@ -70,6 +74,7 @@ __all__ = [
     # Helpers
     "get_supported_datasets",
     "get_supported_models",
+    "load_env",
     "register_analyzer",
     "register_data_source",
     "register_metric_logger",

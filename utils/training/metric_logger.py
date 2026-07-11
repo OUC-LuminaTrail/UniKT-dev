@@ -316,10 +316,8 @@ class SwanLabMetricLogger(MetricLogger):
             config: Experiment configuration dict.
         """
         import swanlab
-        from dotenv import load_dotenv
         from swanlab.plugin.notification import LarkCallback
 
-        load_dotenv()
         callbacks = []
         webhook = os.getenv("LARK_WEBHOOK_URL")
         secret = os.getenv("LARK_SECRET")
