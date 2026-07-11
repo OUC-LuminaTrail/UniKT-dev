@@ -9,7 +9,7 @@ without importing them), writing all ``@register_data_source`` entries into the
 from pathlib import Path
 from typing import Any
 
-from utils.core import DATA_SOURCES, discover_registrations
+from utils.core import DATA_SOURCES, discover_registrations, get_supported_datasets
 
 from .data_source import DataSource
 
@@ -30,7 +30,7 @@ def get_data_source(dataset_name: str, args: Any) -> DataSource:
         ValueError: If the dataset name is not registered.
     """
     if dataset_name not in DATA_SOURCES:
-        available = ", ".join(DATA_SOURCES.keys())
+        available = ", ".join(get_supported_datasets())
         raise ValueError(f"Unsupported dataset: {dataset_name}. Available: {available}")
     dataset_cls = DATA_SOURCES.get(dataset_name)
     return dataset_cls(args=args)

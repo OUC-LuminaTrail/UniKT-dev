@@ -22,6 +22,39 @@ from .registry import (
     register_trainer,
 )
 
+
+def get_supported_datasets() -> list[str]:
+    """Return all registered dataset names from ``DATA_SOURCES``.
+
+    Lazily triggers discovery for ``utils.data_process`` if the registry
+    is still empty (handles the case where ``utils.data_process`` was never
+    imported, e.g. in the web backend).
+    """
+    if not DATA_SOURCES:
+        from pathlib import Path
+
+        discover_registrations(
+            Path(__file__).resolve().parent.parent / "data_process",
+            "utils.data_process",
+        )
+    return sorted(DATA_SOURCES.keys())
+
+
+def get_supported_models() -> list[str]:
+    """Return all registered model names from ``TRAINERS``.
+
+    Lazily triggers discovery for ``model`` if the registry is still empty.
+    """
+    if not TRAINERS:
+        from pathlib import Path
+
+        discover_registrations(
+            Path(__file__).resolve().parent.parent.parent / "model",
+            "model",
+        )
+    return sorted(TRAINERS.keys())
+
+
 __all__ = [
     "ANALYZERS",
     "DATA_SOURCES",
@@ -34,6 +67,9 @@ __all__ = [
     "discover_registrations",
     # Logger
     "get_logger",
+    # Helpers
+    "get_supported_datasets",
+    "get_supported_models",
     "register_analyzer",
     "register_data_source",
     "register_metric_logger",

@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from utils.ablation.config import AblationStudyConfig
-from utils.core import TRAINERS, get_logger, seed_everything
+from utils.core import TRAINERS, get_logger, get_supported_models, seed_everything
 
 logger = get_logger(__name__)
 
@@ -63,7 +63,7 @@ class AblationRunner:
             if ablation.variant not in TRAINERS:
                 raise ValueError(
                     f"Variant '{ablation.variant}' not registered in TRAINERS. "
-                    f"Available: {', '.join(TRAINERS.keys())}"
+                    f"Available: {', '.join(get_supported_models())}"
                 )
             trainer_cls = TRAINERS.get(ablation.variant)
 

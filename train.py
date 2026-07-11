@@ -9,9 +9,8 @@ from utils.config import (
     EarlyStoppingParams,
     GeneralParams,
     get_model_params,
-    list_models,
 )
-from utils.core import TRAINERS, get_logger, seed_everything
+from utils.core import TRAINERS, get_logger, get_supported_models, seed_everything
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
@@ -37,7 +36,7 @@ def parse_args():
     CompileParams.add_args(parser)
 
     # Add model selection parameter
-    available_models = list(TRAINERS.keys())
+    available_models = get_supported_models()
     parser.add_argument(
         "-m",
         "--model",
@@ -54,7 +53,7 @@ def parse_args():
             model_params_cls.add_args(parser)
         else:
             raise ValueError(
-                f"Model '{model_name}' not found. Available models: {', '.join(list_models())}"
+                f"Model '{model_name}' not found. Available models: {', '.join(get_supported_models())}"
             )
 
     args = parser.parse_args()

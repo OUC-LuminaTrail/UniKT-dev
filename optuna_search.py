@@ -15,7 +15,7 @@ from utils.config import (
     GeneralParams,
     get_model_params,
 )
-from utils.core import TRAINERS, get_logger
+from utils.core import TRAINERS, get_logger, get_supported_models
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
@@ -42,7 +42,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Unified Optuna Hyperparameter Search")
 
     # Model selection
-    available_models = TRAINERS.keys()
+    available_models = get_supported_models()
     parser.add_argument(
         "-m",
         "--model",

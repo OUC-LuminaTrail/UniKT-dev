@@ -10,7 +10,7 @@ import model  # noqa: F401
 from utils.ablation.config_loader import load_config
 from utils.ablation.result_formatter import AblationResultFormatter
 from utils.ablation.runner import AblationRunner
-from utils.core import get_logger
+from utils.core import get_logger, get_supported_datasets
 
 logger = get_logger(__name__)
 
@@ -25,12 +25,7 @@ def main():
         "-d",
         "--dataset",
         required=True,
-        choices=[
-            "assistments09",
-            "assistments12",
-            "assistments17",
-            "ednet_kt1",
-        ],
+        choices=get_supported_datasets(),
         help="Dataset name (required)",
     )
     parser.add_argument(

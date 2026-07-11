@@ -16,7 +16,6 @@ from .param_config import (
     SamplingParams,
     get_model_params,
     get_param_sources,
-    list_models,
     register_model_params,
 )
 from .training_config import (
@@ -48,6 +47,5 @@ __all__ = [
     "create_optimized_dataloader",
     "get_model_params",
     "get_param_sources",
-    "list_models",
     "register_model_params",
 ]

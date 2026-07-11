@@ -7,7 +7,11 @@ import argparse
 from abc import ABC, abstractmethod
 from typing import Any
 
-from ..core import DATA_SOURCES, PARAM_CONFIGS, register_model_params
+from ..core import (
+    PARAM_CONFIGS,
+    get_supported_datasets,
+    register_model_params,
+)
 
 _PARAM_SOURCES: dict[str, str] = {}
 
@@ -103,15 +107,6 @@ def get_model_params(model_name: str) -> type[BaseParamConfig] | None:
         return None
 
 
-def list_models() -> list[str]:
-    """List all registered model parameter configurations.
-
-    Returns:
-        List of model names
-    """
-    return PARAM_CONFIGS.keys()
-
-
 # ============================================================================
 # Predefined parameter configuration classes
 # ============================================================================
@@ -134,9 +129,9 @@ class DataParams(BaseParamConfig):
                 "short": "d",
                 "required": True,
                 "help": "Dataset name (required, choices: {})".format(
-                    ", ".join(DATA_SOURCES.keys())
+                    ", ".join(get_supported_datasets())
                 ),
-                "choices": list(DATA_SOURCES.keys()),
+                "choices": get_supported_datasets(),
             },
             "data_base_path": {
                 "type": str,
@@ -386,6 +381,5 @@ __all__ = [
     "SamplingParams",
     "get_model_params",
     "get_param_sources",
-    "list_models",
     "register_model_params",
 ]

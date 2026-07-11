@@ -9,23 +9,11 @@ import json
 from config import PROJECT_ROOT
 from fastapi import APIRouter, HTTPException
 
-from utils.core import DATA_SOURCES, discover_registrations
-
-# Trigger static discovery so DATA_SOURCES index is populated before first use
-discover_registrations(PROJECT_ROOT / "utils" / "data_process", "utils.data_process")
+from utils.core import get_supported_datasets
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
 DATA_DIR = PROJECT_ROOT / "data"
-
-
-def _get_supported_datasets() -> list[str]:
-    """Discover supported datasets from the DATA_SOURCES registry.
-
-    Returns:
-        A list of registered dataset names.
-    """
-    return list(DATA_SOURCES.keys())
 
 
 @router.get("")
@@ -37,7 +25,7 @@ def list_datasets():
         ``num_questions``, and ``num_skills`` from the dataset's
         ``metadata.json`` if available.
     """
-    supported = _get_supported_datasets()
+    supported = get_supported_datasets()
     if not supported:
         raise HTTPException(500, "No datasets registered in DATA_SOURCES")
 

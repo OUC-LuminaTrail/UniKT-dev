@@ -5,9 +5,9 @@ sys.path.insert(0, ".")
 
 import model  # noqa: F401
 from utils.config.param_config import DataParams, EarlyStoppingParams, GeneralParams
-from utils.core import PARAM_CONFIGS
+from utils.core import PARAM_CONFIGS, get_supported_models
 
-models = list(PARAM_CONFIGS.keys())
+models = get_supported_models()
 print(json.dumps({"type": "models", "data": models}))
 
 for model_name in models:

@@ -120,6 +120,17 @@ class UniversalRegistry:
         seen += [k for k in self._index if k not in self._registry]
         return seen
 
+    def __bool__(self) -> bool:
+        """Return ``True`` if the registry has any entries (loaded or indexed).
+
+        This makes ``if not REGISTRY`` behave as expected for empty registries.
+        """
+        return bool(self._registry) or bool(self._index)
+
+    def __len__(self) -> int:
+        """Return the number of unique registered entries (loaded + indexed)."""
+        return len(self.keys())
+
     def __contains__(self, name: object) -> bool:
         """Check whether a name is registered.
 
