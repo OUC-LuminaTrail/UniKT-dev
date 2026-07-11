@@ -64,6 +64,16 @@ class LBKTModelData(QuestionModelData):
         fold_idx = args.fold if args.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
+        if fold_idx is None:
+            raise ValueError("fold_idx must be specified for K-fold cross-validation")
+        if fold_idx < 0 or fold_idx >= kfold_n_splits:
+            raise ValueError(
+                f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
+            )
+        logger.info(
+            f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
+        )
+
         (
             user_sequence,
             user_response,
@@ -71,29 +81,19 @@ class LBKTModelData(QuestionModelData):
             user_time_factor,
             user_attempt_factor,
             user_hint_factor,
-        ) = self.load_sequence_data_with_factors()
+        ) = self.load_sequence_data_with_factors(fold_idx=fold_idx)
 
         q_matrix = self.build_q_matrix(gamma=args.q_gamma)
 
-        if fold_idx is not None:
-            if fold_idx < 0 or fold_idx >= kfold_n_splits:
-                raise ValueError(
-                    f"fold_idx {fold_idx} is out of range [0, {kfold_n_splits})"
-                )
-            logger.info(
-                f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
-            )
-            train_data, val_data, test_data = self.split_kfold_data(
-                user_sequence,
-                user_response,
-                user_mask,
-                user_time_factor,
-                user_attempt_factor,
-                user_hint_factor,
-                fold_idx=fold_idx,
-            )
-        else:
-            raise ValueError("fold_idx must be specified for K-fold cross-validation")
+        train_data, val_data, test_data = self.split_kfold_data(
+            user_sequence,
+            user_response,
+            user_mask,
+            user_time_factor,
+            user_attempt_factor,
+            user_hint_factor,
+            fold_idx=fold_idx,
+        )
 
         train_dataset = LBKTDataset(*train_data)
         val_dataset = LBKTDataset(*val_data)
@@ -101,13 +101,15 @@ class LBKTModelData(QuestionModelData):
 
         return train_dataset, val_dataset, test_dataset, q_matrix
 
-    def load_sequence_data_with_factors(self):
+    def load_sequence_data_with_factors(self, fold_idx: int):
         """加载用户答题序列并计算行为因子。
 
         - time_factor: norm(mean_log, std_log).cdf(log(response_time))
           其中 mean_log/std_log 是每个 question 的 log(响应时间) 的统计量
         - attempt_factor: 1 - poisson.cdf(attempt - 1, mean_attempts)
         - hint_factor: 1 - poisson.cdf(hint - 1, mean_hints)
+
+        所有 per-question 统计量仅基于训练折（fold != fold_idx 且 fold != -1）。
         """
         logger.info("Building response sequences with behavioral factors...")
 
@@ -119,10 +121,13 @@ class LBKTModelData(QuestionModelData):
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_users = data["user"].nunique()
 
+        fold_labels = data["fold"].values
+        train_mask = (fold_labels != fold_idx) & (fold_labels != -1)
+
         logger.info("Computing behavioral factors...")
-        time_factors = self._compute_time_factor(data)
-        attempt_factors = self._compute_attempt_factor(data)
-        hint_factors = self._compute_hint_factor(data)
+        time_factors = self._compute_time_factor(data, train_mask)
+        attempt_factors = self._compute_attempt_factor(data, train_mask)
+        hint_factors = self._compute_hint_factor(data, train_mask)
 
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_response = np.zeros((num_users, max_seq_len), dtype=int)
@@ -150,12 +155,12 @@ class LBKTModelData(QuestionModelData):
             user_hint_factor,
         )
 
-    def _compute_time_factor(self, data) -> np.ndarray:
+    def _compute_time_factor(self, data, train_mask) -> np.ndarray:
         """计算时间因子。
 
         1. ms_first_response 毫秒转秒
         2. 仅对 response_time > 0 的行取 log
-        3. 按 question 分组计算有效 log(time) 的 mean 和 std
+        3. 按 question 分组计算有效 log(time) 的 mean 和 std（仅训练折）
         4. time_factor = norm(mean, std).cdf(log(response_time))
         5. std == 0 时 time_factor = 1
         6. response_time == 0 的行（padding/缺失）time_factor = 1
@@ -165,20 +170,34 @@ class LBKTModelData(QuestionModelData):
         time_factors = np.ones(len(data), dtype=np.float32)
 
         valid_mask = response_times > 0
-        if not np.any(valid_mask):
+        stats_mask = valid_mask & train_mask
+        if not np.any(stats_mask):
             return time_factors
 
         valid_log_times = np.log(response_times[valid_mask])
         valid_questions = data.loc[valid_mask, "question"]
 
-        valid_df = valid_questions.to_frame()
-        valid_df["_log_time"] = valid_log_times
-        question_stats = valid_df.groupby("question")["_log_time"].agg(["mean", "std"])
+        stats_log_times = np.log(response_times[stats_mask])
+        stats_questions = data.loc[stats_mask, "question"]
+
+        stats_df = stats_questions.to_frame()
+        stats_df["_log_time"] = stats_log_times
+        question_stats = stats_df.groupby("question")["_log_time"].agg(["mean", "std"])
         question_stats["std"] = question_stats["std"].fillna(0)
+
+        # 训练集未覆盖的 question 回退到训练折全局统计
+        global_mean = float(stats_log_times.mean())
+        global_std = float(stats_log_times.std())
+        if np.isnan(global_std):
+            global_std = 0.0
 
         # 向量化：通过 map 查表获取每行的 mean/std，一次性计算 CDF
         means = valid_questions.map(question_stats["mean"]).values.astype(np.float64)
         stds = valid_questions.map(question_stats["std"]).values.astype(np.float64)
+
+        missing = np.isnan(means)
+        means[missing] = global_mean
+        stds[missing] = global_std
 
         has_std = stds > 0
         if np.any(has_std):
@@ -192,27 +211,38 @@ class LBKTModelData(QuestionModelData):
 
         return time_factors
 
-    def _compute_attempt_factor(self, data) -> np.ndarray:
+    def _compute_attempt_factor(self, data, train_mask) -> np.ndarray:
         """计算尝试因子。
 
         1 - poisson.cdf(attempt - 1, mean_attempts)
-        其中 mean_attempts 为每个 question 的平均尝试次数。
+        其中 mean_attempts 为每个 question 的平均尝试次数（仅训练折）。
         """
         attempt_counts = data["attempt_count"].values.astype(np.float64)
-        mean_attempts = data.groupby("question")["attempt_count"].mean()
-        mean_per_row = data["question"].map(mean_attempts).values
+        train_data = data.loc[train_mask]
+        mean_attempts = train_data.groupby("question")["attempt_count"].mean()
+        mean_per_row = data["question"].map(mean_attempts).values.astype(np.float64)
+
+        # 训练集未覆盖的 question 回退到训练折全局平均尝试次数
+        global_mean = float(train_data["attempt_count"].mean())
+        mean_per_row[np.isnan(mean_per_row)] = global_mean
 
         return (1 - poisson.cdf(attempt_counts - 1, mean_per_row)).astype(np.float32)
 
-    def _compute_hint_factor(self, data) -> np.ndarray:
+    def _compute_hint_factor(self, data, train_mask) -> np.ndarray:
         """计算提示因子。
 
         - mean_hints > 0 时：1 - poisson.cdf(hint - 1, mean_hints)
         - mean_hints == 0 时：hint_factor = 0
+        mean_hints 为每个 question 的平均提示次数（仅训练折）。
         """
         hint_counts = data["hint_count"].values.astype(np.float64)
-        mean_hints_series = data.groupby("question")["hint_count"].mean()
-        mean_hints = data["question"].map(mean_hints_series).values
+        train_data = data.loc[train_mask]
+        mean_hints_series = train_data.groupby("question")["hint_count"].mean()
+        mean_hints = data["question"].map(mean_hints_series).values.astype(np.float64)
+
+        # 训练集未覆盖的 question 回退到训练折全局平均提示次数
+        global_mean = float(train_data["hint_count"].mean())
+        mean_hints[np.isnan(mean_hints)] = global_mean
 
         hint_factors = np.zeros(len(data), dtype=np.float32)
         mask = mean_hints > 0
