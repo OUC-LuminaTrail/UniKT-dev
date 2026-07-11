@@ -2,6 +2,7 @@ from collections import defaultdict
 from functools import partial
 
 import numpy as np
+import polars as pl
 import torch
 from torch.utils.data import Dataset
 
@@ -76,7 +77,7 @@ class SQGKTModelData(QuestionModelData):
 
         logger.info("Building student-question graph...")
         q_neighbors_2, uq_stat_q = self.build_sq_graph(
-            num_questions, args.user_neighbor_num
+            num_questions, args.user_neighbor_num, args.fold
         )
 
         train_data, val_data, test_data = self.split_kfold_data(
@@ -161,7 +162,7 @@ class SQGKTModelData(QuestionModelData):
             )
         return question_neighbors, skill_neighbors
 
-    def build_sq_graph(self, num_questions, k):
+    def build_sq_graph(self, num_questions, k, fold_idx):
         """学生-问题图（论文 §4.1–4.2）。
 
         对每个问题 q_j 采样 k 个答过它的学生，并按论文式 (6) 计算边权 g_ij 的三个分量：
@@ -169,11 +170,15 @@ class SQGKTModelData(QuestionModelData):
           g^p   : 基于 attempt_count（泊松）的知识获取因子（式 2–3）
           g^n   : 基于 hint_count（泊松）的知识获取因子（式 4–5）
         三分量按位存储（g_ij = w_c·c + w_p·g^p + w_n·g^n 中的可学习权重在模型中）。
+        统计量仅基于训练折（fold != fold_idx 且 fold != -1）。
         返回 q_neighbors_2[num_questions, k]（采样学生 id）与 uq_stat_q[num_questions, k, 3]。
         """
         from scipy.stats import poisson
 
-        data = self.data_src.get_split_question_sequence_data().to_pandas()
+        data = self.data_src.get_split_question_sequence_data()
+        data = data.filter(
+            (pl.col("fold") != fold_idx) & (pl.col("fold") != -1)
+        ).to_pandas()
         eta, alpha, beta = 10.0, 0.3, 0.7
 
         # 学生整体正确率 c_i（式 1）
