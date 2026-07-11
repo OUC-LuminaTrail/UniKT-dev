@@ -254,7 +254,7 @@ async function onStartTraining() {
     if (showKfoldSelector.value && selectedFolds.value.length > 1) {
       await confirmMultiFold()
       let created = 0
-      for (const fold of selectedFolds.value) {
+      for (const fold of [...selectedFolds.value].sort((a, b) => a - b)) {
         await createTask({
           name: buildTaskName(fold),
           env_id: envId.value,

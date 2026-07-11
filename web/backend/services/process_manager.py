@@ -601,58 +601,28 @@ class ProcessManager:
         return False
 
     def recover_tasks(self) -> None:
-        """Reattach live orphans, reap stale interrupted rows, and requeue pending.
+        """Reattach live orphans, re-queue dead in-flight tasks, then queue pending.
 
-        ``interrupted`` rows left by a prior shutdown carry ``pid=None`` (dead),
-        so they are reaped here — otherwise ``_slot_usage`` would keep counting
-        them and their GPU slots would leak. Snapshot interrupted before the
-        running/stopping loop, since that loop transitions live tasks into
-        ``interrupted`` and must not be processed twice.
+        In-flight tasks whose process is gone (interrupted by a prior shutdown,
+        or crashed) are put back to ``pending`` so they re-run instead of being
+        lost; live orphans are re-attached. Pending tasks are then queued in
+        ``id`` order, which matches creation (fold) order and keeps the queue
+        stable across restarts.
         """
         with SessionLocal() as session:
-            interrupted = (
-                session.query(Task.id, Task.pid)
-                .filter(Task.status == "interrupted")
+            inflight = (
+                session.query(Task.id, Task.pid, Task.status)
+                .filter(Task.status.in_(["running", "stopping", "interrupted"]))
                 .all()
             )
-            for task_id, pid in interrupted:
+            for task_id, pid, prior_status in inflight:
                 if pid and psutil.pid_exists(pid):
                     try:
                         if psutil.Process(pid).is_running():
-                            t = threading.Thread(
-                                target=self._recover_monitor,
-                                args=(task_id, pid),
-                                daemon=True,
-                            )
-                            t.start()
-                            with self._lock:
-                                self._recover_monitors[task_id] = t
-                            continue
-                    except psutil.NoSuchProcess:
-                        pass
-                transition(
-                    session,
-                    Task,
-                    task_id,
-                    "interrupted",
-                    "failed",
-                    finished_at=datetime.now(),
-                    pid=None,
-                )
-
-            running = (
-                session.query(Task.id, Task.pid, Task.status)
-                .filter(Task.status.in_(["running", "stopping"]))
-                .all()
-            )
-            for task_id, pid, prior_status in running:
-                if pid and psutil.pid_exists(pid):
-                    try:
-                        proc = psutil.Process(pid)
-                        if proc.is_running():
-                            transition(
-                                session, Task, task_id, prior_status, "interrupted"
-                            )
+                            if prior_status != "interrupted":
+                                transition(
+                                    session, Task, task_id, prior_status, "interrupted"
+                                )
                             t = threading.Thread(
                                 target=self._recover_monitor,
                                 args=(task_id, pid),
@@ -669,15 +639,18 @@ class ProcessManager:
                     Task,
                     task_id,
                     prior_status,
-                    "failed",
-                    finished_at=datetime.now(),
+                    "pending",
                     pid=None,
+                    gpu_assigned=None,
+                    started_at=None,
+                    finished_at=None,
+                    exit_code=None,
                 )
 
             pending = (
                 session.query(Task.id, Task.gpu_request)
                 .filter(Task.status == "pending")
-                .order_by(Task.created_at)
+                .order_by(Task.id)
                 .all()
             )
             with self._lock:
@@ -717,12 +690,23 @@ class ProcessManager:
             self._recover_monitors.pop(task_id, None)
 
     def shutdown(self) -> None:
-        """Stop the scheduler, terminate running tasks, mark them interrupted."""
+        """Stop the scheduler, kill running tasks, and mark them interrupted.
+
+        Running subprocess groups are SIGKILLed so no orphans survive the
+        backend exit and get double-run after ``recover_tasks`` re-queues them.
+        On the next start, recover_tasks puts these interrupted rows back to
+        ``pending`` so they re-run instead of being lost.
+        """
         self._stopping = True
         self._wake.set()
         with contextlib.suppress(Exception):
             self._thread.join(timeout=10)
 
+        for proc in list(self._running.values()):
+            with contextlib.suppress(Exception):
+                self._kill_process_group(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=3)
         for task_id in list(self._running):
             self._cleanup(task_id)
 
@@ -730,8 +714,6 @@ class ProcessManager:
             session.query(Task).filter(Task.status.in_(["running", "stopping"])).update(
                 {
                     "status": "interrupted",
-                    "exit_code": -15,
-                    "finished_at": datetime.now(),
                     "pid": None,
                 }
             )

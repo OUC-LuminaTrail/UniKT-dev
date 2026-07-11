@@ -32,6 +32,10 @@ TASK_TRANSITIONS: set[tuple[str, str]] = {
     ("interrupted", "stopped"),
     ("interrupted", "completed"),
     ("interrupted", "failed"),
+    # Re-queue an in-flight task for re-run on backend restart.
+    ("running", "pending"),
+    ("stopping", "pending"),
+    ("interrupted", "pending"),
 }
 
 # Preprocess: no queue, but shares the interrupted/recover lifecycle.
