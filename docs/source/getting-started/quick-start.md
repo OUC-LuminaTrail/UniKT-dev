@@ -45,10 +45,10 @@ flowchart LR
 
 典型工作流程：
 
-1. [下载](../experiment-guide/data-processing.md) 原始数据集
-2. [处理](../experiment-guide/data-processing.md) 数据为标准化格式，生成 K 折划分
-3. [训练](../experiment-guide/training-evaluation.md) 知识追踪模型
-4. [评估](../experiment-guide/evaluation.md) 模型性能
+1. [下载](../user-guide/data-processing.md) 原始数据集
+2. [处理](../user-guide/data-processing.md) 数据为标准化格式，生成 K 折划分
+3. [训练](../user-guide/training-evaluation.md) 知识追踪模型
+4. [评估](../user-guide/evaluation.md) 模型性能
 
 ## 输出
 
@@ -64,6 +64,6 @@ runs/normal/GIKT_assistments09_20240403-120000_fold0_bs128/
 
 ## 下一步
 
-- [配置系统](../advanced-guide/config.md) — 了解命令行参数
-- [模型评估](../experiment-guide/evaluation.md) — 解读评估指标
-- [添加新模型](../experiment-guide/new-model.md) — 接入自己的模型
+- [配置系统](../advanced/config.md) — 了解命令行参数
+- [模型评估](../user-guide/evaluation.md) — 解读评估指标
+- [添加新模型](../user-guide/new-model.md) — 接入自己的模型

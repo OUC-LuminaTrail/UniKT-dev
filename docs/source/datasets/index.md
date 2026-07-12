@@ -58,8 +58,7 @@ python data_process.py process -d assistments09 \
     --seed 42
 ```
 
-详细流程文档请参阅[数据预处理](../docs/experiment-guide/data-processing.md)。
-
+详细流程文档请参阅[数据预处理](../user-guide/data-processing.md)。
 
 ```{toctree}
 :maxdepth: 1

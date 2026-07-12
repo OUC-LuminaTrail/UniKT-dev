@@ -5,9 +5,9 @@
 ```{rubric} 快速导航
 ```
 
-- [快速上手](docs/introduction/quick-start.md) —— 安装与第一次训练
+- [快速上手](getting-started/quick-start.md) —— 安装与第一次训练
 - [模型基准](model-zoo.md) —— 各模型在标准数据集上的性能对比
-- [框架数据流](docs/advanced-guide/data-flow.md) —— 端到端架构详解
+- [框架数据流](advanced/data-flow.md) —— 端到端架构详解
 
 ::::{grid} 1 2 2 2
 :gutter: 2
@@ -44,8 +44,11 @@
 :maxdepth: 2
 :hidden:
 
-docs/index
-api/index
-datasets/index
+getting-started/index
 model-zoo
+datasets/index
+user-guide/index
+advanced/index
+api/index
+about/index
 ```

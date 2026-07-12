@@ -1,4 +1,4 @@
-# 文档
+# 快速上手
 
 UniKT 是一个基于 PyTorch 和 PyTorch Geometric 构建的统一知识追踪研究实验框架。
 
@@ -46,9 +46,6 @@ graph TB
 ```{toctree}
 :maxdepth: 1
 
-introduction/index
-experiment-guide/index
-auxiliary-tool/index
-advanced-guide/index
-notes/index
+quick-start
+setup
 ```

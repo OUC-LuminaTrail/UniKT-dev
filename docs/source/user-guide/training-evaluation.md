@@ -4,11 +4,11 @@
 
 ## 前置条件
 
-训练前，请确保环境已正确配置。安装选项请参阅[快速上手](../introduction/quick-start.md)：
+训练前，请确保环境已正确配置。安装选项请参阅[快速上手](../getting-started/quick-start.md)：
 
 - **Pixi**（推荐）：GPU 使用 ``pixi shell``，CPU 使用 ``pixi shell -e cpu``，Mamba 模型使用 ``pixi shell -e mamba``
 - **自动 Conda**：使用 ``./scripts/setup_env.sh`` 自动配置
-- **手动 Conda**：按照[环境配置](../introduction/setup.md)中的指南操作
+- **手动 Conda**：按照[环境配置](../getting-started/setup.md)中的指南操作
 
 ## 训练流程
 

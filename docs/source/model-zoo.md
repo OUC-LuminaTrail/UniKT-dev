@@ -90,7 +90,7 @@ python train.py -m DKT -d assistments09 --fold 0
 
 ## 贡献新模型
 
-请参考[自定义模型](docs/advanced-guide/customize-model.md)。基本步骤：
+请参考[自定义模型](advanced/customize-model.md)。基本步骤：
 
 1. 在 ``model/<YourModel>/`` 下创建 ``*_trainer.py``、``*_data.py``、``*_model.py``
 2. 注册模型：``@register_trainer("YourModel")``、``@register_model_params("YourModel")``
