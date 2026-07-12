@@ -629,12 +629,12 @@ msgstr ""
 
 #: ../../source/user-guide/evaluation.md:196 37fae383eaa048c38c6341f710758486
 msgid "飞书告警"
-msgstr "Feishu alerts"
+msgstr "Lark alerts"
 
 #: ../../source/user-guide/evaluation.md:198 8a395dcc2b194c1ba4fa506f54d88635
 msgid "SwanLab 支持通过飞书机器人推送训练异常通知。在 ``.env`` 中添加："
 msgstr ""
-"SwanLab supports pushing training exception notifications via a Feishu bot. "
+"SwanLab supports pushing training exception notifications via a Lark bot. "
 "Add the following to ``.env``:"
 
 #: ../../source/user-guide/evaluation.md:205 e532e8f473484b7282251eeba91409ed
@@ -643,7 +643,7 @@ msgid ""
 "配对使用。"
 msgstr ""
 "Once configured, training exceptions (e.g. gradient explosions) are pushed in "
-"real time via the Feishu bot. ``LARK_SECRET`` is the signing key, paired "
+"real time via the Lark bot. ``LARK_SECRET`` is the signing key, paired "
 "with ``LARK_WEBHOOK_URL``."
 
 #: ../../source/user-guide/evaluation.md:207 0b365f78065b4a4a89dce8d07cedc43e
