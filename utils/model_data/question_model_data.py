@@ -261,12 +261,11 @@ class QuestionModelData(BaseModelData):
               e.g. questions sharing the same skill/template/assignment.
 
         Args:
-            edge_type: Edge type triplet (vertex_type, relation, hyperedge_type).
-                       Examples: ('question', 'has', 'skill'),
-                                 ('question', 'belongs_to', 'template'),
-                                 ('question', 'in', 'assignment').
-            vertex_type: Vertex type (optional). Defaults to the first element
-                         of edge_type (typically 'question').
+            edge_type: Edge type triplet (vertex_type, relation, hyperedge_type). Examples:
+                ('question', 'has', 'skill'), ('question', 'belongs_to', 'template'),
+                ('question', 'in', 'assignment').
+            vertex_type: Vertex type (optional). Defaults to the first element of
+                edge_type (typically 'question').
 
         Returns:
             dhg.Hypergraph: DHG framework hypergraph object.

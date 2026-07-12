@@ -207,7 +207,7 @@ class SkillModelData(BaseModelData):
 
         Returns:
             Tuple of (user_sequence, user_response, user_mask,
-                      user_id_sequence, user_question) as numpy arrays,
+            user_id_sequence, user_question) as numpy arrays,
             each of shape (num_split_users, max_seq_len).
         """
         import numpy as np
@@ -253,8 +253,8 @@ class SkillModelData(BaseModelData):
 
         Returns:
             Tuple of (user_sequence, user_response, user_mask,
-                      user_id_sequence, late_group_id, user_true_labels,
-                      user_question) as numpy arrays,
+            user_id_sequence, late_group_id, user_true_labels,
+            user_question) as numpy arrays,
             each of shape (num_samples, max_seq_len).
         """
         import numpy as np

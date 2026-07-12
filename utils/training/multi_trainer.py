@@ -117,16 +117,15 @@ class MultiTrainer(BaseTrainer):
     """Multi-stage trainer.
 
     Subclasses must implement:
+
     1. :meth:`build_stages`: Return the ordered list of stages.
-    2. :meth:`forward_pass`: ``forward_pass(batch_data)``, distinguishing
-       the current stage via ``self._current_stage``.
+    2. :meth:`forward_pass`: ``forward_pass(batch_data)``, distinguishing the current stage via ``self._current_stage``.
 
     Optional overrides:
+
     3. :meth:`on_stage_begin`: Preparation before a stage (default no-op).
-    4. :meth:`on_stage_complete`: Post-stage processing (default no-op),
-       often used to pass data to the next stage.
-    5. :meth:`_compute_loss`: Custom loss computation (defaults to
-       ``self.loss(y_hat, y_label)``).
+    4. :meth:`on_stage_complete`: Post-stage processing (default no-op), often used to pass data to the next stage.
+    5. :meth:`_compute_loss`: Custom loss computation (defaults to ``self.loss(y_hat, y_label)``).
 
     Construction accepts ``device`` / ``seed`` for device and random
     seed, then uses chained :meth:`with_experiment` and :meth:`build`
