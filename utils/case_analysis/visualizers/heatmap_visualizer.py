@@ -23,8 +23,7 @@ class HeatmapVisualizer:
     - Top row: question label (q0, q1, ...) for each time step
     - Second row: skill label (c0, c1, ...) for each time step
     - Third row: correctness marker (✓/✗) for each time step
-    - Main body: heatmap where each row is a skill's knowledge state over time
-      (colour encodes mastery level, green=high, red=low)
+    - Main body: heatmap where each row is a skill's knowledge state over time (colour encodes mastery level, green=high, red=low)
 
     Requires the predictions DataFrame to contain a 'knowledge_state' column
     (list of floats per row, one value per skill).

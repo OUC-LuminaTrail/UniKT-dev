@@ -1,0 +1,7 @@
+sphinx>=7
+furo
+myst-parser
+sphinxcontrib-mermaid
+sphinx-design
+sphinx-copybutton
+sphinx-intl

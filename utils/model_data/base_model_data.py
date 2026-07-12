@@ -41,7 +41,8 @@ class BaseModelData(ABC):
     def disk_cache(cache_name: str | None = None):
         """Decorator factory providing disk caching for instance methods.
 
-        Usage:
+        Usage::
+
             @BaseModelData.disk_cache()
             def prepare_data(self, args):
                 ...
@@ -51,8 +52,7 @@ class BaseModelData(ABC):
                 ...
 
         Args:
-            cache_name: Cache filename prefix (optional). Defaults to the
-                        decorated function name.
+            cache_name: Cache filename prefix (optional). Defaults to the decorated function name.
 
         Notes:
             - Caching is only enabled when the instance's ``self._cache`` is True.
@@ -366,15 +366,12 @@ class BaseModelData(ABC):
 
         Args:
             edge_type: Edge type triplet (source_node_type, relation_name, target_node_type).
-                       Node types correspond to column names in the data
-                       (e.g. 'user', 'question', 'skill', 'template', 'assignment').
-                       Examples: ('user', 'answers', 'question'),
-                                 ('question', 'has', 'skill'),
-                                 ('question', 'belongs_to', 'template'),
-                                 ('skill', 'related_to', 'assignment').
-            value_type: Matrix value type:
-                       - 'binary': Binary matrix indicating relationship existence (default).
-                       - 'count': Count matrix indicating relationship frequency.
+                Node types correspond to column names in the data (e.g. 'user',
+                'question', 'skill', 'template', 'assignment'). Examples:
+                ('user', 'answers', 'question'), ('question', 'has', 'skill'),
+                ('question', 'belongs_to', 'template'), ('skill', 'related_to', 'assignment').
+            value_type: Matrix value type. 'binary' indicates relationship existence
+                (default); 'count' indicates relationship frequency.
 
         Returns:
             data_matrix: numpy array of shape (num_src_nodes, num_dst_nodes).

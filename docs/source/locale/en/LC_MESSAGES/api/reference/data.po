@@ -1,0 +1,944 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025-2026, UniKT Team
+# This file is distributed under the same license as the UniKT package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: UniKT \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../source/api/reference/data.md:1 52663b0cd5d644b2b7101caa9ab93186
+msgid "数据处理"
+msgstr "Data processing"
+
+#: ../../source/api/reference/data.md:3 f2a7884c8e5f429e91fca5de1ee641d9
+msgid ""
+"模型级数据基类与数据源基类。各数据集处理器（`utils/data_process/<dataset>.py`）均继承 "
+"`DataSource`，按需实现 `load_src_data` / `clean_raw_data` / `transform_data`。"
+msgstr ""
+"Model-level data base classes and data source base class. Each dataset handler "
+"(`utils/data_process/<dataset>.py`) inherits `DataSource` and implements "
+"`load_src_data` / `clean_raw_data` / `transform_data` as needed."
+
+#: 7969e0eb86cf45a6ba2cc727b49bd6ae of utils.model_data.base_model_data:1
+msgid "Base model data class for knowledge tracing datasets."
+msgstr "Base model data class for knowledge tracing datasets."
+
+#: 42bb862ca0ed40848ca934eba86427e4 of utils.model_data.base_model_data:3
+msgid ""
+"Provides the abstract foundation for preparing model-ready data, "
+"including K-fold splitting, difficulty calculation, and relationship "
+"matrix building."
+msgstr ""
+"Provides the abstract foundation for preparing model-ready data, "
+"including K-fold splitting, difficulty calculation, and relationship "
+"matrix building."
+
+#: 9adeb4dfaaba42ddb164e62c343a4fc3 b3c08a748e59485cb50f143e7573c148 of
+#: utils.data_process.data_source.DataSource:1
+#: utils.model_data.base_model_data.BaseModelData:1
+msgid "基类：:py:class:`~abc.ABC`"
+msgstr "Bases: :py:class:`~abc.ABC`"
+
+#: 1b695855aa57442b83e32e67ffba2829 of
+#: utils.model_data.base_model_data.BaseModelData:1
+msgid "Abstract base class for model data preparation."
+msgstr "Abstract base class for model data preparation."
+
+#: ../../source/api/reference/data.md 06c6046087b4419cac45f62815f4cacb
+#: 221b9361a8114e88bebb040df8e54f75 2d03eeef404a4a96908fb73cdb8dc98b
+#: 3088f1de68a94b339e873b112d8984f4 49e6f44ddbdc48efb7cb825e1b976671
+#: 5be162c83e0d4620a69aef3eb337c03d 5e0eeeee653d4f71a268605c9afc6562
+#: 7adbc865be3b4153b3065ed733183ced 7dcd7eff62754eb784ad1e156d1a4de1
+#: 89096ee23a4e47bda0f2f811f67d042b 8b7e9e659f5a43bd81c07c32bd717035
+#: 8f1015da6e6a44f4ba1fbdffa1fb1f0a a6a45604d84e4dd593fe687c2504c082
+#: ab625d49e6e34bb98c72382f13a17789 ae1f3a91b3d44e01a33a298c2241e9eb
+#: bad88df3b473470991bccb2f5d9619ab badbe3c183404c6c914331342259d8bb
+#: c28c5c657a3b478cac31a673189b5c1f cfb5470f6c224df0ab5235e68725d2fa
+#: d2feda3b6a8044dd967c11525f1ce008 e067e1a331e34b46a9ab3b4f6ebaa1fa
+#: e24fb2134a8242abb863de157304b471 f2705399d3c54f31b6d0acac717f9048
+#: f7ce69856d524452a6f5a15396bfd740 f80e7d4f02664748bac6976aa2ac5b43 of
+#: utils.data_process.data_source.DataSource.compute_md5
+#: utils.data_process.data_source.DataSource.get_metadata
+#: utils.data_process.data_source.DataSource.get_relation
+#: utils.data_process.data_source.DataSource.update_metadata
+#: utils.data_process.data_source.DataSource.update_metadatas
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph
+#: utils.model_data.skill_model_data.WindowlateIterableDataset
+msgid "参数"
+msgstr "Parameters"
+
+#: c947a99e449345ab84b6335dfc3b06f0 of
+#: utils.model_data.base_model_data.BaseModelData:3
+msgid "Data source object."
+msgstr "Data source object."
+
+#: 66dca36f3d68464c9dc9d13dec81f554 of
+#: utils.model_data.base_model_data.BaseModelData:4
+msgid "Whether to enable disk caching for expensive operations."
+msgstr "Whether to enable disk caching for expensive operations."
+
+#: 840ae197ace746798e68c877a0c8c966 of
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix:1
+msgid "Build a relationship matrix between entity types."
+msgstr "Build a relationship matrix between entity types."
+
+#: 89bd2062ecfe4c42b35fe786938793c6 of
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix:3
+msgid ""
+"Edge type triplet (source_node_type, relation_name, target_node_type). "
+"Node types correspond to column names in the data (e.g. 'user', "
+"'question', 'skill', 'template', 'assignment'). Examples: ('user', "
+"'answers', 'question'), ('question', 'has', 'skill'), ('question', "
+"'belongs_to', 'template'), ('skill', 'related_to', 'assignment')."
+msgstr ""
+"Edge type triplet (source_node_type, relation_name, target_node_type). "
+"Node types correspond to column names in the data (e.g. 'user', "
+"'question', 'skill', 'template', 'assignment'). Examples: ('user', "
+"'answers', 'question'), ('question', 'has', 'skill'), ('question', "
+"'belongs_to', 'template'), ('skill', 'related_to', 'assignment')."
+
+#: 5ac3a467de06453caebc6d7709ed9207 of
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix:8
+msgid ""
+"Matrix value type. 'binary' indicates relationship existence (default); "
+"'count' indicates relationship frequency."
+msgstr ""
+"Matrix value type. 'binary' indicates relationship existence (default); "
+"'count' indicates relationship frequency."
+
+#: ../../source/api/reference/data.md 122253d0dc9f4d51a13ec8229eb58cb7
+#: 1dfadfae03b24a1087c0c929100baf9a 364f7cbafdb04300bf2b6a0ed3315b16
+#: 3a86f3bb88394e7985759bb25431fcd9 40fdfe5652374b25bb637352baba8394
+#: 45455b8d2e3e4bd580f877d346ece990 49e1a889c93b4bfbad4b20b83678cd90
+#: 656e29a6a1654c6898621172424755e8 9be3bd01bdaf4933a439709d6d9be91e
+#: bb0f7014fae44812b7b805e152704170 c8c5dcb70fdf445e8c22181b4d0ddfd2
+#: d95f72800be64952855a57c5780bfc85 e0f560cf2a5443a78b6d633ce87d60d5
+#: ea14f9e48adb4e558ca8407ab46e9816 of
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph
+msgid "返回"
+msgstr "Returns"
+
+#: 8f467a01261f49109bd02117201f30d7 of
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix:11
+msgid "numpy array of shape (num_src_nodes, num_dst_nodes)."
+msgstr "numpy array of shape (num_src_nodes, num_dst_nodes)."
+
+#: ../../source/api/reference/data.md 026b3a7a30094a97960c80d5b0db4bdf
+#: 043d02fd23424390bd8ae94aa0747545 2ca9d49300074ff5b4bbf5647416c1bd
+#: 2e82b59b888644318b1ad1b9b09e4e3b 3405ee1d5fb2403b95be6e60903d95d7
+#: 3efda8d060b24cb78a1a0f89f05d5bb0 4f9e5dc430d94feba4227cd73b4c4ea6
+#: 59ef2bda96174713bbdcbc369b40adc4 705ae075e7d6467c806d8a461a1a5c07
+#: 9e507257c2c944ef9489e64694c016ae a05a2ef355ef4b45962d7409a661200a
+#: aff9a5cd2757469ca930538f697a96c8 b5daa1652f5c4ccaa558a4cbaa41df4d
+#: d550e9bd021c4804a6a55d76298d0a3c da9f18f324874c71a92a419992f3f67d
+#: e77eeac604344893bf0b8453cac74523 e7d6bdc189c74015aba6e3ed97fa9f22
+#: f024b72285a9426083305592e865f44e of
+#: utils.data_process.data_source.DataSource.clean_raw_data
+#: utils.data_process.data_source.DataSource.compute_md5
+#: utils.data_process.data_source.DataSource.get_available_relations
+#: utils.data_process.data_source.DataSource.get_relation
+#: utils.data_process.data_source.DataSource.get_sequence_data
+#: utils.data_process.data_source.DataSource.get_split_question_sequence_data
+#: utils.data_process.data_source.DataSource.get_split_skill_sequence_data
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph
+msgid "返回类型"
+msgstr "Return type"
+
+#: 0512613c5cd545159a81bae466a664ee 8be0e529324346468b5c1d2358ec9d37
+#: f525203e279a48af83a7c0898c72beae of
+#: utils.model_data.base_model_data.BaseModelData.build_relationship_matrix:15
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:18
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:18
+msgid "示例"
+msgstr "Example"
+
+#: 897ce0c74bae4872bf2525b03a109cf2 of
+#: utils.model_data.base_model_data.BaseModelData.calculate_question_difficulty:1
+msgid "Calculate difficulty metrics for each question."
+msgstr "Calculate difficulty metrics for each question."
+
+#: 41a9bd9a37f74de3aee42f389f22f4cd of
+#: utils.model_data.base_model_data.BaseModelData.calculate_question_difficulty:3
+msgid ""
+"Difficulty is computed from: 1. Correct rate (correct_rate): correct "
+"answers / total answers 2. Average response time (avg_time): if the "
+"dataset has a time field 3. Hint rate (hint_rate): if the dataset has a "
+"hint field"
+msgstr ""
+"Difficulty is computed from: 1. Correct rate (correct_rate): correct "
+"answers / total answers 2. Average response time (avg_time): if the "
+"dataset has a time field 3. Hint rate (hint_rate): if the dataset has a "
+"hint field"
+
+#: 2063d3f5a1c64a299fef972eb7f2cc76 of
+#: utils.model_data.base_model_data.BaseModelData.calculate_question_difficulty:8
+msgid ""
+"Fold index to exclude (used during cross-validation to avoid data leakage"
+" from the validation fold)."
+msgstr ""
+"Fold index to exclude (used during cross-validation to avoid data leakage"
+" from the validation fold)."
+
+#: a23164d05b5e43dcae4d7f4fbc52654f of
+#: utils.model_data.base_model_data.BaseModelData.calculate_question_difficulty:11
+msgid "Question ID to difficulty score mapping (0-1, higher = harder)."
+msgstr "Question ID to difficulty score mapping (0-1, higher = harder)."
+
+#: ddffca4581004ac59ccd42e227687e16 of
+#: utils.model_data.base_model_data.BaseModelData.calculate_question_difficulty:14
+msgid "Formula:"
+msgstr "Formula:"
+
+#: c80896c7a1fd4b3980f82a5e80fd50ae of
+#: utils.model_data.base_model_data.BaseModelData.calculate_question_difficulty:15
+msgid ""
+"difficulty = (1 - correct_rate) * 0.6 + normalized_time * 0.3 + hint_rate"
+" * 0.1"
+msgstr ""
+"difficulty = (1 - correct_rate) * 0.6 + normalized_time * 0.3 + hint_rate"
+" * 0.1"
+
+#: 584e00ac0bf5435687f951a0aec6e173 of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:1
+msgid "Decorator factory providing disk caching for instance methods."
+msgstr "Decorator factory providing disk caching for instance methods."
+
+#: cef3adebb2ef4c25b5f8b7e34bf0ce32 of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:3
+msgid "Usage::"
+msgstr "Usage::"
+
+#: 79184a0ae7ed42b19a0c96a59852a776 of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:13
+msgid "Cache filename prefix (optional). Defaults to the decorated function name."
+msgstr "Cache filename prefix (optional). Defaults to the decorated function name."
+
+#: 3a166ccb5f0449ff85863334d8503725 96969e7047cf4f0287531345733ce580
+#: b3cebbd23a0341a886010a29f4563b76 of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:16
+#: utils.model_data.base_model_data.BaseModelData.split_data:13
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:12
+msgid "备注"
+msgstr "Note"
+
+#: 398fa175d3764c60912764bf362eda7f of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:17
+msgid "Caching is only enabled when the instance's ``self._cache`` is True."
+msgstr "Caching is only enabled when the instance's ``self._cache`` is True."
+
+#: 5fafb98d3f9447de8cd9efcc775d9229 of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:18
+msgid "Cache key is built from the class name, function name, and arguments."
+msgstr "Cache key is built from the class name, function name, and arguments."
+
+#: 5bd94057494e42f2b0c3d0d5934e5c05 of
+#: utils.model_data.base_model_data.BaseModelData.disk_cache:19
+msgid "Cache directory: ``.cache/<ClassName>/``."
+msgstr "Cache directory: ``.cache/<ClassName>/``."
+
+#: 3ef1b200072d4e81b9329fac9ce37bc0 of
+#: utils.model_data.base_model_data.BaseModelData.prepare_data:1
+msgid "Prepare data required by the model."
+msgstr "Prepare data required by the model."
+
+#: 526921669893404eb69a1aa67a32b544 b404ebc64c4c4647836ab7e310f44c8a of
+#: utils.model_data.base_model_data.BaseModelData.prepare_data:3
+#: utils.model_data.question_model_data.QuestionModelData.prepare_data:3
+msgid "Configuration arguments."
+msgstr "Configuration arguments."
+
+#: 5a50689cdbcd4f5787954a2503159f72 of
+#: utils.model_data.base_model_data.BaseModelData.split_data:1
+msgid "Randomly split data into training, validation, and test sets."
+msgstr "Randomly split data into training, validation, and test sets."
+
+#: 4183a56097794ebfb8532cd334a1adf2 of
+#: utils.model_data.base_model_data.BaseModelData.split_data:3
+msgid "Any number of arrays or tensors with samples as the first dimension."
+msgstr "Any number of arrays or tensors with samples as the first dimension."
+
+#: ad098ae753824879820fe8a3e4033cda of
+#: utils.model_data.base_model_data.BaseModelData.split_data:5
+msgid "Validation set ratio (default: 0.2)."
+msgstr "Validation set ratio (default: 0.2)."
+
+#: 7cfe2e8927a04654836d6d7b8846124f of
+#: utils.model_data.base_model_data.BaseModelData.split_data:6
+msgid "Test set ratio (default: 0.0, no test split)."
+msgstr "Test set ratio (default: 0.0, no test split)."
+
+#: 41a271531bc14ed1af4fa6876957d0dc of
+#: utils.model_data.base_model_data.BaseModelData.split_data:8
+msgid ""
+"``(train_data, val_data)``. If test_ratio > 0: ``(train_data, val_data, "
+"test_data)``."
+msgstr ""
+"``(train_data, val_data)``. If test_ratio > 0: ``(train_data, val_data, "
+"test_data)``."
+
+#: f0f529b07494420a91dabd5f4952258f of
+#: utils.model_data.base_model_data.BaseModelData.split_data:14
+msgid "Uses the first dimension of the first input as the sample dimension."
+msgstr "Uses the first dimension of the first input as the sample dimension."
+
+#: d580c67300a54e7f8254e88113c4a2ab of
+#: utils.model_data.base_model_data.BaseModelData.split_data:15
+msgid "All inputs must have matching first dimension sizes."
+msgstr "All inputs must have matching first dimension sizes."
+
+#: 6b28e5bd82b9409d94feb498c18bacf2 of
+#: utils.model_data.base_model_data.BaseModelData.split_data:16
+msgid "Compatible with both numpy.ndarray and torch.Tensor."
+msgstr "Compatible with both numpy.ndarray and torch.Tensor."
+
+#: fb2068c1388f420fb184271a790d9dda of
+#: utils.model_data.base_model_data.BaseModelData.split_data:17
+msgid ""
+"Splitting order: test set first, then validation from remaining, then "
+"training."
+msgstr ""
+"Splitting order: test set first, then validation from remaining, then "
+"training."
+
+#: 9625e451613145a6ba00c5606c0a1af3 of
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:1
+msgid "Split data into train, validation, and test sets by K-fold index."
+msgstr "Split data into train, validation, and test sets by K-fold index."
+
+#: 0f8086cdf61243eb9e2e3f0227049561 of
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:3
+msgid "Any number of arrays or tensors with users as the first dimension."
+msgstr "Any number of arrays or tensors with users as the first dimension."
+
+#: 441c7e568ee74616a016c8fb81c4a813 of
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:4
+msgid "Current fold index (keyword-only, required)."
+msgstr "Current fold index (keyword-only, required)."
+
+#: d804bbe84c4e430cb8d0eaac74380105 of
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:6
+msgid ""
+"Tuple of train slices with the same structure as input. val_data: Tuple "
+"of validation slices. test_data: Tuple of test slices."
+msgstr ""
+"Tuple of train slices with the same structure as input. val_data: Tuple "
+"of validation slices. test_data: Tuple of test slices."
+
+#: 1fee2b8b940e4e768e2335499cab0971 of
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:13
+msgid ""
+"Validation set uses the specified fold (fold_idx); test set uses fold == "
+"-1; training set uses remaining folds."
+msgstr ""
+"Validation set uses the specified fold (fold_idx); test set uses fold == "
+"-1; training set uses remaining folds."
+
+#: 537fd88b2bf04dc38d5ff92ad7ece31a of
+#: utils.model_data.base_model_data.BaseModelData.split_kfold_data:15
+msgid "Requires user-to-row-index mapping in the data source."
+msgstr "Requires user-to-row-index mapping in the data source."
+
+#: bca6ac64794a48c7b355a9ba4fbad53a of utils.model_data.question_model_data:1
+msgid "Question-level model data module."
+msgstr "Question-level model data module."
+
+#: 28f8a66db02e4c458ed4e2efe30404cb of utils.model_data.question_model_data:3
+msgid ""
+"Provides the QuestionModelData class for preparing question-level "
+"knowledge tracing model data, including sequence building and "
+"heterogeneous graph construction."
+msgstr ""
+"Provides the QuestionModelData class for preparing question-level "
+"knowledge tracing model data, including sequence building and "
+"heterogeneous graph construction."
+
+#: a1ba21d2c4ae42978c3db5ab2c3cca89 dd1c1e0154054ff2b2d0d29353e7498a of
+#: utils.model_data.question_model_data.QuestionModelData:1
+#: utils.model_data.skill_model_data.SkillModelData:1
+msgid "基类：:py:class:`~utils.model_data.base_model_data.BaseModelData`"
+msgstr "Bases: :py:class:`~utils.model_data.base_model_data.BaseModelData`"
+
+#: 2b41a95801794461bb6ca59c59cabc61 of
+#: utils.model_data.question_model_data.QuestionModelData:1
+msgid "Base class for question-level model data preparation."
+msgstr "Base class for question-level model data preparation."
+
+#: 2181313c55c045b98155e0c9c4f7b783 of
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:1
+msgid ""
+"Build a heterogeneous graph with flexible node and edge type "
+"configuration."
+msgstr ""
+"Build a heterogeneous graph with flexible node and edge type "
+"configuration."
+
+#: 1b03e2126f324c8bb4a21c044a25b09d of
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:3
+msgid ""
+"List of edge type triplets (source_type, relation, target_type). Example:"
+" [('user', 'answers', 'question'), ('question', 'has', 'skill')]."
+msgstr ""
+"List of edge type triplets (source_type, relation, target_type). Example:"
+" [('user', 'answers', 'question'), ('question', 'has', 'skill')]."
+
+#: 3219eac3ac35430c93d627687c57f551 of
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:5
+#, python-brace-format
+msgid ""
+"Edge attribute dictionary. Keys are edge type triplets, values are lists "
+"of attribute column names. Example: {('user', 'answers', 'question'): "
+"['label', 'timestamp']}. Defaults to None (no edge attributes)."
+msgstr ""
+"Edge attribute dictionary. Keys are edge type triplets, values are lists "
+"of attribute column names. Example: {('user', 'answers', 'question'): "
+"['label', 'timestamp']}. Defaults to None (no edge attributes)."
+
+#: 91707d933a7e44e9bf2376e03c89212b of
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:9
+msgid "Whether to build a directed graph. Defaults to False (undirected)."
+msgstr "Whether to build a directed graph. Defaults to False (undirected)."
+
+#: 7432f5d820634400980e3fdbed5bb46d of
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:10
+msgid ""
+"Node feature dictionary. Keys are node types, values are feature tensors "
+"or None. Defaults to using node IDs as features."
+msgstr ""
+"Node feature dictionary. Keys are node types, values are feature tensors "
+"or None. Defaults to using node IDs as features."
+
+#: bce45c98bbf64c98b4d3dda6a836e1ad of
+#: utils.model_data.question_model_data.QuestionModelData.build_hetero_graph:14
+msgid "PyTorch Geometric heterogeneous graph object."
+msgstr "PyTorch Geometric heterogeneous graph object."
+
+#: 6cecd2f7d68047e8b5862732c098a659 of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:1
+msgid "Build a hypergraph with flexible hyperedge type configuration."
+msgstr "Build a hypergraph with flexible hyperedge type configuration."
+
+#: a39874b89ebf4cbbb35220e4eac34df9 of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:3
+msgid "Hypergraph definition:"
+msgstr "Hypergraph definition:"
+
+#: 731c737733114f2fbaee3b3e74b0e5a3 of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:4
+msgid "Vertices: Typically question nodes."
+msgstr "Vertices: Typically question nodes."
+
+#: acd8da89c5ea4ca699a42dd51e55974e of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:5
+msgid ""
+"Hyperedges: Each hyperedge connects a group of related vertices, e.g. "
+"questions sharing the same skill/template/assignment."
+msgstr ""
+"Hyperedges: Each hyperedge connects a group of related vertices, e.g. "
+"questions sharing the same skill/template/assignment."
+
+#: d4743ee28b3a43f78e17a0edcbc220cf of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:8
+msgid ""
+"Edge type triplet (vertex_type, relation, hyperedge_type). Examples: "
+"('question', 'has', 'skill'), ('question', 'belongs_to', 'template'), "
+"('question', 'in', 'assignment')."
+msgstr ""
+"Edge type triplet (vertex_type, relation, hyperedge_type). Examples: "
+"('question', 'has', 'skill'), ('question', 'belongs_to', 'template'), "
+"('question', 'in', 'assignment')."
+
+#: 7e1e675d64de49e8afd51b012e6ec10f of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:11
+msgid ""
+"Vertex type (optional). Defaults to the first element of edge_type "
+"(typically 'question')."
+msgstr ""
+"Vertex type (optional). Defaults to the first element of edge_type "
+"(typically 'question')."
+
+#: 71810d5bfa2b4261976b10a00cd00943 of
+#: utils.model_data.question_model_data.QuestionModelData.build_hyper_graph:14
+msgid "DHG framework hypergraph object."
+msgstr "DHG framework hypergraph object."
+
+#: 91934bef0b0c4d2a82084a52380c0b86 of
+#: utils.model_data.question_model_data.QuestionModelData.load_sequence_data:1
+msgid "Load user response sequences."
+msgstr "Load user response sequences."
+
+#: 7107a693ad0b4154a1c6d621b1dcd9bd of
+#: utils.model_data.question_model_data.QuestionModelData.load_sequence_data:3
+msgid "Loads split question sequence data from disk and builds sequence arrays."
+msgstr "Loads split question sequence data from disk and builds sequence arrays."
+
+#: 99ae31d2487349cdbdf2ee7108a1ebe7 of
+#: utils.model_data.question_model_data.QuestionModelData.load_sequence_data:5
+msgid ""
+"(user_sequence, user_response, user_mask, user_id_sequence)        as "
+"numpy arrays of shape (num_users, max_seq_len)."
+msgstr ""
+"(user_sequence, user_response, user_mask, user_id_sequence)        as "
+"numpy arrays of shape (num_users, max_seq_len)."
+
+#: 054ec9cbc8ee45f0ba342ad26759f3b1 of
+#: utils.model_data.question_model_data.QuestionModelData.load_sequence_data:7
+msgid "(user_sequence, user_response, user_mask, user_id_sequence)"
+msgstr "(user_sequence, user_response, user_mask, user_id_sequence)"
+
+#: 7555a40335bd43f8808a961abd2c3a62 of
+#: utils.model_data.question_model_data.QuestionModelData.load_sequence_data:8
+msgid "as numpy arrays of shape (num_users, max_seq_len)."
+msgstr "as numpy arrays of shape (num_users, max_seq_len)."
+
+#: 4005d9a350164b39ae91d8200049aef2 of
+#: utils.model_data.question_model_data.QuestionModelData.prepare_data:1
+msgid "Prepare data required by question-level models."
+msgstr "Prepare data required by question-level models."
+
+#: a361b34d415a486a821a16b5f6f77ca6 of utils.model_data.skill_model_data:1
+msgid "Skill-level model data module."
+msgstr "Skill-level model data module."
+
+#: 2a513b02103f480b8770bddb2c2c3e9c of utils.model_data.skill_model_data:3
+msgid ""
+"Provides the SkillModelData class for skill-based knowledge tracing model"
+" data preparation, including sequence building, windowlate evaluation "
+"data loading, and iterable dataset streaming from parquet files."
+msgstr ""
+"Provides the SkillModelData class for skill-based knowledge tracing model"
+" data preparation, including sequence building, windowlate evaluation "
+"data loading, and iterable dataset streaming from parquet files."
+
+#: caec205c004f4edaabfb50a6d3b0a97f of
+#: utils.model_data.skill_model_data.SkillModelData:1
+msgid "Skill sequence data base class."
+msgstr "Skill sequence data base class."
+
+#: 06c44f272321489cb0c57d8deb0222ca of
+#: utils.model_data.skill_model_data.SkillModelData:3
+msgid "Used to build skill-based (skill/concept) knowledge tracing model data."
+msgstr "Used to build skill-based (skill/concept) knowledge tracing model data."
+
+#: 8152e2936187449b8be153ea5b48be46 of
+#: utils.model_data.skill_model_data.SkillModelData.build_sequence_data:1
+msgid "Load user skill sequences from split skill sequence data."
+msgstr "Load user skill sequences from split skill sequence data."
+
+#: a81cacb173ad402a90fe9599ac685b62 of
+#: utils.model_data.skill_model_data.SkillModelData.build_sequence_data:3
+msgid ""
+"Tuple of (user_sequence, user_response, user_mask, user_id_sequence, "
+"user_question) as numpy arrays, each of shape (num_split_users, "
+"max_seq_len)."
+msgstr ""
+"Tuple of (user_sequence, user_response, user_mask, user_id_sequence, "
+"user_question) as numpy arrays, each of shape (num_split_users, "
+"max_seq_len)."
+
+#: f012b771a509499cb6ba5e0aa177e6ab of
+#: utils.model_data.skill_model_data.SkillModelData.create_windowlate_iterable_dataset:1
+msgid "Create a WindowlateIterableDataset from the windowlate parquet file."
+msgstr "Create a WindowlateIterableDataset from the windowlate parquet file."
+
+#: 33ef331d402140b6bbd70b83dcbb89ba 3b741893276c48dea60518e989a324db of
+#: utils.model_data.skill_model_data.SkillModelData.create_windowlate_iterable_dataset:3
+#: utils.model_data.skill_model_data.SkillModelData.load_windowlate_data:6
+msgid "Maximum sequence length (window size)."
+msgstr "Maximum sequence length (window size)."
+
+#: cf0ee3cca7894075995c57b501d59c95 of
+#: utils.model_data.skill_model_data.SkillModelData.create_windowlate_iterable_dataset:4
+msgid "Number of rows to read per batch (default: 200000)."
+msgstr "Number of rows to read per batch (default: 200000)."
+
+#: edee5baa6903479682f8d1265fd38b59 of
+#: utils.model_data.skill_model_data.SkillModelData.create_windowlate_iterable_dataset:6
+msgid "A configured WindowlateIterableDataset instance."
+msgstr "A configured WindowlateIterableDataset instance."
+
+#: 25311d8021b7408da63488834220544f of
+#: utils.model_data.skill_model_data.SkillModelData.load_windowlate_data:1
+msgid "Load windowlate evaluation samples."
+msgstr "Load windowlate evaluation samples."
+
+#: 65291afe43bd428ebc6bafaa07035569 of
+#: utils.model_data.skill_model_data.SkillModelData.load_windowlate_data:3
+msgid ""
+"Loads sliding window data from a preprocessed parquet file and converts "
+"it to numpy arrays."
+msgstr ""
+"Loads sliding window data from a preprocessed parquet file and converts "
+"it to numpy arrays."
+
+#: 1472fbb54d034d36bdbae6d1523bdb10 of
+#: utils.model_data.skill_model_data.SkillModelData.load_windowlate_data:8
+msgid ""
+"Tuple of (user_sequence, user_response, user_mask, user_id_sequence, "
+"late_group_id, user_true_labels, user_question) as numpy arrays, each of "
+"shape (num_samples, max_seq_len)."
+msgstr ""
+"Tuple of (user_sequence, user_response, user_mask, user_id_sequence, "
+"late_group_id, user_true_labels, user_question) as numpy arrays, each of "
+"shape (num_samples, max_seq_len)."
+
+#: 9c7d68f8bf4c46f2a64f473cdb5ec695 of
+#: utils.model_data.skill_model_data.WindowlateIterableDataset:1
+msgid "基类：:py:class:`~torch.utils.data.IterableDataset`"
+msgstr "Bases: :py:class:`~torch.utils.data.IterableDataset`"
+
+#: 6e35841af7cb4965a9e9e04ed7dbc8d6 of
+#: utils.model_data.skill_model_data.WindowlateIterableDataset:1
+msgid "Stream windowlate samples from a parquet file."
+msgstr "Stream windowlate samples from a parquet file."
+
+#: ae905230895a49d282e885b88af64027 of utils.data_process.data_source:1
+msgid "Data source management for knowledge tracing datasets."
+msgstr "Data source management for knowledge tracing datasets."
+
+#: 757446f1557f43bfb1517b4f6045da65 of utils.data_process.data_source:3
+msgid ""
+"Provides the base DataSource class and utility functions for downloading,"
+" loading, processing, and saving dataset files with metadata tracking and"
+" integrity checks."
+msgstr ""
+"Provides the base DataSource class and utility functions for downloading,"
+" loading, processing, and saving dataset files with metadata tracking and"
+" integrity checks."
+
+#: 4af7c8ffa42247a9a14da2d656ce8466 of
+#: utils.data_process.data_source.DataSource:1
+msgid "Base class for data source management."
+msgstr "Base class for data source management."
+
+#: b81c68950f8549d69e8b3935abbf7603 of
+#: utils.data_process.data_source.DataSource:3
+msgid ""
+"Provides common functionality for downloading, loading, processing, and "
+"saving dataset files with metadata tracking and integrity checks."
+msgstr ""
+"Provides common functionality for downloading, loading, processing, and "
+"saving dataset files with metadata tracking and integrity checks."
+
+#: 5f0760386bc74328a05cf4ed5df44cfe of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:1
+msgid "Add K-fold cross-validation labels with test set separation."
+msgstr "Add K-fold cross-validation labels with test set separation."
+
+#: b02e178dd530495c8545c81b5935b804 of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:3
+msgid ""
+"Ensures all data from the same user stays in the same fold to prevent "
+"data leakage."
+msgstr ""
+"Ensures all data from the same user stays in the same fold to prevent "
+"data leakage."
+
+#: ba6ef7c1525848b6a13f6dc17eb50688 of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:6
+msgid ""
+"The process: 1. Split users into test set and non-test set 2. Test set "
+"users are labeled with -1 3. Non-test set users are split into n_splits "
+"folds (0 to n_splits-1)"
+msgstr ""
+"The process: 1. Split users into test set and non-test set 2. Test set "
+"users are labeled with -1 3. Non-test set users are split into n_splits "
+"folds (0 to n_splits-1)"
+
+#: bf18f835dfce4e31a10631a703b4b07f of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:11
+msgid "Number of folds for cross-validation (default: 5)."
+msgstr "Number of folds for cross-validation (default: 5)."
+
+#: 3fbec5c2fafb4046bb526b62739bb7b0 of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:12
+msgid "Ratio of users to allocate to test set (default: 0.2)."
+msgstr "Ratio of users to allocate to test set (default: 0.2)."
+
+#: dcdc58e377a848bc8013f659aa9be263 of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:14
+msgid "-1 for test set, 0 to n_splits-1 for train/val)."
+msgstr "-1 for test set, 0 to n_splits-1 for train/val)."
+
+#: ../../source/api/reference/data.md 91f77fc0fef546c5a33e0676fe38d057
+#: ccc8bcb0ec414d20871cad990d39eb35 f0d6161c7a174056a504a71c373ccc6c
+msgid "抛出"
+msgstr "Raises"
+
+#: 0224b82ce7ea4f1da014af142da27d9f 0f8b7cee296c44148d9ecb69ca827898 of
+#: utils.data_process.data_source.DataSource.add_kfold_labels:17
+#: utils.data_process.data_source.DataSource.get_user_stats:6
+msgid "If sequence_data is not loaded."
+msgstr "If sequence_data is not loaded."
+
+#: bc76ebc03e8c413d84770035ce6d45be of
+#: utils.data_process.data_source.DataSource.build_split_question_sequence_data:1
+msgid "Build split sequence data by question."
+msgstr "Build split sequence data by question."
+
+#: 493d4f35f61743ca8e27ad87409797a9 of
+#: utils.data_process.data_source.DataSource.build_split_question_sequence_data:3
+msgid ""
+"Splits user sequences longer than ``max_seq_len`` into multiple sub-"
+"sequences, drops splits shorter than ``min_seq_len``, and assigns new "
+"dense user IDs to each retained split."
+msgstr ""
+"Splits user sequences longer than ``max_seq_len`` into multiple sub-"
+"sequences, drops splits shorter than ``min_seq_len``, and assigns new "
+"dense user IDs to each retained split."
+
+#: 0d62b779f36948bdb68f1198e2b6347e 569db8c42d844ce2b0c6820010d84138 of
+#: utils.data_process.data_source.DataSource.build_split_question_sequence_data:7
+#: utils.data_process.data_source.DataSource.build_split_skill_sequence_data:8
+msgid ""
+"Processing is done in user-aligned batches to bound peak memory, while "
+"producing output identical to whole-frame processing."
+msgstr ""
+"Processing is done in user-aligned batches to bound peak memory, while "
+"producing output identical to whole-frame processing."
+
+#: 7587d5458c04411e853fa204f45f33a8 of
+#: utils.data_process.data_source.DataSource.build_split_skill_sequence_data:1
+msgid "Build split skill sequence data."
+msgstr "Build split skill sequence data."
+
+#: 16ab2bc33a3d456c8721308cee7e992d of
+#: utils.data_process.data_source.DataSource.build_split_skill_sequence_data:3
+msgid ""
+"Expands question sequences into skill sequences (one question may map to "
+"multiple skills), preserving the question column, then splits long "
+"sequences by ``max_seq_len`` and drops splits shorter than "
+"``min_seq_len``."
+msgstr ""
+"Expands question sequences into skill sequences (one question may map to "
+"multiple skills), preserving the question column, then splits long "
+"sequences by ``max_seq_len`` and drops splits shorter than "
+"``min_seq_len``."
+
+#: 1d4f5e8ddff84cb78d13e3ab5f2fcdbf of
+#: utils.data_process.data_source.DataSource.build_split_skill_sequence_data:11
+msgid "Output columns: original sequence_data columns + skill + seq_pos"
+msgstr "Output columns: original sequence_data columns + skill + seq_pos"
+
+#: c851f64cd81c4e39944f173b2e641fa3 of
+#: utils.data_process.data_source.DataSource.build_windowlate_data:1
+msgid "Build windowlate evaluation samples for windowlate_auc_mean scoring."
+msgstr "Build windowlate evaluation samples for windowlate_auc_mean scoring."
+
+#: 5a712d3d354c45379d3e6d28c544f832 of
+#: utils.data_process.data_source.DataSource.build_windowlate_data:3
+msgid "Data is streamed directly to file in this method."
+msgstr "Data is streamed directly to file in this method."
+
+#: 20e54e339a0e41fb937ed7a5aaf55294 of
+#: utils.data_process.data_source.DataSource.clean_raw_data:1
+msgid "Clean raw data. Must be implemented by subclasses."
+msgstr "Clean raw data. Must be implemented by subclasses."
+
+#: 9e765f6caf55419d8d3447a0c923a342 of
+#: utils.data_process.data_source.DataSource.compute_md5:1
+msgid "Compute MD5 checksum of a file."
+msgstr "Compute MD5 checksum of a file."
+
+#: 42763f8a526643608026150a022e4616 of
+#: utils.data_process.data_source.DataSource.fetch_data:1
+msgid "Download and extract data archive with retry support."
+msgstr "Download and extract data archive with retry support."
+
+#: 5496a409536d4b6eb90f5fe26609bb6e of
+#: utils.data_process.data_source.DataSource.fetch_data:3
+msgid "Force re-download even if file exists."
+msgstr "Force re-download even if file exists."
+
+#: b5d585fb16174279b53af9ad3b104dc6 of
+#: utils.data_process.data_source.DataSource.fetch_data:4
+msgid "Maximum number of download retry attempts."
+msgstr "Maximum number of download retry attempts."
+
+#: 89fd76f3f5144c5c98af8c90cd2e9d5a of
+#: utils.data_process.data_source.DataSource.fetch_data:5
+msgid "Number of threads for multi-threaded download."
+msgstr "Number of threads for multi-threaded download."
+
+#: 10fa0fc8533447a189c754232d8bed4b of
+#: utils.data_process.data_source.DataSource.get_available_relations:1
+msgid "Return names of available relation tables."
+msgstr "Return names of available relation tables."
+
+#: 458f00018c044c009deab746b3c9970f of
+#: utils.data_process.data_source.DataSource.get_metadata:1
+msgid "Get metadata entry or entire metadata dict."
+msgstr "Get metadata entry or entire metadata dict."
+
+#: 1744760f80ce425d85a2fa6f76148213 of
+#: utils.data_process.data_source.DataSource.get_relation:1
+msgid "Get a normalized relation table by name (e.g., \"question_skill\")."
+msgstr "Get a normalized relation table by name (e.g., \"question_skill\")."
+
+#: 773cca29bf0241f180384389c306ead5 of
+#: utils.data_process.data_source.DataSource.get_relation:3
+msgid "Each relation is a 2-column DataFrame unique on (src, dst)."
+msgstr "Each relation is a 2-column DataFrame unique on (src, dst)."
+
+#: 4eb036dd89594e879c394f76cfd1f95a of
+#: utils.data_process.data_source.DataSource.get_sequence_data:1
+msgid "Get user sequence data."
+msgstr "Get user sequence data."
+
+#: 4cab4974216d49cb9ef4bbb618e1df63 of
+#: utils.data_process.data_source.DataSource.get_split_question_sequence_data:1
+msgid "Get split user sequence data."
+msgstr "Get split user sequence data."
+
+#: ee44c6b2b793438880bfa2ac05327f9b of
+#: utils.data_process.data_source.DataSource.get_split_skill_sequence_data:1
+msgid "Get split skill sequence data."
+msgstr "Get split skill sequence data."
+
+#: 8e4dba9384384920bdd905753c611501 of
+#: utils.data_process.data_source.DataSource.get_user_stats:1
+msgid ""
+"Compute user statistics: attempts, correct count, skill count, correct "
+"rate."
+msgstr ""
+"Compute user statistics: attempts, correct count, skill count, correct "
+"rate."
+
+#: e70612e017484a00aa6c91f69c4b964c of
+#: utils.data_process.data_source.DataSource.get_user_stats:3
+msgid "user, attempts, correct, skill_count, correct_rate."
+msgstr "user, attempts, correct, skill_count, correct_rate."
+
+#: b583c594d1924b2686e5fed8b1167ccc of
+#: utils.data_process.data_source.DataSource.get_windowlate_data:1
+msgid "Get windowlate evaluation data."
+msgstr "Get windowlate evaluation data."
+
+#: 261f9e1348b644a88c79ef14312202a1 of
+#: utils.data_process.data_source.DataSource.get_windowlate_data:3
+msgid ""
+"Windowlate evaluation samples (long format). Columns: sample_id, "
+"position, skill, response, mask, user_id, group_id, true_label, fold"
+msgstr ""
+"Windowlate evaluation samples (long format). Columns: sample_id, "
+"position, skill, response, mask, user_id, group_id, true_label, fold"
+
+#: ea7de22a41224aa9b14d65f9f40e843a of
+#: utils.data_process.data_source.DataSource.load_metadata:1
+msgid "Load metadata from JSON file."
+msgstr "Load metadata from JSON file."
+
+#: 60cc0d127c5e4089b076c4048df48e60 of
+#: utils.data_process.data_source.DataSource.load_src_data:1
+msgid "Load source data. Must be implemented by subclasses."
+msgstr "Load source data. Must be implemented by subclasses."
+
+#: 2406e7924ed34ad89b29c33ec5febca2 of
+#: utils.data_process.data_source.DataSource.sample:1
+msgid "Sample dataset by users or interactions."
+msgstr "Sample dataset by users or interactions."
+
+#: 0f944bea68ee4ed0810b58aed45cba63 of
+#: utils.data_process.data_source.DataSource.sample:3
+msgid ""
+"Absolute sample count. For random/stratified: number of users. For time: "
+"number of interactions."
+msgstr ""
+"Absolute sample count. For random/stratified: number of users. For time: "
+"number of interactions."
+
+#: 2a0ea2a0ade844bf81dfd1c631271991 of
+#: utils.data_process.data_source.DataSource.sample:5
+msgid "Sample ratio (0.0-1.0). Overrides sample_size if set."
+msgstr "Sample ratio (0.0-1.0). Overrides sample_size if set."
+
+#: 533f79dccbd740ddb122311503f56c1e of
+#: utils.data_process.data_source.DataSource.sample:6
+msgid "Sampling strategy (random, stratified, time)."
+msgstr "Sampling strategy (random, stratified, time)."
+
+#: 53099ae7eccd4da5b2d696ddb2f25854 of
+#: utils.data_process.data_source.DataSource.sample:7
+msgid "Attempt count bin edges for stratified sampling."
+msgstr "Attempt count bin edges for stratified sampling."
+
+#: 2330e303636644c985c3cf71b8fb542c of
+#: utils.data_process.data_source.DataSource.sample:8
+msgid "Correct rate bin edges for stratified sampling."
+msgstr "Correct rate bin edges for stratified sampling."
+
+#: 98fa78aefd5d435899fbbca747a41ca0 of
+#: utils.data_process.data_source.DataSource.sample:10
+msgid ""
+"If neither sample_size nor sample_ratio is provided,     or if the "
+"computed size exceeds available data."
+msgstr ""
+"If neither sample_size nor sample_ratio is provided,     or if the "
+"computed size exceeds available data."
+
+#: 3db764c1721b4944acefa54744060f35 of
+#: utils.data_process.data_source.DataSource.save_data:1
+msgid "Save processed relation tables, sequence data, and metadata."
+msgstr "Save processed relation tables, sequence data, and metadata."
+
+#: 0e98be92d1b043b7802f14b0547e3b6d of
+#: utils.data_process.data_source.DataSource.save_metadata:1
+msgid "Save metadata to JSON file."
+msgstr "Save metadata to JSON file."
+
+#: d4416c6af8644c74b38cd55dc38c7e95 of
+#: utils.data_process.data_source.DataSource.transform_data:1
+msgid ""
+"Transform cleaned data into standard format. Must be implemented by "
+"subclasses."
+msgstr ""
+"Transform cleaned data into standard format. Must be implemented by "
+"subclasses."
+
+#: c12e3d8604d34338932fa1f471d7359e of
+#: utils.data_process.data_source.DataSource.update_metadata:1
+msgid "Update a single metadata entry."
+msgstr "Update a single metadata entry."
+
+#: 98f00e23f04f40eab2509a297af91a0e of
+#: utils.data_process.data_source.DataSource.update_metadatas:1
+msgid "Update multiple metadata entries."
+msgstr "Update multiple metadata entries."
+
+#: d5e568016af14dceab815b416418a75a of
+#: utils.data_process.data_source.exclude_short_sequences:1
+msgid "Filter out users with sequence length less than min_seq_len."
+msgstr "Filter out users with sequence length less than min_seq_len."
+
+#: eb1a3f00888d41588da4c91e27dde22a of
+#: utils.data_process.data_source.exclude_short_sequences:3
+msgid "Polars DataFrame or LazyFrame."
+msgstr "Polars DataFrame or LazyFrame."
+
+#: 6e3fbfda03e64f808778707253cd679d of
+#: utils.data_process.data_source.exclude_short_sequences:4
+msgid "Minimum sequence length."
+msgstr "Minimum sequence length."
+
+#: 8d98321f8f22432b84cddb6e6550c78c of
+#: utils.data_process.data_source.exclude_short_sequences:6
+msgid "DataFrame or LazyFrame of same type as input."
+msgstr "DataFrame or LazyFrame of same type as input."

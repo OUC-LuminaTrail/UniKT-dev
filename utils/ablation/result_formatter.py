@@ -12,8 +12,8 @@ Usage:
     formatter.print_console_table()
     formatter.export_to_csv(output_path='results.csv')
 
-Expected Data Structure:
-    results is a list of dictionaries, each containing:
+Expected data structure — each result dict::
+
     {
         "name": str,          # Experiment name
         "variant": str,       # Model variant name

@@ -1,0 +1,100 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025-2026, UniKT Team
+# This file is distributed under the same license as the UniKT package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: UniKT \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../source/api/cli/train.md:1 4d017c7870d145759bbc68d5ae2a31c0
+msgid "Train CLI"
+msgstr "Train CLI"
+
+#: ../../source/api/cli/train.md:5 758dfef556a54a05adbfe091cbec5ede
+msgid "train.py"
+msgstr "train.py"
+
+#: ../../source/api/cli/train.md 88fcecd4ff8f49f2a46d62c9f8952db5
+msgid "参数"
+msgstr "Parameter"
+
+#: ../../source/api/cli/train.md d4247123c92c4bf7a3f245e25e55e77b
+msgid "描述"
+msgstr "Description"
+
+#: ../../source/api/cli/train.md a0d65f5caa3d452ea09a78a2d6d9ecf3
+msgid "``-m, --model``"
+msgstr "``-m, --model``"
+
+#: ../../source/api/cli/train.md 89af2a6fed2b46489f6c784454071a7e
+msgid "模型名称（如 GIKT、AKT、DKT）"
+msgstr "Model name (e.g. GIKT, AKT, DKT)"
+
+#: ../../source/api/cli/train.md a78af00e07dc44b182b7e452f9c039b1
+msgid "``-d, --dataset``"
+msgstr "``-d, --dataset``"
+
+#: ../../source/api/cli/train.md 73987596dd134ec4acb6899d1957a4ac
+msgid "数据集名称（如 assistments09）"
+msgstr "Dataset name (e.g. assistments09)"
+
+#: ../../source/api/cli/train.md 5137080d597643568d1088a8b67f011c
+msgid "``--fold``"
+msgstr "``--fold``"
+
+#: ../../source/api/cli/train.md bedc02319a2f43389f9d99f810555217
+msgid "K 折索引（默认：0）"
+msgstr "K-fold index (default: 0)"
+
+#: ../../source/api/cli/train.md b8cb59f6c4314ed798c7e0adf2ec497d
+msgid "``--seed``"
+msgstr "``--seed``"
+
+#: ../../source/api/cli/train.md 9d7962749b9f4e0d815d45e5d7603fc6
+msgid "随机种子（默认：42）"
+msgstr "Random seed (default: 42)"
+
+#: ../../source/api/cli/train.md 4d3e503551f5431ab64bd693e313f581
+msgid "``--device``"
+msgstr "``--device``"
+
+#: ../../source/api/cli/train.md 540732f436b74a4892130be24a2c96cc
+msgid "设备（cuda/cpu，自动检测）"
+msgstr "Device (cuda/cpu, auto-detected)"
+
+#: ../../source/api/cli/train.md 729ebbee02484804b260afcbe4969b8d
+msgid "``--es_patience``"
+msgstr "``--es_patience``"
+
+#: ../../source/api/cli/train.md 3f57f9f77ab64ebeb7c44b2b4a66ec19
+msgid "早停耐心轮数（默认：10）"
+msgstr "Early stopping patience in epochs (default: 10)"
+
+#: ../../source/api/cli/train.md 8539538a7f59495994da756c06ff4db6
+msgid "``--max_grad_norm``"
+msgstr "``--max_grad_norm``"
+
+#: ../../source/api/cli/train.md 610aa12467634b70a3da53b416662650
+msgid "梯度裁剪阈值"
+msgstr "Gradient clipping threshold"
+
+#: ../../source/api/cli/train.md ee7c11383fcd4b31a7d7c24e3341a365
+msgid "``--skip_test``"
+msgstr "``--skip_test``"
+
+#: ../../source/api/cli/train.md d44950c086dd4965ad84e644c929a9c8
+msgid "跳过测试评估"
+msgstr "Skip test evaluation"

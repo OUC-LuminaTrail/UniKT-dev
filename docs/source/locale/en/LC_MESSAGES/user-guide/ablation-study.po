@@ -1,0 +1,312 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025-2026, UniKT Team
+# This file is distributed under the same license as the UniKT package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: UniKT \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../source/user-guide/ablation-study.md:1 7991148ddd3f4263ae151644ecefe32d
+msgid "消融实验"
+msgstr "Ablation study"
+
+#: ../../source/user-guide/ablation-study.md:3 869e644c1d4948909f84a4782d3f5297
+msgid "通过系统消融分析模型各组件的贡献。"
+msgstr "Analyze each model component's contribution through systematic ablation."
+
+#: ../../source/user-guide/ablation-study.md:5 b2df284eebe7438ab1ae27fef9a74163
+msgid "概述"
+msgstr "Overview"
+
+#: ../../source/user-guide/ablation-study.md:20
+#: eb0a92f837cb49ed94f6eb42b7d50104
+msgid "快速上手"
+msgstr "Quick start"
+
+#: ../../source/user-guide/ablation-study.md:30
+#: 7cbd1eedacc64b1597cc1de227692229
+msgid "参数说明"
+msgstr "Parameter reference"
+
+#: ../../source/user-guide/ablation-study.md:7 b5bea24ffda94882a618cdbec4e0bbf5
+msgid "参数"
+msgstr "Parameter"
+
+#: ../../source/user-guide/ablation-study.md:7 91e86f74c84b4bb6a9f014bc4e36293c
+msgid "默认值"
+msgstr "Default"
+
+#: ../../source/user-guide/ablation-study.md:7 0e897abf54b64b07baa889a8f31cc779
+#: 8005f483eaf3428bb6496eacf8a535cb
+msgid "描述"
+msgstr "Description"
+
+#: ../../source/user-guide/ablation-study.md:7 f2753aaa09a34d8c91f068162e48e13f
+msgid "``--config``"
+msgstr "``--config``"
+
+#: ../../source/user-guide/ablation-study.md:7 9c04acdf3cb24c72b382aa89068b2fc7
+#: e362c6e2a7e44896ab61945c23b0669e
+msgid "必填"
+msgstr "Required"
+
+#: ../../source/user-guide/ablation-study.md:7 450fe464ab174cd49709f02f7dbbd44d
+msgid "消融实验配置 JSON 路径"
+msgstr "Path to the ablation study configuration JSON"
+
+#: ../../source/user-guide/ablation-study.md:7 601f882ff7554b7f87792027370149df
+msgid "``-d, --dataset``"
+msgstr "``-d, --dataset``"
+
+#: ../../source/user-guide/ablation-study.md:7 8bbeb5f06c1c47b4823d28b25440a683
+msgid "数据集名称"
+msgstr "Dataset name"
+
+#: ../../source/user-guide/ablation-study.md:7 0d9e019be1c74f2f8567c4ef670fa987
+msgid "``-f, --fold``"
+msgstr "``-f, --fold``"
+
+#: ../../source/user-guide/ablation-study.md:7 b689f137401f4d96bcaad40afdddd4bc
+msgid "0"
+msgstr "0"
+
+#: ../../source/user-guide/ablation-study.md:7 6bee582992e94f37815e8d393d839f9c
+msgid "K 折索引"
+msgstr "K-fold index"
+
+#: ../../source/user-guide/ablation-study.md:39
+#: 51470e425f384fe7a7d9fb70d9a9f84f
+msgid "配置"
+msgstr "Configuration"
+
+#: ../../source/user-guide/ablation-study.md:41
+#: c865c67047a74e6c88d910d3fff78eae
+msgid "在 JSON 中定义消融变体："
+msgstr "Define ablation variants in JSON:"
+
+#: ../../source/user-guide/ablation-study.md:76
+#: 90e02f93390c4e228a9ef6cd6d3279df
+msgid "**配置字段说明：**"
+msgstr "**Configuration field reference:**"
+
+#: ../../source/user-guide/ablation-study.md:7 b2acdd3611e54694a94d3c87c4e41a47
+msgid "字段"
+msgstr "Field"
+
+#: ../../source/user-guide/ablation-study.md:7 1888f49540564999a28cbce15de01fb5
+msgid "``study_name``"
+msgstr "``study_name``"
+
+#: ../../source/user-guide/ablation-study.md:7 c822a77da2ae49ec8cb188cabbc62961
+msgid "消融实验名称"
+msgstr "Ablation study name"
+
+#: ../../source/user-guide/ablation-study.md:7 c311ed8cebcb42b0a387a77453efeb31
+msgid "``base_model``"
+msgstr "``base_model``"
+
+#: ../../source/user-guide/ablation-study.md:7 bca1538d21504f6a90121cb32932cb88
+msgid "作为基准的模型"
+msgstr "Model used as the baseline"
+
+#: ../../source/user-guide/ablation-study.md:7 56cc81437fed4b72b27ced9bc983893c
+msgid "``shared_params``"
+msgstr "``shared_params``"
+
+#: ../../source/user-guide/ablation-study.md:7 f844da1f7c47419b8c2250043ea54c15
+msgid "所有变体共享的训练参数"
+msgstr "Training parameters shared by all variants"
+
+#: ../../source/user-guide/ablation-study.md:7 8c93dbb523a842129ae941149fa829fc
+msgid "``ablations``"
+msgstr "``ablations``"
+
+#: ../../source/user-guide/ablation-study.md:7 3fb45131f47b42809a73ec4a2fe8eadb
+msgid "消融变体列表"
+msgstr "List of ablation variants"
+
+#: ../../source/user-guide/ablation-study.md:7 84645d05002b4cb4b768858694e78ed6
+msgid "``ablations[].name``"
+msgstr "``ablations[].name``"
+
+#: ../../source/user-guide/ablation-study.md:7 f63a75a02e4c445b8ac243869ea80f5f
+msgid "变体简称"
+msgstr "Variant short name"
+
+#: ../../source/user-guide/ablation-study.md:7 2470fce68c4243f28cad9aeb60127e31
+msgid "``ablations[].variant``"
+msgstr "``ablations[].variant``"
+
+#: ../../source/user-guide/ablation-study.md:7 0f9b9dd9240a4d5aaa39659d2f0b7a2e
+msgid "已注册的模型变体名称"
+msgstr "Registered model variant name"
+
+#: ../../source/user-guide/ablation-study.md:7 efc8e66e9230411d92bc0f2b7de0c34d
+msgid "``ablations[].description``"
+msgstr "``ablations[].description``"
+
+#: ../../source/user-guide/ablation-study.md:7 16b105c791f442bd819993fcfb981fc3
+msgid "变更说明"
+msgstr "Description of changes"
+
+#: ../../source/user-guide/ablation-study.md:89
+#: 24ad58166dc844baade134c8f7009931
+msgid "输出"
+msgstr "Output"
+
+#: ../../source/user-guide/ablation-study.md:91
+#: 8b6d6aa42dd74fa1a97c1733e259ef56
+msgid "结果保存到 ``runs/ablation/<study_name>_<timestamp>/``："
+msgstr "Results are saved to ``runs/ablation/<study_name>_<timestamp>/``:"
+
+#: ../../source/user-guide/ablation-study.md:101
+#: 2dc79ddcdef44e8d86b42a6ef2f8e8f8
+msgid "**示例比较：**"
+msgstr "**Example comparison:**"
+
+#: ../../source/user-guide/ablation-study.md:7 307e5d21ec744b9c942134daef7c540a
+msgid "模型"
+msgstr "Model"
+
+#: ../../source/user-guide/ablation-study.md:7 3d70245de3154a8cafcff9f6c1d99208
+msgid "AUC"
+msgstr "AUC"
+
+#: ../../source/user-guide/ablation-study.md:7 f83cfe742c7e42f29d4981138997dedb
+msgid "ACC"
+msgstr "ACC"
+
+#: ../../source/user-guide/ablation-study.md:7 694b2ba8b8d149c5860c751ce367c96b
+msgid "Δ AUC"
+msgstr "Δ AUC"
+
+#: ../../source/user-guide/ablation-study.md:7 358193772f2843b1a444079c3ec85adf
+msgid "HDHKT（完整）"
+msgstr "HDHKT (full)"
+
+#: ../../source/user-guide/ablation-study.md:7 bd722a2469f341a2a964b160453247ca
+msgid "0.785"
+msgstr "0.785"
+
+#: ../../source/user-guide/ablation-study.md:7 9049566e99d9453a9cf0c5e60239e0da
+msgid "0.742"
+msgstr "0.742"
+
+#: ../../source/user-guide/ablation-study.md:7 512c00c8bab9426e84ed54267ba737b6
+msgid "-"
+msgstr "-"
+
+#: ../../source/user-guide/ablation-study.md:7 dc1427a70cb7478283b7cbb074615bf4
+msgid "HeteroOnly"
+msgstr "HeteroOnly"
+
+#: ../../source/user-guide/ablation-study.md:7 3c1cdfc7e01e435baa9ccef31ff76d9b
+msgid "0.762"
+msgstr "0.762"
+
+#: ../../source/user-guide/ablation-study.md:7 e09b879bfcbd45f69deece126fe1e392
+msgid "0.721"
+msgstr "0.721"
+
+#: ../../source/user-guide/ablation-study.md:7 ddc54b7f63b24e209dcb18596f8312a9
+msgid "-2.9%"
+msgstr "-2.9%"
+
+#: ../../source/user-guide/ablation-study.md:7 1a44769db53f4c0d945b5667eb35f9d7
+msgid "HyperOnly"
+msgstr "HyperOnly"
+
+#: ../../source/user-guide/ablation-study.md:7 9624fb3f2d0543a2a530718cd078c7cb
+msgid "0.751"
+msgstr "0.751"
+
+#: ../../source/user-guide/ablation-study.md:7 3cce24e68efc49ad8a34a7b5e04541b5
+msgid "0.710"
+msgstr "0.710"
+
+#: ../../source/user-guide/ablation-study.md:7 256f3e2ed4484cd4bbba26b1416531b8
+msgid "-4.3%"
+msgstr "-4.3%"
+
+#: ../../source/user-guide/ablation-study.md:7 0e3b4ba99e6e47f98ca2e2923834e017
+msgid "SimpleFusion"
+msgstr "SimpleFusion"
+
+#: ../../source/user-guide/ablation-study.md:7 741c5cd4d9e1426e9a4a0ec509833ed4
+msgid "0.768"
+msgstr "0.768"
+
+#: ../../source/user-guide/ablation-study.md:7 57ad3f31debc4b5ab7da3608f808b2da
+msgid "0.725"
+msgstr "0.725"
+
+#: ../../source/user-guide/ablation-study.md:7 afbaa6e4ed9d46ffaf8354a23126ca87
+msgid "-2.2%"
+msgstr "-2.2%"
+
+#: ../../source/user-guide/ablation-study.md:111
+#: 3cacead0f8014774b0a720257eff39b4
+msgid "创建消融变体"
+msgstr "Creating ablation variants"
+
+#: ../../source/user-guide/ablation-study.md:113
+#: 732a950c03364689948aaf048ae62f16
+msgid "步骤一：创建变体模型"
+msgstr "Step 1: Create a variant model"
+
+#: ../../source/user-guide/ablation-study.md:131
+#: 7a2fef521c224988b7fa3c9042fa07ff
+msgid "步骤二：添加到配置"
+msgstr "Step 2: Add it to the configuration"
+
+#: ../../source/user-guide/ablation-study.md:141
+#: 36750e481d3d496caa0ee78efcf7870a
+msgid "多数据集消融"
+msgstr "Multi-dataset ablation"
+
+#: ../../source/user-guide/ablation-study.md:152
+#: 89b46699d923479590383e1990813045
+msgid "最佳实践"
+msgstr "Best practices"
+
+#: ../../source/user-guide/ablation-study.md:154
+#: 14911cbc39fc4b87a9d6591ebd371b82
+msgid "**单一变量**：每个变体只更改一个组件"
+msgstr "**Single variable**: each variant changes only one component"
+
+#: ../../source/user-guide/ablation-study.md:155
+#: 462996425d304c4ba7021ba067fa0ea7
+msgid "**相同超参数**：使用相同设置以进行公平比较"
+msgstr ""
+"**Same hyperparameters**: use identical settings for a fair comparison"
+
+#: ../../source/user-guide/ablation-study.md:156
+#: 3b99b6012b02462c946603670e556222
+msgid "**多次运行**：用不同折运行 3-5 次，报告均值 ± 标准差"
+msgstr ""
+"**Multiple runs**: run 3-5 times with different folds and report mean ± "
+"standard deviation"
+
+#: ../../source/user-guide/ablation-study.md:157
+#: da1b8e5f2f43428fbd85341e7c00e38a
+msgid "**统计检验**：使用 t 检验评估显著性"
+msgstr "**Statistical testing**: use a t-test to evaluate significance"
+
+#: ../../source/user-guide/ablation-study.md:158
+#: 27de1bbeb6024f6f9e640450d62ddf28
+msgid "**文档化**：清晰描述每个变体移除或修改的内容"
+msgstr ""
+"**Documentation**: clearly describe what each variant removes or modifies"

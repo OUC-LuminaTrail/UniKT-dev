@@ -124,6 +124,27 @@ web-frontend = { cmd = "npm run dev", cwd = "web/frontend", description = "Start
 web-dev = { cmd = "cd web/backend && python -m uvicorn main:app --host 127.0.0.1 --port 8765 & cd web/frontend && npm run dev", description = "Start both backend and frontend in dev mode" }
 web-serve = { cmd = "npm run build && (cd ../backend && python -m uvicorn main:app --host 0.0.0.0 --port 8765 &) && npx vite preview --host 0.0.0.0", cwd = "web/frontend", env = { PYTHONPATH = "../../" }, description = "Build frontend, start API backend (background), and launch Vite preview" }
 
+[feature.docs.dependencies]
+python = "3.12.*"
+pandoc = ">=3.8,<4"
+sphinx = ">=8.0,<9"
+furo = ">=2025,<2026"
+sphinxcontrib-mermaid = ">=2.0,<3"
+sphinx-design = ">=0.7,<1"
+sphinx-copybutton = ">=0.5,<0.6"
+myst-parser = ">=4,<5"
+sphinx-intl = ">=2,<3"
+sphinx-autobuild = ">=2025"
+ruff = ">=0.15,<0.16"
+
+[feature.docs.tasks]
+docs-build = { cmd = "sphinx-build -b html source _build", cwd = "docs", description = "Build Sphinx HTML docs" }
+docs-dev = { cmd = "sphinx-autobuild source _build --open-browser", cwd = "docs", description = "Live-preview docs" }
+docs-clean = { cmd = "rm -rf _build", cwd = "docs", description = "Remove docs build output" }
+docs-fmt = { cmd = "python scripts/fmt-code-blocks.py source", cwd = "docs", description = "Format python code blocks in .md" }
+docs-fmt-check = { cmd = "python scripts/fmt-code-blocks.py source --check", cwd = "docs", description = "Check python code blocks formatting" }
+docs-linkcheck = { cmd = "sphinx-build -b linkcheck source _linkcheck", cwd = "docs", description = "Check external links" }
+
 [environments]
 dhg-cpu = { features = ["dhg", "dhg-cpu"], no-default-feature = true }
 dhg-gpu = { features = ["dhg", "dhg-gpu"], no-default-feature = true }
@@ -131,6 +152,7 @@ cpu = { features = ["base", "cpu"] }
 mamba = { features = ["base", "gpu", "mamba"] }
 xlstm = { features = ["base", "gpu", "xlstm"] }
 web = { features = ["base", "web"] }
+docs = { features = ["docs"] }
 default = { features = ["base", "gpu"] }
 
 [tasks]

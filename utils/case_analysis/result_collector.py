@@ -178,7 +178,7 @@ class ResultCollector:
             - auc: Area under ROC curve (if enough variance)
             - avg_confidence: Average prediction confidence
             - error_rate: Proportion of incorrect predictions
-            - calibration_error: |predicted_correct_rate - correct_rate|
+            - calibration_error: abs(predicted_correct_rate - correct_rate)
         """
         df = self.to_dataframe()
 

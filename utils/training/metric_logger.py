@@ -6,8 +6,7 @@ DATA_SOURCES / get_data_source).
 
 Backends:
 - LocalMetricLogger: Local CSV logging, always enabled.
-- SwanLabMetricLogger: SwanLab remote logging, enabled by default,
-  disabled via ``--no_swanlab``.
+- SwanLabMetricLogger: SwanLab remote logging, enabled by default, disabled via ``--no_swanlab``.
 """
 
 import atexit
