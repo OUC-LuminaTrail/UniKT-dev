@@ -49,7 +49,7 @@ export default defineConfig({
     port: FRONTEND_PORT,
     proxy: {
       '/api': {
-        target: API_TARGET,
+        target: 'http://127.0.0.1:8765',
         ws: true,
       },
     },
