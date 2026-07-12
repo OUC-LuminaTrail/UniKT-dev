@@ -17,8 +17,12 @@ _MockObject.__ror__ = _mock_or
 
 project = "UniKT"
 author = "UniKT Team"
-language = "zh_CN"
+language = os.environ.get("READTHEDOCS_LANGUAGE", "zh_CN")
 project_copyright = "2025-%Y, UniKT Team"
+
+locale_dirs = ["locale/"]
+gettext_compact = False
+gettext_uuid = True
 
 # Let sphinx find the modules to document
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))

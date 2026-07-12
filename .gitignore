@@ -43,3 +43,8 @@ data/
 web/backend/data/
 web/frontend/node_modules/
 web/frontend/dist/
+
+# Docs build artifacts
+docs/_build/
+docs/source/_build/
+docs/source/**/*.mo
