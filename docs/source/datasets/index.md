@@ -63,5 +63,6 @@ python data_process.py process -d assistments09 \
 ```{toctree}
 :maxdepth: 1
 
-analysis/index
+assistments/index
+junyi2015
 ```
