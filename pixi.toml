@@ -132,6 +132,7 @@ sphinx-rtd-theme = ">=3.1,<4"
 sphinxcontrib-mermaid = ">=2.0,<3"
 sphinx-design = ">=0.7,<1"
 sphinx-copybutton = ">=0.5,<0.6"
+myst-parser = ">=4,<5"
 sphinx-autobuild = ">=2025"
 ruff = ">=0.15,<0.16"
 
@@ -139,7 +140,7 @@ ruff = ">=0.15,<0.16"
 docs-build = { cmd = "sphinx-build -b html source _build", cwd = "docs", description = "Build Sphinx HTML docs" }
 docs-dev = { cmd = "sphinx-autobuild source _build --open-browser", cwd = "docs", description = "Live-preview docs" }
 docs-clean = { cmd = "rm -rf _build", cwd = "docs", description = "Remove docs build output" }
-docs-fmt = { cmd = "python scripts/fmt-code-blocks.py source", cwd = "docs", description = "Format python code blocks in .rst" }
+docs-fmt = { cmd = "python scripts/fmt-code-blocks.py source", cwd = "docs", description = "Format python code blocks in .md" }
 docs-fmt-check = { cmd = "python scripts/fmt-code-blocks.py source --check", cwd = "docs", description = "Check python code blocks formatting" }
 
 [environments]

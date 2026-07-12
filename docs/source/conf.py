@@ -6,12 +6,15 @@ language = "zh_CN"
 release = ""
 
 extensions = [
+    "myst_parser",
     "sphinxcontrib.mermaid",
     "sphinx_design",
     "sphinx_copybutton",
 ]
 
-source_suffix = ".rst"
+source_suffix = ".md"
+
+myst_enable_extensions = ["colon_fence"]
 
 html_theme = "sphinx_rtd_theme"
 html_theme_options = {
