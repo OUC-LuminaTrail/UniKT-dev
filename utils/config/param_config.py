@@ -249,10 +249,10 @@ class GeneralParams(BaseParamConfig):
                 "short": "s",
                 "help": "Random seed for reproducibility (default: 42)",
             },
-            "deterministic": {
+            "no_deterministic": {
                 "type": bool,
-                "default": True,
-                "short": "det",
+                "default": False,
+                "short": "ndet",
                 "help": "Disable deterministic algorithms (deterministic is enabled by default)",
             },
             "no_swanlab": {

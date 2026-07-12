@@ -92,7 +92,7 @@ def main():
     # Seed for reproducibility (eval is deterministic; defensive)
     seed_everything(
         getattr(model_args, "seed", 42),
-        deterministic=getattr(model_args, "deterministic", False),
+        deterministic=not getattr(model_args, "no_deterministic", False),
     )
 
     # Step 3: Create experiment manager pointing to existing run dir

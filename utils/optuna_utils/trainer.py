@@ -69,7 +69,7 @@ class TrainerObjectiveWrapper:
 
         # Reseed before constructing the trainer so every trial starts from
         # the same RNG state (weight init, data shuffle, training RNG).
-        seed_everything(args.seed, deterministic=getattr(args, "deterministic", True))
+        seed_everything(args.seed, deterministic=not getattr(args, "no_deterministic", False))
 
         trial_exp_manager = None
         if self.exp_manager is not None:

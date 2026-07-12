@@ -81,7 +81,7 @@ python train.py -m GIKT -d assistments09 \
 | 参数 | 默认值 | 描述 |
 | --- | --- | --- |
 | ``--skip_test`` | False | 训练后跳过测试评估 |
-| ``--deterministic`` | True | 启用确定性算法 |
+| ``--no_deterministic`` | False | 关闭确定性算法（默认开启） |
 
 
 :::{warning}

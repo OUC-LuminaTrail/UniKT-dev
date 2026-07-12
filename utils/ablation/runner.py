@@ -96,7 +96,7 @@ class AblationRunner:
         # Reseed before constructing the trainer for reproducible weight init.
         seed_everything(
             getattr(args, "seed", 42),
-            deterministic=getattr(args, "deterministic", True),
+            deterministic=not getattr(args, "no_deterministic", False),
         )
 
         # Create experiment manager with ABLATION type

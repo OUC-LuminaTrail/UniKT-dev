@@ -66,7 +66,7 @@ def main():
 
     # Seed as early as possible so model weight init, data loading, and
     # training-time RNG are all reproducible.
-    seed_everything(args.seed, deterministic=args.deterministic)
+    seed_everything(args.seed, deterministic=not args.no_deterministic)
 
     # Create experiment manager
     exp_manager = ExperimentManager.from_args(args, ExperimentType.NORMAL)
