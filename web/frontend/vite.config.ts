@@ -5,6 +5,8 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
+const FRONTEND_PORT = parseInt(process.env.KT_WEB_PORT || '5173', 10)
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -35,10 +37,19 @@ export default defineConfig({
     }
   },
   server: {
-    port: 5173,
+    port: FRONTEND_PORT,
     proxy: {
       '/api': {
         target: 'http://127.0.0.1:8765',
+        ws: true,
+      },
+    },
+  },
+  preview: {
+    port: FRONTEND_PORT,
+    proxy: {
+      '/api': {
+        target: API_TARGET,
         ws: true,
       },
     },

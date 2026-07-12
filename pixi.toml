@@ -122,7 +122,7 @@ fastapi-pagination = "*"
 web-backend = { cmd = "python -m uvicorn main:app --host 127.0.0.1 --port 8765", cwd = "web/backend", env = { PYTHONPATH = "../../" }, description = "Start the backend server" }
 web-frontend = { cmd = "npm run dev", cwd = "web/frontend", description = "Start the frontend in dev mode" }
 web-dev = { cmd = "cd web/backend && python -m uvicorn main:app --host 127.0.0.1 --port 8765 & cd web/frontend && npm run dev", description = "Start both backend and frontend in dev mode" }
-web-serve = { cmd = "npm run build && cd ../backend && python -m uvicorn main:app --host 0.0.0.0 --port 8765", cwd = "web/frontend", env = { PYTHONPATH = "../../" }, description = "Build frontend and start production server" }
+web-serve = { cmd = "npm run build && (cd ../backend && python -m uvicorn main:app --host 0.0.0.0 --port 8765 &) && npx vite preview --host 0.0.0.0", cwd = "web/frontend", env = { PYTHONPATH = "../../" }, description = "Build frontend, start API backend (background), and launch Vite preview" }
 
 [environments]
 dhg-cpu = { features = ["dhg", "dhg-cpu"], no-default-feature = true }

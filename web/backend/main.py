@@ -1,16 +1,13 @@
 """FastAPI application entry point for the KT Experiment Manager.
 
-Configures the FastAPI app with CORS, error handling, pagination, static file
-serving for the frontend dist directory, and registers all API routers.
+Configures the FastAPI app with CORS, error handling, pagination, and registers all API routers.
 """
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from database import init_db
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi_pagination import add_pagination
 from fastapi_pagination.api import set_page
 from fastapi_problem.handler import add_exception_handler, new_exception_handler
@@ -107,7 +104,3 @@ app.include_router(preprocess.router)
 app.include_router(datasets.router)
 app.include_router(settings_api.router)
 app.include_router(capabilities.router)
-
-dist_dir = Path(__file__).resolve().parent.parent / "frontend" / "dist"
-if dist_dir.exists():
-    app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="frontend")
