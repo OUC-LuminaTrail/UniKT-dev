@@ -1,0 +1,166 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025-2026, UniKT Team
+# This file is distributed under the same license as the UniKT package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: UniKT \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../source/getting-started/setup.md:1 3e122a67daaa49a1bfbc754963559874
+msgid "环境配置"
+msgstr "Environment setup"
+
+#: ../../source/getting-started/setup.md:3 3930c796409a43068040da52dc8694c2
+msgid "本文档介绍 UniKT 的环境配置与安装方式，包含多套不同依赖环境（PyTorch、Mamba-SSM、DHG 超图）的开箱即用方案。"
+msgstr ""
+"This document covers environment setup and installation for UniKT, including "
+"out-of-the-box configurations for several dependency environments (PyTorch, "
+"Mamba-SSM, DHG hypergraph)."
+
+#: ../../source/getting-started/setup.md:5 7059d2ffce4d4c7d858d7fe4392420aa
+msgid "环境要求"
+msgstr "Requirements"
+
+#: ../../source/getting-started/setup.md fe0d4c918eea4387a8e70a3d166b2154
+msgid "需求"
+msgstr "Requirement"
+
+#: ../../source/getting-started/setup.md
+#: ../../source/getting-started/setup.md:37 26e2ff20fa1d4e3d93b0ea65cf8dadca
+#: db9b745096cd4625966fce4b9331ac32
+msgid "说明"
+msgstr "Description"
+
+#: ../../source/getting-started/setup.md 6763edfdaee84b14812181bf39e96b95
+msgid "操作系统"
+msgstr "Operating system"
+
+#: ../../source/getting-started/setup.md c38c98d0288c4d58ad38536af4f6996f
+msgid "Linux（已在 Ubuntu 24.04 上测试通过，不支持 Ubuntu 22.04）"
+msgstr "Linux (tested on Ubuntu 24.04; Ubuntu 22.04 is not supported)"
+
+#: ../../source/getting-started/setup.md a56d7efcdf564ce7b6dd30c76395a1d2
+msgid "Python"
+msgstr "Python"
+
+#: ../../source/getting-started/setup.md a1127731a2ed4c0ba2d050b133f34a31
+msgid "3.10+（DHG 环境需 3.10）"
+msgstr "3.10+ (the DHG environment requires 3.10)"
+
+#: ../../source/getting-started/setup.md aa5a76001f6b4072a31cff1a9baacd04
+msgid "CUDA"
+msgstr "CUDA"
+
+#: ../../source/getting-started/setup.md 12beb5d663e74090a1face6e9cd0f0f6
+msgid "11.7+（GPU 环境）"
+msgstr "11.7+ (GPU environment)"
+
+#: ../../source/getting-started/setup.md ca90a5005ce4429bbe98c19f45eb2a80
+msgid "包管理"
+msgstr "Package manager"
+
+#: ../../source/getting-started/setup.md 4f29521a89f44f3a90b1a6819285c714
+msgid "pixi（推荐）或 conda"
+msgstr "pixi (recommended) or conda"
+
+#: ../../source/getting-started/setup.md:15 a3c488d44f0d4b2ea0e1a7973b6237b2
+msgid "安装方式"
+msgstr "Installation methods"
+
+#: ../../source/getting-started/setup.md:17 acd33be92db8498f9e606dec0700b551
+msgid "方式一：pixi（推荐）"
+msgstr "Option 1: pixi (recommended)"
+
+#: ../../source/getting-started/setup.md:19 3ae6460371024521ad75aa59a6325eef
+msgid "pixi 提供包版本锁定，确保不同设备间依赖一致性，最大程度保证模型数值可复现。预置了多套环境配置，开箱即用："
+msgstr ""
+"pixi locks package versions, ensuring dependency consistency across machines "
+"and maximizing numerical reproducibility of models. Several preconfigured "
+"environments are ready to use out of the box:"
+
+#: ../../source/getting-started/setup.md:35 50ebfc24d5314e4782f61516da56e1f0
+msgid "方式二：自动 Conda 配置"
+msgstr "Option 2: Automatic Conda setup"
+
+#: ../../source/getting-started/setup.md:38 793e7490826c43c3ae815763cf26c41c
+msgid "该脚本未经充分测试，依赖版本可能落后于 pixi 配置文件。推荐使用 pixi。"
+msgstr ""
+"This script is not fully tested, and its dependency versions may lag behind "
+"the pixi configuration. pixi is recommended."
+
+#: ../../source/getting-started/setup.md:48 1c4cf567cfd84039975c101b1f571c60
+msgid "方式三：手动 Conda 配置"
+msgstr "Option 3: Manual Conda setup"
+
+#: ../../source/getting-started/setup.md:52 24bd9d97958c4db3b106e8bd22b49f8a
+msgid "GPU 环境（CUDA 12.8）"
+msgstr "GPU environment (CUDA 12.8)"
+
+#: ../../source/getting-started/setup.md:67 3798dc363cbc45d6a6a632c3743f8410
+msgid "CPU 环境"
+msgstr "CPU environment"
+
+#: ../../source/getting-started/setup.md:82 0c11eddc522847a69bddd9041f0a8b02
+msgid "DHG 环境（用于 HDHKT 等超图模型）"
+msgstr "DHG environment (for hypergraph models such as HDHKT)"
+
+#: ../../source/getting-started/setup.md:98 24f26e846db74abb90a35e15e8802593
+msgid "环境变量"
+msgstr "Environment variables"
+
+#: ../../source/getting-started/setup.md:100 c0f63c68ec8e4caeabf1821959089102
+msgid "在项目根目录创建 ``.env`` 文件："
+msgstr "Create a ``.env`` file in the project root:"
+
+#: ../../source/getting-started/setup.md:37 41f78625b5a74c34a01f2d6c65facf75
+msgid "变量"
+msgstr "Variable"
+
+#: ../../source/getting-started/setup.md:37 3607b907897046e3a0f15c47e26ddece
+msgid "``LARK_WEBHOOK_URL``"
+msgstr "``LARK_WEBHOOK_URL``"
+
+#: ../../source/getting-started/setup.md:37 63741424b19647398b324f39cd7461fb
+msgid "飞书机器人通知 webhook（可选）"
+msgstr "Lark bot notification webhook (optional)"
+
+#: ../../source/getting-started/setup.md:37 ac48aa3230a948598a71bb95fa44a915
+msgid "``SWANLAB_WORKSPACE``"
+msgstr "``SWANLAB_WORKSPACE``"
+
+#: ../../source/getting-started/setup.md:37 839f3e33ed694d418ad93439014411ef
+msgid "SwanLab 工作空间名称"
+msgstr "SwanLab workspace name"
+
+#: ../../source/getting-started/setup.md:37 98e5094dd9844e038430a09c564da6d0
+msgid "``SWANLAB_MODE``"
+msgstr "``SWANLAB_MODE``"
+
+#: ../../source/getting-started/setup.md:37 ffb44709115b44368b5458097b66aadc
+msgid "``cloud``（上传到云端）或 ``local``（本地存储）"
+msgstr "``cloud`` (upload to the cloud) or ``local`` (local storage)"
+
+#: ../../source/getting-started/setup.md:37 b64e2af13a6948548bcc05c809bcbc6d
+msgid "``LOG_LEVEL``"
+msgstr "``LOG_LEVEL``"
+
+#: ../../source/getting-started/setup.md:37 72fb7625e66c46cd9a4008699279a8a0
+msgid "日志级别（默认 INFO）"
+msgstr "Log level (default INFO)"
+
+#: ../../source/getting-started/setup.md:114 84a3b2171a7543dabb319ed5e150a7a7
+msgid "验证安装"
+msgstr "Verify the installation"

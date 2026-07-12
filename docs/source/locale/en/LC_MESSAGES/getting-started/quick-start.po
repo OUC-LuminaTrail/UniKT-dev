@@ -1,0 +1,114 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025-2026, UniKT Team
+# This file is distributed under the same license as the UniKT package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: UniKT \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../source/getting-started/quick-start.md:1
+#: 1b76327100a5478daa67fddc9f1abfc8
+msgid "快速上手"
+msgstr "Quick start"
+
+#: ../../source/getting-started/quick-start.md:3
+#: ddcc4d5d60a94ec8b5fc28575b662668
+msgid "在几分钟内运行你的第一个 UniKT 实验。"
+msgstr "Run your first UniKT experiment in minutes."
+
+#: ../../source/getting-started/quick-start.md:5
+#: 4efedc6e7fea4d1f8867f356c0efcb2c
+msgid "环境配置"
+msgstr "Environment setup"
+
+#: ../../source/getting-started/quick-start.md:16
+#: 02e76d8084db48f6b16dcfe52a8674c8
+msgid "CPU、Mamba、DHG 等环境或手动 Conda 安装方式请参考[环境配置](setup.md)。"
+msgstr ""
+"For CPU, Mamba, DHG and other environments, or manual Conda installation, "
+"see [Environment setup](setup.md)."
+
+#: ../../source/getting-started/quick-start.md:21
+#: e788432295a345c5ac9974e1bd58329e
+msgid "5 分钟示例"
+msgstr "5-minute example"
+
+#: ../../source/getting-started/quick-start.md:37
+#: 650bf6090a7c451c9ab90bd688b10012
+msgid "工作流程概览"
+msgstr "Workflow overview"
+
+#: ../../source/getting-started/quick-start.md:46
+#: 196182b25c724d2db8b3b0a9b3dc4f87
+msgid "典型工作流程："
+msgstr "A typical workflow:"
+
+#: ../../source/getting-started/quick-start.md:48
+#: dd357afebb654b8baf39a580f0fcc790
+msgid "[下载](../user-guide/data-processing.md) 原始数据集"
+msgstr "[Download](../user-guide/data-processing.md) the raw datasets"
+
+#: ../../source/getting-started/quick-start.md:49
+#: 8fbd676f74ba4c0585000b1ad5dd5e58
+msgid "[处理](../user-guide/data-processing.md) 数据为标准化格式，生成 K 折划分"
+msgstr ""
+"[Process](../user-guide/data-processing.md) the data into a standardized "
+"format and generate K-fold splits"
+
+#: ../../source/getting-started/quick-start.md:50
+#: f132ee506a8f4b2ab75580308abbb297
+msgid "[训练](../user-guide/training-evaluation.md) 知识追踪模型"
+msgstr "[Train](../user-guide/training-evaluation.md) a knowledge tracing model"
+
+#: ../../source/getting-started/quick-start.md:51
+#: dde7927e376a41d38248c42e2c7a3ca0
+msgid "[评估](../user-guide/evaluation.md) 模型性能"
+msgstr "[Evaluate](../user-guide/evaluation.md) model performance"
+
+#: ../../source/getting-started/quick-start.md:53
+#: a1e6276579fe4adda3d236c1fcbe5f93
+msgid "输出"
+msgstr "Output"
+
+#: ../../source/getting-started/quick-start.md:55
+#: 2d60fd8181db4740a026ed27a3819900
+msgid "实验输出保存在 ``runs/normal/<model>_<dataset>_<timestamp>/``："
+msgstr ""
+"Experiment output is saved under "
+"``runs/normal/<model>_<dataset>_<timestamp>/``:"
+
+#: ../../source/getting-started/quick-start.md:65
+#: 02d6ab86a3f74c8e80cfea3a59176382
+msgid "下一步"
+msgstr "Next steps"
+
+#: ../../source/getting-started/quick-start.md:67
+#: 7d4c48d6dad14938a2638ed617a0fcf0
+msgid "[配置系统](../advanced/config.md) — 了解命令行参数"
+msgstr "[Configuration system](../advanced/config.md) — learn the CLI arguments"
+
+#: ../../source/getting-started/quick-start.md:68
+#: 574b76cec45d40be8c79f9a826aa0701
+msgid "[模型评估](../user-guide/evaluation.md) — 解读评估指标"
+msgstr ""
+"[Model evaluation](../user-guide/evaluation.md) — interpret evaluation "
+"metrics"
+
+#: ../../source/getting-started/quick-start.md:69
+#: a0563ceecb2e4ba599172e7b7a73ca25
+msgid "[添加新模型](../user-guide/new-model.md) — 接入自己的模型"
+msgstr ""
+"[Adding a new model](../user-guide/new-model.md) — integrate your own model"

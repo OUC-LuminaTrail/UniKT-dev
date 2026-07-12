@@ -1,0 +1,446 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2025-2026, UniKT Team
+# This file is distributed under the same license as the UniKT package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: UniKT \n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: ../../source/user-guide/case-analysis.md:1 aed77c6bf1774b0e9a38f08a871c99cd
+msgid "案例分析"
+msgstr "Case analysis"
+
+#: ../../source/user-guide/case-analysis.md:3 e29a5b8677884030980cd049bb1f0fd6
+msgid "对训练好的模型进行案例分析——查看单个学生的答题序列和知识状态变化。"
+msgstr "Perform case analysis on a trained model — inspect an individual student's response sequence and the evolution of their knowledge state."
+
+#: ../../source/user-guide/case-analysis.md:5 7a174b7759154526bbe1931b6118d958
+msgid "概述"
+msgstr "Overview"
+
+#: ../../source/user-guide/case-analysis.md:7 e32b817648fc492ca1d5303a152f67e5
+msgid ""
+"案例分析的目的是**可视化模型对具体学生的预测质量**：模型在哪里对了、哪里错了、知识状态如何演变。 它通过三步工作流完成：推理 → 筛选学生 →"
+" 生成热力图。"
+msgstr ""
+"The goal of case analysis is to **visualize the prediction quality for specific students**: where the model was right, where it was wrong, and how the "
+"knowledge state evolves. It follows a three-step workflow: inference → student selection →"
+" heatmap generation."
+
+#: ../../source/user-guide/case-analysis.md:15 1a5abd2ff30b4b12b90d7f3464f9f02e
+msgid "快速上手"
+msgstr "Quick start"
+
+#: ../../source/user-guide/case-analysis.md:34 494d21be8ea14f038fddb564e6959711
+msgid ""
+"三步必须按顺序执行——``select`` 依赖 ``inference`` 产出的 "
+"``predictions.parquet``，``plot`` 依赖 ``select`` 产出的 "
+"``selected_users.json``。"
+msgstr ""
+"The three steps must be executed in order — ``select`` depends on the "
+"``predictions.parquet`` produced by ``inference``, and ``plot`` depends on the "
+"``selected_users.json`` produced by ``select``."
+
+#: ../../source/user-guide/case-analysis.md:41 1d71637ea13c417893715176edb3f9bf
+msgid "inference —— 批量推理"
+msgstr "inference — Batch inference"
+
+#: ../../source/user-guide/case-analysis.md:43 9f4a4b40165144bd8d328cda03575fa3
+msgid "加载 ``best_model.pth``，用验证集跑前向推理，保存预测结果。"
+msgstr "Loads ``best_model.pth``, runs forward inference on the validation set, and saves the predictions."
+
+#: ../../source/user-guide/case-analysis.md:33
+#: ../../source/user-guide/case-analysis.md:62 55c24709984546cea39a9469d6829a06
+#: dbe504ea0ad74858bc8112e9b90d42a4 dbebaf546754471f95057008ef9418c0
+msgid "参数"
+msgstr "Parameter"
+
+#: ../../source/user-guide/case-analysis.md:33
+#: ../../source/user-guide/case-analysis.md:62 429434da3d44455c9e21e2d0199cddea
+#: de55987a7a2f4bfda1ad845b73191369 df32139f7a254a35aa82f63d416c378a
+msgid "默认值"
+msgstr "Default"
+
+#: ../../source/user-guide/case-analysis.md:33
+#: ../../source/user-guide/case-analysis.md:62 bed5264db9bd404690fb15e7eb3d7701
+#: dc4cc34bf3154b11ad10c9757ca71270 df45a820c7a540ebaf73c7e09fb9803d
+msgid "描述"
+msgstr "Description"
+
+#: ../../source/user-guide/case-analysis.md:33
+#: ../../source/user-guide/case-analysis.md:62 822ba3ca249146f5b844e25d7418e431
+#: 91b356dc05e542d99dcf1eb3aecda246 c7890e8c39e04437b1054c7fbf1d6b98
+msgid "``--run_dir``"
+msgstr "``--run_dir``"
+
+#: ../../source/user-guide/case-analysis.md:33
+#: ../../source/user-guide/case-analysis.md:62 3252bd84c3014c97a7279a6980509db4
+#: a5d375a43cbd476883169124acd5d409 c050f5c9438347948922e96923e490ef
+#: dc7f776312ae481d8fb23a13c5baadf2
+msgid "必填"
+msgstr "Required"
+
+#: ../../source/user-guide/case-analysis.md:33 ecb318cb847241929ab46857edebabb4
+msgid "run 目录路径（包含 ``best_model.pth`` 和 ``hyperparameters.json``）"
+msgstr "run directory path (containing ``best_model.pth`` and ``hyperparameters.json``)"
+
+#: ../../source/user-guide/case-analysis.md:33 34c8b16817844b80b2073d523fb9a922
+msgid "``--hyperparams``"
+msgstr "``--hyperparams``"
+
+#: ../../source/user-guide/case-analysis.md:33 ad7f823b18ca4419a7660fe904adc38c
+msgid "自动检测"
+msgstr "Auto-detect"
+
+#: ../../source/user-guide/case-analysis.md:33 462ae254b5134c95b0b48cf7c6afea12
+msgid "超参数 JSON 路径"
+msgstr "Hyperparameter JSON path"
+
+#: ../../source/user-guide/case-analysis.md:33 5be56893d9624d18980e4e4dab80f652
+msgid "``--data_base_path``"
+msgstr "``--data_base_path``"
+
+#: ../../source/user-guide/case-analysis.md:33 9ba96800d6fd4b1eb4afe74e2eaed596
+msgid "``./data``"
+msgstr "``./data``"
+
+#: ../../source/user-guide/case-analysis.md:33 59de534d04914d68b594f4c0eb76763d
+msgid "数据集根目录"
+msgstr "Dataset root directory"
+
+#: ../../source/user-guide/case-analysis.md:52 0af7b9a70ae5420c83b442bd39507f88
+msgid ""
+"执行流程：从 ``hyperparameters.json`` 读取模型名和数据集名 → 加载模型专属的 ``CaseAnalyzer`` → "
+"遍历验证集批量推理 → 输出 parquet 文件。"
+msgstr ""
+"Execution flow: read the model name and dataset name from ``hyperparameters.json`` → load the model-specific ``CaseAnalyzer`` → "
+"iterate over the validation set for batch inference → output a parquet file."
+
+#: ../../source/user-guide/case-analysis.md:54 eebd7bac1cdb4c42bfb7cc89cbe52ea1
+msgid "推理完成后在 ``run_dir/case_analysis/`` 下生成："
+msgstr "After inference completes, the following is generated under ``run_dir/case_analysis/``:"
+
+#: ../../source/user-guide/case-analysis.md:63 e61b913200be45ed8fc4fc27dcc9b4c3
+msgid ""
+"``CaseAnalyzer`` 继承 ``BaseTrainer``，但 ``build`` 只加载 checkpoint 不创建 "
+"optimizer/loss——专为推理设计。如果 checkpoint 目录下没有 "
+"``hyperparameters.json``，推理会直接报错。"
+msgstr ""
+"``CaseAnalyzer`` inherits from ``BaseTrainer``, but ``build`` only loads the checkpoint without creating an "
+"optimizer/loss — it is purpose-built for inference. If there is no "
+"``hyperparameters.json`` in the checkpoint directory, inference raises an error immediately."
+
+#: ../../source/user-guide/case-analysis.md:70 d6181b9bc33442ee860b7c1539cc9a95
+msgid "select —— 筛选学生"
+msgstr "select — Student selection"
+
+#: ../../source/user-guide/case-analysis.md:72 8fd372d55ee245e1aeea1664c3e3496a
+msgid "从推理结果中按策略筛选目标学生。"
+msgstr "Selects target students from the inference results according to a strategy."
+
+#: ../../source/user-guide/case-analysis.md:62 2612804dc35143509e67713941a03092
+#: 29a24bd99e214daaa83a7de8a7f06590
+msgid "run 目录路径"
+msgstr "run directory path"
+
+#: ../../source/user-guide/case-analysis.md:62 caaa496c9a2545418f44540a2553b2ca
+msgid "``--strategy``"
+msgstr "``--strategy``"
+
+#: ../../source/user-guide/case-analysis.md:62 1402b7f9f5b1479da9bf8d39a41b1575
+msgid "``diverse``"
+msgstr "``diverse``"
+
+#: ../../source/user-guide/case-analysis.md:62 6e4c8b372b2b41c8899ec6f1864793b9
+msgid "筛选策略：``diverse`` / ``extreme`` / ``random``"
+msgstr "Selection strategy: ``diverse`` / ``extreme`` / ``random``"
+
+#: ../../source/user-guide/case-analysis.md:62 b0899866b5b64ec3a905313fe0b0ac13
+msgid "``--num_users``"
+msgstr "``--num_users``"
+
+#: ../../source/user-guide/case-analysis.md:62 4dbda10435e94123a77f075789990d75
+msgid "``10``"
+msgstr "``10``"
+
+#: ../../source/user-guide/case-analysis.md:62 21a28953651041a5bcc3ef104fb9e775
+msgid "最多筛选多少学生"
+msgstr "Maximum number of students to select"
+
+#: ../../source/user-guide/case-analysis.md:62 5e839921c4484b57945f2cc9bbf7591b
+msgid "``--min_seq_len``"
+msgstr "``--min_seq_len``"
+
+#: ../../source/user-guide/case-analysis.md:62 d83665338a6849eb8674a1a527411b5e
+msgid "``20``"
+msgstr "``20``"
+
+#: ../../source/user-guide/case-analysis.md:62 aae43aa4446e4b36812550c172a945d4
+msgid "学生最少答题数"
+msgstr "Minimum number of responses per student"
+
+#: ../../source/user-guide/case-analysis.md:62 6d0664a097f944bf9c22b41df40447a8
+msgid "``--min_error``"
+msgstr "``--min_error``"
+
+#: ../../source/user-guide/case-analysis.md:62 26ebed9d52f048a89d1df82c9a8b9870
+msgid "``0.1``"
+msgstr "``0.1``"
+
+#: ../../source/user-guide/case-analysis.md:62 cd31f9cc4a6c4619bacc43d3c025f69e
+msgid "最低错误率"
+msgstr "Minimum error rate"
+
+#: ../../source/user-guide/case-analysis.md:62 53431dc30fbc4ba496f3d465ec51c62e
+msgid "``--max_error``"
+msgstr "``--max_error``"
+
+#: ../../source/user-guide/case-analysis.md:62 4af9a8d7d00449658d4640f08773da8f
+msgid "``0.9``"
+msgstr "``0.9``"
+
+#: ../../source/user-guide/case-analysis.md:62 d2a5aa4f1306455abea9c9d589c37fa3
+msgid "最高错误率"
+msgstr "Maximum error rate"
+
+#: ../../source/user-guide/case-analysis.md:84 9479776bdc544c79bd3e20259cf9bbd7
+msgid "三种策略"
+msgstr "The three strategies"
+
+#: ../../source/user-guide/case-analysis.md:86 04a94c70071e4158bdcfa1d26970f953
+msgid ""
+"**diverse（多样采样，默认）**：将学生按错误率分 5 个桶（very_low → "
+"very_high），从每个桶均匀采样，覆盖不同能力层次。"
+msgstr ""
+"**diverse (diverse sampling, default)**: splits students into 5 buckets by error rate (very_low → "
+"very_high), sampling evenly from each bucket to cover different ability levels."
+
+#: ../../source/user-guide/case-analysis.md:94 d130e872f1ce4ee684386b27fad9977d
+msgid "**extreme（极端案例）**：选择错误率最高的学生，适合分析模型失败模式。"
+msgstr "**extreme (extreme cases)**: selects students with the highest error rate, suitable for analyzing model failure modes."
+
+#: ../../source/user-guide/case-analysis.md:102
+#: 552dcc42eda64a24b192a7034377f838
+msgid "**random（随机采样）**：从符合条件的候选中随机抽取，适合快速抽查。"
+msgstr "**random (random sampling)**: randomly samples from qualifying candidates, suitable for quick spot checks."
+
+#: ../../source/user-guide/case-analysis.md:110
+#: e5ebff4142ac4329b3e4768a950e0aae
+msgid "筛选逻辑"
+msgstr "Selection logic"
+
+#: ../../source/user-guide/case-analysis.md:112
+#: 21add29bd4624109854c3c9dc944f6e4
+msgid "计算所有学生的 ``num_attempts`` / ``error_rate`` / ``avg_confidence``"
+msgstr "Compute ``num_attempts`` / ``error_rate`` / ``avg_confidence`` for all students"
+
+#: ../../source/user-guide/case-analysis.md:113
+#: ebab74645ec54a28ac8bbbfc5f5f77dc
+msgid ""
+"过滤掉 ``num_attempts < min_seq_len``、``error_rate`` 不在 ``[min_error, "
+"max_error]`` 或 ``avg_confidence`` 不在 ``[0.3, 0.95]`` 的学生"
+msgstr ""
+"Filter out students with ``num_attempts < min_seq_len``, an ``error_rate`` outside ``[min_error, "
+"max_error]``, or an ``avg_confidence`` outside ``[0.3, 0.95]``"
+
+#: ../../source/user-guide/case-analysis.md:114
+#: 680aee85d57e4a49ba968aaaa639e34a
+msgid "符合条件不足 ``num_users`` 则全部返回，否则按策略采样"
+msgstr "If fewer than ``num_users`` qualify, return all of them; otherwise sample according to the strategy"
+
+#: ../../source/user-guide/case-analysis.md:116
+#: 285b4061518941e79323fdd5a24970ed
+msgid "结果保存到 ``run_dir/case_analysis/<strategy>/selected_users.json``。"
+msgstr "Results are saved to ``run_dir/case_analysis/<strategy>/selected_users.json``."
+
+#: ../../source/user-guide/case-analysis.md:122
+#: c981f2e225534184a0afaa5977e54459
+msgid "plot —— 热力图可视化"
+msgstr "plot — Heatmap visualization"
+
+#: ../../source/user-guide/case-analysis.md:124
+#: 609450e4d5ac42bb9630e8daabb531e7
+msgid "为选中的学生生成知识状态热力图。"
+msgstr "Generates knowledge state heatmaps for the selected students."
+
+#: ../../source/user-guide/case-analysis.md:62 952977a82c6542fa85ada858a2f85f23
+msgid "``--selected_users``"
+msgstr "``--selected_users``"
+
+#: ../../source/user-guide/case-analysis.md:62 e0f8fd17147e43f4ac4bf3e50262de29
+msgid "策略名（``diverse``/``extreme``/``random``）或 JSON 文件路径"
+msgstr "Strategy name (``diverse``/``extreme``/``random``) or JSON file path"
+
+#: ../../source/user-guide/case-analysis.md:62 e8554a0971b94decb32e87172ac7731c
+msgid "``--max_seq_len``"
+msgstr "``--max_seq_len``"
+
+#: ../../source/user-guide/case-analysis.md:62 a672f86d674f4de888771d1f6bb19cae
+msgid "``None``"
+msgstr "``None``"
+
+#: ../../source/user-guide/case-analysis.md:62 a69fabbcc2fe40cdb35fe671aad84787
+msgid "截断序列长度"
+msgstr "Truncated sequence length"
+
+#: ../../source/user-guide/case-analysis.md:145
+#: 59850a28bdd94b6abf5fe88983aa7f0b
+msgid "热力图解读"
+msgstr "Reading the heatmap"
+
+#: ../../source/user-guide/case-analysis.md:147
+#: fa28d8e2c4d541dbb4ce475f80874041
+msgid "每张热力图从上到下四个区域："
+msgstr "Each heatmap has four regions from top to bottom:"
+
+#: ../../source/user-guide/case-analysis.md:62 e592922cef39411e81e5328400409727
+msgid "行"
+msgstr "Row"
+
+#: ../../source/user-guide/case-analysis.md:62 e0840045924d40a2a04ec3b0644ac953
+msgid "标签"
+msgstr "Label"
+
+#: ../../source/user-guide/case-analysis.md:62 03c8b9fa8ccb4eb18ad071d5a432f9c5
+msgid "内容"
+msgstr "Content"
+
+#: ../../source/user-guide/case-analysis.md:62 634de5f0cdc04b4a8071c29f78e29482
+msgid "Question"
+msgstr "Question"
+
+#: ../../source/user-guide/case-analysis.md:62 216b503ea6ec45939b5a866673a4491e
+msgid "``q0``, ``q1``, ..."
+msgstr "``q0``, ``q1``, ..."
+
+#: ../../source/user-guide/case-analysis.md:62 caaa9196c73f4b1fbff3c6715dc056b3
+msgid "每一步的题目 ID"
+msgstr "Question ID at each step"
+
+#: ../../source/user-guide/case-analysis.md:62 dfafc75fd7c14d8a995ebd19a0dc99bd
+msgid "Skill"
+msgstr "Skill"
+
+#: ../../source/user-guide/case-analysis.md:62 ea50485c76a5410e9e8c71da1db533df
+msgid "``c0``, ``c1``, ..."
+msgstr "``c0``, ``c1``, ..."
+
+#: ../../source/user-guide/case-analysis.md:62 c090cd3977da4716899042adcb438462
+msgid "每一步的技能 ID（多技能纵向排列，最多 3 个）"
+msgstr "Skill ID at each step (multiple skills stacked vertically, up to 3)"
+
+#: ../../source/user-guide/case-analysis.md:62 7e2ac9db844f4bc590b4f2dd50eb29ec
+msgid "Resp"
+msgstr "Resp"
+
+#: ../../source/user-guide/case-analysis.md:62 e67465a7a8a14fb0b6d544585874bef3
+msgid "✓ / ✗"
+msgstr "✓ / ✗"
+
+#: ../../source/user-guide/case-analysis.md:62 35d9a6fdd9c749b0b61aedd06ad197ba
+msgid "实际答题正误（绿 ✓ / 红 ✗）"
+msgstr "Actual response correctness (green ✓ / red ✗)"
+
+#: ../../source/user-guide/case-analysis.md:62 2517dfbd1ee8415380630910499fb9d2
+msgid "热力图主体"
+msgstr "Heatmap body"
+
+#: ../../source/user-guide/case-analysis.md:62 b24c3dd2e380492b9419995d321771c6
+msgid "色块 + 数值"
+msgstr "Color block + value"
+
+#: ../../source/user-guide/case-analysis.md:62 f0f1cdf973b942b989aedd779d065296
+msgid "每个技能的知识状态值（绿=高，红=低）"
+msgstr "Knowledge state value for each skill (green = high, red = low)"
+
+#: ../../source/user-guide/case-analysis.md:157
+#: fc202c791a8842bb816de636dd98a755
+msgid ""
+"图片保存为 "
+"``run_dir/case_analysis/<strategy>/figures/user_<user_id>_heatmap.png``，300"
+" DPI。"
+msgstr ""
+"Images are saved as "
+"``run_dir/case_analysis/<strategy>/figures/user_<user_id>_heatmap.png`` at 300"
+" DPI."
+
+#: ../../source/user-guide/case-analysis.md:160
+#: 81153783b2854fefa76cda206d5d77f0
+msgid ""
+"热力图需要 ``knowledge_states`` 列。大多数 DKT 类模型会将隐藏状态作为知识状态输出。如果该列全为 "
+"``None``，``plot`` 会报错。"
+msgstr ""
+"The heatmap requires the ``knowledge_states`` column. Most DKT-style models output the hidden state as the knowledge state. If this column is entirely "
+"``None``, ``plot`` raises an error."
+
+#: ../../source/user-guide/case-analysis.md:165
+#: b219bcd872884e63b7eb4692c9d3bc00
+msgid "自定义案例选择"
+msgstr "Custom case selection"
+
+#: ../../source/user-guide/case-analysis.md:167
+#: cbd8b7dd621840c7af627648c5c1f49d
+msgid "可以直接用 ``ResultCollector`` 在 Python 中自定义筛选："
+msgstr "You can use ``ResultCollector`` directly in Python to customize the selection:"
+
+#: ../../source/user-guide/case-analysis.md:187
+#: 02bb7231029847c6b5ae4efba4732d68
+msgid "完整输出结构"
+msgstr "Full output structure"
+
+#: ../../source/user-guide/case-analysis.md:206
+#: 3b93288d2691487fbb34652c0be39d1e
+msgid "模型支持"
+msgstr "Model support"
+
+#: ../../source/user-guide/case-analysis.md:208
+#: f9df27d30deb4a208689fae78dc3dd5e
+msgid ""
+"模型需要实现 ``@register_analyzer(\"NAME\")`` 并继承 "
+"``BaseCaseAnalyzer``（``utils/case_analysis/base_analyzer.py`` ），实现一个方法："
+msgstr ""
+"A model must implement ``@register_analyzer(\"NAME\")`` and inherit from "
+"``BaseCaseAnalyzer`` (``utils/case_analysis/base_analyzer.py``), implementing one method:"
+
+#: ../../source/user-guide/case-analysis.md:224
+#: 846217cd9c694e86bed678672194810b
+msgid "已有 34 个模型中的大部分实现了该方法。新模型参考 ``model/DKT/DKT_analyzer.py`` 创建即可。"
+msgstr "Most of the 34 existing models already implement this method. For a new model, follow ``model/DKT/DKT_analyzer.py``."
+
+#: ../../source/user-guide/case-analysis.md:227
+#: 543542efc20c47cc844fa42ea64a8c9b
+msgid "最佳实践"
+msgstr "Best practices"
+
+#: ../../source/user-guide/case-analysis.md:229
+#: 62f89901c308400692b8a2024218157b
+msgid "**先看 extreme**：找到模型表现最差的学生，优先修复失败模式"
+msgstr "**Start with extreme**: find the students where the model performs worst, and prioritize fixing failure modes"
+
+#: ../../source/user-guide/case-analysis.md:230
+#: 95b4fc3873b54fd390bac1496b15803d
+msgid "**再看 diverse**：覆盖不同能力层次，确认修复没有引入退化"
+msgstr "**Then look at diverse**: cover different ability levels and confirm the fix did not introduce regressions"
+
+#: ../../source/user-guide/case-analysis.md:231
+#: 55bcf0a02d6b4d03a5ed8c51cb70d06b
+msgid "**对比不同模型**：同一数据集、同一学生，对比两个模型的热力图"
+msgstr "**Compare different models**: for the same dataset and student, compare the heatmaps of two models"
+
+#: ../../source/user-guide/case-analysis.md:232
+#: 6ba09e78c831405b9328e220e0b6206f
+msgid "**截断长序列**：答题数超过 100 时用 ``--max_seq_len 100``，避免热力图过宽"
+msgstr "**Truncate long sequences**: when there are more than 100 responses, use ``--max_seq_len 100`` to avoid an overly wide heatmap"
