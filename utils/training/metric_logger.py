@@ -324,7 +324,7 @@ class SwanLabMetricLogger(MetricLogger):
             callbacks.append(LarkCallback(webhook_url=webhook, secret=secret))
 
         swanlab.init(
-            workspace=os.getenv("SWANLAB_WORKSPACE", None),
+            workspace=os.getenv("SWANLAB_WORKSPACE") or None,
             project_name="kt-exp-graph",
             experiment_name=f"Run_{experiment_name}",
             config=config,
