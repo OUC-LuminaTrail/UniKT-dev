@@ -132,10 +132,10 @@ class ResourceStats:
 
 
 class ResourceSampler:
-    """后台线程按固定间隔采样 CPU/RAM/GPU 利用率与功耗。
+    """Background thread sampling CPU/RAM/GPU utilization and power per stage.
 
-    psutil/pynvml 查询是阻塞的（每样本 1-5ms），不能落在延迟计时关键路径上，
-    因此放 daemon 线程。这些调用释放 GIL，可与 GPU kernel 并发。
+    psutil/pynvml queries block (1-5ms each), kept off the latency timing path
+    via a daemon thread; they release the GIL and overlap GPU kernels.
     """
 
     def __init__(self, device: torch.device, interval_s: float = 0.05) -> None:
@@ -143,12 +143,9 @@ class ResourceSampler:
         self.interval = interval_s
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._cpu: list[float] = []
-        self._rss: list[float] = []
-        self._gpu_util: list[float] = []
-        self._gpu_power: list[float] = []
-        self._gpu_mem: list[float] = []
-        self._gpu_temp: list[float] = []
+        # Per-stage sample buckets; _current routes each sample to its stage.
+        self._buckets: dict[str, dict[str, list[float]]] = {}
+        self._current: str | None = None
         self._proc = None
         self._nv_handle = None
         self._nv_ok = False
@@ -159,7 +156,7 @@ class ResourceSampler:
             import psutil
 
             self._proc = psutil.Process(os.getpid())
-            # 首次 cpu_percent 无基线返回 0，先预热
+            # First cpu_percent call has no baseline (returns 0); prime it here.
             self._proc.cpu_percent(interval=None)
             for child in self._proc.children(recursive=True):
                 child.cpu_percent(interval=None)
@@ -174,7 +171,7 @@ class ResourceSampler:
                 import pynvml
 
                 pynvml.nvmlInit()
-                # 标记 NVML 已初始化，stop 据此 shutdown——即使后续 GetHandle 失败也要配对
+                # Mark NVML initialized so stop() pairs the shutdown even if GetHandle fails.
                 self._nvml_inited = True
                 idx = self.device.index or 0
                 self._nv_handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
@@ -193,22 +190,35 @@ class ResourceSampler:
             self._sample_once()
             self._stop.wait(self.interval)
 
+    def begin_stage(self, name: str) -> None:
+        """Route subsequent samples to the named stage's bucket."""
+        if name not in self._buckets:
+            self._buckets[name] = _new_bucket()
+        self._current = name
+
+    def end_stage(self) -> None:
+        """Stop attributing samples until the next stage begins."""
+        self._current = None
+
     def _sample_once(self) -> None:
+        if self._current is None:
+            return
+        bucket = self._buckets[self._current]
         if self._proc is not None:
             try:
                 import psutil
 
                 cpu = self._proc.cpu_percent(interval=None)
                 rss = self._proc.memory_info().rss / 1024**2
-                # 包含 DataLoader 子进程
+                # Include DataLoader child processes
                 for child in self._proc.children(recursive=True):
                     try:
                         cpu += child.cpu_percent(interval=None)
                         rss += child.memory_info().rss / 1024**2
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
                         pass
-                self._cpu.append(cpu)
-                self._rss.append(rss)
+                bucket["cpu"].append(cpu)
+                bucket["rss"].append(rss)
             except Exception:
                 pass
 
@@ -217,13 +227,13 @@ class ResourceSampler:
                 import pynvml
 
                 util = pynvml.nvmlDeviceGetUtilizationRates(self._nv_handle)
-                self._gpu_util.append(float(util.gpu))
-                self._gpu_mem.append(float(util.memory))
-                # 功耗返回 mW
-                self._gpu_power.append(
+                bucket["gpu_util"].append(float(util.gpu))
+                bucket["gpu_mem"].append(float(util.memory))
+                # Power returns mW
+                bucket["gpu_power"].append(
                     float(pynvml.nvmlDeviceGetPowerUsage(self._nv_handle)) / 1000.0
                 )
-                self._gpu_temp.append(
+                bucket["gpu_temp"].append(
                     float(
                         pynvml.nvmlDeviceGetTemperature(
                             self._nv_handle, pynvml.NVML_TEMPERATURE_GPU
@@ -233,7 +243,7 @@ class ResourceSampler:
             except Exception:
                 pass
 
-    def stop(self) -> ResourceStats:
+    def stop(self) -> dict[str, ResourceStats]:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -245,14 +255,29 @@ class ResourceSampler:
             except Exception:
                 pass
 
-        return ResourceStats(
-            cpu_percent=_summarize(self._cpu),
-            process_rss_mib=_summarize(self._rss),
-            gpu_util_pct=_summarize(self._gpu_util),
-            gpu_power_w=_summarize(self._gpu_power),
-            gpu_mem_used_mib=_summarize(self._gpu_mem),
-            gpu_temp_c=_summarize(self._gpu_temp),
-        )
+        return {
+            name: ResourceStats(
+                cpu_percent=_summarize(b["cpu"]),
+                process_rss_mib=_summarize(b["rss"]),
+                gpu_util_pct=_summarize(b["gpu_util"]),
+                gpu_power_w=_summarize(b["gpu_power"]),
+                gpu_mem_used_mib=_summarize(b["gpu_mem"]),
+                gpu_temp_c=_summarize(b["gpu_temp"]),
+            )
+            for name, b in self._buckets.items()
+        }
+
+
+def _new_bucket() -> dict[str, list[float]]:
+    """Empty per-stage sample container."""
+    return {
+        "cpu": [],
+        "rss": [],
+        "gpu_util": [],
+        "gpu_power": [],
+        "gpu_mem": [],
+        "gpu_temp": [],
+    }
 
 
 def _summarize(xs: list[float]) -> ResourceSummary:

@@ -34,7 +34,7 @@ class EfficiencyReport:
     config: dict[str, Any]
     determinism: dict[str, Any]
     environment: EnvironmentInfo
-    resource: ResourceStats | None
+    resource: dict[str, ResourceStats] | None
     results: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -74,16 +74,19 @@ class EfficiencyReport:
                 console.print(table)
                 console.print()
 
-        if self.resource is not None:
-            console.print(_resource_table(self.resource))
+        for stage_name in self.modes:
+            stats = (self.resource or {}).get(stage_name)
+            if stats is None:
+                continue
+            console.print(_resource_table(stats, title=f"Resource Usage — {stage_name}"))
             console.print()
         console.print(_environment_table(self.environment))
         console.print()
 
 
-def _resource_table(stats: ResourceStats) -> Table:
+def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Table:
     table = Table(
-        title="Resource Usage", title_style="bold magenta", show_header=False, box=None
+        title=title, title_style="bold magenta", show_header=False, box=None
     )
     table.add_column("Key", style="yellow", no_wrap=True)
     table.add_column("Mean", style="white")

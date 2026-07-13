@@ -79,12 +79,17 @@ class EfficiencySession:
         sampler = ResourceSampler(device, self.cfg.resource_sample_interval)
         sampler.start()
         results: dict[str, Any] = {}
+        resources: dict[str, Any] = {}
         try:
             for name, stage in self.stages:
                 logger.info(f"[{name}] running ...")
-                results[name] = stage.run(ctx)
+                sampler.begin_stage(name)
+                try:
+                    results[name] = stage.run(ctx)
+                finally:
+                    sampler.end_stage()
         finally:
-            resource = sampler.stop()
+            resources = sampler.stop()
         logger.info("[Report] assembling efficiency report ...")
 
         report = EfficiencyReport(
@@ -103,7 +108,7 @@ class EfficiencySession:
                 "deterministic_algorithms": environment.deterministic_algorithms,
             },
             environment=environment,
-            resource=resource,
+            resource=resources,
             results=results,
         )
 
