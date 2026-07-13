@@ -4,8 +4,8 @@
 if [ "$#" -lt 2 ]; then
     echo "Usage: $0 <model_name|ALL> <folds_list> [args...]"
     echo "Supported models: GIKT, SQGKT"
-    echo "Example: $0 GIKT \"0 1 2\" --dataset assistments09 --epochs 100"
-    echo "Example: $0 ALL \"0 1 2\" --dataset assistments09 --epochs 100"
+    echo "Example: $0 GIKT \"0 1 2\" -d assistments09 --model.epochs 100"
+    echo "Example: $0 ALL \"0 1 2\" -d assistments09 --model.epochs 100"
     exit 1
 fi
 
@@ -38,8 +38,8 @@ run_kfold_for_model() {
         echo "Running Fold $fold for $model"
         echo "----------------------------------------"
         
-        # 运行统一的 train.py 脚本，传入 -m 模型参数、--fold 参数和其他参数
-        python train.py -m "$model" --fold "$fold" $ARGS
+        # 运行统一的 train.py 脚本，传入 -m 模型参数、--data.fold 参数和其他参数
+        python train.py -m "$model" --data.fold "$fold" $ARGS
         
         # 检查退出代码
         if [ $? -ne 0 ]; then
