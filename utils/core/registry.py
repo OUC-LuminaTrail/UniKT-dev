@@ -161,6 +161,7 @@ MODEL_CONFIGS = UniversalRegistry("model_configs")
 DATA_SOURCES = UniversalRegistry("data_sources")
 ANALYZERS = UniversalRegistry("analyzers")
 METRIC_LOGGERS = UniversalRegistry("metric_loggers")
+EFFICIENCY_STAGES = UniversalRegistry("efficiency_stages")
 
 
 # ============================================================================
@@ -236,3 +237,18 @@ def register_metric_logger(name: str | None = None):
         A decorator that registers the class with ``METRIC_LOGGERS``.
     """
     return METRIC_LOGGERS.register(name)
+
+
+def register_efficiency_stage(name: str | None = None):
+    """Register an efficiency benchmark stage into ``EFFICIENCY_STAGES``.
+
+    Stages are auto-discovered from ``utils/efficiency/stages/``; drop a file
+    there and decorate the class — no manual registration elsewhere.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``EFFICIENCY_STAGES``.
+    """
+    return EFFICIENCY_STAGES.register(name)

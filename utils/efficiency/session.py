@@ -1,149 +1,109 @@
-"""Efficiency session: orchestrates profile + inference + training + resource."""
+"""Efficiency session: orchestrates registered stages + resource sampling.
 
-from dataclasses import asdict, dataclass
+Stages are resolved from :data:`utils.core.EFFICIENCY_STAGES` (filtered by
+``rc.efficiency.modes``, ordered by ``priority``); the session is agnostic to
+which stages exist. ``environment`` is collected once as shared context, and the
+background ``ResourceSampler`` spans all stages.
+"""
+
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import torch
+from omegaconf import OmegaConf
 
-from utils.core import get_logger, seed_everything
+from utils.core import (
+    EFFICIENCY_STAGES,
+    get_logger,
+    get_supported_stages,
+    seed_everything,
+)
 
 from .environment import ResourceSampler, collect_environment
-from .inference import (
-    batch_size_of,
-    benchmark_inference,
-    count_valid_interactions,
-)
-from .model_profile import profile_model
+from .inference import batch_size_of, count_valid_interactions
 from .report import EfficiencyReport
-from .training import benchmark_training
+from .stages.base import EfficiencyStage, StageContext
 
 logger = get_logger(__name__)
 
 
-@dataclass
-class EfficiencyConfig:
-    """效率基准运行参数。"""
-
-    warmup_iters: int = 50
-    benchmark_iters: int = 200
-    train_iters: int = 50
-    repeats: int = 3
-    sample_interval: float = 0.05
-    profile_flops: bool = True
-
-
 class EfficiencySession:
-    """协调单次效率评估会话。
+    """Coordinate one efficiency benchmark run over the enabled stages."""
 
-    构造时接收已 build 的 trainer，按选定 modes 依次跑 profile/inference/training，
-    后台 ``ResourceSampler`` 贯穿测量，最后组装 ``EfficiencyReport``。
-    """
-
-    def __init__(self, trainer, args, output_dir: str | Path | None = None) -> None:
+    def __init__(self, trainer, rc, output_dir: str | Path | None = None) -> None:
+        """Resolve the enabled stages from ``rc.efficiency.modes``."""
         self.trainer = trainer
+        self.rc = rc
+        self.cfg = rc.efficiency
         self.device = trainer.device_
-        self.args = args
         self.output_dir = Path(output_dir) if output_dir else None
-        self.cfg = EfficiencyConfig(
-            warmup_iters=getattr(args, "warmup_iters", 50),
-            benchmark_iters=getattr(args, "benchmark_iters", 200),
-            train_iters=getattr(args, "train_iters", 50),
-            repeats=getattr(args, "repeats", 3),
-            sample_interval=getattr(args, "sample_interval", 0.05),
-            profile_flops=getattr(args, "profile_flops", True),
-        )
-        self.modes = [m.strip() for m in args.modes.split(",") if m.strip()]
+        self.stages = _resolve_stages(list(self.cfg.modes))
 
     def run(self) -> EfficiencyReport:
-        # seed + cuDNN/deterministic_algorithms 由 seed_everything 统一设置
-        seed_everything(self.args.seed, deterministic=self.args.deterministic)
+        """Run the enabled stages under a shared resource sampler and assemble the report."""
+        seed_everything(self.rc.general.seed, deterministic=not self.rc.general.no_deterministic)
 
         device = self.device
-        # trainer.run() 本会迁移 model/loss 到 device；这里不走 run()，需手动迁移，
-        # 否则 forward_pass 把 input 迁到 device 后与 cpu 上的 model weight 冲突
+        # trainer.run() would migrate model/loss to device; we skip run(), so do it
+        # manually — otherwise forward_pass moves inputs to device and clashes with
+        # CPU-resident weights.
         self.trainer.model.to(device)
         if isinstance(self.trainer.loss, torch.nn.Module):
             self.trainer.loss.to(device)
         environment = collect_environment(device)
 
-        # 预取一个 representative batch；计时循环复用它以规避 DataLoader IPC 噪声
+        # Prefetch one representative batch; timing loops reuse it to avoid
+        # DataLoader IPC noise.
         sample_batch = _to_device(next(iter(self.trainer.train_data)), device)
         batch_size = batch_size_of(sample_batch)
         valid_tokens = count_valid_interactions(self.trainer, sample_batch)
-        seq_len = getattr(self.args, "max_seq_len", None)
+        seq_len = getattr(self.rc.data, "max_seq_len", None)
         logger.info(
             f"[Setup] batch_size={batch_size} seq_len={seq_len} "
             f"valid_tokens={valid_tokens}"
         )
 
-        sampler = ResourceSampler(device, self.cfg.sample_interval)
+        ctx = StageContext(
+            trainer=self.trainer,
+            device=device,
+            sample_batch=sample_batch,
+            batch_size=batch_size,
+            valid_tokens=valid_tokens,
+            seq_len=seq_len,
+            cfg=self.cfg,
+            environment=environment,
+        )
+
+        sampler = ResourceSampler(device, self.cfg.resource_sample_interval)
         sampler.start()
-        profile = inference = training = None
+        results: dict[str, Any] = {}
         try:
-            if "profile" in self.modes:
-                logger.info("[Profile] measuring params / size / FLOPs ...")
-                profile = profile_model(
-                    self.trainer.model,
-                    forward_fn=lambda: self.trainer.forward_pass(sample_batch),
-                    device=device,
-                    count_flops=self.cfg.profile_flops,
-                )
-            if "inference" in self.modes:
-                logger.info(
-                    f"[Inference] starting "
-                    f"(warmup={self.cfg.warmup_iters}, "
-                    f"iters={self.cfg.benchmark_iters}×{self.cfg.repeats}) ..."
-                )
-                inference = benchmark_inference(
-                    self.trainer,
-                    sample_batch,
-                    batch_size,
-                    valid_tokens,
-                    self.cfg.warmup_iters,
-                    self.cfg.benchmark_iters,
-                    self.cfg.repeats,
-                    device,
-                )
-            if "train" in self.modes:
-                logger.info(
-                    f"[Training] starting "
-                    f"(warmup={self.cfg.warmup_iters}, "
-                    f"iters={self.cfg.train_iters}, with backward) ..."
-                )
-                training = benchmark_training(
-                    self.trainer,
-                    sample_batch,
-                    batch_size,
-                    valid_tokens,
-                    self.cfg.warmup_iters,
-                    self.cfg.train_iters,
-                    device,
-                )
+            for name, stage in self.stages:
+                logger.info(f"[{name}] running ...")
+                results[name] = stage.run(ctx)
         finally:
             resource = sampler.stop()
         logger.info("[Report] assembling efficiency report ...")
 
         report = EfficiencyReport(
-            model_name=getattr(self.args, "model", ""),
-            dataset_name=getattr(self.args, "dataset", ""),
+            model_name=self.rc.experiment.model_name,
+            dataset_name=self.rc.data.dataset,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             batch_size=batch_size,
             seq_len=seq_len,
-            modes=self.modes,
-            config=asdict(self.cfg),
+            modes=[name for name, _ in self.stages],
+            config=OmegaConf.to_container(self.cfg, resolve=True),
             determinism={
-                "seed": self.args.seed,
-                "deterministic": bool(self.args.deterministic),
+                "seed": self.rc.general.seed,
+                "deterministic": not self.rc.general.no_deterministic,
                 "cudnn_benchmark": environment.cudnn_benchmark,
                 "cudnn_deterministic": environment.cudnn_deterministic,
                 "deterministic_algorithms": environment.deterministic_algorithms,
             },
             environment=environment,
-            model_profile=profile,
-            inference=inference,
-            training=training,
             resource=resource,
+            results=results,
         )
 
         if self.output_dir is not None:
@@ -151,8 +111,26 @@ class EfficiencySession:
         return report
 
 
+def _resolve_stages(modes: list[str]) -> list[tuple[str, EfficiencyStage]]:
+    """Resolve ``(registry_name, stage)`` pairs (empty ``modes`` = all), by priority.
+
+    Keys/results use the registry name, not the stage's ``name`` ClassVar, so a
+    stage whose ClassVar drifts from its registration key still renders. ``modes``
+    is de-duplicated (preserving order) so a repeated stage runs once.
+    """
+    available = get_supported_stages()
+    unknown = [m for m in modes if m not in available]
+    if unknown:
+        raise SystemExit(
+            f"Unknown efficiency stage(s): {unknown}. Available: {available}"
+        )
+    selected = list(dict.fromkeys(modes if modes else available))
+    stages = [(n, EFFICIENCY_STAGES.get(n)()) for n in selected]
+    return sorted(stages, key=lambda ns: ns[1].priority)
+
+
 def _to_device(batch, device: torch.device):
-    """递归把 batch 中的 tensor 移到 device（tuple/list/dict 感知）。"""
+    """Recursively move batch tensors to device (tuple/list/dict aware)."""
     if isinstance(batch, torch.Tensor):
         return batch.to(device)
     if isinstance(batch, (list, tuple)):

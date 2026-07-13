@@ -17,6 +17,7 @@ from .logger import get_logger
 from .registry import (
     ANALYZERS,
     DATA_SOURCES,
+    EFFICIENCY_STAGES,
     MODEL_CONFIGS,
     TRAINERS,
     UniversalRegistry,
@@ -30,6 +31,7 @@ _DECORATORS: dict[str, UniversalRegistry] = {
     "register_model_config": MODEL_CONFIGS,
     "register_data_source": DATA_SOURCES,
     "register_analyzer": ANALYZERS,
+    "register_efficiency_stage": EFFICIENCY_STAGES,
 }
 
 

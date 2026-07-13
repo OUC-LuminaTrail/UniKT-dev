@@ -15,12 +15,14 @@ from .random import seed_everything
 from .registry import (
     ANALYZERS,
     DATA_SOURCES,
+    EFFICIENCY_STAGES,
     METRIC_LOGGERS,
     MODEL_CONFIGS,
     TRAINERS,
     UniversalRegistry,
     register_analyzer,
     register_data_source,
+    register_efficiency_stage,
     register_metric_logger,
     register_model_config,
     register_trainer,
@@ -59,9 +61,26 @@ def get_supported_models() -> list[str]:
     return sorted(TRAINERS.keys())
 
 
+def get_supported_stages() -> list[str]:
+    """Return all registered efficiency stage names from ``EFFICIENCY_STAGES``.
+
+    Lazily triggers discovery for ``utils.efficiency.stages`` if the registry is
+    still empty (mirrors :func:`get_supported_models`).
+    """
+    if not EFFICIENCY_STAGES:
+        from pathlib import Path
+
+        discover_registrations(
+            Path(__file__).resolve().parent.parent / "efficiency" / "stages",
+            "utils.efficiency.stages",
+        )
+    return sorted(EFFICIENCY_STAGES.keys())
+
+
 __all__ = [
     "ANALYZERS",
     "DATA_SOURCES",
+    "EFFICIENCY_STAGES",
     "METRIC_LOGGERS",
     "MODEL_CONFIGS",
     # Registries
@@ -74,9 +93,11 @@ __all__ = [
     # Helpers
     "get_supported_datasets",
     "get_supported_models",
+    "get_supported_stages",
     "load_env",
     "register_analyzer",
     "register_data_source",
+    "register_efficiency_stage",
     "register_metric_logger",
     "register_model_config",
     # Decorators

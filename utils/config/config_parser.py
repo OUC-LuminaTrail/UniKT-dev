@@ -97,15 +97,42 @@ def _register_nodes(parser: argparse.ArgumentParser, nodes: dict[str, type]) -> 
 class ConfigParser:
     """Build argparse flags reflectively from a RunConfig schema and parse to an OmegaConf node."""
 
-    def __init__(self, prog: str | None = None, description: str | None = None):
-        """Store the argparse prog/description for the generated parser."""
+    def __init__(
+        self,
+        prog: str | None = None,
+        description: str | None = None,
+        extra_nodes: dict[str, type] | None = None,
+        base_config: Any = None,
+    ):
+        """Store the argparse prog/description and any entry-point-specific config nodes.
+
+        Args:
+            prog: argparse ``prog``.
+            description: argparse ``description``.
+            extra_nodes: Additional ``{node_name: dataclass}`` config nodes merged
+                on top of the framework RunConfig nodes. Lets entry-point scripts
+                (e.g. ``efficiency.py``) expose their own ``--<node>.<field>`` flags
+                without polluting the shared RunConfig tree used by ``train.py``.
+            base_config: A programmatic base config (OmegaConf node or dict) merged
+                under the schema defaults, e.g. an archived RunConfig reconstructed
+                by ``load_run_config_archive``. Serves the same role as ``--config``
+                but without argv surgery; its ``experiment.model_name`` drives model
+                resolution when neither ``-m`` nor ``--config`` is given.
+        """
         self.prog = prog
         self.description = description
+        self.extra_nodes = dict(extra_nodes) if extra_nodes else {}
+        if base_config is None:
+            self.base_config = None
+        elif OmegaConf.is_config(base_config):
+            self.base_config = base_config
+        else:
+            self.base_config = OmegaConf.create(base_config)
 
     def parse_args(self, argv: list[str] | None = None) -> Any:
         """Parse ``argv`` (default: ``sys.argv[1:]``) into a structured OmegaConf DictConfig."""
         model_name, base_cfg = self._pass_one(argv)
-        schema_nodes = build_run_config_schema(model_name)
+        schema_nodes = {**build_run_config_schema(model_name), **self.extra_nodes}
         schema = OmegaConf.structured(schema_nodes)
 
         parser = self._build_full_parser(schema_nodes)
@@ -118,6 +145,8 @@ class ConfigParser:
         merge_sources = [schema]
         if base_cfg is not None:
             merge_sources.append(base_cfg)
+        if self.base_config is not None:
+            merge_sources.append(self.base_config)
         if nested:
             merge_sources.append(OmegaConf.create(nested))
         return OmegaConf.merge(*merge_sources)
@@ -139,6 +168,11 @@ class ConfigParser:
                     model_name = base_cfg.experiment.model_name
                 except (AttributeError, KeyError):
                     model_name = None
+        if not model_name and self.base_config is not None:
+            try:
+                model_name = self.base_config.experiment.model_name
+            except (AttributeError, KeyError):
+                model_name = None
         if not model_name:
             argv_list = argv if argv is not None else sys.argv[1:]
             if "-h" in argv_list or "--help" in argv_list:
@@ -147,7 +181,8 @@ class ConfigParser:
                 self._print_framework_help()
             pre.error(
                 "model name is required: pass -m/--experiment.model_name, "
-                "or provide --config pointing at a yaml with experiment.model_name"
+                "provide --config pointing at a yaml with experiment.model_name, "
+                "or pass base_config to ConfigParser"
             )
         return model_name, base_cfg
 
@@ -170,7 +205,7 @@ class ConfigParser:
         parser.add_argument("--config", help="Path to a RunConfig yaml base.")
         # The experiment node registers -m/--experiment.model_name via its field
         # metadata; do not add -m manually (would conflict).
-        _register_nodes(parser, _FRAMEWORK_NODES)
+        _register_nodes(parser, {**_FRAMEWORK_NODES, **self.extra_nodes})
         parser.parse_args(["-h"])  # prints help and exits 0
 
     def _build_full_parser(
