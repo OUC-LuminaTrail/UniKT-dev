@@ -1,21 +1,22 @@
 """RunConfig yaml archive: lossless save/load for reproducibility.
 
 The config tree serializes to ``run_config.yaml``; runtime-derived metadata
-(param count, optimizer, device info) that does not belong in config goes to
-a sidecar ``run_metadata.yaml``.
+(param count, optimizer, device info) that does not belong in config goes to a
+sidecar ``run_metadata.yaml``.
 
-Load re-validates against the concrete model's structured schema, so a stale
-archive is caught at load time.
+Load re-constructs the typed :class:`RunConfig` tree against the concrete
+model's schema, so a stale archive (unknown/removed field) raises at load time.
 """
 
 from __future__ import annotations
 
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
+import yaml
 
-from .run_config import build_run_config_schema
+from .run_config import RunConfig, build_run_config_schema, config_to_dict
 
 
 def save_run_config_archive(
@@ -24,10 +25,10 @@ def save_run_config_archive(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[Path, Path | None]:
-    """Write ``rc`` (an OmegaConf DictConfig) to ``<log_dir>/run_config.yaml``.
+    """Write a :class:`RunConfig` to ``<log_dir>/run_config.yaml``.
 
     Args:
-        rc: RunConfig as an OmegaConf ``DictConfig``.
+        rc: RunConfig instance.
         log_dir: Output directory (created if missing).
         metadata: Optional runtime-derived metadata written to a sidecar
             ``run_metadata.yaml`` (e.g. total_params, optimizer, device info).
@@ -38,31 +39,37 @@ def save_run_config_archive(
     out = Path(log_dir)
     out.mkdir(parents=True, exist_ok=True)
     config_path = out / "run_config.yaml"
-    OmegaConf.save(rc, config_path)
+    config_path.write_text(
+        yaml.safe_dump(config_to_dict(rc), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
 
     metadata_path: Path | None = None
     if metadata:
         metadata_path = out / "run_metadata.yaml"
         metadata_path.write_text(
-            OmegaConf.to_yaml(OmegaConf.create(metadata)), encoding="utf-8"
+            yaml.safe_dump(metadata, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
         )
     return config_path, metadata_path
 
 
-def load_run_config_archive(yaml_path: str | Path) -> Any:
-    """Load a ``run_config.yaml`` and revalidate against its model's schema.
+def load_run_config_archive(yaml_path: str | Path) -> RunConfig:
+    """Load a ``run_config.yaml`` and reconstruct the typed :class:`RunConfig`.
 
-    The model name is read from ``experiment.model_name``; the merge validates
-    that every archived node/field still exists in the current schema.
-
-    Returns:
-        RunConfig as an OmegaConf ``DictConfig``.
+    The model name is read from ``experiment.model_name``; constructing each node
+    dataclass against the current schema validates that archived fields still
+    exist (unknown/removed fields raise ``TypeError``).
     """
     yaml_path = Path(yaml_path)
-    archived = OmegaConf.load(yaml_path)
-    model_name = archived.experiment.model_name
-    schema = OmegaConf.structured(build_run_config_schema(model_name))
-    return OmegaConf.merge(schema, archived)
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    model_name = data.get("experiment", {}).get("model_name", "")
+    schema_nodes = build_run_config_schema(model_name)
+
+    node_instances: dict[str, Any] = {}
+    for node, cls in schema_nodes.items():
+        node_instances[node] = _build_node_from_dict(cls, data.get(node, {}))
+    return RunConfig(**node_instances)
 
 
 def load_run_metadata(log_dir: str | Path) -> dict[str, Any]:
@@ -70,7 +77,13 @@ def load_run_metadata(log_dir: str | Path) -> dict[str, Any]:
     path = Path(log_dir) / "run_metadata.yaml"
     if not path.exists():
         return {}
-    return OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+
+
+def _build_node_from_dict(cls: type, data: dict[str, Any]) -> Any:
+    """Construct a config dataclass from a dict, ignoring unknown archived keys."""
+    valid = {f.name for f in fields(cls)}
+    return cls(**{k: v for k, v in data.items() if k in valid})
 
 
 __all__ = [

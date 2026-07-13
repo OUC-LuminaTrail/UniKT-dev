@@ -3,7 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from omegaconf import OmegaConf
+import yaml
 from optuna.pruners import (
     BasePruner,
     MedianPruner,
@@ -231,8 +231,9 @@ def load_optuna_config(config_path: str) -> OptunaConfig:
     Returns:
         An OptunaConfig instance.
     """
-    cfg = OmegaConf.load(config_path)
-    return OptunaConfig(**OmegaConf.to_container(cfg, resolve=True))
+    with open(config_path) as f:
+        cfg = yaml.safe_load(f) or {}
+    return OptunaConfig(**cfg)
 
 
 def _default_fits(space: HyperparameterSpace, default: Any) -> bool:

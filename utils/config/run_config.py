@@ -1,246 +1,134 @@
 """Unified run configuration tree — the single source of truth.
 
-One typed dataclass tree: the CLI is auto-derived from field metadata by
-:class:`ConfigParser`; yaml archives round-trip via OmegaConf. Per-model
+A typed dataclass tree parsed by :class:`~utils.config.config_parser.ConfigParser`
+(built on ``jsonargparse``): CLI flags, ``--config`` yaml, and archived
+``run_config.yaml`` all round-trip through the same schema. Per-model
 hyperparameters live in :class:`ModelConfig` subclasses (registered via
 ``@register_model_config``); framework-level knobs live in the fixed
 sub-configs below.
 
-Runtime ``rc`` is an OmegaConf ``DictConfig`` (mutable, dot-access,
-yaml-native). The polymorphic ``model`` node is always the concrete subclass
-at schema-build time (see ``build_run_config_schema``), never structured on
-the :class:`ModelConfig` base directly.
+Runtime ``rc`` is a :class:`RunConfig` instance (mutable, typed, dot-access).
+The polymorphic ``model`` node is always the concrete subclass at schema-build
+time (see :func:`build_run_config_schema`), never the :class:`ModelConfig` base.
 
-The training knobs (epochs/batch_size/learning_rate/weight_decay) are declared
-on :class:`ModelConfig` as a contract; each subclass overrides their defaults.
+Field help lives in each class ``Args:`` docstring (read by jsonargparse and
+IDEs); enumerated fields use :class:`typing.Literal` for validated choices.
 """
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 
 @dataclass
 class EarlyStoppingConfig:
     """Early stopping configuration.
 
-    Attributes:
-        monitor: Metric to monitor, one of 'auc', 'acc', 'rmse', 'loss'
-        mode: Optimization mode, 'max' for auc/acc, 'min' for rmse/loss
-        patience: Number of epochs to tolerate without improvement
-        min_delta: Minimum improvement threshold
+    Args:
+        monitor: Metric to monitor.
+        mode: Optimization mode ('max' for auc/acc, 'min' for rmse/loss).
+        patience: Epochs with no improvement before stopping.
+        min_delta: Minimum change to qualify as improvement.
     """
 
-    monitor: str = field(
-        default="auc",
-        metadata={
-            "help": "Metric to monitor for early stopping (choices: auc, acc, rmse, loss, default: auc)",
-            "short": "esm",
-            "choices": ["auc", "acc", "rmse", "loss"],
-        },
-    )
-    mode: str = field(
-        default="max",
-        metadata={
-            "help": "Optimization mode for monitored metric (default: max)",
-            "short": "esmo",
-        },
-    )
-    patience: int = field(
-        default=10,
-        metadata={
-            "help": "Number of epochs with no improvement before stopping (default: 10)",
-            "short": "esp",
-        },
-    )
-    min_delta: float = field(
-        default=0.0,
-        metadata={
-            "help": "Minimum change to qualify as improvement (default: 0.0)",
-            "short": "esd",
-        },
-    )
+    monitor: Literal["auc", "acc", "rmse", "loss"] = "auc"
+    mode: str = "max"
+    patience: int = 10
+    min_delta: float = 0.0
 
 
 @dataclass
 class GeneralConfig:
-    """Framework-level general knobs: logging, device, seed, tracking."""
+    """Framework-level general knobs: logging, device, seed, tracking.
 
-    log_dir: str | None = field(
-        default=None,
-        metadata={
-            "help": "Directory to save logs and models (default: runs/<timestamp>)",
-            "short": "ld",
-        },
-    )
-    checkpoint_path: str | None = field(
-        default=None,
-        metadata={
-            "help": "Path to model checkpoint for resuming training",
-            "short": "cp",
-        },
-    )
-    device: str | None = field(
-        default=None,
-        metadata={
-            "help": "Device to use: 'cuda' or 'cpu' (default: auto-detect)",
-            "short": "dev",
-        },
-    )
-    seed: int = field(
-        default=42,
-        metadata={
-            "help": "Random seed for reproducibility (default: 42)",
-            "short": "s",
-        },
-    )
-    no_deterministic: bool = field(
-        default=False,
-        metadata={
-            "help": "Disable deterministic algorithms (deterministic is enabled by default)"
-        },
-    )
-    no_swanlab: bool = field(
-        default=False,
-        metadata={
-            "help": "Disable SwanLab experiment tracking (default: SwanLab on)",
-            "short": "nsl",
-        },
-    )
-    log_batch_metrics: bool = field(
-        default=False,
-        metadata={
-            "help": "Log per-batch loss to batch_metrics_<phase>.csv (default: False)",
-            "short": "lbm",
-        },
-    )
-    skip_test: bool = field(
-        default=False,
-        metadata={
-            "help": "Skip test set evaluation after training (default: False)",
-            "short": "st",
-        },
-    )
-    cache: bool = field(
-        default=False,
-        metadata={
-            "help": "Enable disk cache for model data preparation (default: False)",
-            "short": "ca",
-        },
-    )
+    Args:
+        log_dir: Directory to save logs and models (default runs/<timestamp>).
+        checkpoint_path: Path to a checkpoint for resuming training.
+        device: Device to use ('cuda' or 'cpu'; auto-detect when null).
+        seed: Random seed for reproducibility.
+        no_deterministic: Disable deterministic algorithms (on by default).
+        no_swanlab: Disable SwanLab experiment tracking.
+        log_batch_metrics: Log per-batch loss to batch_metrics_<phase>.csv.
+        skip_test: Skip test-set evaluation after training.
+        cache: Enable disk cache for model data preparation.
+    """
+
+    log_dir: str | None = None
+    checkpoint_path: str | None = None
+    device: str | None = None
+    seed: int = 42
+    no_deterministic: bool = False
+    no_swanlab: bool = False
+    log_batch_metrics: bool = False
+    skip_test: bool = False
+    cache: bool = False
 
 
 @dataclass
 class CompileConfig:
-    """``torch.compile`` execution knobs (framework-level, model-agnostic)."""
+    """``torch.compile`` execution knobs (framework-level, model-agnostic).
 
-    compile: bool = field(
-        default=False,
-        metadata={
-            "help": "Enable torch.compile for model optimization (default: False)"
-        },
-    )
-    compile_mode: str = field(
-        default="default",
-        metadata={
-            "help": "Compilation mode (default: default)",
-            "choices": [
-                "default",
-                "reduce-overhead",
-                "max-autotune",
-                "max-autotune-no-cudagraphs",
-            ],
-        },
-    )
-    compile_fullgraph: bool = field(
-        default=False,
-        metadata={
-            "help": "Require the entire function be capturable into a single graph (default: False)"
-        },
-    )
-    compile_dynamic: bool | None = field(
-        default=None,
-        metadata={
-            "help": "Use dynamic shape tracing (default: None, PyTorch auto-detects)"
-        },
-    )
-    compile_backend: str = field(
-        default="inductor",
-        metadata={"help": "Compilation backend (default: inductor)"},
-    )
+    Args:
+        compile: Enable torch.compile for model optimization.
+        compile_mode: Compilation mode.
+        compile_fullgraph: Require the whole function be one capturable graph.
+        compile_dynamic: Use dynamic shape tracing (null = PyTorch auto-detects).
+        compile_backend: Compilation backend.
+    """
+
+    compile: bool = False
+    compile_mode: Literal[
+        "default",
+        "reduce-overhead",
+        "max-autotune",
+        "max-autotune-no-cudagraphs",
+    ] = "default"
+    compile_fullgraph: bool = False
+    compile_dynamic: bool | None = None
+    compile_backend: str = "inductor"
 
 
 @dataclass
 class ExperimentConfig:
-    """Experiment identity used for run naming and archive lookup."""
+    """Experiment identity used for run naming and archive lookup.
 
-    model_name: str = field(default="", metadata={"help": "Model name", "short": "m"})
+    Args:
+        model_name: Registered model name (selects the trainer + ModelConfig).
+    """
+
+    model_name: str = ""
 
 
 @dataclass
 class RunDataConfig:
-    """Dataset selection, split, sequence bounds, and sampling."""
+    """Dataset selection, split, sequence bounds, and sampling.
 
-    dataset: str = field(
-        default="",
-        metadata={"help": "Dataset name", "short": "d"},
-    )
-    data_base_path: str = field(
-        default="./data",
-        metadata={"help": "Path to the data files (default: ./data)", "short": "dbp"},
-    )
-    fold: int = field(
-        default=0,
-        metadata={
-            "help": "Index of fold for K-Fold cross-validation (default: 0)",
-            "short": "f",
-        },
-    )
-    kfold: int = field(
-        default=5,
-        metadata={
-            "help": "Number of folds for K-Fold cross-validation (>=2 to enable, default: 5)"
-        },
-    )
-    test_ratio: float = field(
-        default=0.2,
-        metadata={"help": "Ratio for test set (default: 0.2)"},
-    )
-    min_seq_len: int = field(
-        default=3,
-        metadata={"help": "Minimum sequence length (default: 3)"},
-    )
-    max_seq_len: int = field(
-        default=200,
-        metadata={"help": "Maximum sequence length (default: 200)"},
-    )
-    sample_size: int | None = field(
-        default=None,
-        metadata={"help": "Absolute sample count (None to disable)"},
-    )
-    sample_ratio: float | None = field(
-        default=None,
-        metadata={"help": "Sample ratio 0.0-1.0 (overrides sample_size)"},
-    )
-    sample_strategy: str = field(
-        default="random",
-        metadata={
-            "help": "Sampling strategy (default: random)",
-            "choices": ["random", "stratified", "time"],
-        },
-    )
-    sample_attempts_bins: list[int] = field(
-        default_factory=lambda: [20, 100],
-        metadata={
-            "help": "Attempt count bin edges (e.g. 20 100 for low/medium/high)",
-            "nargs": "+",
-        },
-    )
-    sample_correct_bins: list[float] = field(
-        default_factory=lambda: [0.4, 0.8],
-        metadata={
-            "help": "Correct rate bin edges (e.g. 0.4 0.8 for low/medium/high)",
-            "nargs": "+",
-        },
-    )
+    Args:
+        dataset: Dataset name.
+        data_base_path: Path to the data files.
+        fold: Fold index for K-fold cross-validation.
+        kfold: Number of folds (>=2 to enable K-fold).
+        test_ratio: Held-out test ratio.
+        min_seq_len: Minimum sequence length.
+        max_seq_len: Maximum sequence length.
+        sample_size: Absolute sample count (null disables sampling).
+        sample_ratio: Sample ratio 0.0-1.0 (overrides sample_size).
+        sample_strategy: Sampling strategy.
+        sample_attempts_bins: Attempt-count bin edges (e.g. [20, 100]).
+        sample_correct_bins: Correct-rate bin edges (e.g. [0.4, 0.8]).
+    """
+
+    dataset: str = ""
+    data_base_path: str = "./data"
+    fold: int = 0
+    kfold: int = 5
+    test_ratio: float = 0.2
+    min_seq_len: int = 3
+    max_seq_len: int = 200
+    sample_size: int | None = None
+    sample_ratio: float | None = None
+    sample_strategy: Literal["random", "stratified", "time"] = "random"
+    sample_attempts_bins: list[int] = field(default_factory=lambda: [20, 100])
+    sample_correct_bins: list[float] = field(default_factory=lambda: [0.4, 0.8])
 
 
 @dataclass
@@ -250,29 +138,36 @@ class ModelConfig:
     Each model subclasses this and registers via ``@register_model_config``.
     The training knobs below are declared here as a contract (so the framework
     can always read ``rc.model.epochs`` / ``rc.model.batch_size`` / etc.);
-    subclasses override the defaults with their model-specific values.
+    subclasses override the defaults with model-specific values and may carry
+    an ``optuna`` field-metadata key consumed by the Optuna search-space derive.
+
+    Args:
+        epochs: Number of training epochs.
+        batch_size: Batch size for training.
+        learning_rate: Learning rate.
+        weight_decay: Weight decay.
     """
 
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    batch_size: int = field(
-        default=32, metadata={"help": "Batch size for training", "short": "bs"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate", "short": "lr"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay", "short": "wd"}
-    )
+    epochs: int = 150
+    batch_size: int = 32
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
 
 
 @dataclass
 class RunConfig:
     """Top-level run configuration tree.
 
-    The ``model`` node is polymorphic: the runtime schema is assembled with
-    the concrete :class:`ModelConfig` subclass, never structured on this base.
+    The ``model`` node is polymorphic: the runtime schema is assembled with the
+    concrete :class:`ModelConfig` subclass, never structured on this base.
+
+    Args:
+        general: Framework-level general knobs.
+        compile: torch.compile execution knobs.
+        early_stopping: Early-stopping knobs.
+        experiment: Experiment identity.
+        data: Dataset / split / sampling knobs.
+        model: Per-model hyperparameters (concrete ModelConfig subclass).
     """
 
     general: GeneralConfig = field(default_factory=GeneralConfig)
@@ -296,8 +191,8 @@ _FRAMEWORK_NODES: dict[str, type] = {
 def build_run_config_schema(model_name: str) -> dict[str, type]:
     """Return ``{node_name: dataclass_cls}`` for the concrete model's tree.
 
-    The polymorphic ``model`` node is bound to the concrete registered
-    :class:`ModelConfig` subclass; OmegaConf validates against it.
+    Binds the polymorphic ``model`` node to the concrete registered
+    :class:`ModelConfig` subclass; the framework nodes are the fixed five.
     """
     from ..core import MODEL_CONFIGS  # lazy: avoid any import-time cycle
 
@@ -310,7 +205,21 @@ def build_run_config_schema(model_name: str) -> dict[str, type]:
     return {**_FRAMEWORK_NODES, "model": model_cls}
 
 
+def config_to_dict(config) -> dict:
+    """Recursively convert a config dataclass (instance or node) to a plain dict.
+
+    Replaces ``OmegaConf.to_container``: used for yaml serialization, metric
+    logging, cache keys, and anywhere a config must cross into plain-Python land.
+    """
+    from dataclasses import asdict, is_dataclass
+
+    if config is None:
+        return {}
+    return asdict(config) if is_dataclass(config) else dict(config)
+
+
 __all__ = [
+    "_FRAMEWORK_NODES",
     "CompileConfig",
     "EarlyStoppingConfig",
     "ExperimentConfig",
@@ -319,4 +228,5 @@ __all__ = [
     "RunConfig",
     "RunDataConfig",
     "build_run_config_schema",
+    "config_to_dict",
 ]

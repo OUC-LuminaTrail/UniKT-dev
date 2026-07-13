@@ -7,7 +7,8 @@ from pathlib import Path
 from typing import Any
 
 import optuna
-from omegaconf import OmegaConf
+import yaml
+from dataclasses import asdict, is_dataclass
 from optuna.samplers import GridSampler
 
 from utils.core import get_logger
@@ -195,7 +196,8 @@ class OptunaTuner:
         # Best parameters
         best_params_path = os.path.join(self.config.save_dir, "best_params.yaml")
         Path(best_params_path).write_text(
-            OmegaConf.to_yaml(OmegaConf.create(self._best_params())), encoding="utf-8"
+            yaml.safe_dump(self._best_params(), sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
         )
 
         # Search history
@@ -210,13 +212,19 @@ class OptunaTuner:
             for trial in self.study.trials
         ]
         Path(history_path).write_text(
-            OmegaConf.to_yaml(OmegaConf.create(trials_data)), encoding="utf-8"
+            yaml.safe_dump(trials_data, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
         )
 
         # Configuration echo
         config_path = os.path.join(self.config.save_dir, "optuna_config.yaml")
         Path(config_path).write_text(
-            OmegaConf.to_yaml(OmegaConf.structured(self.config)), encoding="utf-8"
+            yaml.safe_dump(
+                asdict(self.config) if is_dataclass(self.config) else self.config,
+                sort_keys=False,
+                allow_unicode=True,
+            ),
+            encoding="utf-8",
         )
 
         logger.info(f"Results saved to {self.config.save_dir}")

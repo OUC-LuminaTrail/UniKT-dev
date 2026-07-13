@@ -23,9 +23,9 @@ def _rc_to_args_namespace(rc):
     """
     import argparse
 
-    from omegaconf import OmegaConf
+    from utils.config import config_to_dict
 
-    flat = OmegaConf.to_container(rc.data, resolve=True)
+    flat = config_to_dict(rc.data)
     flat["seed"] = rc.general.seed
     flat["device"] = rc.general.device
     return argparse.Namespace(**flat)

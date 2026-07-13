@@ -1,237 +1,195 @@
-"""Reflective CLI parser: derives argparse flags from RunConfig dataclass fields.
+"""Reflective CLI parser built on ``jsonargparse`` (PyTorch Lightning-aligned).
 
-Two-pass parse: first resolve the model name (needed to pick the concrete
-:class:`~utils.config.run_config.ModelConfig` subclass), then register dot-path
-flags (``--general.seed``, ``--model.hidden_dim``) for every field and parse
-fully. Returns an OmegaConf ``DictConfig``: the structured defaults merged with
-user-supplied overrides (and an optional ``--config`` yaml base).
+The RunConfig dataclass tree is the single schema. jsonargparse derives CLI flags
+from it (types, ``Literal`` choices, list nargs, bool), merges ``--config`` yaml
+bases with CLI overrides, and dumps/loads the same shape — replacing the former
+hand-rolled argparse reflection + OmegaConf merge.
 
-Defaults are ``SUPPRESS``ed so only user-provided flags land in the parsed
-namespace; the structured schema supplies every default. This yields correct
-"override-on-top-of-defaults" semantics and lets a yaml base config combine
-cleanly with CLI flags.
+Two-pass model resolution is retained: the model name (``-m`` /
+``--experiment.model_name`` / a ``--config`` or ``default_config`` yaml) selects
+the concrete :class:`ModelConfig` subclass *before* the schema is built, because
+model configs are lazily discovered across multiple environments and cannot all
+be imported at parse time.
+
+``parse_args`` returns a typed :class:`RunConfig` instance. Entry points that
+need their own extra nodes (e.g. ``efficiency.py``) use ``parse_with_extras``.
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-import typing
 from dataclasses import fields
+from pathlib import Path
 from typing import Any
 
-from omegaconf import OmegaConf
+import yaml
+from jsonargparse import ActionConfigFile, ArgumentParser, Namespace
 
-from .run_config import build_run_config_schema
-
-
-def _base_type(tp: Any) -> Any:
-    """Reduce ``Optional[X]`` and ``list[X]`` to their scalar element type.
-
-    ``int``/``float``/``str``/``bool`` pass through unchanged.
-    """
-    args = typing.get_args(tp)
-    if not args:
-        return tp
-    origin = typing.get_origin(tp)
-    if origin is list:
-        return args[0] if args else tp
-    # Optional[X] / X | None: drop NoneType
-    non_none = [a for a in args if a is not type(None)]
-    if type(None) in args and len(non_none) == 1:
-        return non_none[0]
-    return tp
-
-
-def _is_list(tp: Any) -> bool:
-    return typing.get_origin(tp) is list
-
-
-def register_config_group(
-    parser: argparse.ArgumentParser, node: str, cls: type
-) -> None:
-    """Register a config dataclass's fields as dot-path argparse flags.
-
-    Shared by :class:`ConfigParser` (full RunConfig) and standalone tools that
-    only need a subset of nodes (e.g. ``data_process.py``). Defaults are
-    ``SUPPRESS``ed so the structured schema supplies them on merge.
-    """
-    hints = typing.get_type_hints(cls)
-    for f in fields(cls):
-        ftype = hints.get(f.name, f.type)
-        flag = f"--{node}.{f.name}"
-        meta = f.metadata
-        kwargs: dict[str, Any] = {
-            "dest": f"{node}.{f.name}",
-            "default": argparse.SUPPRESS,
-            "help": meta.get("help", ""),
-        }
-        if meta.get("choices") is not None:
-            kwargs["choices"] = meta["choices"]
-
-        if _is_list(ftype):
-            kwargs["nargs"] = meta.get("nargs", "+")
-            elem = _base_type(ftype)
-            if elem in (int, float, str):
-                kwargs["type"] = elem
-        else:
-            scalar = _base_type(ftype)
-            if scalar is bool:
-                # default True -> store_false, else store_true (covers bool and bool | None)
-                kwargs["action"] = "store_false" if f.default is True else "store_true"
-            elif scalar in (int, float, str):
-                kwargs["type"] = scalar
-
-        arg_names = [flag]
-        if meta.get("short"):
-            arg_names.insert(0, f"-{meta['short']}")
-        parser.add_argument(*arg_names, **kwargs)
-
-
-def _register_nodes(parser: argparse.ArgumentParser, nodes: dict[str, type]) -> None:
-    """Register every node's dataclass fields as dot-path flags on ``parser``."""
-    for node, cls in nodes.items():
-        register_config_group(parser, node, cls)
+from .run_config import RunConfig, build_run_config_schema
 
 
 class ConfigParser:
-    """Build argparse flags reflectively from a RunConfig schema and parse to an OmegaConf node."""
+    """Build CLI flags reflectively from the RunConfig schema and parse to a RunConfig."""
 
     def __init__(
         self,
         prog: str | None = None,
         description: str | None = None,
         extra_nodes: dict[str, type] | None = None,
-        base_config: Any = None,
+        default_config: str | Path | None = None,
     ):
-        """Store the argparse prog/description and any entry-point-specific config nodes.
+        """Store parser identity and optional extension points.
 
         Args:
             prog: argparse ``prog``.
             description: argparse ``description``.
-            extra_nodes: Additional ``{node_name: dataclass}`` config nodes merged
-                on top of the framework RunConfig nodes. Lets entry-point scripts
-                (e.g. ``efficiency.py``) expose their own ``--<node>.<field>`` flags
-                without polluting the shared RunConfig tree used by ``train.py``.
-            base_config: A programmatic base config (OmegaConf node or dict) merged
-                under the schema defaults, e.g. an archived RunConfig reconstructed
-                by ``load_run_config_archive``. Serves the same role as ``--config``
-                but without argv surgery; its ``experiment.model_name`` drives model
-                resolution when neither ``-m`` nor ``--config`` is given.
+            extra_nodes: Extra ``{node_name: dataclass}`` nodes (e.g.
+                ``{"efficiency": EfficiencyConfig}``) exposed as ``--<node>.<field>``
+                flags without polluting the shared RunConfig tree.
+            default_config: Path to a yaml loaded as the base config (CLI overrides
+                on top); serves the same role as ``--config`` but programmatic.
         """
         self.prog = prog
         self.description = description
         self.extra_nodes = dict(extra_nodes) if extra_nodes else {}
-        if base_config is None:
-            self.base_config = None
-        elif OmegaConf.is_config(base_config):
-            self.base_config = base_config
-        else:
-            self.base_config = OmegaConf.create(base_config)
+        self.default_config = str(default_config) if default_config else None
 
-    def parse_args(self, argv: list[str] | None = None) -> Any:
-        """Parse ``argv`` (default: ``sys.argv[1:]``) into a structured OmegaConf DictConfig."""
-        model_name, base_cfg = self._pass_one(argv)
+    def parse_args(self, argv: list[str] | None = None) -> RunConfig:
+        """Parse ``argv`` (default ``sys.argv[1:]``) into a :class:`RunConfig` instance."""
+        rc, _ = self.parse_with_extras(argv)
+        return rc
+
+    def parse_with_extras(self, argv: list[str] | None = None) -> tuple[RunConfig, Namespace]:
+        """Parse and return ``(RunConfig, full Namespace)`` — Namespace exposes extra nodes."""
+        argv = sys.argv[1:] if argv is None else list(argv)
+        argv = _expand_short_flags(argv)
+
+        model_name = self._resolve_model_name(argv)
         schema_nodes = {**build_run_config_schema(model_name), **self.extra_nodes}
-        schema = OmegaConf.structured(schema_nodes)
+        parser = self._build_parser(schema_nodes)
 
-        parser = self._build_full_parser(schema_nodes)
         ns = parser.parse_args(argv)
-        # Config flags use ``node.field`` dot dests; the only non-dot dest
-        # (``config``) is SUPPRESSed, so dot-presence marks a user override.
-        overrides = {k: v for k, v in vars(ns).items() if "." in k}
-        nested = _dot_to_nested(overrides)
+        rc = _namespace_to_run_config(ns, schema_nodes)
+        return rc, ns
 
-        merge_sources = [schema]
-        if base_cfg is not None:
-            merge_sources.append(base_cfg)
-        if self.base_config is not None:
-            merge_sources.append(self.base_config)
-        if nested:
-            merge_sources.append(OmegaConf.create(nested))
-        return OmegaConf.merge(*merge_sources)
-
-    def _pass_one(self, argv: list[str] | None) -> tuple[str | None, Any]:
+    def _resolve_model_name(self, argv: list[str]) -> str:
+        """Pass one: find the model name from -m / --config / default_config."""
         pre = argparse.ArgumentParser(add_help=False)
-        pre.add_argument(
-            "-m", "--experiment.model_name", dest="model_name", default=None
-        )
+        pre.add_argument("-m", "--experiment.model_name", dest="model_name", default=None)
         pre.add_argument("--config", dest="config", default=None)
         pre_args, _ = pre.parse_known_args(argv)
 
-        base_cfg = None
-        model_name = pre_args.model_name
-        if pre_args.config:
-            base_cfg = OmegaConf.load(pre_args.config)
-            if not model_name:
-                try:
-                    model_name = base_cfg.experiment.model_name
-                except (AttributeError, KeyError):
-                    model_name = None
-        if not model_name and self.base_config is not None:
-            try:
-                model_name = self.base_config.experiment.model_name
-            except (AttributeError, KeyError):
-                model_name = None
-        if not model_name:
-            argv_list = argv if argv is not None else sys.argv[1:]
-            if "-h" in argv_list or "--help" in argv_list:
-                # No model yet: show framework-level help and exit 0 (model-specific
-                # flags require `-m <model> -h`).
-                self._print_framework_help()
-            pre.error(
-                "model name is required: pass -m/--experiment.model_name, "
-                "provide --config pointing at a yaml with experiment.model_name, "
-                "or pass base_config to ConfigParser"
-            )
-        return model_name, base_cfg
+        for source in (pre_args.config, self.default_config):
+            if source:
+                name = _read_model_name(source)
+                if name:
+                    return name
+        if pre_args.model_name:
+            return pre_args.model_name
+
+        argv_list = argv if argv is not None else sys.argv[1:]
+        if "-h" in argv_list or "--help" in argv_list:
+            self._print_framework_help()
+        raise SystemExit(
+            "model name is required: pass -m/--experiment.model_name, or a --config / "
+            "default_config yaml carrying experiment.model_name"
+        )
+
+    def _build_parser(self, schema_nodes: dict[str, type]) -> ArgumentParser:
+        default_files = [self.default_config] if self.default_config else None
+        parser = ArgumentParser(
+            prog=self.prog,
+            description=self.description,
+            default_config_files=default_files,
+        )
+        parser.add_argument("--config", action=ActionConfigFile)
+        for node, cls in schema_nodes.items():
+            parser.add_class_arguments(cls, node)
+        return parser
 
     def _print_framework_help(self) -> None:
-        """Print help for the framework-level flags (when no model is given)."""
+        """Print framework-level help (model-specific flags need ``-m <model> -h``)."""
         from utils.core import get_supported_models
 
         from .run_config import _FRAMEWORK_NODES
 
         available = get_supported_models()
-        parser = argparse.ArgumentParser(
+        parser = ArgumentParser(
             prog=self.prog,
             description=(
                 (self.description or "")
                 + f"\nAvailable models: {', '.join(available)}"
                 + "\nPass -m <model> -h for model-specific flags."
             ),
-            allow_abbrev=False,
         )
-        parser.add_argument("--config", help="Path to a RunConfig yaml base.")
-        # The experiment node registers -m/--experiment.model_name via its field
-        # metadata; do not add -m manually (would conflict).
-        _register_nodes(parser, {**_FRAMEWORK_NODES, **self.extra_nodes})
+        parser.add_argument("--config", action=ActionConfigFile)
+        for node, cls in {**_FRAMEWORK_NODES, **self.extra_nodes}.items():
+            parser.add_class_arguments(cls, node)
         parser.parse_args(["-h"])  # prints help and exits 0
 
-    def _build_full_parser(
-        self, schema_nodes: dict[str, type]
-    ) -> argparse.ArgumentParser:
-        parser = argparse.ArgumentParser(
-            prog=self.prog, description=self.description, allow_abbrev=False
-        )
-        # --config is consumed in pass one; register here so pass two accepts it.
-        parser.add_argument(
-            "--config", dest="config", default=argparse.SUPPRESS, help=argparse.SUPPRESS
-        )
-        _register_nodes(parser, schema_nodes)
-        return parser
+
+def _expand_short_flags(argv: list[str]) -> list[str]:
+    """Rewrite the two essential short flags to their full jsonargparse forms.
+
+    ``-m X`` -> ``--experiment.model_name X`` and ``-d X`` -> ``--data.dataset X``.
+    Kept as the only short flags for ergonomics; everything else uses readable
+    dotted flags. Done by argv rewriting so jsonargparse only ever sees full flags.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        long_form, inline = None, None
+        if token == "-m":
+            long_form = "--experiment.model_name"
+        elif token.startswith("-m="):
+            inline = "--experiment.model_name=" + token[3:]
+        elif token == "-d":
+            long_form = "--data.dataset"
+        elif token.startswith("-d="):
+            inline = "--data.dataset=" + token[3:]
+        if inline is not None:
+            out.append(inline)
+            i += 1
+            continue
+        if long_form is not None and i + 1 < len(argv):
+            out.append(long_form)
+            out.append(argv[i + 1])
+            i += 2
+            continue
+        out.append(token)
+        i += 1
+    return out
 
 
-def _dot_to_nested(dot_dict: dict[str, Any]) -> dict[str, Any]:
-    """Expand ``{"a.b": 1}`` into ``{"a": {"b": 1}}``."""
-    nested: dict[str, Any] = {}
-    for key, value in dot_dict.items():
-        parts = key.split(".")
-        cursor = nested
-        for part in parts[:-1]:
-            cursor = cursor.setdefault(part, {})
-        cursor[parts[-1]] = value
-    return nested
+def _read_model_name(config_path: str) -> str | None:
+    """Read ``experiment.model_name`` from a yaml config file (no schema needed)."""
+    try:
+        with Path(config_path).open() as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("experiment", {}).get("model_name")
+    except (OSError, yaml.YAMLError):
+        return None
+
+
+def _namespace_to_run_config(ns: Namespace, schema_nodes: dict[str, type]) -> RunConfig:
+    """Construct a :class:`RunConfig` from a jsonargparse Namespace.
+
+    Only the standard RunConfig nodes are built; entry-point ``extra_nodes`` stay
+    in the Namespace (returned alongside by ``parse_with_extras``).
+    """
+    rc_fields = {f.name for f in fields(RunConfig)}
+    node_instances: dict[str, Any] = {}
+    for node, cls in schema_nodes.items():
+        if node in rc_fields:
+            node_instances[node] = _build_node(cls, ns[node])
+    return RunConfig(**node_instances)
+
+
+def _build_node(cls: type, node_ns: Namespace) -> Any:
+    """Instantiate a config dataclass from its Namespace slice."""
+    return cls(**{f.name: node_ns[f.name] for f in fields(cls)})
 
 
 __all__ = ["ConfigParser"]

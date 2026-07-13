@@ -25,10 +25,10 @@ seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
 [feature.base.pypi-dependencies]
 swanlab = ">=0.8,<0.9"
-omegaconf = ">=2.0.6,<3"
 psutil = ">=7.2.0"
 nvidia-ml-py = "*"
 py-cpuinfo = ">=9.0.0"
+jsonargparse = ">=4.30"
 
 [feature.gpu]
 platforms = ["gpu"]
@@ -90,7 +90,6 @@ seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
 [feature.dhg.pypi-dependencies]
 dhg = "==0.9.*"
-omegaconf = ">=2.0.6,<3"
 pyg_lib = ">=0.4.0,<0.5"
 torch-scatter = "==2.1.1"
 torch-geometric = ">=2.7.0, <3"

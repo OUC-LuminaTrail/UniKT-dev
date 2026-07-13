@@ -390,8 +390,8 @@ class ProcessManager:
         import subprocess
         import tempfile
 
+        import yaml
         from config import PROJECT_ROOT
-        from omegaconf import OmegaConf
 
         builder = str(
             PROJECT_ROOT / "web" / "backend" / "services" / "_config_builder.py"
@@ -429,7 +429,10 @@ class ProcessManager:
                 os.unlink(old)
         fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix=f"run_{model_name}_")
         os.close(fd)
-        OmegaConf.save(OmegaConf.create(payload["nested"]), yaml_path)
+        Path(yaml_path).write_text(
+            yaml.safe_dump(payload["nested"], sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
         self._temp_configs[task_id] = yaml_path
         return ["train.py", "--config", yaml_path]
 

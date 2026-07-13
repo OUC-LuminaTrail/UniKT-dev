@@ -548,13 +548,11 @@ class BaseTrainer(ABC):
         Local CSV logging is always enabled; SwanLab is included unless
         ``--no_swanlab`` was set.
         """
-        from omegaconf import OmegaConf
+        from utils.config import config_to_dict
 
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
         config = (
-            OmegaConf.to_container(self.run_config, resolve=True)
-            if self.run_config is not None
-            else {}
+            config_to_dict(self.run_config) if self.run_config is not None else {}
         )
         self.metric_logger.init_run(
             log_dir=self.log_dir,

@@ -1,8 +1,8 @@
-"""Load ablation configs from yaml (OmegaConf)."""
+"""Load ablation configs from yaml."""
 
 from pathlib import Path
 
-from omegaconf import OmegaConf
+import yaml
 
 from utils.ablation.config import AblationConfig, AblationStudyConfig
 
@@ -39,7 +39,7 @@ def load_config(config_path: str, dataset: str, fold: int = 0) -> AblationStudyC
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    data = OmegaConf.to_container(OmegaConf.load(config_file), resolve=True)
+    data = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
 
     # Validate required fields
     required_fields = ["study_name", "base_model"]

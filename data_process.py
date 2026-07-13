@@ -1,91 +1,58 @@
 """Command-line tool for downloading and processing datasets."""
 
-from argparse import ArgumentParser
+from dataclasses import fields as dataclass_fields
 
-from omegaconf import OmegaConf
+from jsonargparse import ActionConfigFile, ArgumentParser
 
-from utils.config import GeneralConfig, RunDataConfig, register_config_group
+from utils.config import GeneralConfig, RunDataConfig
 from utils.core import get_logger, seed_everything
 from utils.data_process import get_data_source
 
 logger = get_logger(__name__)
 
 
-def _build_partial_rc(ns):
-    """Build a data+general RunConfig view from the parsed namespace.
-
-    Only ``data`` and ``general`` nodes are needed for ETL; config defaults come
-    from the structured schema, user flags (dot-path) override them.
-    """
-    nested: dict = {}
-    for key, value in vars(ns).items():
-        if "." not in key:
-            continue
-        parts = key.split(".")
-        cursor = nested
-        for part in parts[:-1]:
-            cursor = cursor.setdefault(part, {})
-        cursor[parts[-1]] = value
-    base = OmegaConf.structured({"data": RunDataConfig, "general": GeneralConfig})
-    return OmegaConf.merge(base, OmegaConf.create(nested))
+def _add_common_nodes(parser: ArgumentParser) -> None:
+    """Add the ``data`` and ``general`` config nodes shared by both subcommands."""
+    parser.add_class_arguments(RunDataConfig, "data")
+    parser.add_class_arguments(GeneralConfig, "general")
+    parser.add_argument("--config", action=ActionConfigFile)
 
 
-def build_parser():
-    """Build the command-line argument parser for data processing."""
-    parser = ArgumentParser(description="Data Processing CLI")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+def build_parser() -> ArgumentParser:
+    """Build the CLI with ``download`` / ``process`` subcommands."""
+    parser = ArgumentParser(prog="data_process.py", description="Data Processing CLI")
+    subs = parser.add_subcommands(required=True)
 
-    # download subcommand
-    dl = subparsers.add_parser(
-        "download", help="Download raw dataset archive and extract"
-    )
-    register_config_group(dl, "data", RunDataConfig)
-    register_config_group(dl, "general", GeneralConfig)
-    dl.add_argument(
-        "--data_url",
-        type=str,
-        default=None,
-        help="Override data URL for downloading (optional)",
-    )
-    dl.add_argument(
-        "--force",
-        action="store_true",
-        help="Force re-download even if file already exists",
-    )
-    dl.add_argument(
-        "--max_retries",
-        type=int,
-        default=3,
-        help="Maximum number of download retries (default: 3)",
-    )
-    dl.add_argument(
-        "--num_threads",
-        type=int,
-        default=4,
-        help="Number of threads for parallel download (default: 4)",
-    )
+    download = ArgumentParser(prog="data_process.py download")
+    _add_common_nodes(download)
+    download.add_argument("--data_url", type=str, default=None, help="Override data URL for downloading.")
+    download.add_argument("--force", action="store_true", help="Force re-download even if the file exists.")
+    download.add_argument("--max_retries", type=int, default=3, help="Maximum download retries.")
+    download.add_argument("--num_threads", type=int, default=4, help="Parallel download threads.")
+    subs.add_subcommand("download", download)
 
-    # process subcommand
-    proc = subparsers.add_parser(
-        "process", help="Process raw data into standardized format"
-    )
-    register_config_group(proc, "data", RunDataConfig)
-    register_config_group(proc, "general", GeneralConfig)
-    proc.add_argument(
-        "--extra",
-        nargs="*",
-        default=[],
-        help="Extra processing steps",
-    )
+    process = ArgumentParser(prog="data_process.py process")
+    _add_common_nodes(process)
+    process.add_argument("--extra", nargs="*", default=[], help="Extra processing steps (e.g. windowlate).")
+    subs.add_subcommand("process", process)
 
     return parser
+
+
+class _PartialRC:
+    """Lightweight rc view exposing only the ``data`` and ``general`` nodes."""
+
+    def __init__(self, sub_ns):
+        self.data = RunDataConfig(**{f.name: sub_ns.data[f.name] for f in dataclass_fields(RunDataConfig)})
+        self.general = GeneralConfig(**{f.name: sub_ns.general[f.name] for f in dataclass_fields(GeneralConfig)})
 
 
 def cmd_download(rc, ns):
     """Handle `download` subcommand."""
     dp = get_data_source(rc)
-    if getattr(ns, "data_url", None):
-        dp.data_url = ns.data_url
+    sub_ns = ns[ns.command]
+    if getattr(sub_ns, "data_url", None):
+        dp.data_url = sub_ns.data_url
 
     if not dp.data_url:
         raise ValueError(
@@ -94,9 +61,9 @@ def cmd_download(rc, ns):
 
     logger.info(f"Downloading dataset {rc.data.dataset} to {dp.data_folder}")
     dp.fetch_data(
-        force_download=getattr(ns, "force", False),
-        max_retries=getattr(ns, "max_retries", 3),
-        num_threads=getattr(ns, "num_threads", 4),
+        force_download=getattr(sub_ns, "force", False),
+        max_retries=getattr(sub_ns, "max_retries", 3),
+        num_threads=getattr(sub_ns, "num_threads", 4),
     )
     dp.save_metadata()
     logger.info("Download complete.")
@@ -106,6 +73,7 @@ def cmd_process(rc, ns):
     """Handle `process` subcommand."""
     seed_everything(rc.general.seed, deterministic=False)
     dp = get_data_source(rc)
+    sub_ns = ns[ns.command]
     dp.clean_raw_data()
     # The raw interaction frame is no longer needed after cleaning; release it so
     # it doesn't pile up against the (much larger) split-stage intermediates.
@@ -135,7 +103,7 @@ def cmd_process(rc, ns):
 
     dp.build_split_question_sequence_data()
     dp.build_split_skill_sequence_data()
-    if "windowlate" in (ns.extra or []):
+    if "windowlate" in (sub_ns.extra or []):
         dp.build_windowlate_data()
 
     dp.save_data()
@@ -144,7 +112,7 @@ def cmd_process(rc, ns):
 if __name__ == "__main__":
     parser = build_parser()
     ns = parser.parse_args()
-    rc = _build_partial_rc(ns)
+    rc = _PartialRC(ns[ns.command])
 
     if ns.command == "download":
         cmd_download(rc, ns)

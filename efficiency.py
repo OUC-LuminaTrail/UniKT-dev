@@ -3,7 +3,7 @@
 Two mutually exclusive entry modes:
     - ``-m/-d``                build the model fresh (random weights, or
                                 ``--efficiency.weights`` to load a file) + data
-    - ``--efficiency.run_dir`` reconstruct the RunConfig from a trained run's
+    - ``--efficiency.run_dir`` seed the RunConfig from a trained run's
                                 ``run_config.yaml`` and benchmark its checkpoint
 
 Usage:
@@ -14,10 +14,11 @@ Usage:
 """
 
 import sys
+from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 import model  # noqa: F401  — triggers trainer/model-config discovery
-from utils.config import ConfigParser, load_run_config_archive
+from utils.config import ConfigParser
 from utils.core import TRAINERS, get_logger
 from utils.data_process import get_data_source
 from utils.efficiency import EfficiencyConfig, EfficiencySession
@@ -28,19 +29,19 @@ logger = get_logger(__name__)
 
 def main() -> None:
     """Build the model, run all enabled efficiency stages, and print the report."""
-    rc = _parse_rc()
+    rc, eff_cfg = _parse()
     # Suppress trainer side effects irrelevant to benchmarking.
     rc.general.no_swanlab = True
     rc.general.checkpoint_path = None
     rc.general.skip_test = True
 
-    weights_path = _resolve_weights(rc)
+    weights_path = _resolve_weights(eff_cfg)
     logger.info(
         f"[Benchmark] model={rc.experiment.model_name} dataset={rc.data.dataset}"
     )
 
     exp_manager = ExperimentManager.from_run_config(rc, ExperimentType.EFFICIENCY)
-    output_dir = rc.efficiency.output_dir or exp_manager.get_log_dir()
+    output_dir = eff_cfg.output_dir or exp_manager.get_log_dir()
     logger.info(f"[Benchmark] output_dir={output_dir}")
 
     data_src = get_data_source(rc)
@@ -53,32 +54,35 @@ def main() -> None:
         trainer.load_weights(weights_path)
 
     EfficiencySession(
-        trainer=trainer, rc=rc, output_dir=output_dir
+        trainer=trainer, rc=rc, eff_cfg=eff_cfg, output_dir=output_dir
     ).run().print_console()
 
 
-def _parse_rc():
-    """Build the RunConfig; in run_dir mode, seed it from the archived RunConfig."""
+def _parse() -> tuple:
+    """Parse RunConfig + EfficiencyConfig; in run_dir mode seed from the archive."""
     run_dir = _peek_run_dir()
-    base_config = None
+    default_config = None
     if run_dir:
         _reject_model_flag(sys.argv[1:])  # run_dir mode reconstructs the model from the archive
         archive = Path(run_dir) / "run_config.yaml"
         if not archive.exists():
             raise SystemExit(f"[Benchmark] run_config.yaml not found in {run_dir}")
-        # Reuse the shared archive loader (schema revalidation + filename convention)
-        # and feed it as the programmatic base; CLI flags override on top.
-        base_config = load_run_config_archive(archive)
-    return ConfigParser(
+        default_config = archive
+
+    rc, ns = ConfigParser(
         prog="efficiency.py",
         description="UniKT Model Efficiency Benchmark",
         extra_nodes={"efficiency": EfficiencyConfig},
-        base_config=base_config,
-    ).parse_args()
+        default_config=default_config,
+    ).parse_with_extras()
+    eff_cfg = EfficiencyConfig(
+        **{f.name: ns["efficiency"][f.name] for f in dataclass_fields(EfficiencyConfig)}
+    )
+    return rc, eff_cfg
 
 
 def _peek_run_dir() -> str | None:
-    """Read --efficiency.run_dir before ConfigParser (model resolution needs it)."""
+    """Read --efficiency.run_dir before ConfigParser (default_config path needs it)."""
     for i, a in enumerate(sys.argv):
         if a == "--efficiency.run_dir" and i + 1 < len(sys.argv):
             return sys.argv[i + 1]
@@ -88,12 +92,7 @@ def _peek_run_dir() -> str | None:
 
 
 def _reject_model_flag(argv: list[str]) -> None:
-    """run_dir mode is incompatible with an explicit model flag.
-
-    Catches every form argparse's pass-one pre-parser (``allow_abbrev=True``)
-    accepts: ``-m``, ``-mVALUE``, ``--experiment.model_name`` and its unique
-    abbreviations (e.g. ``--experiment.model``), in both space and ``=`` forms.
-    """
+    """run_dir mode is incompatible with an explicit model flag."""
     for a in argv:
         if a.startswith("-m") or a.startswith("--experiment.model"):
             raise SystemExit(
@@ -101,15 +100,15 @@ def _reject_model_flag(argv: list[str]) -> None:
             )
 
 
-def _resolve_weights(rc) -> str | None:
-    weights = rc.efficiency.weights
+def _resolve_weights(eff_cfg: EfficiencyConfig) -> str | None:
+    weights = eff_cfg.weights
     if weights:
         path = Path(weights)
-    elif rc.efficiency.run_dir:
-        path = Path(rc.efficiency.run_dir) / rc.efficiency.checkpoint
+    elif eff_cfg.run_dir:
+        path = Path(eff_cfg.run_dir) / eff_cfg.checkpoint
     else:
         return None
-    # Fail fast before the expensive model+data build, mirroring the old guard.
+    # Fail fast before the expensive model+data build.
     if not path.exists():
         raise SystemExit(f"[Benchmark] checkpoint not found: {path}")
     return str(path)

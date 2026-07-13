@@ -85,15 +85,12 @@ class AblationRunner:
         """
         from dataclasses import fields as dc_fields
 
-        from omegaconf import OmegaConf
-
-        from utils.config import build_run_config_schema
+        from utils.config import RunConfig, build_run_config_schema
         from utils.data_process import get_data_source
         from utils.experiment_manager import ExperimentManager, ExperimentType
 
-        # Build a RunConfig for this variant: the model's structured schema
-        # defaults overlaid with the ablation's flat params, routed to the
-        # correct node (model/data/general/...) by field-name lookup.
+        # Build a RunConfig for this variant: each node's defaults overlaid with
+        # the ablation's flat params, routed to the correct node by field-name.
         schema = build_run_config_schema(ablation.variant)
         nested: dict = {}
         matched: set[str] = set()
@@ -110,7 +107,10 @@ class AblationRunner:
                 ablation.variant,
                 unmatched,
             )
-        rc = OmegaConf.merge(OmegaConf.structured(schema), OmegaConf.create(nested))
+        rc = RunConfig(**{node: cls() for node, cls in schema.items()})
+        for node, overrides in nested.items():
+            for k, v in overrides.items():
+                setattr(getattr(rc, node), k, v)
         rc.experiment.model_name = ablation.variant
         rc.data.dataset = self.config.dataset
 

@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from omegaconf import OmegaConf
 
+from utils.config import config_to_dict
 from utils.core import (
     EFFICIENCY_STAGES,
     get_logger,
@@ -31,14 +31,15 @@ logger = get_logger(__name__)
 class EfficiencySession:
     """Coordinate one efficiency benchmark run over the enabled stages."""
 
-    def __init__(self, trainer, rc, output_dir: str | Path | None = None) -> None:
-        """Resolve the enabled stages from ``rc.efficiency.modes``."""
+    def __init__(self, trainer, rc, eff_cfg, output_dir: str | Path | None = None) -> None:
+        """Resolve the enabled stages from ``eff_cfg.modes`` (comma-separated)."""
         self.trainer = trainer
         self.rc = rc
-        self.cfg = rc.efficiency
+        self.cfg = eff_cfg
         self.device = trainer.device_
         self.output_dir = Path(output_dir) if output_dir else None
-        self.stages = _resolve_stages(list(self.cfg.modes))
+        modes = [m.strip() for m in eff_cfg.modes.split(",") if m.strip()]
+        self.stages = _resolve_stages(modes)
 
     def run(self) -> EfficiencyReport:
         """Run the enabled stages under a shared resource sampler and assemble the report."""
@@ -93,7 +94,7 @@ class EfficiencySession:
             batch_size=batch_size,
             seq_len=seq_len,
             modes=[name for name, _ in self.stages],
-            config=OmegaConf.to_container(self.cfg, resolve=True),
+            config=config_to_dict(self.cfg),
             determinism={
                 "seed": self.rc.general.seed,
                 "deterministic": not self.rc.general.no_deterministic,

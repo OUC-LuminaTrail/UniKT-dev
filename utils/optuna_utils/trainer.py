@@ -4,7 +4,6 @@ from collections.abc import Callable
 from typing import Any
 
 import optuna
-from omegaconf import OmegaConf
 
 from utils.core import get_logger, seed_everything
 
@@ -105,11 +104,16 @@ class TrainerObjectiveWrapper:
     def _create_trial_rc(self, params: dict[str, Any]) -> Any:
         """Evolve the base RunConfig with a trial's model hyperparameters.
 
-        Trial params are model-node field names; they merge onto
-        ``base_rc.model``. Every trial reseeds from the base seed so only the
-        sampled hyperparameters vary across trials.
+        Trial params are model-node field names; they are applied onto a deep
+        copy of ``base_rc.model``. Every trial reseeds from the base seed so only
+        the sampled hyperparameters vary across trials.
         """
-        return OmegaConf.merge(self.base_rc, OmegaConf.create({"model": params}))
+        import copy
+
+        trial_rc = copy.deepcopy(self.base_rc)
+        for name, value in params.items():
+            setattr(trial_rc.model, name, value)
+        return trial_rc
 
     def _worst_value(self) -> float:
         """Return the worst possible target value for the current optimisation direction.
