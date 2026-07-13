@@ -46,7 +46,7 @@ class EfficiencySession:
         seed_everything(self.rc.general.seed, deterministic=not self.rc.general.no_deterministic)
 
         device = self.device
-        # trainer.run() would migrate model/loss to device; we skip run(), so do it
+        # trainer.run() would move model/loss to device; we skip run(), so do it
         # manually — otherwise forward_pass moves inputs to device and clashes with
         # CPU-resident weights.
         self.trainer.model.to(device)

@@ -28,8 +28,7 @@ class UniversalRegistry:
             loading.
     """
 
-    # Auto-populated roll-call of every registry instance; lets discovery iterate
-    # registries without hardcoding the decorator→registry mapping. Mutable by design.
+    # Roll-call of every registry instance, iterated by discovery. Mutable by design.
     _all_registries: list["UniversalRegistry"] = []  # noqa: RUF012
 
     def __init__(self, name: str, decorator_name: str | None = None):
@@ -193,10 +192,9 @@ def register_trainer(name: str | None = None):
 def register_model_config(name: str | None = None):
     """Register a per-model ``ModelConfig`` dataclass into ``MODEL_CONFIGS``.
 
-    Combines ``@dataclass`` transformation and registry binding into a single
-    decorator: write ``@register_model_config("Name")`` directly on a
-    :class:`~utils.config.run_config.ModelConfig` subclass instead of stacking
-    it over ``@dataclass``.
+    Combines ``@dataclass`` transformation and registry binding into one
+    decorator: apply ``@register_model_config("Name")`` directly on a
+    :class:`~utils.config.run_config.ModelConfig` subclass.
 
     Args:
         name: Optional registration name. Defaults to the class name.

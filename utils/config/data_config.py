@@ -1,7 +1,4 @@
-"""Data configuration module.
-
-Provides DataLoader configuration and optimization functions, migrated from dataloader_config.py.
-"""
+"""DataLoader configuration and the optimized DataLoader factory."""
 
 import os
 from dataclasses import dataclass

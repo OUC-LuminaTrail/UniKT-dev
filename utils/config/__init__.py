@@ -1,9 +1,9 @@
-"""Unified configuration management module.
+"""Configuration management: RunConfig schema, CLI parser, and yaml archive.
 
-The RunConfig tree is the single source of truth; :class:`ConfigParser` (built on
-``jsonargparse``) derives the CLI from it reflectively, and :mod:`archive`
-round-trips it to yaml. EarlyStopping (algorithm) and the runtime containers
-(TrainingConfig/DataConfig/...) live in utils.training, not here.
+:class:`ConfigParser` derives the CLI from the RunConfig dataclass tree and
+returns a typed RunConfig instance; :mod:`archive` round-trips it to yaml.
+EarlyStopping (algorithm) and the runtime containers (TrainingConfig/...) live
+in utils.training, not here.
 """
 
 from .archive import (

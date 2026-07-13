@@ -1,18 +1,16 @@
-"""Reflective CLI parser built on ``jsonargparse`` (PyTorch Lightning-aligned).
+"""Reflective CLI parser for the RunConfig dataclass tree.
 
-The RunConfig dataclass tree is the single schema. jsonargparse derives CLI flags
-from it (types, ``Literal`` choices, list nargs, bool), merges ``--config`` yaml
-bases with CLI overrides, and dumps/loads the same shape — replacing the former
-hand-rolled argparse reflection + OmegaConf merge.
+jsonargparse derives CLI flags from the schema (types, ``Literal`` choices, list
+nargs, bool), merges ``--config``/``default_config`` yaml under CLI overrides,
+and dumps/loads the same shape.
 
-Two-pass model resolution is retained: the model name (``-m`` /
-``--experiment.model_name`` / a ``--config`` or ``default_config`` yaml) selects
-the concrete :class:`ModelConfig` subclass *before* the schema is built, because
-model configs are lazily discovered across multiple environments and cannot all
-be imported at parse time.
+The model node is polymorphic and lazily discovered across multiple environments,
+so the model name (``-m`` / ``--experiment.model_name`` / a yaml) is resolved
+first and selects the concrete :class:`ModelConfig` subclass before the schema
+is built.
 
-``parse_args`` returns a typed :class:`RunConfig` instance. Entry points that
-need their own extra nodes (e.g. ``efficiency.py``) use ``parse_with_extras``.
+``parse_args`` returns a typed :class:`RunConfig` instance. Entry points needing
+their own nodes (e.g. ``efficiency.py``) use ``parse_with_extras``.
 """
 
 from __future__ import annotations
@@ -47,8 +45,8 @@ class ConfigParser:
             extra_nodes: Extra ``{node_name: dataclass}`` nodes (e.g.
                 ``{"efficiency": EfficiencyConfig}``) exposed as ``--<node>.<field>``
                 flags without polluting the shared RunConfig tree.
-            default_config: Path to a yaml loaded as the base config (CLI overrides
-                on top); serves the same role as ``--config`` but programmatic.
+            default_config: Path to a yaml loaded as the base config; CLI overrides
+                apply on top.
         """
         self.prog = prog
         self.description = description

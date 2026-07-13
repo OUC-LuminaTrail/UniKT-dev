@@ -1,18 +1,16 @@
-"""Unified run configuration tree — the single source of truth.
+"""RunConfig: the typed dataclass tree parsed by :class:`ConfigParser`.
 
-A typed dataclass tree parsed by :class:`~utils.config.config_parser.ConfigParser`
-(built on ``jsonargparse``): CLI flags, ``--config`` yaml, and archived
-``run_config.yaml`` all round-trip through the same schema. Per-model
-hyperparameters live in :class:`ModelConfig` subclasses (registered via
-``@register_model_config``); framework-level knobs live in the fixed
-sub-configs below.
+CLI flags, ``--config`` yaml, and archived ``run_config.yaml`` all round-trip
+through this schema. Framework-level knobs live in the fixed sub-configs below;
+per-model hyperparameters live in :class:`ModelConfig` subclasses registered via
+``@register_model_config``.
 
-Runtime ``rc`` is a :class:`RunConfig` instance (mutable, typed, dot-access).
-The polymorphic ``model`` node is always the concrete subclass at schema-build
-time (see :func:`build_run_config_schema`), never the :class:`ModelConfig` base.
+Runtime ``rc`` is a :class:`RunConfig` instance. The polymorphic ``model`` node
+is the concrete subclass at schema-build time (see
+:func:`build_run_config_schema`), never the base.
 
-Field help lives in each class ``Args:`` docstring (read by jsonargparse and
-IDEs); enumerated fields use :class:`typing.Literal` for validated choices.
+Field help lives in each class ``Args:`` docstring; enumerated fields use
+:class:`typing.Literal` for validated choices.
 """
 
 from dataclasses import dataclass, field
@@ -208,8 +206,8 @@ def build_run_config_schema(model_name: str) -> dict[str, type]:
 def config_to_dict(config) -> dict:
     """Recursively convert a config dataclass (instance or node) to a plain dict.
 
-    Replaces ``OmegaConf.to_container``: used for yaml serialization, metric
-    logging, cache keys, and anywhere a config must cross into plain-Python land.
+    Used for yaml serialization, metric logging, cache keys, and anywhere a
+    config must cross into plain-Python land.
     """
     from dataclasses import asdict, is_dataclass
 

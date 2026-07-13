@@ -1,15 +1,14 @@
-"""Static registration discovery: scans source code without importing modules to build a name->module lazy index.
+"""Static registration discovery: scan source code (no imports) to build a name→module lazy index.
 
 Scans for ``@register_<role>("name")`` decorators and populates the corresponding
-registry's ``index``. This allows ``keys()`` to list all components at startup while
+registry's ``index``. ``keys()`` then lists all components at startup while
 component code is only imported on ``get()`` (lazy loading, multi-environment safe).
 
 The decorator→registry mapping is self-described: each :class:`UniversalRegistry`
-declares its own ``decorator_name``, so this module never hardcodes the role list —
-adding a registry anywhere is picked up automatically.
+declares its own ``decorator_name``, which discovery reads.
 
-Only recognizes the uniform ``@register_<role>("literal")`` form; non-literal arguments
-(variables, expressions) are ignored.
+Only the uniform ``@register_<role>("literal")`` form is recognized; non-literal
+arguments (variables, expressions) are ignored.
 """
 
 from __future__ import annotations
