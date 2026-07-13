@@ -88,46 +88,7 @@ pixi shell -e dhg-gpu
 pixi shell -e mamba
 ```
 
-### Option 2: Automated Conda Setup
-
-Use the provided setup script for automatic environment configuration:
-
-```bash
-# Clone the repository
-git clone https://github.com/szhhwh/UniKT.git
-cd UniKT
-
-# Auto-detect GPU and create environment (recommended)
-./scripts/setup_env.sh
-
-# Specify environment name
-./scripts/setup_env.sh -n myenv
-
-# Force CPU environment
-./scripts/setup_env.sh --cpu
-
-# Force GPU environment
-./scripts/setup_env.sh --gpu
-
-# Non-interactive mode (use existing env if present)
-./scripts/setup_env.sh --yes
-
-# Force recreate environment
-./scripts/setup_env.sh --force
-```
-
-**Script Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-n, --env-name NAME` | Conda environment name (default: kt-exp) |
-| `--feature FEATURE` | Install feature: gpu, cpu, dhg-gpu, dhg-cpu |
-| `--cpu` | Force CPU installation |
-| `--gpu` | Force GPU installation |
-| `--force` | Remove and recreate existing environment |
-| `--yes` | Non-interactive mode |
-
-### Option 3: Manual Conda Setup
+### Option 2: Manual Conda Setup
 
 <details>
 <summary>Click to expand manual installation guide</summary>

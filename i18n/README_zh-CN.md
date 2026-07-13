@@ -90,46 +90,7 @@ pixi shell -e dhg-gpu
 pixi shell -e mamba
 ```
 
-### 方式二：自动配置 Conda 环境
-
-使用提供的脚本自动配置 Conda 环境：
-
-```bash
-# 克隆仓库
-git clone https://github.com/OUC-LuminaTrail/kt-exp-graph.git
-cd kt-exp-graph
-
-# 自动检测 GPU 并创建环境（推荐）
-./scripts/setup_env.sh
-
-# 指定环境名称
-./scripts/setup_env.sh -n myenv
-
-# 强制使用 CPU 环境
-./scripts/setup_env.sh --cpu
-
-# 强制使用 GPU 环境
-./scripts/setup_env.sh --gpu
-
-# 非交互模式（如环境已存在则使用现有环境）
-./scripts/setup_env.sh --yes
-
-# 强制重建环境
-./scripts/setup_env.sh --force
-```
-
-**脚本选项：**
-
-| 选项 | 说明 |
-|------|------|
-| `-n, --env-name NAME` | Conda 环境名称（默认：kt-exp） |
-| `--feature FEATURE` | 安装特性：gpu, cpu, dhg-gpu, dhg-cpu |
-| `--cpu` | 强制 CPU 安装 |
-| `--gpu` | 强制 GPU 安装 |
-| `--force` | 删除并重建已有环境 |
-| `--yes` | 非交互模式 |
-
-### 方式三：手动配置 Conda 环境
+### 方式二：手动配置 Conda 环境
 
 <details>
 <summary>点击展开手动安装指南</summary>
