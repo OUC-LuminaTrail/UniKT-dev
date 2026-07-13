@@ -10,6 +10,7 @@ from config import PROJECT_ROOT
 from fastapi import APIRouter, HTTPException
 
 from utils.core import get_supported_datasets
+from utils.dataset_status import dataset_status
 
 router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
@@ -42,6 +43,7 @@ def list_datasets():
         result.append(
             {
                 "name": name,
+                "status": dataset_status(name, DATA_DIR),
                 "num_users": meta.get("num_users"),
                 "num_questions": meta.get("num_questions"),
                 "num_skills": meta.get("num_skills"),

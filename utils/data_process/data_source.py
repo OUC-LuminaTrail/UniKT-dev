@@ -22,6 +22,7 @@ import tqdm
 from sklearn.model_selection import KFold
 
 from utils.core import get_logger
+from utils.dataset_status import has_raw, is_processed, raw_folder_path
 
 from .windowlate_processor import WindowlateProcessor
 
@@ -69,6 +70,27 @@ class DataSource(ABC):
             "split_skill_sequence": {"lazy": False},
             "windowlate": {"lazy": True},
         }
+
+    @property
+    def raw_folder(self) -> str:
+        """Extracted raw-data directory (``<data_folder>/raw``)."""
+        return str(raw_folder_path(self.data_base_path, self.dataset))
+
+    def raw_exists(self) -> bool:
+        """True if the raw-data directory exists and is non-empty."""
+        return has_raw(self.data_base_path, self.dataset)
+
+    def metadata_exists(self) -> bool:
+        """True if ``metadata.json`` is present on disk."""
+        return os.path.exists(self.metadata_path)
+
+    def processed_exists(self) -> bool:
+        """True if the dataset has been processed (metadata carries the marker).
+
+        Distinct from :meth:`metadata_exists`: ``download`` also writes
+        metadata.json, but only ``process`` records the processed marker.
+        """
+        return is_processed(self.data_base_path, self.dataset)
 
     def _build_id_mapping(self, data: pl.DataFrame, columns: list[str]):
         """Build ID mappings from data.

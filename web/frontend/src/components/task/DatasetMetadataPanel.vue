@@ -30,17 +30,22 @@
     </template>
   </div>
 
-  <div class="metadata-panel metadata-empty" v-else-if="dataset && loading">
-    <div class="empty-text">加载中...</div>
-  </div>
-
-  <div class="metadata-panel metadata-no-data" v-else-if="dataset && !loading">
+  <div class="metadata-panel metadata-no-data" v-else-if="status === 'downloaded'">
     <el-icon :size="32"><Coin /></el-icon>
-    <span class="no-data-text">该数据集尚未预处理</span>
+    <span class="no-data-text">已下载，尚未处理</span>
     <router-link v-if="showPreprocessLink" :to="{ name: 'preprocess', query: { dataset } }" class="preprocess-link">
       <el-icon :size="14"><Download /></el-icon>
-      去预处理
+      去处理
     </router-link>
+  </div>
+
+  <div class="metadata-panel metadata-no-data" v-else-if="status === 'empty'">
+    <el-icon :size="32"><Coin /></el-icon>
+    <span class="no-data-text">尚未下载</span>
+  </div>
+
+  <div class="metadata-panel metadata-empty" v-else-if="dataset && loading">
+    <div class="empty-text">加载中...</div>
   </div>
 
   <div class="metadata-panel metadata-placeholder" v-else>
@@ -52,7 +57,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Coin, Download } from '@element-plus/icons-vue'
-import { type DatasetMetadata } from '@/api/datasets'
+import { type DatasetMetadata, type DatasetStatus } from '@/api/datasets'
 
 const HIDDEN_KEYS = new Set([
   'question_data_md5', 'sequence_data_md5',
@@ -92,6 +97,7 @@ const KEY_LABELS: Record<string, string> = {
 const props = defineProps<{
   dataset: string
   metadata: DatasetMetadata | null
+  status?: DatasetStatus
   loading?: boolean
   iconGradient?: string
   showPreprocessLink?: boolean

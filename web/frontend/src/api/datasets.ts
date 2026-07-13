@@ -1,7 +1,10 @@
 import api from './index'
 
+export type DatasetStatus = 'empty' | 'downloaded' | 'ready'
+
 export interface DatasetInfo {
   name: string
+  status: DatasetStatus
   num_users: number | null
   num_questions: number | null
   num_skills: number | null

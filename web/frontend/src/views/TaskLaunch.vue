@@ -84,7 +84,7 @@
         v-if="step === 'select'"
         type="primary"
         size="large"
-        :disabled="!envId || !modelName || !dataset"
+        :disabled="!canConfirm"
         @click="onSelectConfirm"
       >
         确认选择
@@ -126,7 +126,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { createTask } from '@/api/tasks'
-import { getDatasetMetadata } from '@/api/datasets'
+import { getDatasetMetadata, listDatasets, type DatasetInfo } from '@/api/datasets'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
 import { getDefaultEnv } from '@/api/settings'
@@ -171,7 +171,18 @@ const models = computed(() => initDataQuery.data.value?.modelList ?? [])
 const refreshing = ref(false)
 const loading = computed(() => initDataQuery.isPending.value || refreshing.value)
 
-const datasets = ref<string[]>([])
+const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: listDatasets })
+// Train view hides empty datasets; downloaded ones stay visible so the user can
+// be routed to preprocessing instead of training on unprocessed data.
+const datasets = computed<DatasetInfo[]>(() =>
+  (datasetsQuery.data.value ?? []).filter(d => d.status !== 'empty')
+)
+const selectedInfo = computed(
+  () => datasets.value.find(d => d.name === dataset.value) ?? null
+)
+const canConfirm = computed(
+  () => !!envId.value && !!modelName.value && selectedInfo.value?.status === 'ready'
+)
 
 const modelParamsQuery = useQuery({
   queryKey: computed(() => ['model-params', modelName.value]),
@@ -199,7 +210,7 @@ async function onModelChange(val: string) {
 }
 
 function onSelectConfirm() {
-  if (!envId.value || !modelName.value || !dataset.value) return
+  if (!canConfirm.value) return
   localStorage.setItem(STORAGE_KEY_ENV, envId.value)
   localStorage.setItem(STORAGE_KEY_DATASET, dataset.value)
   step.value = 'params'
@@ -326,12 +337,13 @@ async function refreshAll() {
   await queryClient.refetchQueries({ queryKey: ['task-launch-init'] })
   await queryClient.refetchQueries({ queryKey: ['model-params'] })
   await queryClient.refetchQueries({ queryKey: ['dataset-metadata'] })
+  await queryClient.refetchQueries({ queryKey: ['datasets'] })
 
   refreshing.value = false
   ElMessage.success('已刷新模型和数据集')
 }
 
-watch(() => initDataQuery.data.value, async (data) => {
+watch(() => initDataQuery.data.value, (data) => {
   if (!data || initDone.value) return
   initDone.value = true
 
@@ -357,23 +369,19 @@ watch(() => initDataQuery.data.value, async (data) => {
     modelName.value = savedModel
     onModelChange(savedModel)
   }
-
-  const anyModel = modelList[0]
-  if (anyModel) {
-    const s = await getModelParams(anyModel)
-    for (const g of s.param_groups) {
-      if (g.params['dataset']?.choices?.length) {
-        datasets.value = g.params['dataset'].choices as string[]
-        break
-      }
-    }
-  }
-
-  const savedDataset = localStorage.getItem(STORAGE_KEY_DATASET)
-  if (savedDataset && datasets.value.includes(savedDataset)) {
-    dataset.value = savedDataset
-  }
 }, { immediate: true })
+
+// Restore last-chosen dataset once the filtered list resolves; only ready ones
+// are eligible since empty datasets are hidden from this view.
+const datasetRestored = ref(false)
+watch(datasets, (list) => {
+  if (datasetRestored.value || !list.length) return
+  datasetRestored.value = true
+  const saved = localStorage.getItem(STORAGE_KEY_DATASET)
+  if (saved && list.some(d => d.name === saved)) {
+    dataset.value = saved
+  }
+})
 </script>
 
 <style scoped>

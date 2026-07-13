@@ -115,36 +115,37 @@
       <div class="dataset-layout">
         <div class="dataset-cards" v-if="datasets.length && viewMode === 'grid'">
           <div
-            v-for="name in datasets"
-            :key="name"
+            v-for="ds in datasets"
+            :key="ds.name"
             class="select-card"
-            :class="{ active: dataset === name }"
-            @click="onDatasetClick(name)"
+            :class="{ active: dataset === ds.name }"
+            @click="onDatasetClick(ds.name)"
           >
-            <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + name) }">
+            <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
               <el-icon :size="18"><Coin /></el-icon>
             </div>
-            <div class="card-name" :title="name">{{ name }}</div>
+            <div class="card-name" :title="ds.name">{{ ds.name }}</div>
           </div>
         </div>
         <div class="select-list" v-else-if="datasets.length">
           <div
-            v-for="name in datasets"
-            :key="name"
+            v-for="ds in datasets"
+            :key="ds.name"
             class="list-item"
-            :class="{ active: dataset === name }"
-            @click="onDatasetClick(name)"
+            :class="{ active: dataset === ds.name }"
+            @click="onDatasetClick(ds.name)"
           >
-            <span class="list-badge icon-dataset" :style="{ background: getGradient('ds-' + name) }">
+            <span class="list-badge icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
               <el-icon :size="14"><Coin /></el-icon>
             </span>
-            <span class="list-name" :title="name">{{ name }}</span>
+            <span class="list-name" :title="ds.name">{{ ds.name }}</span>
           </div>
         </div>
 
         <DatasetMetadataPanel
           :dataset="dataset"
           :metadata="metadata"
+          :status="selectedInfo?.status"
           :loading="metadataLoading"
           :icon-gradient="dataset ? getGradient('ds-' + dataset) : undefined"
           show-preprocess-link
@@ -159,7 +160,7 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { Coin, Refresh, Grid, Menu } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
-import { getDatasetMetadata, type DatasetMetadata } from '@/api/datasets'
+import { getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
 import { getGpuStatus } from '@/api/gpu'
 import DatasetMetadataPanel from './DatasetMetadataPanel.vue'
 import { getGradient } from '@/composables/useGradient'
@@ -173,7 +174,7 @@ const props = defineProps<{
   gpu: number | null
   environments: EnvironmentInfo[]
   models: string[]
-  datasets: string[]
+  datasets: DatasetInfo[]
   refreshing: boolean
 }>()
 
@@ -219,6 +220,7 @@ const gpuChoice = computed<string>({
 
 const metadata = ref<DatasetMetadata | null>(null)
 const metadataLoading = ref(false)
+const selectedInfo = computed(() => props.datasets.find(d => d.name === props.dataset))
 
 const pixiEnvs = computed(() => props.environments.filter(e => e.type === 'pixi'))
 const condaEnvs = computed(() => props.environments.filter(e => e.type === 'conda'))
@@ -243,15 +245,22 @@ async function loadMetadata(name: string) {
   }
 }
 
-watch(() => props.dataset, (name) => {
-  if (!name) { metadata.value = null; return }
-  if (metadataCache.value[name]) { metadata.value = metadataCache.value[name]; return }
-  loadMetadata(name)
+// Only ready datasets expose a metadata grid; downloaded/empty render a status
+// prompt instead, so skip the network round-trip for them.
+watch(selectedInfo, (info) => {
+  if (!info || info.status !== 'ready') { metadata.value = null; return }
+  if (metadataCache.value[info.name]) { metadata.value = metadataCache.value[info.name]; return }
+  loadMetadata(info.name)
 }, { immediate: true })
 
 function clearCache() {
   metadataCache.value = {}
-  if (props.dataset) loadMetadata(props.dataset)
+  const info = selectedInfo.value
+  if (info && info.status === 'ready') {
+    loadMetadata(info.name)
+  } else {
+    metadata.value = null
+  }
 }
 
 defineExpose({ clearCache })

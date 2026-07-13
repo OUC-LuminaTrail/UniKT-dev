@@ -78,9 +78,9 @@
                 </div>
               </template>
               <template #default>
-                <div class="dataset-cards" v-if="datasets.length">
+                <div class="dataset-cards" v-if="visibleDatasets.length">
                   <div
-                    v-for="ds in datasets"
+                    v-for="ds in visibleDatasets"
                     :key="ds.name"
                     class="select-card"
                     :class="{ active: dataset === ds.name }"
@@ -98,6 +98,7 @@
             <DatasetMetadataPanel
               :dataset="dataset"
               :metadata="datasetMetadata"
+              :status="selectedInfo?.status"
               :loading="metadataLoading"
               :icon-gradient="dataset ? getGradient('ds-' + dataset) : undefined"
             />
@@ -214,6 +215,16 @@ const envsQuery = useQuery({ queryKey: ['environments'], queryFn: listEnvironmen
 
 const datasets = computed<DatasetInfo[]>(() => datasetsQuery.data.value ?? [])
 const environments = computed<EnvironmentInfo[]>(() => envsQuery.data.value ?? [])
+// Download offers every dataset; process only those with raw data or already
+// processed — empty ones have nothing to process.
+const visibleDatasets = computed<DatasetInfo[]>(() =>
+  action.value === 'download'
+    ? datasets.value
+    : datasets.value.filter(d => d.status !== 'empty')
+)
+const selectedInfo = computed(
+  () => datasets.value.find(d => d.name === dataset.value) ?? null
+)
 const loading = computed(() =>
   activeTasksQuery.isPending.value ||
   datasetsQuery.isPending.value ||
@@ -235,13 +246,19 @@ const preprocessTaskQuery = useQuery({
 })
 
 watch(() => preprocessTaskQuery.data.value, (data) => {
-  if (data) taskInfo.value = data
+  if (!data) return
+  taskInfo.value = data
+  // A finished download/process changes on-disk state — refresh dataset statuses
+  // so cards transition empty→downloaded→ready without a manual reload.
+  if (data.status === 'completed') {
+    queryClient.invalidateQueries({ queryKey: ['datasets'] })
+  }
 })
 
 const datasetMetadataQuery = useQuery({
   queryKey: computed(() => ['dataset-metadata', dataset.value]),
   queryFn: () => getDatasetMetadata(dataset.value),
-  enabled: computed(() => !!dataset.value),
+  enabled: computed(() => !!dataset.value && selectedInfo.value?.status === 'ready'),
 })
 
 const datasetMetadata = computed<DatasetMetadata | null>(() => datasetMetadataQuery.data.value ?? null)
@@ -374,6 +391,7 @@ const onStop = () => {
 const onBack = () => {
   phase.value = 'config'
   taskInfo.value = null
+  queryClient.invalidateQueries({ queryKey: ['datasets'] })
 }
 </script>
 
