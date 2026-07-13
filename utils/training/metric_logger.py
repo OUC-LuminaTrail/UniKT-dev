@@ -658,7 +658,7 @@ def build_default_metric_loggers(
         loggers.append(get_metric_logger("swanlab"))
 
     if async_io:
-        logger.info("Async metric logging: ENABLED (METRIC_LOGGING_ASYNC=0 to disable)")
+        logger.debug("Async metric logging: ENABLED (METRIC_LOGGING_ASYNC=0 to disable)")
         loggers = [AsyncMetricLoggerProxy(lg) for lg in loggers]
     return MetricLoggerComposite(loggers)
 

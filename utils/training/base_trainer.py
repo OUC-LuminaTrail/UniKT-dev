@@ -560,7 +560,7 @@ class BaseTrainer(ABC):
     def _finish_metric_logger(self):
         """Finalize and shut down the metric logging backend."""
         self.metric_logger.finish()
-        logger.info("Metric logging finished")
+        logger.debug("Metric logging finished")
 
     def run(self):
         """Run the full training loop.
