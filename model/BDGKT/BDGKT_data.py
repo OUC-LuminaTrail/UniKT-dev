@@ -59,9 +59,9 @@ class BDGKTModelData(QuestionModelData):
         return self.data_src.get_sequence_data()
 
     @BaseModelData.disk_cache()
-    def prepare_data(self, args):
-        l_s = getattr(args, "question_max_length", 20)
-        l_q = getattr(args, "student_max_length", 5)
+    def prepare_data(self, rc):
+        l_s = rc.model.question_max_length
+        l_q = rc.model.student_max_length
 
         raw_data = self.data_src.get_sequence_data().to_pandas()
         logger.info(
@@ -79,7 +79,7 @@ class BDGKTModelData(QuestionModelData):
 
         num_students = edges["num_students"]
         user_folds = self._build_user_folds(num_students)
-        fold_idx = getattr(args, "fold", 0)
+        fold_idx = rc.data.fold
 
         train_users = np.where((user_folds != fold_idx) & (user_folds != -1))[0]
         val_users = np.where(user_folds == fold_idx)[0]

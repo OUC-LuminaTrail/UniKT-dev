@@ -5,6 +5,7 @@
 
 import math
 import os
+from typing import Any
 
 import numpy as np
 import torch
@@ -110,7 +111,6 @@ def _compute_time_gaps(
             bucket = _log2_bucket(pc)
             pcount[t] = min(bucket, num_pcount - 1)
 
-        # Update state
         last_ts[s] = timestamps[t]
         skill_count[s] = skill_count.get(s, 0) + 1
 
@@ -260,26 +260,26 @@ class MTKTModelData(SkillModelData):
         return user_timestamp
 
     @override
-    def prepare_data(self, args) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练和验证数据
+
+        Args:
+            rc: RunConfig (OmegaConf DictConfig)
 
         Returns:
             (train_dataset, val_dataset, test_dataset)
         """
-        fold_idx = args.fold if args.fold >= 0 else None
-        num_rgap = args.num_rgap
-        num_sgap = args.num_sgap
-        num_pcount = args.num_pcount
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
+        num_rgap = rc.model.num_rgap
+        num_sgap = rc.model.num_sgap
+        num_pcount = rc.model.num_pcount
 
-        # 1. 构建标准技能序列
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
         )
 
-        # 2. 加载时间戳
         user_timestamp = self._load_timestamps()
 
-        # 3. 计算时间间隔特征
         logger.info("Computing time gap features (rgap, sgap, pcount)...")
         user_rgap, user_sgap, user_pcount = self._build_time_gaps(
             user_sequence,
@@ -290,7 +290,6 @@ class MTKTModelData(SkillModelData):
             num_pcount,
         )
 
-        # 4. K-fold 划分
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -317,7 +316,6 @@ class MTKTModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        # 5. 构建 Dataset
         train_dataset = MTKTDataset(
             train_data[0],
             train_data[1],
@@ -337,13 +335,12 @@ class MTKTModelData(SkillModelData):
             val_data[6],
         )
 
-        # 6. Windowlate 测试集
         parquet_path = os.path.join(
             self.data_src.data_folder, f"{self.data_src.dataset}_windowlate.parquet"
         )
         test_dataset = MTKTWindowlateIterableDataset(
             parquet_path=parquet_path,
-            max_seq_len=args.max_seq_len,
+            max_seq_len=rc.data.max_seq_len,
             num_rgap=num_rgap,
             num_sgap=num_sgap,
             num_pcount=num_pcount,

@@ -1,90 +1,79 @@
 """MIKT 模型训练器"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("MIKT")
-class MIKTModelParams(BaseParamConfig):
-    """MIKT 模型参数配置"""
+@register_model_config("MIKT")
+@dataclass
+class MIKTConfig(ModelConfig):
+    """MIKT 模型配置。"""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "MIKT Parameters"
-        params = {
-            "embed_dim": {
-                "type": int,
-                "default": 64,
-                "short": "ed",
-                "help": "Embedding dimension (default: 64)",
-            },
-            "state_dim": {
-                "type": int,
-                "default": 64,
-                "short": "sd",
-                "help": "State representation dimension (default: 64)",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.4,
-                "short": "dp",
-                "help": "Dropout rate (default: 0.4)",
-            },
-            "grad_clip": {
-                "type": float,
-                "default": 15.0,
-                "help": "Gradient clipping norm (default: 15.0)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs (default: 200)",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 0.002,
-                "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.002)",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-5,
-                "short": "wd",
-                "help": "Weight decay for optimizer (default: 1e-5)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 80,
-                "short": "bs",
-                "help": "Batch size for training (default: 80)",
-            },
-        }
-        return group_name, params
+    embed_dim: int = field(
+        default=64,
+        metadata={"help": "Embedding dimension (default: 64)", "short": "ed"},
+    )
+    state_dim: int = field(
+        default=64,
+        metadata={
+            "help": "State representation dimension (default: 64)",
+            "short": "sd",
+        },
+    )
+    dropout: float = field(
+        default=0.4, metadata={"help": "Dropout rate (default: 0.4)", "short": "dp"}
+    )
+    grad_clip: float = field(
+        default=15.0, metadata={"help": "Gradient clipping norm (default: 15.0)"}
+    )
+    epochs: int = field(
+        default=200,
+        metadata={"help": "Number of training epochs (default: 200)", "short": "ep"},
+    )
+    learning_rate: float = field(
+        default=0.002,
+        metadata={
+            "help": "Learning rate for optimizer (default: 0.002)",
+            "short": "lr",
+        },
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"help": "Weight decay for optimizer (default: 1e-5)", "short": "wd"},
+    )
+    batch_size: int = field(
+        default=80,
+        metadata={"help": "Batch size for training (default: 80)", "short": "bs"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
 
 
 @register_trainer("MIKT")
 class MIKTTrainer(BaseTrainer):
     """MIKT 模型训练器"""
 
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
+        from model.MIKT.MIKT_data import MIKTModelData
         from model.MIKT.MIKT_model import MIKT
 
         logger.info("Initializing MIKT model...")
-        model = MIKT(args, data_src.get_metadata())
-
-        from model.MIKT.MIKT_data import MIKTModelData
+        m = rc.model
+        metadata = data_src.get_metadata()
+        model = MIKT(
+            embed_dim=m.embed_dim,
+            state_dim=m.state_dim,
+            dropout=m.dropout,
+            data_metadata=metadata,
+        )
 
         model_data = MIKTModelData(data_src)
         (
@@ -92,55 +81,39 @@ class MIKTTrainer(BaseTrainer):
             val_dataset,
             test_dataset,
             self.question_skill_matrix,
-        ) = model_data.prepare_data(args)
+        ) = model_data.prepare_data(rc)
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if getattr(args, "lr_decay", None):
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
+        # build() hasn't run yet, so self.device_ is None. Resolve the target
+        # device from rc to place the trainer-side question_skill_matrix correctly.
+        dev = rc.general.device
+        device = (
+            torch.device(dev)
+            if dev
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.question_skill_matrix = self.question_skill_matrix.to(device)
 
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            max_clip_grad_norm=args.grad_clip,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="MIKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
-
-        self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
+            max_clip_grad_norm=m.grad_clip,
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -155,7 +128,7 @@ class MIKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        # 模型输出 [B, S-1]，P[:, t] 预测 response[:, t+1]（next-item）；pad 到 [B, S] 后用内置函数
+        # Model outputs [B, S-1]; P[:, t] predicts response[:, t+1] (next-item). Pad to [B, S] for built-in alignment.
         y_hat_full = self._pad_to_full_sequence(
             self.model(sequence, response, mask, self.question_skill_matrix)
         )

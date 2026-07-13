@@ -67,40 +67,53 @@ class DAGKT(nn.Module):
     总损失 = 预测损失(BCE) + 难度自编码器重建损失 + 尝试次数自编码器重建损失
 
     Args:
-        args: 模型参数配置
         data_metadata: 数据集元数据，包含 num_questions 和 num_skills
         question_difficulty: 题目正确率张量 [num_questions, 1]
+        embedding_dim: Embedding 维度
+        hidden_dim: 隐藏层维度
+        lstm_layers: LSTM 层数
+        dropout: Dropout 率
+        ae_hidden_dim: 自编码器隐藏层维度
+        n_hop: GNN 跳数
+        heads: 注意力头数
+        history_neighbour: 历史邻居数量
+        att_bound: 注意力边界
         **kwargs: 额外的关键字参数
     """
 
     def __init__(
         self,
-        args: Any,
         data_metadata: dict[str, Any],
         question_difficulty: torch.Tensor | None = None,
+        *,
+        embedding_dim: int = 100,
+        hidden_dim: int = 100,
+        lstm_layers: int = 2,
+        dropout: float = 0.4,
+        ae_hidden_dim: int = 50,
+        n_hop: int = 3,
+        heads: int = 2,
+        history_neighbour: int = 5,
+        att_bound: float = 0.2,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
-        self.args = args
         self.data_metadata = data_metadata
 
-        # 模型参数
-        self.embedding_dim = args.embedding_dim
-        self.hidden_dim = args.hidden_dim
-        self.lstm_layers = args.lstm_layers
-        self.dropout = args.dropout
-        ae_hidden_dim = getattr(args, "ae_hidden_dim", 50)
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        self.lstm_layers = lstm_layers
+        self.dropout = dropout
 
         num_questions = data_metadata["num_questions"]
         num_skills = data_metadata["num_skills"]
 
-        # 题目正确率（作为 buffer 而非可训练参数）
+        # Question correct rates: registered as a buffer (tracked, not trained)
         if question_difficulty is not None:
             self.register_buffer("difficulty_rates", question_difficulty.float())
         else:
             self.register_buffer("difficulty_rates", torch.zeros(num_questions, 1))
 
-        # Embedding 层（同 GIKT）
         self.question_embedding = nn.Embedding(
             num_embeddings=num_questions,
             embedding_dim=self.embedding_dim,
@@ -115,40 +128,33 @@ class DAGKT(nn.Module):
         )
         self.embedding_dropout = nn.Dropout(p=self.dropout)
 
-        # GNN 层（同 GIKT，复用 GNN_QS）
         self.conv = GNN_QS(
             embedding_dim=self.embedding_dim,
-            n_hop=args.n_hop,
-            heads=args.heads,
+            n_hop=n_hop,
+            heads=heads,
             dropout=self.dropout,
         )
 
-        # 难度自编码器
         self.difficulty_ae = Autoencoder(
             input_dim=1,
             ae_hidden_dim=ae_hidden_dim,
             embedding_dim=self.embedding_dim,
         )
 
-        # 尝试次数自编码器
         self.attempt_ae = Autoencoder(
             input_dim=1,
             ae_hidden_dim=ae_hidden_dim,
             embedding_dim=self.embedding_dim,
         )
 
-        # 难度融合层: concat(q_emb, diff_emb) → embedding_dim
         self.transdiff = nn.Linear(2 * self.embedding_dim, self.embedding_dim)
 
-        # 尝试融合层: concat(answer_emb, attempt_emb) → embedding_dim
         self.trans_answer = nn.Linear(2 * self.embedding_dim, self.embedding_dim)
 
-        # 全连接层: concat(q_fused, ans_fused) → hidden_dim
         self.fc_exercise = Linear(
             2 * self.embedding_dim, self.hidden_dim, weight_initializer="uniform"
         )
 
-        # LSTM 层
         self.lstm = nn.LSTM(
             input_size=self.hidden_dim,
             hidden_size=self.hidden_dim,
@@ -157,13 +163,11 @@ class DAGKT(nn.Module):
             dropout=self.dropout,
         )
 
-        # 历史回顾模块（同 GIKT）
         self.history_review = HistoryRecap(
-            hist_neighbor_num=args.history_neighbour,
-            att_bound=args.att_bound,
+            hist_neighbor_num=history_neighbour,
+            att_bound=att_bound,
         )
 
-        # 广义交互模块（同 GIKT）
         self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
     def forward(
@@ -190,15 +194,8 @@ class DAGKT(nn.Module):
         """
         B, S = user_sequence.size()
 
-        # ================================================================
-        # 1. 难度编码：将题目正确率通过自编码器编码为嵌入
-        # ================================================================
-        # difficulty_rates: [num_questions, 1] → diff_emb: [num_questions, E]
         diff_emb, loss_diff = self.difficulty_ae(self.difficulty_rates)
 
-        # ================================================================
-        # 2. 图卷积（同 GIKT）
-        # ================================================================
         conv = self.conv(
             {
                 "question": self.question_embedding.weight,
@@ -209,68 +206,45 @@ class DAGKT(nn.Module):
         question_conv: torch.Tensor = conv["question"]  # [num_questions, E]
         skill_conv: torch.Tensor = conv["skill"]  # [num_skills, E]
 
-        # ================================================================
-        # 3. 当前题嵌入 + 难度融合
-        # ================================================================
         q_emb = question_conv[user_sequence]  # [B, S, E]
         cur_diff_emb = diff_emb[user_sequence]  # [B, S, E]
         q_fused = torch.relu(
             self.transdiff(torch.cat([q_emb, cur_diff_emb], dim=-1))
         )  # [B, S, E]
 
-        # ================================================================
-        # 4. 尝试次数编码：将尝试次数通过自编码器编码为嵌入
-        # ================================================================
-        # attempt_counts: [B, S] → reshape [B*S, 1]
         attempt_input = attempt_counts.reshape(-1, 1)  # [B*S, 1]
         attempt_encoded, loss_attempt = self.attempt_ae(attempt_input)
         # [B*S, E] → [B, S, E]
         attempt_emb = attempt_encoded.reshape(B, S, self.embedding_dim)
 
-        # ================================================================
-        # 5. 答案嵌入 + 尝试融合
-        # ================================================================
         ans_emb = self.answer_embedding(user_response)  # [B, S, E]
         ans_fused = torch.relu(
             self.trans_answer(torch.cat([ans_emb, attempt_emb], dim=-1))
         )  # [B, S, E]
 
-        # ================================================================
-        # 6. 练习嵌入: concat(q_fused, ans_fused) → hidden_dim
-        # ================================================================
         exercise_emb = torch.cat([q_fused, ans_fused], dim=-1)  # [B, S, 2E]
         exercise_emb = torch.relu(self.fc_exercise(exercise_emb))  # [B, S, H]
         exercise_emb = self.embedding_dropout(exercise_emb)
 
-        # ================================================================
-        # 7. LSTM 处理（同 GIKT）
-        # ================================================================
         lstm_output, _ = self.lstm(exercise_emb)  # [B, S, H]
 
-        # ================================================================
-        # 8. 下一题处理（同 GIKT 但加入难度融合）
-        # ================================================================
         next_user_sequence = torch.zeros_like(user_sequence)  # [B, S]
         if S > 1:
             next_user_sequence[:, :-1] = user_sequence[:, 1:]
             next_user_sequence[:, -1] = 0
 
-        # 下一题图卷积嵌入 + 难度融合
         next_q_emb = question_conv[next_user_sequence]  # [B, S, E]
         next_diff_emb = diff_emb[next_user_sequence]  # [B, S, E]
         next_q_fused = torch.relu(
             self.transdiff(torch.cat([next_q_emb, next_diff_emb], dim=-1))
         )  # [B, S, E]
 
-        # 下一题答案嵌入（用于 GeneralInteraction 中的 knowledge_status 构造）
+        # Next-step response embeddings feed the knowledge_status built in GeneralInteraction
         next_user_response = torch.zeros_like(user_response)  # [B, S]
         if S > 1:
             next_user_response[:, :-1] = user_response[:, 1:]
             next_user_response[:, -1] = 0
 
-        # ================================================================
-        # 9. 历史回顾模块（同 GIKT）
-        # ================================================================
         history_question_neighbors = self.history_review(
             q_emb,
             next_q_emb,
@@ -278,16 +252,10 @@ class DAGKT(nn.Module):
             user_mask,
         )  # [B, S, M, H]
 
-        # ================================================================
-        # 10. 构造学生状态集合（同 GIKT）
-        # ================================================================
         student_status = torch.cat(
             [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
         )  # [B, S, M+1, H]
 
-        # ================================================================
-        # 11. 构建知识状态集合（同 GIKT）
-        # ================================================================
         q_skill_vectors = question_skill_matrix[
             next_user_sequence
         ]  # [B, S, num_skills]
@@ -325,15 +293,12 @@ class DAGKT(nn.Module):
 
         related_skill_embs = skill_conv_padded[related_skill_ids]
 
-        # knowledge_status 使用 next_q_fused（已融合难度）作为问题表示
+        # knowledge_status uses next_q_fused (already difficulty-fused) as the question representation
         knowledge_status = torch.cat(
             [next_q_fused.unsqueeze(2), related_skill_embs],
             dim=2,
         )  # [B, S, max_skills_per_question+1, E/H]
 
-        # ================================================================
-        # 12. 广义交互模块（同 GIKT）
-        # ================================================================
         logits = self.general_interaction(
             student_status, knowledge_status, user_mask
         )  # [B, S]

@@ -8,9 +8,9 @@ from abc import ABC
 from collections.abc import Callable
 from typing import TypeVar
 
-from ..config import EarlyStopping
 from ..core import get_logger
 from .checkpoint import CheckpointManager
+from .early_stopping import EarlyStopping
 
 logger = get_logger(__name__)
 

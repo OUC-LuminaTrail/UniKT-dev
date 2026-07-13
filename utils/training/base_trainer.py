@@ -7,7 +7,6 @@ logging.
 
 import os
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,15 +15,7 @@ from rich.console import Group
 from rich.live import Live
 from rich.text import Text
 
-from ..config import (
-    DataConfig,
-    EarlyStopping,
-    EarlyStoppingConfig,
-    ExperimentConfig,
-    OptimizationConfig,
-    TrainingConfig,
-    create_optimized_dataloader,
-)
+from ..config import create_optimized_dataloader
 from ..core import get_logger
 from ..progress import create_progress
 from .callbacks import (
@@ -32,13 +23,14 @@ from .callbacks import (
     CallbackManager,
     CheckpointCallback,
     EarlyStoppingCallback,
-    FunctionCallback,
     MemoryCleanupCallback,
     TestEvaluationCallback,
 )
 from .checkpoint import CheckpointManager
-from .metric_logger import build_default_metric_loggers, resolve_metric_logging_flags
+from .early_stopping import EarlyStopping
+from .metric_logger import build_default_metric_loggers
 from .metrics import MetricsAccumulator
+from .runtime_components import RuntimeComponents
 
 logger = get_logger(__name__)
 
@@ -66,42 +58,63 @@ class StageResult:
 class BaseTrainer(ABC):
     r"""Abstract base class for trainers.
 
-    Subclasses must implement:
-    1. ``__init__``: Directly initialize the model.
-    2. ``forward_pass``: Model forward pass logic.
+    A single-stage trainer is constructed in one step::
 
-    Usage::
-
-        trainer = MyTrainer(model)
-            .with_training(epochs=150, seed=42)
-            .with_data(train_dataset, val_dataset, batch_size=128)
-            .with_optimization(optimizer, loss_fn, lr_scheduler)
-            .with_experiment(exp_manager, hyperparams=args)
-            .build()
+        trainer = MyTrainer(rc, data_src, exp_manager)
         trainer.run()
+
+    The constructor wires everything: it calls :meth:`build_components` to let
+    the subclass assemble the model/optimizer/data from ``rc`` + ``data_src``,
+    reads :meth:`build_callbacks` for any extra callbacks, then runs
+    :meth:`build` to finalize device, loaders, early stopping, logging and
+    checkpointing.
+
+    Subclasses implement:
+
+    1. :meth:`build_components`: Return a :class:`RuntimeComponents` holding the
+       model, optimizer, loss, scheduler, and train/val/test data built from
+       ``rc`` + ``data_src``. Scalar knobs are read from ``rc`` directly, never
+       stored on the components.
+    2. :meth:`build_callbacks`: Return extra callbacks (default ``[]``).
+    3. :meth:`forward_pass`: Model forward pass for one batch.
     """
 
-    def __init__(self, model: torch.nn.Module):
-        """Initialize the base trainer.
+    def __init__(self, rc: Any, data_src: Any, exp_manager: Any = None) -> None:
+        """Construct and build the trainer in one step.
 
         Args:
-            model: PyTorch model to train.
+            rc: RunConfig (OmegaConf ``DictConfig``) — the single source of
+                truth for scalar configuration.
+            data_src: Data source used by :meth:`build_components` to prepare
+                datasets and model metadata.
+            exp_manager: Experiment manager (run directory / tracking). May be
+                ``None`` only for inference-only subclasses that override the
+                constructor.
         """
-        self.model = model
+        self._init_trainer_state(rc, data_src, exp_manager)
+        self._components = self.build_components(rc, data_src)
+        self._custom_callbacks: list[Callback] = self.build_callbacks()
+        self.build()
 
-        # Configuration objects
-        self._training_config: TrainingConfig | None = None
-        self._data_config: DataConfig | None = None
-        self._optimization_config: OptimizationConfig | None = None
-        self._experiment_config: ExperimentConfig | None = None
+    def _init_trainer_state(self, rc: Any, data_src: Any, exp_manager: Any) -> None:
+        """Initialize shared trainer instance state (no build side effects).
 
-        # Internal state
+        Called by :meth:`__init__` and by :class:`MultiTrainer`, which builds
+        per-stage components instead of a single ``build_components``.
+        """
+        self.run_config = rc
+        self._data_src = data_src
+        self._exp_manager = exp_manager
+        self._components = RuntimeComponents()
+        self._custom_callbacks: list[Callback] = []
+
         self._built = False
-        self._compile_config: dict | None = None
+        self.model = None
         self.device_: torch.device | None = None
         self.epochs: int | None = None
         self.train_data = None
         self.val_data = None
+        self.test_data = None
         self.opt = None
         self.max_clip_grad_norm: float | None = None
         self.loss = None
@@ -112,219 +125,39 @@ class BaseTrainer(ABC):
         self.metrics_accumulator = None
         self.checkpoint_manager = None
         self.callback_manager = None
-        self.hyperparam_manager = None
         self.no_swanlab = False
         self.log_batch_metrics = False
+        self.skip_test = False
         self.metric_logger = None
         self._global_step = 0
-        self._custom_callbacks: list[Callback] = []
-        self._custom_callback_functions: dict[str, list[Callable]] = {}
 
         # Multi-stage context (None/0 for single-stage)
         self._current_stage: str | None = None
         self._metric_step_offset: int = 0
 
-    def with_training(
-        self,
-        epochs: int = 200,
-        seed: int = 42,
-        device: torch.device | None = None,
-        checkpoint_path: str | None = None,
-    ) -> "BaseTrainer":
-        """Configure training parameters.
+    # ==================== Subclass hooks ====================
 
-        Args:
-            epochs: Number of training epochs.
-            seed: Random seed.
-            device: Compute device (auto-detected if None).
-            checkpoint_path: Path to checkpoint for resuming training.
+    def build_components(self, rc: Any, data_src: Any) -> RuntimeComponents:
+        """Assemble the model/optimizer/data for this run.
 
-        Returns:
-            Self for method chaining.
+        Single-stage trainers override this to return a populated
+        :class:`RuntimeComponents`. The default returns an empty holder and is
+        only meant for subclasses that manage their own lifecycle (e.g.
+        multi-stage trainers that build per stage, and inference analyzers).
         """
-        self._training_config = TrainingConfig(
-            epochs=epochs,
-            seed=seed,
-            device=device,
-            checkpoint_path=checkpoint_path,
-        )
-        return self
+        return RuntimeComponents()
 
-    def with_compile(
-        self,
-        mode: str = "default",
-        fullgraph: bool = False,
-        dynamic: bool | None = None,
-        backend: str = "inductor",
-    ) -> "BaseTrainer":
-        """Configure ``torch.compile`` optimization.
+    def build_callbacks(self) -> list[Callback]:
+        """Return extra callbacks for this run (default: none)."""
+        return []
 
-        Args:
-            mode: Compilation mode (``"default"``, ``"reduce-overhead"``,
-                ``"max-autotune"``, ``"max-autotune-no-cudagraphs"``).
-            fullgraph: Whether to require a single computational graph.
-            dynamic: Dynamic shape tracing. None = auto, True = force,
-                False = static.
-            backend: Compilation backend.
-
-        Returns:
-            Self for method chaining.
-        """
-        self._compile_config = {
-            "mode": mode,
-            "fullgraph": fullgraph,
-            "dynamic": dynamic,
-            "backend": backend,
-        }
-        return self
-
-    def with_callbacks(
-        self,
-        callbacks: list[Callback] | None = None,
-        functions: dict[str, Callable | list[Callable]] | None = None,
-    ) -> "BaseTrainer":
-        """Configure custom callbacks.
-
-        Args:
-            callbacks: List of callback objects (optional).
-            functions: Dict mapping event names to callables or lists
-                of callables (optional).
-
-        Returns:
-            Self for method chaining.
-        """
-        if callbacks:
-            self._custom_callbacks.extend(callbacks)
-        if functions:
-            for name, funcs in functions.items():
-                if funcs is None:
-                    continue
-                items = funcs if isinstance(funcs, list) else [funcs]
-                self._custom_callback_functions.setdefault(name, []).extend(items)
-        return self
-
-    def register_callback(self, callback: Callback) -> None:
-        """Register a single callback object.
-
-        Args:
-            callback: Callback instance to register.
-        """
-        self._custom_callbacks.append(callback)
-
-    def register_callback_fn(self, event: str, func: Callable) -> None:
-        """Register a single callback function for a named event.
-
-        Args:
-            event: Event name (e.g. ``"on_epoch_end"``).
-            func: Callable to invoke on the event.
-        """
-        self._custom_callback_functions.setdefault(event, []).append(func)
-
-    def with_data(
-        self,
-        train_data,
-        batch_size,
-        val_data,
-        test_data=None,
-        collate_fn=None,
-        val_collate_fn=None,
-        test_collate_fn=None,
-    ) -> "BaseTrainer":
-        """Configure data loaders.
-
-        Args:
-            train_data: Training data (DataLoader or Dataset).
-            batch_size: Batch size.
-            val_data: Validation data (DataLoader or Dataset).
-            test_data: Test data (DataLoader or Dataset, optional).
-            collate_fn: Custom collate function (optional).
-            val_collate_fn: Custom validation collate function (optional).
-            test_collate_fn: Custom test collate function (optional).
-
-        Returns:
-            Self for method chaining.
-        """
-        self._data_config = DataConfig(
-            train_data=train_data,
-            batch_size=batch_size,
-            val_data=val_data,
-            test_data=test_data,
-            collate_fn=collate_fn,
-            val_collate_fn=collate_fn if val_collate_fn is None else val_collate_fn,
-            test_collate_fn=collate_fn if test_collate_fn is None else test_collate_fn,
-        )
-        return self
-
-    def with_optimization(
-        self,
-        optimizer,
-        loss_fn,
-        max_clip_grad_norm: float | None = None,
-        lr_scheduler=None,
-        early_stopping: EarlyStoppingConfig | None = None,
-    ) -> "BaseTrainer":
-        """Configure optimizer, loss function, and scheduler.
-
-        Args:
-            optimizer: PyTorch optimizer.
-            loss_fn: Loss function.
-            max_clip_grad_norm: Maximum gradient norm for clipping (optional).
-            lr_scheduler: Learning rate scheduler (optional).
-            early_stopping: Early stopping configuration (optional).
-
-        Returns:
-            Self for method chaining.
-        """
-        self._optimization_config = OptimizationConfig(
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            max_clip_grad_norm=max_clip_grad_norm,
-            lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping,
-        )
-        return self
-
-    def with_experiment(
-        self,
-        exp_manager,
-        hyperparams=None,
-        no_swanlab: bool | None = None,
-        log_batch_metrics: bool | None = None,
-        model_name: str = "",
-        dataset_name: str = "",
-        skip_test: bool = False,
-    ) -> "BaseTrainer":
-        """Configure experiment management and tracking.
-
-        Args:
-            exp_manager: Experiment manager instance.
-            hyperparams: Hyperparameters (dict or namespace, optional).
-            no_swanlab: Disable SwanLab (None = read from hyperparams).
-            log_batch_metrics: Log per-batch loss (None = read from hyperparams).
-            model_name: Model name.
-            dataset_name: Dataset name.
-            skip_test: Skip test set evaluation after training.
-
-        Returns:
-            Self for method chaining.
-        """
-        self._experiment_config = ExperimentConfig(
-            exp_manager=exp_manager,
-            hyperparams=hyperparams,
-            no_swanlab=bool(no_swanlab),
-            log_batch_metrics=bool(log_batch_metrics),
-            model_name=model_name,
-            dataset_name=dataset_name,
-        )
-        self.skip_test = skip_test
-        return self
+    # ==================== Build ====================
 
     def build(self) -> "BaseTrainer":
-        """Build the trainer, initializing all components.
+        """Finalize the trainer: device, loaders, early stopping, logging.
 
-        Validates configurations, sets up device, data loaders,
-        optimization, early stopping, callbacks, logging, and
-        hyperparameters.
+        Reads scalar configuration from ``self.run_config`` and runtime objects
+        from ``self._components`` / ``self._exp_manager``.
 
         Returns:
             Self for method chaining.
@@ -333,58 +166,43 @@ class BaseTrainer(ABC):
             logger.warning("Trainer already built. Skipping rebuild.")
             return self
 
-        # Validate required configurations
-        if self._training_config is None:
-            raise ValueError(
-                "Training configuration not set. Call with_training() first."
-            )
-        if self._data_config is None:
-            raise ValueError("Data configuration not set. Call with_data() first.")
-        if self._optimization_config is None:
-            raise ValueError(
-                "Optimization configuration not set. Call with_optimization() first."
-            )
-        if self._experiment_config is None:
-            raise ValueError(
-                "Experiment configuration not set. Call with_experiment() first."
-            )
+        rc = self.run_config
+        if rc is None:
+            raise ValueError("run_config is required.")
+        if self._exp_manager is None:
+            raise ValueError("exp_manager is required.")
+        c = self._components
 
-        # 1. Setup device
-        if self._training_config.device is None:
-            self.device_ = self._try_gpu()
-        else:
-            self.device_ = torch.device(self._training_config.device)
+        # 1. Device
+        dev = rc.general.device
+        self.device_ = torch.device(dev) if dev else self._try_gpu()
 
-        # 2. Setup training parameters
-        self.epochs = self._training_config.epochs
+        # 2. Scalar snapshot. ``epochs`` is a per-run scalar read from rc.model;
+        #    multi-stage trainers override it per stage via _apply_stage.
+        self.epochs = rc.model.epochs
+        self.no_swanlab = bool(rc.general.no_swanlab)
+        self.log_batch_metrics = bool(rc.general.log_batch_metrics)
+        self.skip_test = bool(rc.general.skip_test)
 
-        # Resolve no_swanlab / log_batch_metrics
-        hyperparams = self._experiment_config.hyperparams
-        self.no_swanlab, self.log_batch_metrics = resolve_metric_logging_flags(
-            self._experiment_config, hyperparams
-        )
+        # 3. Runtime instances
+        self.model = c.model
+        self.opt = c.optimizer
+        self.loss = c.loss_fn
+        self.lr_scheduler = c.lr_scheduler
+        self.max_clip_grad_norm = c.max_clip_grad_norm
 
-        # 3. Setup data loaders
+        # 4. Data loaders
         self._setup_data_loaders()
 
-        # 4. Setup optimization
-        self.opt = self._optimization_config.optimizer
-        self.loss = self._optimization_config.loss_fn
-        self.max_clip_grad_norm = self._optimization_config.max_clip_grad_norm
-        self.lr_scheduler = self._optimization_config.lr_scheduler
+        # 5. Early stopping (config lives on rc)
+        self.early_stopping = EarlyStopping(rc.early_stopping)
 
-        # 5. Setup early stopping
-        self._setup_early_stopping()
-
-        # 6. Create log directory
-        exp_manager = self._experiment_config.exp_manager
-        if exp_manager is None:
-            raise ValueError("exp_manager is required.")
+        # 6. Log directory
+        exp_manager = self._exp_manager
         self.log_dir = exp_manager.get_log_dir()
-        if not os.path.exists(self.log_dir):
-            os.makedirs(self.log_dir)
+        os.makedirs(self.log_dir, exist_ok=True)
 
-        # 7. Initialize components
+        # 7. Shared components
         self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
         self.metric_logger = build_default_metric_loggers(
@@ -393,39 +211,26 @@ class BaseTrainer(ABC):
             no_swanlab=self.no_swanlab,
         )
 
-        # 8. Initialize callbacks
-        callbacks: list[Callback] = []
-        callbacks.extend(self._custom_callbacks)
-        if self._custom_callback_functions:
-            callbacks.append(FunctionCallback(self._custom_callback_functions))
+        # 8. Callbacks
+        callbacks: list[Callback] = list(self._custom_callbacks)
         callbacks.append(MemoryCleanupCallback(cleanup_interval=5))
-        if self.early_stopping is not None:
-            callbacks.append(
-                EarlyStoppingCallback(
-                    early_stopping=self.early_stopping,
-                    stage=None,
-                )
-            )
+        callbacks.append(
+            EarlyStoppingCallback(early_stopping=self.early_stopping, stage=None)
+        )
         callbacks.append(
             CheckpointCallback(
                 checkpoint_manager=self.checkpoint_manager,
                 early_stopping=self.early_stopping,
                 last_filename="last_checkpoint.pth",
-                best_filename=(
-                    "best_model.pth" if self.early_stopping is not None else None
-                ),
+                best_filename="best_model.pth",
             )
         )
-        if not getattr(self, "skip_test", False):
+        if not self.skip_test:
             callbacks.append(TestEvaluationCallback(use_best_model=True))
             if self.test_data is None:
                 logger.warning(
-                    "Test data was not provided during trainer initialization. "
-                    "Test evaluation will be skipped. "
-                    "Cause: The model's trainer was initialized without passing "
-                    "test_data to with_data(). "
-                    "Fix: Ensure to pass test_data to with_data(), or use "
-                    "'--skip_test' to skip test evaluation explicitly."
+                    "Test data was not provided. Test evaluation will be skipped. "
+                    "Ensure build_components returns test_data, or set --skip_test."
                 )
             else:
                 test_len = (
@@ -434,34 +239,23 @@ class BaseTrainer(ABC):
                 if test_len is not None and test_len == 0:
                     logger.warning(
                         "Test set is empty (0 samples). Test evaluation will "
-                        "produce no results. "
-                        "Cause: No users were assigned to the test fold (fold=-1) "
-                        "during data preprocessing. "
-                        "This happens when: "
-                        "(1) add_kfold_labels() was called with test_ratio=0, or "
-                        "(2) test_ratio > 0 but int(num_users * test_ratio) == 0 "
-                        "due to small dataset size. "
-                        "Fix: Re-run data preprocessing with a larger test_ratio "
-                        "value, or use '--skip_test' to skip test evaluation "
-                        "explicitly."
+                        "produce no results. Re-run data preprocessing with a "
+                        "larger test_ratio, or use --skip_test."
                     )
         else:
             logger.info("Test evaluation will be skipped.")
         self.callback_manager = CallbackManager(callbacks)
 
-        # 10. Setup hyperparameters
-        if hyperparams is not None:
-            self._setup_hyperparameters(
-                hyperparams,
-                model_name=self._experiment_config.model_name,
-                dataset_name=self._experiment_config.dataset_name,
-            )
+        # 9. Save RunConfig archive (skip when reusing an existing run dir, so
+        #    the training archive is preserved for evaluate/case_analysis).
+        if not getattr(exp_manager, "is_existing_run", False):
+            self._setup_run_config_archive()
 
-        # 11. Load checkpoint if provided
-        if self._training_config.checkpoint_path:
-            self._load_checkpoint(self._training_config.checkpoint_path)
+        # 10. Resume from checkpoint
+        if rc.general.checkpoint_path:
+            self._load_checkpoint(rc.general.checkpoint_path)
 
-        # 12. Apply torch.compile if configured
+        # 11. torch.compile
         self._apply_compile()
 
         self._built = True
@@ -469,18 +263,19 @@ class BaseTrainer(ABC):
         return self
 
     def _setup_data_loaders(self):
-        """Set up data loaders for train, validation, and test sets.
+        """Wrap Dataset instances into optimized DataLoaders.
 
-        Converts Dataset instances to optimized DataLoaders; passes
-        DataLoader instances through unchanged.
+        DataLoaders pass through unchanged. ``collate_fn`` applies to train; the
+        val/test collators fall back to it when not set explicitly.
         """
-        train_data = self._data_config.train_data
-        val_data = self._data_config.val_data
-        test_data = self._data_config.test_data
-        collate_fn = self._data_config.collate_fn
-        val_collate_fn = self._data_config.val_collate_fn
-        test_collate_fn = self._data_config.test_collate_fn
-        batch_size = self._data_config.batch_size
+        c = self._components
+        batch_size = self.run_config.model.batch_size
+        val_collate_fn = (
+            c.val_collate_fn if c.val_collate_fn is not None else c.collate_fn
+        )
+        test_collate_fn = (
+            c.test_collate_fn if c.test_collate_fn is not None else c.collate_fn
+        )
 
         def _build_loader(data, shuffle, loader_collate_fn):
             if isinstance(data, torch.utils.data.Dataset):
@@ -493,55 +288,54 @@ class BaseTrainer(ABC):
                 )
             return data
 
-        self.train_data = _build_loader(train_data, True, collate_fn)
-        self.val_data = _build_loader(val_data, False, val_collate_fn)
-        self.test_data = _build_loader(test_data, False, test_collate_fn)
+        self.train_data = _build_loader(c.train_data, True, c.collate_fn)
+        self.val_data = _build_loader(c.val_data, False, val_collate_fn)
+        self.test_data = _build_loader(c.test_data, False, test_collate_fn)
 
-    def _setup_early_stopping(self):
-        """Set up early stopping from the optimization configuration."""
-        early_stopping_cfg = self._optimization_config.early_stopping
-        self.early_stopping = (
-            EarlyStopping(early_stopping_cfg)
-            if early_stopping_cfg is not None
-            else None
-        )
+    def _setup_run_config_archive(self):
+        """Save the RunConfig yaml archive plus a runtime-metadata sidecar."""
+        from utils.config import save_run_config_archive
+
+        rc = self.run_config
+        metadata: dict = {
+            "model_name": rc.experiment.model_name,
+            "dataset_name": rc.experiment.dataset_name,
+            "seed": rc.general.seed,
+        }
+        if self.model is not None:
+            metadata["total_params"] = sum(
+                p.numel() for p in self.model.parameters() if p.requires_grad
+            )
+        if self.opt is not None:
+            metadata["optimizer"] = type(self.opt).__name__
+        if self.loss is not None:
+            metadata["loss_function"] = type(self.loss).__name__
+        if self.lr_scheduler is not None:
+            metadata["lr_scheduler"] = type(self.lr_scheduler).__name__
+        if hasattr(self.opt, "defaults") and "weight_decay" in self.opt.defaults:
+            metadata["weight_decay"] = self.opt.defaults["weight_decay"]
+        if self.device_ is not None:
+            for key, value in self._get_device_info().items():
+                metadata[key] = value
+        save_run_config_archive(rc, self.log_dir, metadata=metadata)
+        logger.info("RunConfig archive saved to %s/run_config.yaml", self.log_dir)
 
     def _apply_compile(self):
-        """Apply ``torch.compile`` to the model if configured.
-
-        Supports two configuration paths:
-        1. Explicit via ``with_compile()`` chained call.
-        2. Automatic via ``hyperparams.compile`` flag.
-
-        When both are set, explicit configuration takes precedence.
-        """
-        if self._compile_config is None:
-            hyperparams = None
-            if self._experiment_config is not None:
-                hyperparams = self._experiment_config.hyperparams
-            if hyperparams is not None and getattr(hyperparams, "compile", False):
-                self._compile_config = {
-                    "mode": getattr(hyperparams, "compile_mode", "default"),
-                    "fullgraph": getattr(hyperparams, "compile_fullgraph", False),
-                    "dynamic": getattr(hyperparams, "compile_dynamic", None),
-                    "backend": getattr(hyperparams, "compile_backend", "inductor"),
-                }
-
-        if self._compile_config is None:
+        """Apply ``torch.compile`` to the model when ``rc.compile`` enables it."""
+        cc = self.run_config.compile
+        if not cc.compile:
             return
-
         logger.info(
-            f"Applying torch.compile: mode={self._compile_config['mode']}, "
-            f"backend={self._compile_config['backend']}, "
-            f"fullgraph={self._compile_config['fullgraph']}, "
-            f"dynamic={self._compile_config['dynamic']}"
+            f"Applying torch.compile: mode={cc.compile_mode}, "
+            f"backend={cc.compile_backend}, "
+            f"fullgraph={cc.compile_fullgraph}, dynamic={cc.compile_dynamic}"
         )
         self.model = torch.compile(
             self.model,
-            mode=self._compile_config["mode"],
-            fullgraph=self._compile_config["fullgraph"],
-            dynamic=self._compile_config["dynamic"],
-            backend=self._compile_config["backend"],
+            mode=cc.compile_mode,
+            fullgraph=cc.compile_fullgraph,
+            dynamic=cc.compile_dynamic,
+            backend=cc.compile_backend,
         )
         logger.info("torch.compile applied successfully")
 
@@ -561,7 +355,7 @@ class BaseTrainer(ABC):
     def test_forward_pass(self, batch_data: tuple[Any, ...]) -> dict:
         """Perform a forward pass for test data.
 
-        Defaults to ``forward_pass``; override for test-specific logic
+        Defaults to :meth:`forward_pass`; override for test-specific logic
         (e.g. multi-stage where test uses a specific sub-model).
 
         Args:
@@ -703,60 +497,6 @@ class BaseTrainer(ABC):
         """
         return torch.ge(y_hat, torch.tensor(threshold).to(self.device_)).to(torch.int)
 
-    def _setup_hyperparameters(self, hyperparams, model_name=None, dataset_name=None):
-        """Set up and save hyperparameters.
-
-        Args:
-            hyperparams: Hyperparameters (dict or Namespace object).
-            model_name: Model name (optional).
-            dataset_name: Dataset name (optional).
-        """
-        from utils.hyperparam_manager import create_hyperparameter_manager
-
-        # Create hyperparameter manager
-        self.hyperparam_manager = create_hyperparameter_manager(
-            args=hyperparams,
-            save_dir=self.log_dir,
-            model_name=model_name,
-            dataset_name=dataset_name,
-        )
-
-        # Add trainer-related metadata
-        # Multi-stage trainers may not have model/optimizer at build time
-        if self.model is not None:
-            self.hyperparam_manager.add_metadata(
-                "total_params",
-                sum(p.numel() for p in self.model.parameters() if p.requires_grad),
-            )
-        if self.opt is not None:
-            self.hyperparam_manager.add_metadata("optimizer", type(self.opt).__name__)
-        if self.loss is not None:
-            self.hyperparam_manager.add_metadata(
-                "loss_function", type(self.loss).__name__
-            )
-        if self.lr_scheduler is not None:
-            self.hyperparam_manager.add_metadata(
-                "lr_scheduler", type(self.lr_scheduler).__name__
-            )
-        if hasattr(self.opt, "defaults") and "weight_decay" in self.opt.defaults:
-            self.hyperparam_manager.add_metadata(
-                "weight_decay", self.opt.defaults["weight_decay"]
-            )
-        if hyperparams is not None and getattr(hyperparams, "seed", None) is not None:
-            self.hyperparam_manager.add_metadata("seed", hyperparams.seed)
-
-        # Add device info
-        if self.device_ is not None:
-            device_info = self._get_device_info()
-            for key, value in device_info.items():
-                self.hyperparam_manager.add_metadata(key, value)
-
-        # Save hyperparameters
-        self.hyperparam_manager.save()
-
-        # Print summary
-        self.hyperparam_manager.print_summary()
-
     def _get_device_info(self):
         """Get device information including CUDA device details.
 
@@ -807,10 +547,12 @@ class BaseTrainer(ABC):
         Local CSV logging is always enabled; SwanLab is included unless
         ``--no_swanlab`` was set.
         """
+        from omegaconf import OmegaConf
+
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
         config = (
-            self.hyperparam_manager.get_hyperparameters_dict()
-            if self.hyperparam_manager
+            OmegaConf.to_container(self.run_config, resolve=True)
+            if self.run_config is not None
             else {}
         )
         self.metric_logger.init_run(
@@ -1095,7 +837,7 @@ class BaseTrainer(ABC):
     def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
         """Execute a single test batch.
 
-        Uses ``test_forward_pass`` instead of ``forward_pass`` to
+        Uses :meth:`test_forward_pass` instead of :meth:`forward_pass` to
         support test-specific logic.
 
         Args:
@@ -1217,8 +959,7 @@ class BaseTrainer(ABC):
             raise RuntimeError("Trainer has not been built. Call build() first.")
         if self.test_data is None:
             logger.warning(
-                "Test data not available. Ensure the trainer was initialized "
-                "with test_data in with_data()."
+                "Test data not available. Ensure build_components returns test_data."
             )
             return {}
 

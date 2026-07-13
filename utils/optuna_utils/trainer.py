@@ -1,10 +1,10 @@
 """Trainer integration with Optuna objective functions."""
 
-from argparse import Namespace
 from collections.abc import Callable
 from typing import Any
 
 import optuna
+from omegaconf import OmegaConf
 
 from utils.core import get_logger, seed_everything
 
@@ -13,8 +13,7 @@ from .config import (
     HyperparameterSpace,
     OptunaConfig,
     direction_for_metric,
-    load_config_from_json,
-    load_param_space_from_json,
+    load_optuna_config,
 )
 from .tuner import OptunaTuner
 
@@ -28,7 +27,7 @@ class TrainerObjectiveWrapper:
         self,
         trainer_class: type,
         data_src_fn: Callable[[], Any],
-        base_args: Namespace,
+        base_rc: Any,
         metric_name: str = "auc",
         max_epochs: int | None = None,
         exp_manager=None,
@@ -38,17 +37,17 @@ class TrainerObjectiveWrapper:
         Args:
             trainer_class: Trainer class.
             data_src_fn: Data source factory function.
-            base_args: Base arguments.
+            base_rc: Base RunConfig (OmegaConf DictConfig).
             metric_name: Metric name to optimise.
             max_epochs: Maximum number of epochs.
             exp_manager: Experiment manager for creating trial subdirectories.
         """
         self.trainer_class = trainer_class
         self.data_src_fn = data_src_fn
-        self.base_args = base_args
+        self.base_rc = base_rc
         self.metric_name = metric_name
         self.maximize = direction_for_metric(metric_name) == "maximize"
-        self.max_epochs = max_epochs or getattr(base_args, "epochs", 50)
+        self.max_epochs = max_epochs or getattr(base_rc.model, "epochs", 50)
         self.exp_manager = exp_manager
 
     def __call__(self, trial, params: dict[str, Any] | None = None, **kwargs) -> float:
@@ -56,7 +55,8 @@ class TrainerObjectiveWrapper:
 
         Args:
             trial: Optuna trial object.
-            params: Hyperparameter dictionary for this trial.
+            params: Hyperparameter dictionary for this trial (model-node field
+                names; applied as a merge overlay onto ``base_rc.model``).
             **kwargs: Additional keyword arguments.
 
         Returns:
@@ -65,11 +65,13 @@ class TrainerObjectiveWrapper:
         if params is None:
             params = {}
 
-        args = self._create_trial_args(params)
+        trial_rc = self._create_trial_rc(params)
 
         # Reseed before constructing the trainer so every trial starts from
         # the same RNG state (weight init, data shuffle, training RNG).
-        seed_everything(args.seed, deterministic=not getattr(args, "no_deterministic", False))
+        seed_everything(
+            trial_rc.general.seed, deterministic=not trial_rc.general.no_deterministic
+        )
 
         trial_exp_manager = None
         if self.exp_manager is not None:
@@ -83,7 +85,7 @@ class TrainerObjectiveWrapper:
 
         data_src = self.data_src_fn()
         trainer = self.trainer_class(
-            args=args, data_src=data_src, exp_manager=trial_exp_manager
+            rc=trial_rc, data_src=data_src, exp_manager=trial_exp_manager
         )
         # trainer.__init__ already calls build(), so the callback list is finalised;
         # append directly to the active list.
@@ -100,30 +102,14 @@ class TrainerObjectiveWrapper:
 
         return self._extract_metric(trainer, pruning_cb)
 
-    def _create_trial_args(self, params: dict[str, Any]) -> Namespace:
-        """Create new args from trial parameters.
+    def _create_trial_rc(self, params: dict[str, Any]) -> Any:
+        """Evolve the base RunConfig with a trial's model hyperparameters.
 
-        Args:
-            params: Hyperparameter dictionary for this trial.
-
-        Returns:
-            A Namespace with merged base args and trial params.
+        Trial params are model-node field names; they merge onto
+        ``base_rc.model``. Every trial reseeds from the base seed so only the
+        sampled hyperparameters vary across trials.
         """
-        import copy
-
-        args = copy.deepcopy(self.base_args)
-
-        # Special-case batch_size (may need DataLoader recreation)
-        if "batch_size" in params:
-            args.batch_size = params["batch_size"]
-
-        # Update other parameters
-        for key, value in params.items():
-            if key == "batch_size":
-                continue  # Already handled above
-            setattr(args, key, value)
-
-        return args
+        return OmegaConf.merge(self.base_rc, OmegaConf.create({"model": params}))
 
     def _worst_value(self) -> float:
         """Return the worst possible target value for the current optimisation direction.
@@ -176,27 +162,15 @@ class OptunaTunerBuilder:
         self.objective_kwargs: dict[str, Any] = {}
 
     def from_config_file(self, config_path: str) -> "OptunaTunerBuilder":
-        """Load Optuna configuration from a JSON file.
+        """Load Optuna configuration from a yaml file.
 
         Args:
-            config_path: Path to the JSON configuration file.
+            config_path: Path to the yaml configuration file.
 
         Returns:
             Self for chaining.
         """
-        self.config = load_config_from_json(config_path)
-        return self
-
-    def from_param_space_file(self, space_path: str) -> "OptunaTunerBuilder":
-        """Load parameter space definitions from a JSON file.
-
-        Args:
-            space_path: Path to the JSON parameter space file.
-
-        Returns:
-            Self for chaining.
-        """
-        self.param_spaces = load_param_space_from_json(space_path)
+        self.config = load_optuna_config(config_path)
         return self
 
     def with_config(self, config: OptunaConfig) -> "OptunaTunerBuilder":
@@ -263,9 +237,7 @@ class OptunaTunerBuilder:
                 "OptunaConfig not set. Use from_config_file() or with_config()"
             )
         if not self.param_spaces:
-            raise ValueError(
-                "Parameter spaces not set. Use from_param_space_file() or with_param_spaces()"
-            )
+            raise ValueError("Parameter spaces not set. Use with_param_spaces()")
         if not self.objective_fn:
             raise ValueError("Objective function not set. Use with_objective()")
 

@@ -49,7 +49,6 @@ class StableKTDataset(Dataset):
         self.late_group_ids = late_group_ids
         self.true_labels = true_labels
 
-        # 判断是否为窗口测试模式
         self._is_window_mode = late_group_ids is not None and true_labels is not None
 
     def __len__(self) -> int:
@@ -83,23 +82,21 @@ class StableKTModelData(SkillModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练和验证数据
 
         Args:
-            args: 模型参数配置
+            rc: RunConfig (OmegaConf DictConfig)
 
         Returns:
             训练数据集、验证数据集和窗口验证数据集
         """
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
-        # 构建用户答题序列
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
         )
 
-        # 划分训练集和验证集
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -119,10 +116,8 @@ class StableKTModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        # 构建 windowlate 评估数据
-        stream_dataset = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        stream_dataset = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
 
-        # 构建模型数据集
         train_dataset = StableKTDataset(
             train_data[0], train_data[1], train_data[2], train_data[3]
         )
@@ -131,7 +126,7 @@ class StableKTModelData(SkillModelData):
         )
         test_dataset = DataLoader(
             stream_dataset,
-            batch_size=args.batch_size,
+            batch_size=rc.model.batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,

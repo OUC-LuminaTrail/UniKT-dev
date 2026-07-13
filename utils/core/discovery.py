@@ -17,7 +17,7 @@ from .logger import get_logger
 from .registry import (
     ANALYZERS,
     DATA_SOURCES,
-    PARAM_CONFIGS,
+    MODEL_CONFIGS,
     TRAINERS,
     UniversalRegistry,
 )
@@ -27,7 +27,7 @@ _logger = get_logger(__name__)
 # @register_<role>("name") -> target registry
 _DECORATORS: dict[str, UniversalRegistry] = {
     "register_trainer": TRAINERS,
-    "register_model_params": PARAM_CONFIGS,
+    "register_model_config": MODEL_CONFIGS,
     "register_data_source": DATA_SOURCES,
     "register_analyzer": ANALYZERS,
 }

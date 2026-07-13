@@ -59,8 +59,16 @@ class DKVMNModelData(SkillModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any) -> tuple:
+        """准备训练和验证数据
+
+        Args:
+            rc: RunConfig (OmegaConf DictConfig)
+
+        Returns:
+            训练数据集、验证数据集和窗口验证数据集
+        """
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         user_sequence, user_response, user_mask, _, _ = self.build_sequence_data()
 
@@ -79,13 +87,13 @@ class DKVMNModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
 
         train_dataset = DKVMNDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = DKVMNDataset(val_data[0], val_data[1], val_data[2])
         test_dataset = DataLoader(
             window_test_data,
-            batch_size=args.batch_size,
+            batch_size=rc.model.batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,

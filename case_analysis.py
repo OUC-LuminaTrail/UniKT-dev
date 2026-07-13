@@ -35,95 +35,29 @@ from utils.data_process import get_data_source
 logger = get_logger(__name__)
 
 
-def load_model_params(
-    checkpoint_path: str, hyperparams_path: str | None = None
-) -> tuple[argparse.Namespace, str, str]:
-    """Load model parameters from hyperparameter JSON file.
-
-    Priority:
-    1. Auto-discover from checkpoint directory (default)
-    2. Explicit --hyperparams file (fallback)
-
-    Args:
-        checkpoint_path: Path to model checkpoint file
-        hyperparams_path: Optional explicit path to hyperparameters JSON
-
-    Returns:
-        Tuple of (Namespace with model parameters, model_name, dataset_name)
-
-    Raises:
-        FileNotFoundError: If hyperparameter file doesn't exist in either location
-        ValueError: If file format is invalid or required parameters are missing
-    """
-    from utils.hyperparam_manager import HyperparameterManager
-
-    checkpoint_dir = Path(checkpoint_path).parent.resolve()
-    target_path = hyperparams_path or str(checkpoint_dir / "hyperparameters.json")
-
-    if not Path(target_path).exists():
-        raise FileNotFoundError(
-            f"Hyperparameter file not found. Searched in:\n"
-            f"  1. Checkpoint directory: {checkpoint_dir}/hyperparameters.json\n"
-            f"  2. Explicit --hyperparams argument: {hyperparams_path}\n"
-            f"Please use --hyperparams to specify the file location."
-        )
-
-    try:
-        manager = HyperparameterManager()
-        manager.load(target_path)
-
-        flat_dict = manager._flatten_dict(manager.hyperparams)
-        merged_dict = {
-            k.split(".")[-1] if "." in k else k: v for k, v in flat_dict.items()
-        }
-        params_ns = argparse.Namespace(**merged_dict)
-
-        model_name = manager.metadata.get("model_name")
-        dataset_name = manager.metadata.get("dataset_name")
-
-        if not model_name:
-            raise ValueError(
-                f"Missing 'model_name' in hyperparameter file metadata: {target_path}"
-            )
-        if not dataset_name:
-            raise ValueError(
-                f"Missing 'dataset_name' in hyperparameter file metadata: {target_path}"
-            )
-
-        return params_ns, model_name, dataset_name
-
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"Invalid JSON in hyperparameter file '{target_path}': {e}"
-        ) from e
-    except Exception as e:
-        raise ValueError(
-            f"Error loading hyperparameters from '{target_path}': {e}"
-        ) from e
-
-
 def cmd_inference(args):
     """Step 1: Run inference and save predictions."""
+    from utils.config import load_run_config_archive
+
     run_dir = Path(args.run_dir).resolve()
     checkpoint_path = run_dir / "best_model.pth"
-    hyperparams_path = (
-        Path(args.hyperparams) if args.hyperparams else run_dir / "hyperparameters.json"
-    )
+    run_config_path = run_dir / "run_config.yaml"
 
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+    if not run_config_path.exists():
+        raise FileNotFoundError(f"RunConfig archive not found: {run_config_path}")
 
-    model_args, model_name, dataset_name = load_model_params(
-        checkpoint_path=str(checkpoint_path),
-        hyperparams_path=str(hyperparams_path) if hyperparams_path.exists() else None,
-    )
+    rc = load_run_config_archive(run_config_path)
+    model_name = rc.experiment.model_name
+    dataset_name = rc.experiment.dataset_name or rc.data.dataset
 
     logger.info(f"Starting inference for {model_name} on {dataset_name}...")
 
-    data_src = get_data_source(dataset_name, model_args)
+    data_src = get_data_source(rc)
     AnalyzerClass = ANALYZERS.get(model_name)
     analyzer = AnalyzerClass(
-        args=model_args, data_src=data_src, checkpoint_path=str(checkpoint_path)
+        rc=rc, data_src=data_src, checkpoint_path=str(checkpoint_path)
     )
     result_collector = analyzer.run_inference()
 

@@ -65,6 +65,15 @@ class BaseModelData(ABC):
             if isinstance(obj, (str, int, float, bool, type(None))):
                 return obj
 
+            # OmegaConf DictConfig/ListConfig (RunConfig nodes): resolve to plain container
+            try:
+                from omegaconf import DictConfig, ListConfig, OmegaConf
+
+                if isinstance(obj, (DictConfig, ListConfig)):
+                    return _normalize_for_key(OmegaConf.to_container(obj, resolve=True))
+            except ImportError:
+                pass
+
             if isinstance(obj, bytes):
                 return ("__bytes__", len(obj), hashlib.md5(obj).hexdigest())
 

@@ -1,109 +1,73 @@
 """QIKT 模型训练器模块"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("QIKT")
-class QIKTModelParams(BaseParamConfig):
-    """QIKT 模型参数配置"""
+@register_model_config("QIKT")
+@dataclass
+class QIKTConfig(ModelConfig):
+    """QIKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "QIKT Parameters"
-        params = {
-            "emb_size": {
-                "type": int,
-                "default": 64,
-                "help": "Embedding dimension",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability",
-            },
-            "mlp_layer_num": {
-                "type": int,
-                "default": 1,
-                "help": "Number of MLP layers in prediction heads",
-            },
-            "output_mode": {
-                "type": str,
-                "default": "an",
-                "help": "Output fusion mode: 'an' (additive normalization) or 'an_irt'",
-            },
-            "output_q_all_lambda": {
-                "type": float,
-                "default": 1.0,
-                "help": "Output weight for question-all predictions",
-            },
-            "output_c_all_lambda": {
-                "type": float,
-                "default": 1.0,
-                "help": "Output weight for concept-all predictions",
-            },
-            "output_c_next_lambda": {
-                "type": float,
-                "default": 1.0,
-                "help": "Output weight for concept-next predictions",
-            },
-            "loss_q_all_lambda": {
-                "type": float,
-                "default": 1.0,
-                "help": "Loss weight for question-all auxiliary loss",
-            },
-            "loss_c_all_lambda": {
-                "type": float,
-                "default": 1.0,
-                "help": "Loss weight for concept-all auxiliary loss",
-            },
-            "loss_c_next_lambda": {
-                "type": float,
-                "default": 1.0,
-                "help": "Loss weight for concept-next auxiliary loss",
-            },
-            "loss_q_next_lambda": {
-                "type": float,
-                "default": 0.0,
-                "help": "Loss weight for question-next auxiliary loss",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    emb_size: int = field(default=64, metadata={"help": "Embedding dimension"})
+    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
+    mlp_layer_num: int = field(
+        default=1, metadata={"help": "Number of MLP layers in prediction heads"}
+    )
+    output_mode: str = field(
+        default="an",
+        metadata={
+            "help": "Output fusion mode: 'an' (additive normalization) or 'an_irt'"
+        },
+    )
+    output_q_all_lambda: float = field(
+        default=1.0, metadata={"help": "Output weight for question-all predictions"}
+    )
+    output_c_all_lambda: float = field(
+        default=1.0, metadata={"help": "Output weight for concept-all predictions"}
+    )
+    output_c_next_lambda: float = field(
+        default=1.0, metadata={"help": "Output weight for concept-next predictions"}
+    )
+    loss_q_all_lambda: float = field(
+        default=1.0, metadata={"help": "Loss weight for question-all auxiliary loss"}
+    )
+    loss_c_all_lambda: float = field(
+        default=1.0, metadata={"help": "Loss weight for concept-all auxiliary loss"}
+    )
+    loss_c_next_lambda: float = field(
+        default=1.0, metadata={"help": "Loss weight for concept-next auxiliary loss"}
+    )
+    loss_q_next_lambda: float = field(
+        default=0.0, metadata={"help": "Loss weight for question-next auxiliary loss"}
+    )
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("QIKT")
@@ -113,89 +77,59 @@ class QIKTTrainer(BaseTrainer):
     实现双路径预测的融合和多任务损失计算。
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.QIKT.QIKT_data import QIKTModelData
         from model.QIKT.QIKT_model import QIKT
 
-        # 准备数据
         model_data = QIKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
-        # 初始化模型
         metadata = data_src.get_metadata()
         logger.info(
             f"Initializing QIKT model: {metadata['num_questions']} questions, "
             f"{metadata['num_skills']} skills, max_concepts={model_data.max_concepts}"
         )
 
+        m = rc.model
         model = QIKT(
             num_questions=metadata["num_questions"],
             num_skills=metadata["num_skills"],
-            emb_size=args.emb_size,
+            emb_size=m.emb_size,
             max_concepts=model_data.max_concepts,
-            dropout=args.dropout,
-            mlp_layer_num=args.mlp_layer_num,
+            dropout=m.dropout,
+            mlp_layer_num=m.mlp_layer_num,
         )
 
-        # 创建优化器和损失函数
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
+        # Fusion config consumed by forward_pass and _compute_loss
+        self.output_mode = m.output_mode
+        self.output_q_all_lambda = m.output_q_all_lambda
+        self.output_c_all_lambda = m.output_c_all_lambda
+        self.output_c_next_lambda = m.output_c_next_lambda
+        self.loss_q_all_lambda = m.loss_q_all_lambda
+        self.loss_c_all_lambda = m.loss_c_all_lambda
+        self.loss_c_next_lambda = m.loss_c_next_lambda
+        self.loss_q_next_lambda = m.loss_q_next_lambda
 
-        # 保存融合配置
-        self.output_mode = args.output_mode
-        self.output_q_all_lambda = args.output_q_all_lambda
-        self.output_c_all_lambda = args.output_c_all_lambda
-        self.output_c_next_lambda = args.output_c_next_lambda
-        self.loss_q_all_lambda = args.loss_q_all_lambda
-        self.loss_c_all_lambda = args.loss_c_all_lambda
-        self.loss_c_next_lambda = args.loss_c_next_lambda
-        self.loss_q_next_lambda = args.loss_q_next_lambda
-
-        # 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 配置训练器
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="QIKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _fuse_predictions(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
         """融合多预测头的结果
@@ -253,17 +187,14 @@ class QIKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
         skills = self._move_tensor_to_device(skills)
 
-        # 模型前向传播
         outputs = self.model(sequence, response, mask, skills)
 
-        # 融合预测
         y_fused = self._fuse_predictions(outputs)
 
-        # 提取有效预测（跳过第一个位置）
         y_hat, y_label, _ = self._extract_valid_predictions(y_fused, response, mask)
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 提取辅助预测用于多任务损失（复用同一掩码逻辑）
+        # Reuse mask logic so aux predictions align with the main head for multi-task loss
         q_all, _, _ = self._extract_valid_predictions(
             outputs["y_question_all"], response, mask
         )

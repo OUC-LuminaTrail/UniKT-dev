@@ -24,7 +24,9 @@ def format_python(code: str) -> str:
         tf.flush()
         tmp = tf.name
     try:
-        subprocess.run([RUFF, "format", "--quiet", tmp], capture_output=True, timeout=10)
+        subprocess.run(
+            [RUFF, "format", "--quiet", tmp], capture_output=True, timeout=10
+        )
         return Path(tmp).read_text().rstrip("\n")
     finally:
         Path(tmp).unlink(missing_ok=True)

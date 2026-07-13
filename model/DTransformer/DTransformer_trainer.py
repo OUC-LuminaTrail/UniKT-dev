@@ -1,126 +1,86 @@
 """DTransformer 模型训练器"""
 
 import random
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 MIN_SEQ_LEN = 5
 
 
-@register_model_params("DTransformer")
-class DTransformerModelParams(BaseParamConfig):
-    """DTransformer 模型参数配置"""
+@register_model_config("DTransformer")
+@dataclass
+class DTransformerConfig(ModelConfig):
+    """DTransformer 模型配置"""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DTransformer Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 128,
-                "help": "Hidden dimension of the model",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 256,
-                "help": "Feed-forward network dimension",
-            },
-            "num_attn_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of attention heads",
-            },
-            "n_know": {
-                "type": int,
-                "default": 16,
-                "help": "Number of learnable knowledge parameters",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 3,
-                "help": "Number of transformer blocks (1-3)",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.3,
-                "help": "Dropout probability",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate QA embeddings (1=yes, 0=no)",
-            },
-            "l2": {
-                "type": float,
-                "default": 1e-3,
-                "help": "L2 regularization coefficient for Rasch model",
-            },
-            "shortcut": {
-                "type": int,
-                "default": 0,
-                "help": "Use AKT-like shortcut mode (1=yes, 0=no)",
-            },
-            "lambda_cl": {
-                "type": float,
-                "default": 0.0,
-                "help": "Contrastive learning loss weight (0 = disabled)",
-            },
-            "hard_neg": {
-                "type": int,
-                "default": 0,
-                "help": "Use hard negatives for contrastive learning (1=yes, 0=no)",
-            },
-            "proj": {
-                "type": int,
-                "default": 0,
-                "help": "Use projection layer for contrastive learning (1=yes, 0=no)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-5,
-                "short": "wd",
-                "help": "Weight decay for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 32,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=128, metadata={"help": "Hidden dimension of the model"}
+    )
+    d_ff: int = field(default=256, metadata={"help": "Feed-forward network dimension"})
+    num_attn_heads: int = field(
+        default=8, metadata={"help": "Number of attention heads"}
+    )
+    n_know: int = field(
+        default=16, metadata={"help": "Number of learnable knowledge parameters"}
+    )
+    n_blocks: int = field(
+        default=3, metadata={"help": "Number of transformer blocks (1-3)"}
+    )
+    dropout: float = field(default=0.3, metadata={"help": "Dropout probability"})
+    separate_qa: int = field(
+        default=0,
+        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
+    )
+    l2: float = field(
+        default=1e-3, metadata={"help": "L2 regularization coefficient for Rasch model"}
+    )
+    shortcut: int = field(
+        default=0, metadata={"help": "Use AKT-like shortcut mode (1=yes, 0=no)"}
+    )
+    lambda_cl: float = field(
+        default=0.0,
+        metadata={"help": "Contrastive learning loss weight (0 = disabled)"},
+    )
+    hard_neg: int = field(
+        default=0,
+        metadata={"help": "Use hard negatives for contrastive learning (1=yes, 0=no)"},
+    )
+    proj: int = field(
+        default=0,
+        metadata={
+            "help": "Use projection layer for contrastive learning (1=yes, 0=no)"
+        },
+    )
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    weight_decay: float = field(
+        default=1e-5, metadata={"help": "Weight decay for optimizer", "short": "wd"}
+    )
+    batch_size: int = field(
+        default=32, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("DTransformer")
 class DTransformerTrainer(BaseTrainer):
     """DTransformer 模型训练器"""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src):
         from model.DTransformer.DTransformer_data import DTransformerModelData
 
         model_data = DTransformerModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         from model.DTransformer.DTransformer_model import DTransformer
 
@@ -137,64 +97,41 @@ class DTransformerTrainer(BaseTrainer):
                 "DTransformer: Problem ID not available, using skill-only model"
             )
 
+        m = rc.model
         model = DTransformer(
             num_c=metadata["num_skills"],
             n_pid=n_pid,
-            d_model=args.d_model,
-            d_ff=args.d_ff,
-            num_attn_heads=args.num_attn_heads,
-            n_know=args.n_know,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            separate_qa=bool(args.separate_qa),
-            l2=args.l2,
-            shortcut=bool(args.shortcut),
-            proj=bool(args.proj),
+            d_model=m.d_model,
+            d_ff=m.d_ff,
+            num_attn_heads=m.num_attn_heads,
+            n_know=m.n_know,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            separate_qa=bool(m.separate_qa),
+            l2=m.l2,
+            shortcut=bool(m.shortcut),
+            proj=bool(m.proj),
         )
 
-        self.lambda_cl = args.lambda_cl
-        self.hard_neg = bool(args.hard_neg)
+        self.lambda_cl = m.lambda_cl
+        self.hard_neg = bool(m.hard_neg)
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=args.learning_rate,
-            weight_decay=args.weight_decay,
+            lr=m.learning_rate,
+            weight_decay=m.weight_decay,
         )
 
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        super().__init__(model)
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=None,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DTransformer",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _build_pid_data(
         self,

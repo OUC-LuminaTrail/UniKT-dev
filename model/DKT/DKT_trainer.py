@@ -1,80 +1,46 @@
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("DKT")
-class DKTModelParams(BaseParamConfig):
-    """DKT 模型参数配置
+@register_model_config("DKT")
+@dataclass
+class DKTConfig(ModelConfig):
+    """DKT model configuration."""
 
-    Args:
-        hidden_dim: 隐藏层维度
-        embedding_dim: 嵌入维度
-        dropout: Dropout概率
-    """
-
-    def define_params(self) -> tuple[str, dict]:
-        """定义模型参数
-
-        默认值：
-        - emb_size: 200
-        - dropout: 0.2
-        - learning_rate: 1e-3
-        """
-        group_name = "DKT Parameters"
-        params = {
-            "hidden_dim": {
-                "type": int,
-                "default": 200,
-                "help": "Hidden dimension of the model (alias for emb_size)",
-            },
-            "embedding_dim": {
-                "type": int,
-                "default": 200,
-                "help": "Embedding dimension of the model",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    hidden_dim: int = field(
+        default=200,
+        metadata={"help": "Hidden dimension of the model (alias for emb_size)"},
+    )
+    embedding_dim: int = field(
+        default=200, metadata={"help": "Embedding dimension of the model"}
+    )
+    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("DKT")
@@ -84,80 +50,42 @@ class DKTTrainer(BaseTrainer):
     负责初始化DKT模型、优化器和训练数据，并实现前向传播逻辑。
 
     Args:
-        args: 模型参数配置
+        rc: RunConfig (OmegaConf DictConfig)
         data_src: 数据源实例
         exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        # 准备数据
+    def build_components(self, rc, data_src):
         from model.DKT.DKT_data import DKTModelData
-
-        model_data = DKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
-
-        # 初始化模型
         from model.DKT.DKT_model import DKT
 
-        logger.info("Initializing DKT model...")
-        metadata = data_src.get_metadata()
-        model = DKT(
-            num_c=metadata["num_skills"],
-            emb_size=args.embedding_dim,
-            dropout=args.dropout,
+        train_dataset, val_dataset, test_dataset = DKTModelData(data_src).prepare_data(
+            rc
         )
-
-        # 创建优化器和损失函数
+        metadata = data_src.get_metadata()
+        m = rc.model
+        logger.info("Initializing DKT model...")
+        model = DKT(
+            num_c=metadata["num_skills"], emb_size=m.embedding_dim, dropout=m.dropout
+        )
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
-
-        # 创建学习率调度器
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
-
-        # 初始化基类训练器
-        super().__init__(model)
-
-        # 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 7. 配置训练器
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -170,24 +98,19 @@ class DKTTrainer(BaseTrainer):
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
-        # 解包数据并移动到设备
         sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        # 模型前向传播
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )
 
-        # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
         return {
@@ -222,24 +145,17 @@ class DKTTrainer(BaseTrainer):
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
 
-        # 模型前向传播
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # ==================== 关键：DKT 预测对齐 ====================
-        # DKT 的 y_hat[:, t] 预测的是 response[t]
-        # 但 y_hat[:, 0] = 0（无有效预测）
-        # 所以有效预测是 y_hat[:, 1:]，对应 true_labels[:, 1:]
+        # DKT prediction alignment: y_hat[:, t] predicts response[t], but y_hat[:, 0] is 0
+        # (no valid prediction), so valid predictions are y_hat[:, 1:] aligned to true_labels[:, 1:].
+        y_hat_aligned = y_hat_full[:, 1:]
+        true_labels_aligned = true_labels[:, 1:]
+        mask_aligned = mask[:, 1:]
+        group_id_aligned = late_group_id[:, 1:]
 
-        y_hat_aligned = y_hat_full[:, 1:]  # [B, S-1]，有效预测
-        true_labels_aligned = true_labels[:, 1:]  # [B, S-1]，对应的真实标签
-        mask_aligned = mask[:, 1:]  # [B, S-1]，对应的 mask
-        group_id_aligned = late_group_id[:, 1:]  # [B, S-1]，对应的 group_id
-
-        # 使用 mask 筛选需要预测的位置
         y_hat = torch.masked_select(y_hat_aligned, mask_aligned)
-        y_label = torch.masked_select(
-            true_labels_aligned, mask_aligned
-        ).float()  # 使用 true_labels！
+        y_label = torch.masked_select(true_labels_aligned, mask_aligned).float()
         group_ids = torch.masked_select(group_id_aligned, mask_aligned)
 
         return {

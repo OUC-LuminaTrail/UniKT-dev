@@ -45,13 +45,16 @@ class MIKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练和验证数据
+
+        Args:
+            rc: RunConfig (OmegaConf DictConfig)
 
         Returns:
             (train_dataset, val_dataset, test_dataset, question_skill_matrix)
         """
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 

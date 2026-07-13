@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run ablation studies using model variants"
     )
-    parser.add_argument("--config", help="Path to ablation config JSON (required)")
+    parser.add_argument("--config", help="Path to ablation config yaml (required)")
     parser.add_argument(
         "-d",
         "--dataset",

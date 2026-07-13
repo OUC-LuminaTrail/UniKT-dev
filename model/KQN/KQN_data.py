@@ -52,8 +52,8 @@ class KQNModelData(SkillModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any) -> tuple:
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         concepts, responses, masks, _, questions = self.build_sequence_data()
 
@@ -77,7 +77,7 @@ class KQNModelData(SkillModelData):
             fold_idx=fold_idx,
         )
 
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
 
         train_dataset = KQNDataset(
             train_data[0], train_data[1], train_data[2], train_data[3]
@@ -85,7 +85,7 @@ class KQNModelData(SkillModelData):
         val_dataset = KQNDataset(val_data[0], val_data[1], val_data[2], val_data[3])
         test_dataset = DataLoader(
             window_test_data,
-            batch_size=args.batch_size,
+            batch_size=rc.model.batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,

@@ -1,3 +1,5 @@
+from typing import Any
+
 import torch
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
@@ -31,47 +33,40 @@ class HDHKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args):
+    def prepare_data(self, rc: Any):
         r"""
         准备HDHKT模型所需的数据
         """
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
-        # 构建用户答题序列
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-        # 构建问题-技能关联矩阵，并转换为torch张量
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
         ).float()
 
-        # 构建难度加权超图
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
-            num_difficulty_clusters=getattr(args, "num_difficulty_clusters", 3),
+            num_difficulty_clusters=rc.model.num_difficulty_clusters,
         )
 
         logger.debug(
             f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)"
         )
 
-        # 构建异构图
         hetero_graph = self.build_hetero_graph(
             [
-                # 问题技能图
                 (
                     "question",
                     "has",
                     "skill",
                 ),
-                # 技能作业图
                 (
                     "skill",
                     "related_to",
                     "assignment",
                 ),
-                # 题目模板图
                 (
                     "question",
                     "belongs_to",
@@ -80,7 +75,6 @@ class HDHKTModelData(QuestionModelData):
             ]
         )
 
-        # 划分训练集和验证集
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -98,12 +92,10 @@ class HDHKTModelData(QuestionModelData):
                 "K-fold cross-validation is required for HDHKT. Please specify a valid fold index."
             )
 
-        # 构建模型数据集
         train_dataset = HDHKTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = HDHKTDataset(val_data[0], val_data[1], val_data[2])
         test_dataset = HDHKTDataset(test_data[0], test_data[1], test_data[2])
 
-        # 返回数据
         return_data = {
             "train_dataset": train_dataset,
             "val_dataset": val_dataset,
@@ -157,14 +149,11 @@ class HDHKTModelData(QuestionModelData):
         if vertex_type is None:
             vertex_type = vertex_node_type
 
-        # 获取数据和难度分数
         difficulty_scores = self.calculate_question_difficulty()
 
-        # 获取关联矩阵
         H = self.build_relationship_matrix(edge_type, value_type="binary")
         num_vertices = H.shape[0]
 
-        # 将关联矩阵转换为超边字典
         rows, cols = np.nonzero(H)
         edge_dict = {}
         for vertex_idx, hyperedge_idx in zip(rows, cols):
@@ -172,7 +161,7 @@ class HDHKTModelData(QuestionModelData):
                 edge_dict[hyperedge_idx] = []
             edge_dict[hyperedge_idx].append(int(vertex_idx))
 
-        # 为每个超边（如技能）内的题目按难度聚类
+        # Cluster questions within each hyperedge (e.g. skill) by difficulty
         e_list = []
         edge_weights = []
 
@@ -194,10 +183,9 @@ class HDHKTModelData(QuestionModelData):
             if len(vertices) < num_difficulty_clusters:
                 for v in vertices:
                     e_list.append([v])
-                    edge_weights.append(1.0)  # 单题目超边权重为1
+                    edge_weights.append(1.0)
                 continue
 
-            # K-means聚类
             try:
                 kmeans = KMeans(
                     n_clusters=min(num_difficulty_clusters, len(vertices)),
@@ -206,7 +194,7 @@ class HDHKTModelData(QuestionModelData):
                 )
                 cluster_labels = kmeans.fit_predict(difficulties)
 
-                # 存储每个簇的信息以便排序
+                # Collect cluster info for sorting by difficulty
                 current_skill_clusters = []
 
                 for cluster_id in range(kmeans.n_clusters):
@@ -219,7 +207,7 @@ class HDHKTModelData(QuestionModelData):
                     if len(cluster_vertices) == 0:
                         continue
 
-                    # 计算簇内题目的平均难度作为边权
+                    # Edge weight = mean difficulty of questions in this cluster
                     cluster_difficulties = difficulties[cluster_labels == cluster_id]
                     avg_difficulty = float(np.mean(cluster_difficulties))
 
@@ -231,10 +219,8 @@ class HDHKTModelData(QuestionModelData):
                         }
                     )
 
-                # 按照平均难度对簇进行排序
                 current_skill_clusters.sort(key=lambda x: x["avg_difficulty"])
 
-                # 构建超边和权重
                 for cluster in current_skill_clusters:
                     e_list.append(cluster["vertices"])
                     edge_weights.append(cluster["weight"])
@@ -243,18 +229,15 @@ class HDHKTModelData(QuestionModelData):
                 e_list.append(vertices)
                 edge_weights.append(1.0)
 
-        # 处理空超边情况
         if len(e_list) == 0:
             logger.warning("No hyperedges found. Creating self-loop hypergraph.")
             e_list = [[i] for i in range(num_vertices)]
             edge_weights = [1.0] * num_vertices
 
-        # 确保超边列表和权重列表长度一致
         assert len(e_list) == len(edge_weights), (
             f"Mismatch: {len(e_list)} edges but {len(edge_weights)} weights"
         )
 
-        # 创建超图
         hypergraph = Hypergraph(
             num_v=num_vertices, e_list=e_list, e_weight=edge_weights
         )

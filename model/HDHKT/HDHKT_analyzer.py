@@ -20,21 +20,20 @@ from .HDHKT_model import HDHKT
 class HDHKTAnalyzer(BaseCaseAnalyzer):
     """HDHKT-specific case analyzer for inference and visualization."""
 
-    def __init__(self, args, data_src: DataSource, checkpoint_path: str):
+    def __init__(self, rc, data_src: DataSource, checkpoint_path: str):
         """Initialize HDHKT analyzer.
 
         Args:
-            args: Model arguments
+            rc: RunConfig (OmegaConf DictConfig)
             data_src: Data source instance
             checkpoint_path: Path to model checkpoint
         """
-        self.args = args
+        self.rc = rc
         self.data_src = data_src
 
         model_data = HDHKTModelData(data_src)
-        data_dict = model_data.prepare_data(args)
+        data_dict = model_data.prepare_data(rc)
 
-        # Unpack data
         val_dataset = data_dict["val_dataset"]
         hypergraph = data_dict["skill_hypergraph"]
         hetero_graph = data_dict["hetero_graph"]
@@ -58,19 +57,29 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             for q_id in range(self.num_questions)
         ]
 
-        model = HDHKT(args, data_src.get_metadata(), hetero_graph.metadata())
+        m = rc.model
+        model = HDHKT(
+            data_metadata=data_src.get_metadata(),
+            hetero_metadata=hetero_graph.metadata(),
+            hidden_dim=m.hidden_dim,
+            n_hop=m.n_hop,
+            heads=m.heads,
+            lstm_layers=m.lstm_layers,
+            dropout=m.dropout,
+            history_neighbour=m.history_neighbour,
+            att_bound=m.att_bound,
+        )
 
         super().__init__(model, checkpoint_path)
 
-        self.with_inference(val_dataset, args.batch_size, args.device)
-        self.build()
+        self.configure_inference(
+            rc, val_dataset, rc.model.batch_size, device=rc.general.device
+        ).build()
 
-        # Store graph data
         self.hetero_graph = hetero_graph
         self.hypergraph = hypergraph
         self.question_skill_matrix = question_skill_matrix
 
-        # Move graphs to device
         self.hetero_graph = self.hetero_graph.to(self.device_)
         self.hypergraph = self.hypergraph.to(self.device_)
         self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
@@ -92,7 +101,6 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        # Model forward pass with return_states=True
         y_hat_full, skill_hetero_conv, lstm_output = self.model(
             sequence,
             response,
@@ -103,13 +111,10 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             return_states=True,
         )
 
-        # Extract valid predictions (skip first position)
         y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
 
-        # Handle empty batch
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # Generate binary predictions
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
         # Knowledge state definition for heatmap:
@@ -149,7 +154,6 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         """
         B, S = sequence.shape
 
-        # Predict probabilities for all questions at each timestep
         all_question_ids = torch.arange(
             self.num_questions, device=sequence.device, dtype=torch.long
         )
@@ -203,10 +207,8 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
 
         # Process each question sequentially to avoid memory explosion
         for i, q_id in enumerate(question_ids.tolist()):
-            # Get question embedding
             question_embed = question_conv_fused[q_id].view(1, 1, -1).expand(B, S, -1)
 
-            # History review for this question
             history_question_neighbors = self.model.history_review(
                 question_embedding_sequence,
                 question_embed,
@@ -214,12 +216,11 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
                 mask,
             )
 
-            # Build student_status: [B, S, 1+M, H]
+            # [B, S, 1+M, H]
             student_status = torch.cat(
                 [lstm_output.unsqueeze(2), history_question_neighbors], dim=2
             )
 
-            # Build knowledge_status for this question
             skill_ids_list = self.question_to_skill_ids[q_id]
             if not skill_ids_list:
                 related_skill_embs = torch.zeros(
@@ -236,12 +237,12 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
                     .expand(B, S, -1, -1)
                 )
 
-            # knowledge_status: [B, S, 1+num_skills, H]
+            # [B, S, 1+num_skills, H]
             knowledge_status = torch.cat(
                 [question_embed.unsqueeze(2), related_skill_embs], dim=2
             )
 
-            # general_interaction output: [B, S]
+            # [B, S]
             logits_q = self.model.general_interaction(
                 student_status, knowledge_status, mask
             )
@@ -309,13 +310,11 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         question_ids_flat = sequences.view(-1)[valid_indices].cpu().numpy()
         user_ids_flat = users.view(-1)[valid_indices].cpu().numpy()
 
-        # 将知识状态展平：[B, S, num_skills] -> [B*S, num_skills]，取有效位置
         num_skills = knowledge_states.shape[-1]
         knowledge_states_flat = (
             knowledge_states.view(-1, num_skills)[valid_indices].cpu().numpy()
         )
 
-        # Get all skills for each question (returns list of lists)
         skill_ids_list = self._get_all_skills_for_questions(question_ids_flat)
 
         return {
@@ -343,7 +342,6 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         """
         skills_list = []
         for q_id in question_ids:
-            # Find all skills for this question (where matrix value is 1)
             question_skills = np.where(self.question_skill_matrix_np[q_id] == 1)[
                 0
             ].tolist()

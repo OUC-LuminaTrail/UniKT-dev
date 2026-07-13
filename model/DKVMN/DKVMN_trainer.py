@@ -1,74 +1,43 @@
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("DKVMN")
-class DKVMNModelParams(BaseParamConfig):
-    """DKVMN 模型参数配置
+@register_model_config("DKVMN")
+@dataclass
+class DKVMNConfig(ModelConfig):
+    """DKVMN model configuration."""
 
-    默认值：
-    - dim_s: 200
-    - size_m: 50
-    - dropout: 0.2
-    - learning_rate: 1e-3
-    """
-
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DKVMN Parameters"
-        params = {
-            "dim_s": {
-                "type": int,
-                "default": 200,
-                "help": "State dimension of memory vectors",
-            },
-            "size_m": {
-                "type": int,
-                "default": 50,
-                "help": "Number of memory slots",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    dim_s: int = field(
+        default=200, metadata={"help": "State dimension of memory vectors"}
+    )
+    size_m: int = field(default=50, metadata={"help": "Number of memory slots"})
+    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("DKVMN")
@@ -76,74 +45,49 @@ class DKVMNTrainer(BaseTrainer):
     """DKVMN 模型训练器
 
     Args:
-        args: 模型参数配置
+        rc: RunConfig (OmegaConf DictConfig)
         data_src: 数据源实例
         exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src):
         from model.DKVMN.DKVMN_data import DKVMNModelData
 
         model_data = DKVMNModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         from model.DKVMN.DKVMN_model import DKVMN
 
         logger.info("Initializing DKVMN model...")
         metadata = data_src.get_metadata()
+        m = rc.model
         model = DKVMN(
             num_c=metadata["num_skills"],
-            dim_s=args.dim_s,
-            size_m=args.size_m,
-            dropout=args.dropout,
+            dim_s=m.dim_s,
+            size_m=m.size_m,
+            dropout=m.dropout,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DKVMN",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -163,7 +107,7 @@ class DKVMNTrainer(BaseTrainer):
 
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # DKVMN 同位置输出：p[:, t] 用历史 0..t-1 预测 response[t]，用 same_position=True 由内置函数归一化
+        # DKVMN same-position output: p[:, t] predicts response[t] from history 0..t-1; same_position=True delegates alignment to the helper.
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )

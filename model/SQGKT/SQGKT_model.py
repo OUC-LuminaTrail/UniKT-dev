@@ -24,20 +24,38 @@ from ..layers import GeneralInteraction, HistoryRecap
 
 
 class SQGKT(nn.Module):
-    def __init__(self, args, data_metadata, **kwargs):
+    def __init__(
+        self,
+        data_metadata,
+        *,
+        embedding_dim: int,
+        hidden_neurons: list[int],
+        dropout_probs: list[float],
+        n_hop: int,
+        skill_neighbor_num: int,
+        question_neighbor_num: int,
+        hist_neighbor_num: int,
+        next_neighbor_num: int,
+        att_bound: float = 0.7,
+        aggregator: str = "sum",
+        variant: str = "hsei",
+        sim_emb: str = "question_emb",
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.num_skills = data_metadata["num_skills"]
         self.num_questions = data_metadata["num_questions"]
         self.num_users = data_metadata["num_users"]
-        self.embedding_dim = args.embedding_dim
-        self.hidden_neurons = list(args.hidden_neurons)
+        self.embedding_dim = embedding_dim
+        self.hidden_neurons = list(hidden_neurons)
         self.hidden_size = self.hidden_neurons[-1]
-        self.dropout_prob = args.dropout_probs[0]
-        self.model_name = getattr(args, "variant", "hsei")
-        self.sim_emb = getattr(args, "sim_emb", "question_emb")
-        self.hist_neighbor_num = args.hist_neighbor_num
-        self.next_neighbor_num = args.next_neighbor_num
-        self.n_hop = args.n_hop
+        dropout_probs = list(dropout_probs)
+        self.dropout_prob = dropout_probs[0]
+        self.model_name = variant
+        self.sim_emb = sim_emb
+        self.hist_neighbor_num = hist_neighbor_num
+        self.next_neighbor_num = next_neighbor_num
+        self.n_hop = n_hop
 
         assert self.hidden_size == self.embedding_dim, (
             f"hidden_neurons[-1]({self.hidden_size}) must equal embedding_dim({self.embedding_dim})"
@@ -49,21 +67,22 @@ class SQGKT(nn.Module):
 
         self.graph_aggregator = GIKTGraphAggregator(
             self.embedding_dim,
-            args.question_neighbor_num,
-            args.skill_neighbor_num,
+            question_neighbor_num,
+            skill_neighbor_num,
             self.n_hop,
-            args.dropout_probs,
-            args.aggregator,
+            dropout_probs,
+            aggregator,
         )
 
-        # 学生-问题图（§4.3 式 9–11）：学生节点嵌入 + 题目自身嵌入（该图专用）+ GCN 变换。
-        # 把答过 q_j 的学生按边权 g_ij 加权聚合“进”该题，得到每题表示 q̃_j。
+        # Student-question graph (§4.3 Eq.9–11): student node embeddings + per-question
+        # embeddings (graph-local) + GCN transform. Students who answered q_j are
+        # weight-aggregated (edge weight g_ij) into each question to form q̃_j.
         self.emb_table_student = nn.Embedding(self.num_users, self.embedding_dim)
         self.emb_table_question_sq = nn.Embedding(
             self.num_questions, self.embedding_dim
         )
         self.sq_transform = nn.Linear(self.embedding_dim, self.embedding_dim)
-        # g_ij 边权融合（式 6）与 q̂ 双图融合（式 16，w_q1/w_q2 均为自适应可学习参数）。
+        # Edge-weight fusion g_ij (Eq.6) and dual-graph q̂ fusion (Eq.16); w_q1/w_q2 are learnable.
         self.w_c = nn.Parameter(torch.tensor(0.33))
         self.w_p = nn.Parameter(torch.tensor(0.33))
         self.w_n = nn.Parameter(torch.tensor(0.33))
@@ -82,9 +101,7 @@ class SQGKT(nn.Module):
             for i in range(len(self.hidden_neurons))
         )
 
-        self.history_recap = HistoryRecap(
-            self.hist_neighbor_num, getattr(args, "att_bound", 0.7)
-        )
+        self.history_recap = HistoryRecap(self.hist_neighbor_num, att_bound)
         self.general_interaction = GeneralInteraction(self.hidden_size)
 
     def _run_lstm(self, x):
@@ -147,7 +164,7 @@ class SQGKT(nn.Module):
             question_indices, next_question_indices, graph_data
         )
 
-        # 学生-问题图聚合 q̃，与问题-技能图 q 线性融合得 q̂（式 16）
+        # Aggregate student-question q̃ and fuse with question-skill graph q into q̂ (Eq.16)
         self.q_neighbors_2 = graph_data["q_neighbors_2"]
         self.uq_stat_q = graph_data["uq_stat_q"]
         q_tilde_in = self._aggregate_sq(user_sequence[:, :-1])

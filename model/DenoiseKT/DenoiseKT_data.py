@@ -70,9 +70,9 @@ class DenoiseKTModelData(QuestionModelData):
             ("question", "has", "skill"), value_type="binary"
         ).astype(np.float32)  # [num_q, num_c]
 
-        # 非零位置 (q, c)：题目 q 含概念 c
+        # Nonzero positions (q, c): question q contains concept c.
         q_idx, c_idx = np.nonzero(qs_matrix)
-        # 行归一化：每个非零项 = 1 / 该题概念数
+        # Row-normalized: each nonzero entry = 1 / (concept count of that question).
         row_sum = qs_matrix.sum(axis=1)
         row_sum[row_sum == 0] = 1.0
         values = 1.0 / row_sum[q_idx]
@@ -89,9 +89,9 @@ class DenoiseKTModelData(QuestionModelData):
         return sparse_adj
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练、验证、测试数据，以及题目-概念查表和题目图。"""
-        fold_idx = args.fold
+        fold_idx = rc.data.fold
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
         if not (0 <= fold_idx < kfold_n_splits):
             raise ValueError(
@@ -101,7 +101,6 @@ class DenoiseKTModelData(QuestionModelData):
             f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
         )
 
-        # 问题序列
         user_question, user_response, user_mask, _ = self.load_sequence_data()
 
         train_data, val_data, test_data = self.split_kfold_data(

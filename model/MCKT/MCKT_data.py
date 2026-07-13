@@ -38,8 +38,8 @@ class MCKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any):
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any):
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         user_questions, user_responses, user_masks, _ = self.load_sequence_data()
         user_questions, user_responses, user_masks = self._left_pad_sequences(
@@ -47,8 +47,8 @@ class MCKTModelData(QuestionModelData):
         )
 
         pos_matrix = self.build_pos_matrix(
-            strategy=args.pos_strategy,
-            include_self=args.pos_include_self,
+            strategy=rc.model.pos_strategy,
+            include_self=rc.model.pos_include_self,
         )
 
         if fold_idx is None:

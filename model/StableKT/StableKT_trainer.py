@@ -1,142 +1,88 @@
 """StableKT 模型训练器模块"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("StableKT")
-class StableKTModelParams(BaseParamConfig):
-    """StableKT 模型参数配置
+@register_model_config("StableKT")
+@dataclass
+class StableKTConfig(ModelConfig):
+    """StableKT model configuration."""
 
-    Args:
-        d_model: 模型维度
-        n_blocks: Transformer 块数量
-        n_heads: 注意力头数量（必须为偶数）
-        dropout: Dropout 概率
-        d_ff: 前馈网络维度
-        kq_same: 是否共享 key 和 query 的权重
-        separate_qa: 是否使用独立的交互嵌入
-        final_fc_dim: 第一层全连接层维度
-        final_fc_dim2: 第二层全连接层维度
-        emb_type: 嵌入类型
-        r: 半影锥半径
-        gamma: 半影锥温度参数
-        num_buckets: T5 相对位置偏置分桶数
-        max_distance: T5 相对位置偏置最大距离
-    """
-
-    def define_params(self) -> tuple[str, dict]:
-        """定义模型参数"""
-        group_name = "StableKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Dimension of the model",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 2,
-                "help": "Number of transformer blocks",
-            },
-            "n_heads": {
-                "type": int,
-                "default": 4,
-                "help": "Number of attention heads (must be even for HAKT)",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 256,
-                "help": "Dimension of feed-forward network",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether to share key and query weights (1 for yes, 0 for no)",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate interaction embedding (1 for yes, 0 for no)",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 512,
-                "help": "First fully connected layer dimension in output",
-            },
-            "final_fc_dim2": {
-                "type": int,
-                "default": 256,
-                "help": "Second fully connected layer dimension in output",
-            },
-            "emb_type": {
-                "type": str,
-                "default": "qid",
-                "help": "Embedding type: qid, qid_woha, qid_sin, qid_t5, qid_rotary, qid_wha, etc.",
-            },
-            "r": {
-                "type": float,
-                "default": 1.0,
-                "help": "Penumbral cone radius for HAKT attention",
-            },
-            "gamma": {
-                "type": float,
-                "default": 1.0,
-                "help": "Penumbral cone temperature parameter for HAKT attention",
-            },
-            "num_buckets": {
-                "type": int,
-                "default": 32,
-                "help": "Number of buckets for T5 relative position bias",
-            },
-            "max_distance": {
-                "type": int,
-                "default": 100,
-                "help": "Maximum distance for T5 relative position bias",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-4,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(default=256, metadata={"help": "Dimension of the model"})
+    n_blocks: int = field(default=2, metadata={"help": "Number of transformer blocks"})
+    n_heads: int = field(
+        default=4,
+        metadata={"help": "Number of attention heads (must be even for HAKT)"},
+    )
+    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
+    d_ff: int = field(
+        default=256, metadata={"help": "Dimension of feed-forward network"}
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={"help": "Whether to share key and query weights (1 yes, 0 no)"},
+    )
+    separate_qa: int = field(
+        default=0,
+        metadata={
+            "help": "Whether to use separate interaction embedding (1 yes, 0 no)"
+        },
+    )
+    final_fc_dim: int = field(
+        default=512,
+        metadata={"help": "First fully connected layer dimension in output"},
+    )
+    final_fc_dim2: int = field(
+        default=256,
+        metadata={"help": "Second fully connected layer dimension in output"},
+    )
+    emb_type: str = field(
+        default="qid",
+        metadata={
+            "help": "Embedding type: qid, qid_woha, qid_sin, qid_t5, qid_rotary, qid_wha, etc."
+        },
+    )
+    r: float = field(
+        default=1.0, metadata={"help": "Penumbral cone radius for HAKT attention"}
+    )
+    gamma: float = field(
+        default=1.0,
+        metadata={"help": "Penumbral cone temperature parameter for HAKT attention"},
+    )
+    num_buckets: int = field(
+        default=32, metadata={"help": "Number of buckets for T5 relative position bias"}
+    )
+    max_distance: int = field(
+        default=100,
+        metadata={"help": "Maximum distance for T5 relative position bias"},
+    )
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("StableKT")
@@ -146,21 +92,17 @@ class StableKTTrainer(BaseTrainer):
     负责初始化 StableKT 模型、优化器和训练数据，并实现前向传播逻辑。
 
     Args:
-        args: 模型参数配置
+        rc: RunConfig (OmegaConf DictConfig)
         data_src: 数据源实例
         exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        # 准备数据
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.StableKT.StableKT_data import StableKTModelData
 
         model_data = StableKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
-        # 初始化模型
         from model.StableKT.StableKT_model import StableKT
 
         logger.info("Initializing StableKT model...")
@@ -168,75 +110,47 @@ class StableKTTrainer(BaseTrainer):
         n_pid = metadata["num_questions"]
         logger.info(f"StableKT: Using Problem ID (Rasch model) with {n_pid} questions")
 
+        m = rc.model
         model = StableKT(
             num_skills=metadata["num_skills"],
             n_pid=n_pid,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            n_heads=args.n_heads,
-            seq_len=args.max_seq_len,
-            kq_same=args.kq_same,
-            separate_qa=bool(args.separate_qa),
-            final_fc_dim=args.final_fc_dim,
-            final_fc_dim2=args.final_fc_dim2,
-            emb_type=args.emb_type,
-            r=args.r,
-            gamma=args.gamma,
-            num_buckets=args.num_buckets,
-            max_distance=args.max_distance,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            d_ff=m.d_ff,
+            n_heads=m.n_heads,
+            seq_len=rc.data.max_seq_len,
+            kq_same=m.kq_same,
+            separate_qa=bool(m.separate_qa),
+            final_fc_dim=m.final_fc_dim,
+            final_fc_dim2=m.final_fc_dim2,
+            emb_type=m.emb_type,
+            r=m.r,
+            gamma=m.gamma,
+            num_buckets=m.num_buckets,
+            max_distance=m.max_distance,
         )
 
-        # 创建优化器和损失函数
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
-        # 创建学习率调度器
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        # 初始化基类训练器
-        super().__init__(model)
-
-        # 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 配置训练器
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="StableKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _build_pid_data(
         self,
@@ -262,7 +176,6 @@ class StableKTTrainer(BaseTrainer):
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
-        # 解包数据并移动到设备
         sequence, response, mask, question = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
@@ -271,18 +184,14 @@ class StableKTTrainer(BaseTrainer):
 
         pid_data = self._build_pid_data(question, mask)
 
-        # 模型前向传播
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
-        # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )
 
-        # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
         return {
@@ -320,10 +229,8 @@ class StableKTTrainer(BaseTrainer):
         valid_mask = late_group_id >= 0
         pid_data = self._build_pid_data(question, valid_mask)
 
-        # 模型前向传播
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
-        # StableKT 预测对齐
         y_hat = torch.masked_select(y_hat_full, mask)
         y_label = torch.masked_select(true_labels, mask).float()
         group_ids = torch.masked_select(late_group_id, mask)

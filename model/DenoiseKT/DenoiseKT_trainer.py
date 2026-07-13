@@ -1,113 +1,74 @@
 """DenoiseKT 模型训练器。"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("DenoiseKT")
-class DenoiseKTModelParams(BaseParamConfig):
-    """DenoiseKT 模型参数配置。"""
+@register_model_config("DenoiseKT")
+@dataclass
+class DenoiseKTConfig(ModelConfig):
+    """DenoiseKT 模型配置。"""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DenoiseKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Hidden dimension of the model",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 1,
-                "help": "Number of transformer blocks",
-            },
-            "num_attn_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of attention heads",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability for the transformer",
-            },
-            "dropout1": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability for the GCN",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 64,
-                "help": "Feed-forward network dimension",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 256,
-                "help": "First output MLP dimension",
-            },
-            "final_fc_dim2": {
-                "type": int,
-                "default": 256,
-                "help": "Second output MLP dimension",
-            },
-            "bf": {
-                "type": float,
-                "default": 0.9,
-                "help": "Distance-decay base for same-concept boost focus",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether key and query share the linear projection (1=yes, 0=no)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=256, metadata={"help": "Hidden dimension of the model"}
+    )
+    n_blocks: int = field(default=1, metadata={"help": "Number of transformer blocks"})
+    num_attn_heads: int = field(
+        default=8, metadata={"help": "Number of attention heads"}
+    )
+    dropout: float = field(
+        default=0.1, metadata={"help": "Dropout probability for the transformer"}
+    )
+    dropout1: float = field(
+        default=0.1, metadata={"help": "Dropout probability for the GCN"}
+    )
+    d_ff: int = field(default=64, metadata={"help": "Feed-forward network dimension"})
+    final_fc_dim: int = field(
+        default=256, metadata={"help": "First output MLP dimension"}
+    )
+    final_fc_dim2: int = field(
+        default=256, metadata={"help": "Second output MLP dimension"}
+    )
+    bf: float = field(
+        default=0.9,
+        metadata={"help": "Distance-decay base for same-concept boost focus"},
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={
+            "help": "Whether key and query share the linear projection (1=yes, 0=no)"
+        },
+    )
+    epochs: int = field(
+        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0, metadata={"help": "Weight decay for optimizer", "short": "wd"}
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("DenoiseKT")
 class DenoiseKTTrainer(BaseTrainer):
     """DenoiseKT 模型训练器。"""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src):
         from model.DenoiseKT.DenoiseKT_data import DenoiseKTModelData
 
         model_data = DenoiseKTModelData(data_src)
@@ -117,7 +78,7 @@ class DenoiseKTTrainer(BaseTrainer):
             test_dataset,
             question_concepts,
             question_graph,
-        ) = model_data.prepare_data(args)
+        ) = model_data.prepare_data(rc)
 
         from model.DenoiseKT.DenoiseKT_model import DenoiseKT
 
@@ -126,68 +87,45 @@ class DenoiseKTTrainer(BaseTrainer):
         num_c = metadata["num_skills"]
         logger.info("Initializing DenoiseKT model...")
 
+        m = rc.model
         model = DenoiseKT(
             num_c=num_c,
             num_q=num_q,
             question_concepts=question_concepts,
             question_graph=question_graph,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            dropout1=args.dropout1,
-            bf=args.bf,
-            d_ff=args.d_ff,
-            seq_len=args.max_seq_len,
-            kq_same=args.kq_same,
-            final_fc_dim=args.final_fc_dim,
-            final_fc_dim2=args.final_fc_dim2,
-            num_attn_heads=args.num_attn_heads,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            dropout1=m.dropout1,
+            bf=m.bf,
+            d_ff=m.d_ff,
+            seq_len=rc.data.max_seq_len,
+            kq_same=m.kq_same,
+            final_fc_dim=m.final_fc_dim,
+            final_fc_dim2=m.final_fc_dim2,
+            num_attn_heads=m.num_attn_heads,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 1e-3),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DenoiseKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]

@@ -427,20 +427,29 @@ class PreprocessManager:
             if params.get("num_threads") is not None:
                 cmd.extend(["--num_threads", str(params["num_threads"])])
         elif action == "process":
+            # data_process.py registers RunDataConfig + GeneralConfig via
+            # register_config_group, so these are dot-path flags.
             for key in (
                 "min_seq_len",
                 "max_seq_len",
                 "kfold",
-                "seed",
                 "sample_size",
                 "sample_ratio",
-                "sample_attempts_bins",
-                "sample_correct_bins",
             ):
                 if params.get(key) is not None:
-                    cmd.extend([f"--{key}", str(params[key])])
+                    cmd.extend([f"--data.{key}", str(params[key])])
+            # nargs "+" list fields: spread the list into multiple tokens.
+            for key in ("sample_attempts_bins", "sample_correct_bins"):
+                val = params.get(key)
+                if val is None:
+                    continue
+                vals = val if isinstance(val, list) else [val]
+                cmd.append(f"--data.{key}")
+                cmd.extend(str(v) for v in vals)
             if params.get("sample_strategy"):
-                cmd.extend(["--sample_strategy", params["sample_strategy"]])
+                cmd.extend(["--data.sample_strategy", params["sample_strategy"]])
+            if params.get("seed") is not None:
+                cmd.extend(["--general.seed", str(params["seed"])])
             if params.get("extra"):
                 cmd.extend(["--extra", str(params["extra"])])
         return cmd

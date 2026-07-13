@@ -157,14 +157,14 @@ class ClusterKTModelData(QuestionModelData):
         return user_sequence, user_question, user_response, user_mask, user_timestamp
 
     @override
-    def prepare_data(self, args):
+    def prepare_data(self, rc):
         """Prepare ClusterKT datasets.
 
         Returns:
             (train_dataset, val_dataset, test_dataset)
         """
-        fold_idx = args.fold if args.fold >= 0 else None
-        n_et = args.n_et
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
+        n_et = rc.model.n_et
 
         # Build sequences
         (

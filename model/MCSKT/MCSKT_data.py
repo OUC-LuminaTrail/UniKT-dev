@@ -49,19 +49,19 @@ def compute_time_gaps(
     for t in range(seq_len):
         s = int(skills[t])
 
-        # rgap: 距上次同一概念的分钟数
+        # rgap: minutes since the last occurrence of the same concept
         if s in last_ts and timestamps[t] > 0 and last_ts[s] > 0:
             diff_min = (timestamps[t] - last_ts[s]) / 60000.0
             if diff_min >= 0:
                 rgap[t] = min(_log2_bucket(diff_min) + 1, num_rgap - 1)
 
-        # sgap: 距上一条交互的分钟数
+        # sgap: minutes since the previous interaction
         if t > 0 and timestamps[t] > 0 and timestamps[t - 1] > 0:
             diff_min = (timestamps[t] - timestamps[t - 1]) / 60000.0
             if diff_min >= 0:
                 sgap[t] = min(_log2_bucket(diff_min) + 1, num_sgap - 1)
 
-        # pcount: 此前该概念练习次数
+        # pcount: prior practice count for this concept
         if s in skill_count:
             pcount[t] = min(_log2_bucket(skill_count[s]), num_pcount - 1)
 
@@ -227,18 +227,16 @@ class MCSKTModelData(SkillModelData):
         return user_timestamp
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
-        fold_idx = args.fold if args.fold >= 0 else None
-        num_rgap = args.num_rgap
-        num_sgap = args.num_sgap
-        num_pcount = args.num_pcount
+    def prepare_data(self, rc: Any) -> tuple:
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
+        num_rgap = rc.model.num_rgap
+        num_sgap = rc.model.num_sgap
+        num_pcount = rc.model.num_pcount
 
-        # 1. 标准技能序列
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
         )
 
-        # 2. 时间戳 + 遗忘特征
         user_timestamp = self._load_timestamps()
         logger.info("Computing forgetting features (rgap, sgap, pcount)...")
         user_rgap, user_sgap, user_pcount = self._build_time_gaps(
@@ -250,7 +248,6 @@ class MCSKTModelData(SkillModelData):
             num_pcount,
         )
 
-        # 3. K-fold 划分
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -292,7 +289,6 @@ class MCSKTModelData(SkillModelData):
             val_data[6],
         )
 
-        # 4. 带遗忘特征的 windowlate 测试集
         import os
 
         parquet_path = os.path.join(
@@ -300,7 +296,7 @@ class MCSKTModelData(SkillModelData):
         )
         test_dataset = MCSKTWindowlateIterableDataset(
             parquet_path=parquet_path,
-            max_seq_len=args.max_seq_len,
+            max_seq_len=rc.data.max_seq_len,
             num_rgap=num_rgap,
             num_sgap=num_sgap,
             num_pcount=num_pcount,

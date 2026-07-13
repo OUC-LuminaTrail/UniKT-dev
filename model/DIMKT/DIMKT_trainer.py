@@ -1,69 +1,48 @@
 """DIMKT 模型训练器模块。"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("DIMKT")
-class DIMKTModelParams(BaseParamConfig):
-    """DIMKT 模型参数配置。"""
+@register_model_config("DIMKT")
+@dataclass
+class DIMKTConfig(ModelConfig):
+    """DIMKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DIMKT Parameters"
-        params = {
-            "emb_size": {
-                "type": int,
-                "default": 128,
-                "help": "Embedding size",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability",
-            },
-            "difficult_levels": {
-                "type": int,
-                "default": 100,
-                "help": "Number of discrete difficulty levels D (sd/qd levels in [1, D+1])",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 5e-4,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-4,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    emb_size: int = field(default=128, metadata={"help": "Embedding size"})
+    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
+    difficult_levels: int = field(
+        default=100,
+        metadata={
+            "help": "Number of discrete difficulty levels D (sd/qd levels in [1, D+1])"
+        },
+    )
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=5e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("DIMKT")
@@ -71,15 +50,12 @@ class DIMKTTrainer(BaseTrainer):
     """DIMKT 模型训练器。
 
     Args:
-        args: 模型参数配置。
+        rc: RunConfig (OmegaConf DictConfig)。
         data_src: 数据源实例。
         exp_manager: 实验管理器（可选）。
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        # 准备数据
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.DIMKT.DIMKT_data import DIMKTModelData
 
         model_data = DIMKTModelData(data_src)
@@ -89,75 +65,50 @@ class DIMKTTrainer(BaseTrainer):
             test_dataset,
             skill_diff_table,
             question_diff_table,
-        ) = model_data.prepare_data(args)
+        ) = model_data.prepare_data(rc)
 
-        # 初始化模型。
         from model.DIMKT.DIMKT_model import DIMKT
 
         metadata = data_src.get_metadata()
         num_q = metadata["num_questions"]
         num_c = metadata["num_skills"]
+        m = rc.model
         logger.info(
-            f"Initializing DIMKT model (emb_size={args.emb_size}, dropout={args.dropout}, "
-            f"difficult_levels={args.difficult_levels}, num_q={num_q}, num_c={num_c})..."
+            f"Initializing DIMKT model (emb_size={m.emb_size}, dropout={m.dropout}, "
+            f"difficult_levels={m.difficult_levels}, num_q={num_q}, num_c={num_c})..."
         )
 
         model = DIMKT(
             num_q=num_q,
             num_c=num_c,
-            dropout=args.dropout,
-            emb_size=args.emb_size,
-            batch_size=args.batch_size,
-            difficult_levels=args.difficult_levels,
+            dropout=m.dropout,
+            emb_size=m.emb_size,
+            batch_size=m.batch_size,
+            difficult_levels=m.difficult_levels,
             skill_diff_table=skill_diff_table,
             question_diff_table=question_diff_table,
         )
 
-        # 损失与优化器
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DIMKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(self, batch_data):
         """训练 / 验证前向传播。"""

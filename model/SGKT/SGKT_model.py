@@ -387,14 +387,27 @@ class HistoryRecap(nn.Module):
 
 
 class SGKT(nn.Module):
-    def __init__(self, args, data_metadata, **kwargs):
+    def __init__(
+        self,
+        data_metadata,
+        embedding_dim: int,
+        hidden_dim: int,
+        dropout_keep_probs,
+        question_neighbor_num: int,
+        skill_neighbor_num: int,
+        n_hop: int,
+        aggregator: str,
+        hist_neighbor_num: int,
+        att_bound: float,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.num_skills = data_metadata["num_skills"]
         self.num_questions = data_metadata["num_questions"]
         self.max_seq_len = data_metadata["max_seq_len"] - 1
-        self.embedding_dim = args.embedding_dim
-        self.hidden_dim = args.hidden_dim
-        self.dropout_keep_probs = args.dropout_keep_probs
+        self.embedding_dim = embedding_dim
+        self.hidden_dim = hidden_dim
+        self.dropout_keep_probs = dropout_keep_probs
 
         assert self.embedding_dim == self.hidden_dim, (
             f"SGKT requires embedding_dim == hidden_dim for dimension consistency "
@@ -410,11 +423,11 @@ class SGKT(nn.Module):
             num_skills=self.num_skills,
             num_questions=self.num_questions,
             embedding_dim=self.embedding_dim,
-            question_neighbor_num=args.question_neighbor_num,
-            skill_neighbor_num=args.skill_neighbor_num,
-            n_hop=args.n_hop,
+            question_neighbor_num=question_neighbor_num,
+            skill_neighbor_num=skill_neighbor_num,
+            n_hop=n_hop,
             dropout_keep_probs=self.dropout_keep_probs,
-            aggregator=args.aggregator,
+            aggregator=aggregator,
         )
 
         self.feature_trans = nn.Linear(self.embedding_dim, self.hidden_dim)
@@ -425,13 +438,13 @@ class SGKT(nn.Module):
 
         self.sg_embedding = SGEmbedding(embedding_dim=self.embedding_dim)
         self.hist_sampler = HistoryRecap(
-            hist_neighbor_num=args.hist_neighbor_num,
-            att_bound=args.att_bound,
+            hist_neighbor_num=hist_neighbor_num,
+            att_bound=att_bound,
         )
         self.self_attention = SelfAttentionHistory(
             hidden_dim=self.hidden_dim,
             seq_len=self.max_seq_len,
-            hist_neighbor_num=args.hist_neighbor_num,
+            hist_neighbor_num=hist_neighbor_num,
         )
         self.general_interaction = GeneralInteraction(self.hidden_dim)
 

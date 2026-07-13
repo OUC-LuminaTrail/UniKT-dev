@@ -17,20 +17,22 @@ class MIKT(nn.Module):
     使用时间间隔遗忘机制和 IRT 风格的预测公式。
 
     Args:
-        args: 模型参数配置，需包含 embed_dim, state_dim, dropout
+        embed_dim: 嵌入维度（需等于 state_dim）
+        state_dim: 状态表示维度
+        dropout: Dropout 概率
         data_metadata: 数据集元数据，需包含 num_questions, num_skills, max_seq_len
     """
 
-    def __init__(self, args, data_metadata, **kwargs):
+    def __init__(self, embed_dim, state_dim, dropout, data_metadata, **kwargs):
         super().__init__()
 
         pro_max = data_metadata["num_questions"]
         skill_max = data_metadata["num_skills"]
         max_seq = data_metadata["max_seq_len"]
 
-        d = args.embed_dim
-        state_d = args.state_dim
-        p = args.dropout
+        d = embed_dim
+        state_d = state_dim
+        p = dropout
         assert d == state_d, (
             f"MIKT requires embed_dim == state_dim, got {d} != {state_d}"
         )

@@ -22,11 +22,11 @@ class DKT2ModelData(QuestionModelData):
     def __init__(self, data_src):
         super().__init__(data_src)
 
-    def prepare_data(self, args):
+    def prepare_data(self, rc):
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
         num_questions = self.data_src.get_metadata("num_questions")
 
-        # 多概念折叠：Q-矩阵每行是一个题目的概念集合，去重后每行对应一个新概念。
+        # Multi-concept folding: each Q-matrix row is a question's concept set; deduplicated rows each map to one new concept.
         q_matrix = self.build_relationship_matrix(
             ("question", "has", "skill"), value_type="binary"
         )
@@ -34,14 +34,16 @@ class DKT2ModelData(QuestionModelData):
             1
         ]  # [num_questions]
         num_concepts = int(collapsed.max()) + 1
-        num_skills = num_concepts + 1  # 1..num_concepts 为真实概念，0 为 padding
+        num_skills = (
+            num_concepts + 1
+        )  # 1..num_concepts are real concepts, 0 reserved for padding
         logger.info(
             f"DKT2 folded {q_matrix.shape[1]} base skills into {num_concepts} concepts"
         )
 
-        question_to_skill = collapsed + 1  # [num_questions]，1-index
+        question_to_skill = collapsed + 1  # [num_questions], 1-indexed
 
-        # 折叠后的概念序列；padding 位置（mask=0）置 0
+        # Folded concept sequence; padding positions (mask=0) set to 0.
         skills_sequence = question_to_skill[user_sequence]
         skills_sequence = skills_sequence * user_mask
 
@@ -50,7 +52,7 @@ class DKT2ModelData(QuestionModelData):
             user_response,
             user_mask,
             skills_sequence,
-            fold_idx=args.fold,
+            fold_idx=rc.data.fold,
         )
         train_dataset = DKT2Dataset(*train_data)
         val_dataset = DKT2Dataset(*val_data)

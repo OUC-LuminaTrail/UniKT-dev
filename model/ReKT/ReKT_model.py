@@ -13,15 +13,21 @@ class ReKT(nn.Module):
     返回原始 logits，配合 BCEWithLogitsLoss 使用。
     """
 
-    def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
+    def __init__(
+        self,
+        data_metadata: dict[str, Any],
+        hidden_dim: int = 128,
+        dropout: float = 0.4,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
 
         num_questions = data_metadata["num_questions"]
         num_skills = data_metadata["num_combined_skills"]
         max_seq_len = data_metadata["max_seq_len"]
 
-        d = args.hidden_dim
-        p = args.dropout
+        d = hidden_dim
+        p = dropout
 
         self.num_questions = num_questions
         self.num_skills = num_skills

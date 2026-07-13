@@ -9,145 +9,94 @@ import argparse
 import os
 
 import model  # noqa: F401
-from utils.config import (
-    DataParams,
-    EarlyStoppingParams,
-    GeneralParams,
-    get_model_params,
-)
-from utils.core import TRAINERS, get_logger, get_supported_models
+from utils.config import ConfigParser
+from utils.core import TRAINERS, get_logger
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
     OptunaTunerBuilder,
     TrainerObjectiveWrapper,
     direction_for_metric,
-    load_config_from_json,
-    load_param_space_from_json,
+    load_optuna_config,
+    param_spaces_from_model_config,
 )
 
 logger = get_logger(__name__)
 
 
-def parse_args():
-    """Parse command-line arguments."""
-    # Pre-parse model name to dynamically add model-specific arguments
-    temp_parser = argparse.ArgumentParser(add_help=False)
-    temp_parser.add_argument("-m", "--model", type=str)
-    temp_args, _ = temp_parser.parse_known_args()
-
-    model_name = temp_args.model
-
-    # Build the full argument parser
-    parser = argparse.ArgumentParser(description="Unified Optuna Hyperparameter Search")
-
-    # Model selection
-    available_models = get_supported_models()
-    parser.add_argument(
-        "-m",
-        "--model",
-        type=str,
-        required=True,
-        choices=available_models,
-        help=f"Model to search hyperparameters for. Available: {', '.join(available_models)}",
-    )
-
-    # Optuna configuration
-    optuna_group = parser.add_argument_group("Optuna Configuration")
-    optuna_group.add_argument(
+def main():
+    """Main entry point."""
+    # Stage 1: optuna-specific args; parse_known_args leaves RunConfig flags in `remaining`.
+    opt_parser = argparse.ArgumentParser(add_help=False)
+    opt_parser.add_argument(
         "--optuna_config",
         type=str,
-        default="./configs/optuna/optuna_config.json",
-        help="Path to Optuna config JSON file",
+        default="./configs/optuna/optuna_config.yaml",
+        help="Path to Optuna config yaml file",
     )
-    optuna_group.add_argument(
-        "--param_space",
-        type=str,
-        default=None,
-        help="Path to parameter space JSON file (default: ./configs/optuna/param_space_<model>.json)",
-    )
-    optuna_group.add_argument(
+    opt_parser.add_argument(
         "--metric",
         type=str,
         choices=["auc", "acc", "rmse", "loss"],
         default="auc",
         help="Metric to optimize",
     )
+    optuna_args, remaining = opt_parser.parse_known_args()
 
-    # Data parameters
-    DataParams.add_args(parser)
-
-    # Base training parameters
-    EarlyStoppingParams.add_args(parser)
-
-    # Common parameters
-    GeneralParams.add_args(parser)
-
-    # If model is specified, dynamically add model-specific parameters
-    if model_name:
-        model_params_cls = get_model_params(model_name)
-        if model_params_cls:
-            model_params_cls.add_args(parser)
-
-    args = parser.parse_args()
-
-    # Set default parameter space path
-    if args.param_space is None:
-        args.param_space = f"./configs/optuna/param_space_{args.model.lower()}.json"
-
-    return args
-
-
-def main():
-    """Main entry point."""
-    args = parse_args()
+    # Stage 2: RunConfig via reflective ConfigParser on the remaining argv.
+    rc = ConfigParser(
+        prog="optuna_search.py", description="Unified Optuna Hyperparameter Search"
+    ).parse_args(remaining)
+    rc.experiment.dataset_name = rc.data.dataset
+    model_name = rc.experiment.model_name
 
     # Load config first to annotate experiment directory with n_trials
-    logger.info(f"Loading Optuna config from: {args.optuna_config}")
-    optuna_config = load_config_from_json(args.optuna_config)
+    logger.info(f"Loading Optuna config from: {optuna_args.optuna_config}")
+    optuna_config = load_optuna_config(optuna_args.optuna_config)
 
-    # Create experiment manager
     exp_manager = ExperimentManager(
         exp_type=ExperimentType.HYPERPARAM_SEARCH,
-        model_name=args.model,
-        dataset_name=args.dataset,
+        model_name=model_name,
+        dataset_name=rc.experiment.dataset_name,
         base_dir="runs",
         tags=[f"n_trials{optuna_config.n_trials}"],
     )
-
     logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 
     logger.info("=" * 60)
-    logger.info(f"{args.model} Optuna Hyperparameter Search")
+    logger.info(f"{model_name} Optuna Hyperparameter Search")
     logger.info("=" * 60)
 
     optuna_config.save_dir = exp_manager.get_log_dir()
     # Optimization direction is determined by the metric, overriding the config file's direction
-    optuna_config.directions = [direction_for_metric(args.metric)]
-    logger.info(f"Optimizing metric '{args.metric}' ({optuna_config.directions[0]})")
+    optuna_config.directions = [direction_for_metric(optuna_args.metric)]
+    logger.info(
+        f"Optimizing metric '{optuna_args.metric}' ({optuna_config.directions[0]})"
+    )
 
-    # Load parameter space
-    logger.info(f"Loading parameter space from: {args.param_space}")
-    param_spaces = load_param_space_from_json(args.param_space)
+    # Search space is derived solely from the model's ModelConfig field metadata.
+    param_spaces = param_spaces_from_model_config(model_name)
+    if not param_spaces:
+        raise ValueError(
+            f"No searchable params: {model_name}Config has no fields with 'optuna' metadata."
+        )
+    logger.info(
+        f"Searchable params from {model_name}Config: {[s.name for s in param_spaces]}"
+    )
 
-    # Create data source factory function
     def data_src_factory():
-        return get_data_source(dataset_name=args.dataset, args=args)
+        return get_data_source(rc)
 
-    # Get trainer class
-    trainer_class = TRAINERS.get(args.model)
+    trainer_class = TRAINERS.get(model_name)
 
-    # Create objective function wrapper
     objective_wrapper = TrainerObjectiveWrapper(
         trainer_class=trainer_class,
         data_src_fn=data_src_factory,
-        base_args=args,
-        metric_name=args.metric,
-        max_epochs=args.epochs,
+        base_rc=rc,
+        metric_name=optuna_args.metric,
         exp_manager=exp_manager,
     )
 
-    # Use the builder to create an OptunaTuner
     tuner = (
         OptunaTunerBuilder()
         .with_config(optuna_config)
@@ -156,20 +105,17 @@ def main():
         .build()
     )
 
-    # Execute hyperparameter search
     logger.info(
         f"Starting hyperparameter search with {optuna_config.n_trials} trials..."
     )
     best_params = tuner.search()
 
-    # Print results
     tuner.print_summary()
 
-    # Get and save dataframe
     df = tuner.get_dataframe()
     if df is not None:
         log_dir = exp_manager.get_log_dir()
-        df_path = os.path.join(log_dir, f"trials_history_{args.model.lower()}.csv")
+        df_path = os.path.join(log_dir, f"trials_history_{model_name.lower()}.csv")
         df.to_csv(df_path, index=False)
         logger.info(f"Trials history saved to: {df_path}")
 

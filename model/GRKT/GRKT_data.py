@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import polars as pl
 import torch
@@ -53,8 +55,8 @@ class GRKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args):
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any) -> tuple:
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")

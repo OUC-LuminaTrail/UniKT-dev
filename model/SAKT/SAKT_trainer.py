@@ -1,145 +1,91 @@
 """SAKT trainer."""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("SAKT")
-class SAKTModelParams(BaseParamConfig):
-    """SAKT hyperparameter configuration."""
+@register_model_config("SAKT")
+@dataclass
+class SAKTConfig(ModelConfig):
+    """SAKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "SAKT Parameters"
-        params = {
-            "emb_size": {
-                "type": int,
-                "default": 256,
-                "help": "Embedding dimension of interaction and exercise embeddings",
-            },
-            "num_attn_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of multi-head attention heads",
-            },
-            "num_en": {
-                "type": int,
-                "default": 1,
-                "help": "Number of SAKT attention blocks",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    emb_size: int = field(
+        default=256,
+        metadata={"help": "Embedding dimension of interaction and exercise embeddings"},
+    )
+    num_attn_heads: int = field(
+        default=8, metadata={"help": "Number of multi-head attention heads"}
+    )
+    num_en: int = field(default=1, metadata={"help": "Number of SAKT attention blocks"})
+    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
+    epochs: int = field(
+        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0, metadata={"help": "Weight decay for optimizer", "short": "wd"}
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("SAKT")
 class SAKTTrainer(BaseTrainer):
     """SAKT model trainer."""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.SAKT.SAKT_data import SAKTModelData
 
         model_data = SAKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         from model.SAKT.SAKT_model import SAKT
 
         logger.info("Initializing SAKT model...")
         metadata = data_src.get_metadata()
+        m = rc.model
         model = SAKT(
             num_c=metadata["num_skills"],
-            seq_len=args.max_seq_len,
-            emb_size=args.emb_size,
-            num_attn_heads=args.num_attn_heads,
-            dropout=args.dropout,
-            num_en=args.num_en,
+            seq_len=rc.data.max_seq_len,
+            emb_size=m.emb_size,
+            num_attn_heads=m.num_attn_heads,
+            dropout=m.dropout,
+            num_en=m.num_en,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 1e-3),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="SAKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]

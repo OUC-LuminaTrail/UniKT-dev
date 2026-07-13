@@ -9,8 +9,8 @@ from .config import (
     HyperparameterSpace,
     OptunaConfig,
     direction_for_metric,
-    load_config_from_json,
-    load_param_space_from_json,
+    load_optuna_config,
+    param_spaces_from_model_config,
 )
 from .trainer import OptunaTunerBuilder, TrainerObjectiveWrapper
 from .tuner import OptunaTuner
@@ -23,6 +23,6 @@ __all__ = [
     "OptunaTunerBuilder",
     "TrainerObjectiveWrapper",
     "direction_for_metric",
-    "load_config_from_json",
-    "load_param_space_from_json",
+    "load_optuna_config",
+    "param_spaces_from_model_config",
 ]

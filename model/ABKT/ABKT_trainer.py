@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 from typing import Any
 
 import torch
@@ -8,13 +9,11 @@ import torch.utils.data as Data
 from tqdm import tqdm
 
 from utils.config import (
-    BaseParamConfig,
     EarlyStoppingConfig,
+    ModelConfig,
     create_optimized_dataloader,
-    register_model_params,
 )
-from utils.core import get_logger, register_trainer
-from utils.data_process import DataSource
+from utils.core import get_logger, register_model_config, register_trainer
 from utils.training import MultiTrainer, StageComponents, StageConfig
 
 from .ABKT_data import ABKTModelData
@@ -22,113 +21,81 @@ from .ABKT_model import GMF, IRT_2, K_CMF
 
 logger = get_logger(__name__)
 
-__all__ = ["ABKTTrainer", "ABKTModelParams"]
+__all__ = ["ABKTTrainer"]
 
 
-@register_model_params("ABKT")
-class ABKTModelParams(BaseParamConfig):
-    """ABKT model-specific parameters."""
+@register_model_config("ABKT")
+@dataclass
+class ABKTConfig(ModelConfig):
+    """ABKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "ABKT Parameters"
-        params = {
-            # Knowledge Module (KM) parameters
-            "km_hidden_dim": {
-                "type": int,
-                "default": 5,
-                "short": "kmh",
-                "help": "Hidden dimension for knowledge growth in K_CMF (default: 5)",
-            },
-            "km_guess": {
-                "type": float,
-                "default": 0.25,
-                "short": "kmg",
-                "help": "Guess parameter for IRT response function (default: 0.25)",
-            },
-            "km_lr": {
-                "type": float,
-                "default": 0.001,
-                "short": "kmlr",
-                "help": "Learning rate for KM stage (default: 0.001)",
-            },
-            "km_epochs": {
-                "type": int,
-                "default": 100,
-                "short": "kme",
-                "help": "Number of epochs for KM stage (default: 100)",
-            },
-            "km_patience": {
-                "type": int,
-                "default": 10,
-                "short": "kmp",
-                "help": "Early stopping patience for KM stage (default: 10)",
-            },
-            # Ability Module (AM) parameters
-            "am_embedding_dim": {
-                "type": int,
-                "default": 50,
-                "short": "amed",
-                "help": "Embedding dimension for GMF (default: 50)",
-            },
-            "am_lambda": {
-                "type": float,
-                "default": 0.1,
-                "short": "aml",
-                "help": "L2 regularization weight for AM (default: 0.1)",
-            },
-            "am_layer": {
-                "type": int,
-                "default": 1,
-                "short": "amly",
-                "help": "Number of GNN layers in GMF (0-3) (default: 1)",
-            },
-            "am_lr": {
-                "type": float,
-                "default": 0.0001,
-                "short": "amlr",
-                "help": "Learning rate for AM stage (default: 0.0001)",
-            },
-            "am_epochs": {
-                "type": int,
-                "default": 500,
-                "short": "ame",
-                "help": "Number of epochs for AM stage (default: 500)",
-            },
-            "am_patience": {
-                "type": int,
-                "default": 10,
-                "short": "amp",
-                "help": "Early stopping patience for AM stage (default: 10)",
-            },
-            # Common parameters
-            "pretrain_clip": {
-                "type": float,
-                "default": 0.4,
-                "short": "pc",
-                "help": "Clip value for pretrained predictions (default: 0.4)",
-            },
-            "combine_mode": {
-                "type": str,
-                "default": "add",
-                "short": "cm",
-                "help": "Combine mode for KM and AM predictions: 'add' or 'mul' (default: add)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for AM training (default: 128)",
-            },
-            "use_adj": {
-                "type": bool,
-                "default": True,
-                "help": "Whether to use learnable adjacency weights in GMF (default: True)",
-            },
-        }
-        return group_name, params
-
-
-# ==================== KM 阶段的数据集 ====================
+    km_hidden_dim: int = field(
+        default=5,
+        metadata={
+            "help": "Hidden dimension for knowledge growth in K_CMF",
+            "short": "kmh",
+        },
+    )
+    km_guess: float = field(
+        default=0.25,
+        metadata={"help": "Guess parameter for IRT response function", "short": "kmg"},
+    )
+    km_lr: float = field(
+        default=0.001,
+        metadata={"help": "Learning rate for KM stage", "short": "kmlr"},
+    )
+    km_epochs: int = field(
+        default=100,
+        metadata={"help": "Number of epochs for KM stage", "short": "kme"},
+    )
+    km_patience: int = field(
+        default=10,
+        metadata={"help": "Early stopping patience for KM stage", "short": "kmp"},
+    )
+    am_embedding_dim: int = field(
+        default=50,
+        metadata={"help": "Embedding dimension for GMF", "short": "amed"},
+    )
+    am_lambda: float = field(
+        default=0.1,
+        metadata={"help": "L2 regularization weight for AM", "short": "aml"},
+    )
+    am_layer: int = field(
+        default=1,
+        metadata={"help": "Number of GNN layers in GMF (0-3)", "short": "amly"},
+    )
+    am_lr: float = field(
+        default=0.0001,
+        metadata={"help": "Learning rate for AM stage", "short": "amlr"},
+    )
+    am_epochs: int = field(
+        default=500,
+        metadata={"help": "Number of epochs for AM stage", "short": "ame"},
+    )
+    am_patience: int = field(
+        default=10,
+        metadata={"help": "Early stopping patience for AM stage", "short": "amp"},
+    )
+    pretrain_clip: float = field(
+        default=0.4,
+        metadata={"help": "Clip value for pretrained predictions", "short": "pc"},
+    )
+    combine_mode: str = field(
+        default="add",
+        metadata={
+            "help": "Combine mode for KM and AM predictions: 'add' or 'mul'",
+            "short": "cm",
+            "choices": ["add", "mul"],
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"help": "Batch size for AM training", "short": "bs"},
+    )
+    use_adj: bool = field(
+        default=True,
+        metadata={"help": "Whether to use learnable adjacency weights in GMF"},
+    )
 
 
 class KMUserDataset(Data.Dataset):
@@ -163,9 +130,6 @@ class KMValidationDataset(Data.Dataset):
         return user_id, item_id, correct
 
 
-# ==================== AM 阶段的数据集 ====================
-
-
 class AMTripletDataset(Data.Dataset):
     """AM 阶段数据集（每个样本为 [user, item, correct, km_pred, g, w]）。"""
 
@@ -177,9 +141,6 @@ class AMTripletDataset(Data.Dataset):
 
     def __getitem__(self, idx: int):
         return self.triplets[idx]
-
-
-# ==================== 自定义损失函数 ====================
 
 
 class KMLoss(nn.Module):
@@ -234,27 +195,22 @@ class ABKTTrainer(MultiTrainer):
 
     def __init__(
         self,
-        args=None,
-        data_src: DataSource | None = None,
+        rc,
+        data_src,
         exp_manager=None,
     ):
         """初始化 ABKT 训练器。
 
         Args:
-            args: 命令行参数。
+            rc: RunConfig (OmegaConf DictConfig)。
             data_src: 数据源。
-            exp_manager: 实验管理器（可选；提供时会在构造末尾自动 build）。
+            exp_manager: 实验管理器。
         """
-        device = getattr(args, "device", None) if args is not None else None
-        super().__init__(device=device)
-
-        self.args = args
-
         logger.info("Preparing ABKT data...")
         self.model_data = ABKTModelData(data_src)
-        self.data = self.model_data.prepare_data(args)
+        self.data = self.model_data.prepare_data(rc)
 
-        # 模型引用与跨阶段数据，在阶段构建器 / on_stage_complete 中填充
+        # Cross-stage state, populated by stage builders / on_stage_complete
         self.km_model: K_CMF | None = None
         self.am_model: GMF | None = None
         self.Q_matrix: torch.Tensor | None = None
@@ -262,14 +218,7 @@ class ABKTTrainer(MultiTrainer):
         self.am_test_triplets: torch.Tensor | None = None
         self.adj_norm: torch.Tensor | None = None
 
-        # 提供实验管理器时立即完成基础设施构建（与 train.py 的调用约定一致）
-        if exp_manager is not None:
-            self.with_experiment(
-                exp_manager=exp_manager,
-                hyperparams=args,
-                model_name="ABKT",
-                dataset_name=getattr(args, "dataset", "") if args else "",
-            ).build()
+        super().__init__(rc, data_src, exp_manager)
 
     def build_stages(self) -> list[StageConfig]:
         """声明两个训练阶段。构建器延迟执行，am 可依赖 km 的输出。"""
@@ -280,13 +229,14 @@ class ABKTTrainer(MultiTrainer):
 
     def _build_km(self) -> StageComponents:
         """构建 KM 阶段：K_CMF 模型 + 单用户序列数据 + BCE 损失。"""
+        m = self.run_config.model
         Q_matrix = self.data["Q_matrix"].to(self.device_)
         num_users = self.data["num_users"]
         num_items = self.data["num_items"]
         num_skills = self.data["num_skills"]
 
         self.km_model = K_CMF(
-            k_hidden_size=self.args.km_hidden_dim,
+            k_hidden_size=m.km_hidden_dim,
             skill_num=num_skills,
             user_num=num_users,
             item_num=num_items,
@@ -307,7 +257,7 @@ class ABKTTrainer(MultiTrainer):
             val_dataset, batch_size=len(val_dataset), shuffle=False, device=self.device_
         )
 
-        optimizer = optim.Adam(self.km_model.parameters(), lr=self.args.km_lr)
+        optimizer = optim.Adam(self.km_model.parameters(), lr=m.km_lr)
 
         logger.info(
             f"KM Stage: users={num_users}, items={num_items}, skills={num_skills}"
@@ -319,17 +269,18 @@ class ABKTTrainer(MultiTrainer):
             loss_fn=KMLoss(),
             train_data=train_loader,
             val_data=val_loader,
-            epochs=self.args.km_epochs,
+            epochs=m.km_epochs,
             early_stopping=EarlyStoppingConfig(
-                monitor="acc", mode="max", patience=self.args.km_patience
+                monitor="acc", mode="max", patience=m.km_patience
             ),
-            # 早停看 ACC，保存 / 回传给 AM 的是最佳 AUC 模型
+            # Early-stop on ACC but checkpoint/hand back the best-AUC model
             checkpoint_monitor="auc",
             checkpoint_mode="max",
         )
 
     def _build_am(self) -> StageComponents:
         """构建 AM 阶段：GMF 模型 + boosting 残差三元组 + boosting 损失。"""
+        m = self.run_config.model
         num_users = self.data["num_users"]
         num_items = self.data["num_items"]
 
@@ -342,16 +293,16 @@ class ABKTTrainer(MultiTrainer):
         self.am_model = GMF(
             n_users=num_users,
             n_items=num_items,
-            embedding_k=self.args.am_embedding_dim,
+            embedding_k=m.am_embedding_dim,
             aj_norm=self.adj_norm,
-            adj=self.args.use_adj,
-            layer=self.args.am_layer,
+            adj=m.use_adj,
+            layer=m.am_layer,
         )
 
         train_dataset = AMTripletDataset(self.am_train_triplets)
         train_loader = create_optimized_dataloader(
             train_dataset,
-            batch_size=self.args.batch_size,
+            batch_size=m.batch_size,
             shuffle=True,
             device=self.device_,
         )
@@ -361,10 +312,8 @@ class ABKTTrainer(MultiTrainer):
             val_dataset, batch_size=len(val_dataset), shuffle=False, device=self.device_
         )
 
-        optimizer = optim.Adam(self.am_model.parameters(), lr=self.args.am_lr)
-        loss_fn = AMLoss(
-            am_lambda=self.args.am_lambda, combine_mode=self.args.combine_mode
-        )
+        optimizer = optim.Adam(self.am_model.parameters(), lr=m.am_lr)
+        loss_fn = AMLoss(am_lambda=m.am_lambda, combine_mode=m.combine_mode)
 
         logger.info(
             f"AM Stage: train_triplets={len(self.am_train_triplets)}, "
@@ -377,11 +326,11 @@ class ABKTTrainer(MultiTrainer):
             loss_fn=loss_fn,
             train_data=train_loader,
             val_data=val_loader,
-            epochs=self.args.am_epochs,
+            epochs=m.am_epochs,
             early_stopping=EarlyStoppingConfig(
-                monitor="acc", mode="max", patience=self.args.am_patience
+                monitor="acc", mode="max", patience=m.am_patience
             ),
-            # 早停看 ACC，报告 / 保存的是最佳 AUC
+            # Early-stop on ACC but report/checkpoint the best-AUC model
             checkpoint_monitor="auc",
             checkpoint_mode="max",
         )
@@ -399,11 +348,10 @@ class ABKTTrainer(MultiTrainer):
         if self._current_stage == "km":
             return self.loss(outputs["y_hat"], outputs["y_label"])
 
-        # 验证模式：无 g/w，使用组合预测的 BCE 损失
+        # Validation has no g/w, so fall back to BCE on the combined prediction
         if "g" not in outputs or "w" not in outputs:
             y_hat = outputs["y_hat"].clamp(1e-6, 1 - 1e-6)
             return F.binary_cross_entropy(y_hat, outputs["y_label"])
-        # 训练模式：完整 boosting 损失
         return self.loss(
             outputs["am_pred"],
             outputs["km_pred"],
@@ -427,7 +375,7 @@ class ABKTTrainer(MultiTrainer):
         """
         user_ids, items, corrects = batch_data
 
-        # 训练时 items 为 2D [1, seq_len]，验证时为 1D [batch_size]
+        # Dispatch on shape: train feeds [1, seq_len], val feeds [batch_size]
         if items.dim() == 2:
             return self._forward_km_train(user_ids, items, corrects)
         return self._forward_km_val(user_ids, items, corrects)
@@ -436,7 +384,7 @@ class ABKTTrainer(MultiTrainer):
         self, user_ids: torch.Tensor, items: torch.Tensor, corrects: torch.Tensor
     ) -> dict:
         """KM 阶段训练时的前向传播。"""
-        # batch_size=1，移除 batch 维
+        # Train loader uses batch_size=1; drop the singleton batch dim
         user_id = user_ids.item()
         items = items.squeeze(0).to(self.device_)
         corrects = corrects.squeeze(0).to(self.device_)
@@ -445,9 +393,9 @@ class ABKTTrainer(MultiTrainer):
         item_q = self.Q_matrix[items, :]
         item_k = self.km_model.item_k[items, :]
 
-        pred = IRT_2(user_k[:-1, :], item_k, item_q, self.args.km_guess).clamp(
-            1e-6, 1 - 1e-6
-        )
+        pred = IRT_2(
+            user_k[:-1, :], item_k, item_q, self.run_config.model.km_guess
+        ).clamp(1e-6, 1 - 1e-6)
 
         return {
             "y_hat": pred,
@@ -473,7 +421,6 @@ class ABKTTrainer(MultiTrainer):
         item_ids = item_ids.to(self.device_)
         corrects = corrects.to(self.device_)
 
-        # Step 1: 批量计算所有测试用户的最终知识状态
         test_user_state_dict = {}
         with torch.no_grad():
             for test_user_id in self.data["test_users"]:
@@ -485,12 +432,11 @@ class ABKTTrainer(MultiTrainer):
                     user_k, _, _ = self.km_model(test_user_id, train_items_tensor)
                     test_user_state_dict[test_user_id] = user_k[-1, :]
                 else:
-                    # 无训练数据的用户使用初始知识状态
+                    # Users without training history fall back to the initial knowledge state
                     test_user_state_dict[test_user_id] = torch.sigmoid(
                         self.km_model.user_initial_k[test_user_id, :]
                     )
 
-        # Step 2: 按测试样本的用户 ID 批量取知识状态
         user_states_k = torch.cat(
             [
                 test_user_state_dict[user_id].unsqueeze(0)
@@ -499,13 +445,11 @@ class ABKTTrainer(MultiTrainer):
             dim=0,
         )  # [batch_size, skill_num]
 
-        # Step 3: 批量取题目参数
         item_states_q = self.Q_matrix[item_ids, :]  # [batch_size, skill_num]
         item_state_k = self.km_model.item_k[item_ids, :]  # [batch_size, skill_num]
 
-        # Step 4: 批量 IRT 预测
         pred = IRT_2(
-            user_states_k, item_state_k, item_states_q, self.args.km_guess
+            user_states_k, item_state_k, item_states_q, self.run_config.model.km_guess
         ).clamp(1e-6, 1 - 1e-6)
 
         return {
@@ -533,7 +477,7 @@ class ABKTTrainer(MultiTrainer):
 
         am_pred, u_norm, i_norm = self.am_model(u_idx, i_idx)
 
-        if self.args.combine_mode == "mul":
+        if self.run_config.model.combine_mode == "mul":
             final_pred = am_pred * km_pred
         else:
             final_pred = am_pred + km_pred
@@ -550,7 +494,7 @@ class ABKTTrainer(MultiTrainer):
             "i_norm": i_norm,
         }
 
-        # 训练模式下有 g、w 列，用于 boosting 损失
+        # Training rows carry g/w columns for the boosting loss
         if batch.shape[1] >= 6:
             output["g"] = batch[:, 4]
             output["w"] = batch[:, 5]
@@ -559,6 +503,7 @@ class ABKTTrainer(MultiTrainer):
 
     def _compute_boosting_residuals(self):
         """基于训练好的 KM 模型计算 boosting 残差，并构建 AM 阶段所需数据。"""
+        m = self.run_config.model
         Q_matrix = self.Q_matrix
         train_sequences = self.data["train_sequences"]
         test_triplets = self.data["test_triplets"]
@@ -589,9 +534,9 @@ class ABKTTrainer(MultiTrainer):
                 item_q = Q_matrix[itemsq, :]
                 item_k = self.km_model.item_k[itemsq, :]
 
-                clip_pred = IRT_2(
-                    user_k[:-1, :], item_k, item_q, self.args.km_guess
-                ).clamp(self.args.pretrain_clip, 1 - self.args.pretrain_clip)
+                clip_pred = IRT_2(user_k[:-1, :], item_k, item_q, m.km_guess).clamp(
+                    m.pretrain_clip, 1 - m.pretrain_clip
+                )
 
                 user_final_states[user_id] = user_k[-1, :]
 
@@ -618,8 +563,8 @@ class ABKTTrainer(MultiTrainer):
                         user_k.unsqueeze(0),
                         item_k.unsqueeze(0),
                         item_q.unsqueeze(0),
-                        self.args.km_guess,
-                    ).clamp(self.args.pretrain_clip, 1 - self.args.pretrain_clip)
+                        m.km_guess,
+                    ).clamp(m.pretrain_clip, 1 - m.pretrain_clip)
                     test_triplet_list.append(
                         [user_id, item_id, correct, clip_pred.item()]
                     )

@@ -1,19 +1,20 @@
-"""Load ablation configs from JSON."""
+"""Load ablation configs from yaml (OmegaConf)."""
 
-import json
 from pathlib import Path
+
+from omegaconf import OmegaConf
 
 from utils.ablation.config import AblationConfig, AblationStudyConfig
 
 
 def load_config(config_path: str, dataset: str, fold: int = 0) -> AblationStudyConfig:
-    """Load ablation study config from JSON.
+    """Load ablation study config from a yaml file.
 
     Dataset and fold must be provided as parameters, not from the config file.
     Config file should contain study_name, base_model, shared_params, and ablations.
 
     Args:
-        config_path: Path to JSON config file
+        config_path: Path to yaml config file
         dataset: Dataset name (must be provided from command line)
         fold: Fold index for K-Fold cross-validation (default: 0)
 
@@ -22,12 +23,11 @@ def load_config(config_path: str, dataset: str, fold: int = 0) -> AblationStudyC
 
     Raises:
         FileNotFoundError: If config file doesn't exist
-        json.JSONDecodeError: If config file is not valid JSON
         KeyError: If required fields are missing
         ValueError: If dataset is not provided
 
     Example:
-        >>> config = load_config("configs/ablation/hgikt_study.json", dataset="assistments09", fold=0)
+        >>> config = load_config("configs/ablation/hgikt_study.yaml", dataset="assistments09", fold=0)
         >>> print(config.study_name)
         >>> print(config.dataset)  # returns "assistments09"
         >>> print(config.fold)  # returns 0
@@ -39,8 +39,7 @@ def load_config(config_path: str, dataset: str, fold: int = 0) -> AblationStudyC
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with open(config_file) as f:
-        data = json.load(f)
+    data = OmegaConf.to_container(OmegaConf.load(config_file), resolve=True)
 
     # Validate required fields
     required_fields = ["study_name", "base_model"]

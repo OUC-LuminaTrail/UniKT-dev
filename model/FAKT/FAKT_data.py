@@ -37,7 +37,7 @@ def _compute_gaps_1d(skills: np.ndarray, timestamps: np.ndarray):
         pcounts[t] = int(np.log2(cnt) + 1) if cnt > 0 else 0
 
         if prev_ts is not None:
-            dmin = (ts - prev_ts) / 60000.0  # 毫秒 -> 分钟
+            dmin = (ts - prev_ts) / 60000.0  # ms -> minutes
             if dmin >= 1.0:
                 sgaps[t] = int(np.log2(dmin) + 1)
 
@@ -159,23 +159,20 @@ class FAKTModelData(SkillModelData):
         self.num_pcount = 0
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练、验证和测试数据
 
         Returns:
             (train_dataset, val_dataset, test_dataset)
         """
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
-        # 1. 基础技能序列
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
         )
 
-        # 2. 时间间隔特征
         rgaps, sgaps, pcounts = self._compute_time_gaps()
 
-        # 3. K-fold 划分
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -198,14 +195,13 @@ class FAKTModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        # 4. windowlate 测试数据
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
 
         train_dataset = FAKTDataset(*train_data)
         val_dataset = FAKTDataset(*val_data)
         test_dataset = DataLoader(
             window_test_data,
-            batch_size=args.batch_size,
+            batch_size=rc.model.batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,

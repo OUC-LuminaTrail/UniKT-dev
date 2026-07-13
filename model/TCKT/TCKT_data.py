@@ -62,7 +62,7 @@ class TCKTModelData(QuestionModelData):
     """TCKT 模型数据加载器。"""
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练 / 验证 / 测试数据与模型所需的元信息。
 
         Returns:
@@ -74,15 +74,12 @@ class TCKTModelData(QuestionModelData):
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
 
-        # 问题序列（题目、答案、掩码）
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-        # 响应 / 间隔时间序列
         at_seq, it_seq, n_at, n_it = self._build_time_sequences(
-            max_seq_len, args.max_rt_seconds, args.max_it_minutes
+            max_seq_len, rc.model.max_rt_seconds, rc.model.max_it_minutes
         )
 
-        # Q-matrix 与主知识点
         q_matrix = self.build_relationship_matrix(("question", "has", "skill"))
         primary_skill = self._build_primary_skill(q_matrix)  # [num_questions]
         c_seq = primary_skill[user_sequence]
@@ -92,11 +89,10 @@ class TCKTModelData(QuestionModelData):
             f"n_at={n_at}, n_it={n_it}, max_seq_len={max_seq_len}"
         )
 
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         if fold_idx is None:
             raise ValueError("K-fold cross-validation is not enabled (fold < 0).")
 
-        # 按 fold 切分
         train_slices, val_slices, test_slices = self.split_kfold_data(
             user_sequence,
             user_response,
@@ -110,7 +106,6 @@ class TCKTModelData(QuestionModelData):
         (va_e, va_a, va_mask, va_at, va_it, va_c) = val_slices
         (te_e, te_a, te_mask, te_at, te_it, te_c) = test_slices
 
-        # 每题难度
         difficulty = self._compute_bayes_difficulty(tr_e, tr_a, tr_mask, num_questions)
 
         train_dataset = TCKTDataset(tr_e, tr_at, tr_a, tr_it, tr_c, tr_mask)
@@ -134,7 +129,6 @@ class TCKTModelData(QuestionModelData):
         }
         return train_dataset, val_dataset, test_dataset, info
 
-    # 时间序列构建
     def _build_time_sequences(
         self, max_seq_len: int, max_rt_seconds: int, max_it_minutes: int
     ):
@@ -149,7 +143,6 @@ class TCKTModelData(QuestionModelData):
         data = self.data_src.get_split_question_sequence_data()
         num_users = data["user"].n_unique()
 
-        # 取出需要的列，按 (user, seq_pos) 对齐。
         sub = data.select(
             ["user", "seq_pos", "ms_first_response", "timestamp"]
         ).to_pandas()
@@ -158,17 +151,17 @@ class TCKTModelData(QuestionModelData):
         ms = sub["ms_first_response"].to_numpy(dtype=np.float64)
         ts = sub["timestamp"].to_numpy(dtype=np.float64)
 
-        # 透视为 [N, S]，缺失 / 填充位置为 0。
+        # Pivot into [N, S] grids; missing/padded positions become 0.
         ms_grid = np.zeros((num_users, max_seq_len), dtype=np.float64)
         ts_grid = np.zeros((num_users, max_seq_len), dtype=np.float64)
         ms_grid[user_idx, seq_pos] = np.nan_to_num(ms, nan=0.0, posinf=0.0, neginf=0.0)
         ts_grid[user_idx, seq_pos] = np.nan_to_num(ts, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # 响应时间（秒），截断到 [0, max_rt_seconds]。
+        # Response time in seconds, truncated to [0, max_rt_seconds].
         rt_sec = np.floor(ms_grid / 1000.0)
         rt_sec = np.clip(rt_sec, 0, max_rt_seconds).astype(np.int32)
 
-        # 间隔时间（分钟）：行内相邻 timestamp 之差，首位置为 0，截断到 [0, max_it_minutes]。
+        # Interval time in minutes: adjacent timestamp diff per row, first position 0, truncated to [0, max_it_minutes].
         diff_ms = np.zeros_like(ts_grid)
         diff_ms[:, 1:] = ts_grid[:, 1:] - ts_grid[:, :-1]
         it_min = np.floor(diff_ms / 60000.0)
@@ -178,7 +171,6 @@ class TCKTModelData(QuestionModelData):
         n_it = int(max_it_minutes) + 1
         return rt_sec, it_min, n_at, n_it
 
-    # 主知识点
     @staticmethod
     def _build_primary_skill(q_matrix: np.ndarray) -> np.ndarray:
         """每题取第一个关联知识点作为主知识点；无关联则为 0。"""
@@ -187,10 +179,9 @@ class TCKTModelData(QuestionModelData):
         for q in range(num_questions):
             skills = np.where(q_matrix[q] > 0)[0]
             if skills.size > 0:
-                primary[q] = skills[0] + 1  # +1：0 留给“无知识点”（padding_idx）
+                primary[q] = skills[0] + 1  # +1: reserve 0 for “no skill” (padding_idx)
         return primary
 
-    # 贝叶斯难度（论文式 2）
     @staticmethod
     def _compute_bayes_difficulty(
         e: np.ndarray,

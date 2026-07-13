@@ -49,8 +49,8 @@ class DeepIRTModelData(SkillModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any) -> tuple:
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         user_sequence, user_response, user_mask, _, _ = self.build_sequence_data()
 
         if fold_idx is None:
@@ -72,16 +72,16 @@ class DeepIRTModelData(SkillModelData):
         train_dataset = DeepIRTDataset(train_data[0], train_data[1], train_data[2])
         val_dataset = DeepIRTDataset(val_data[0], val_data[1], val_data[2])
 
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
-        test_batch_size = getattr(args, "test_batch_size", args.batch_size)
-        test_num_workers = getattr(args, "test_num_workers", 4)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
+        test_batch_size = getattr(rc.model, "test_batch_size", rc.model.batch_size)
+        test_num_workers = getattr(rc.model, "test_num_workers", 4)
         test_loader_kwargs = {
             "batch_size": test_batch_size,
             "shuffle": False,
             "num_workers": test_num_workers,
-            "pin_memory": getattr(args, "test_pin_memory", True),
+            "pin_memory": getattr(rc.model, "test_pin_memory", True),
         }
-        test_prefetch_factor = getattr(args, "test_prefetch_factor", 2)
+        test_prefetch_factor = getattr(rc.model, "test_prefetch_factor", 2)
         if test_num_workers > 0 and test_prefetch_factor is not None:
             test_loader_kwargs["prefetch_factor"] = test_prefetch_factor
         test_dataset = DataLoader(window_test_data, **test_loader_kwargs)

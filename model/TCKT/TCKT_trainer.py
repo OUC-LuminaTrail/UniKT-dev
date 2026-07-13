@@ -7,118 +7,74 @@
        交互嵌入做 MiniBatchKMeans 聚类，得到 N 个中心，更新模型的全局字典缓冲区
        （论文 4.3 节“dictionary is updated during the end-to-end training”）。
 
-原作者代码缺失训练基础设施（``KTM`` 类）与全局聚类生成；前者由 ``BaseTrainer`` 替代，
-后者由此处的 :class:`GlobalDictRefreshCallback` + :meth:`refresh_global_dict` 补全。
+训练基础设施（``KTM`` 类）由 ``BaseTrainer`` 提供，全局聚类生成由此处的
+:class:`GlobalDictRefreshCallback` + :meth:`refresh_global_dict` 实现。
 """
 
 from __future__ import annotations
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
 from torch import nn
 
-from utils.config import (
-    BaseParamConfig,
-    EarlyStoppingConfig,
-    register_model_params,
-)
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 from utils.training.callbacks import Callback
 
 logger = get_logger(__name__)
 
 
-@register_model_params("TCKT")
-class TCKTModelParams(BaseParamConfig):
-    """TCKT 模型超参数。"""
+@register_model_config("TCKT")
+@dataclass
+class TCKTConfig(ModelConfig):
+    """TCKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "TCKT Parameters"
-        params = {
-            "d_k": {"type": int, "default": 128, "help": "Hidden dimension d_k"},
-            "d_a": {
-                "type": int,
-                "default": 64,
-                "help": "Expansion dim for answer / difficulty (paper d_a)",
-            },
-            "d_e": {"type": int, "default": 128, "help": "Exercise embedding dim"},
-            "num_heads": {"type": int, "default": 8, "help": "Attention heads"},
-            "dropout": {"type": float, "default": 0.2, "help": "Dropout rate"},
-            "q_gamma": {
-                "type": float,
-                "default": 0.03,
-                "help": "Q-matrix smoothing factor",
-            },
-            "global_dict_size": {
-                "type": int,
-                "default": 400,
-                "help": "Global dictionary size N (K-Means clusters)",
-            },
-            "max_rt_seconds": {
-                "type": int,
-                "default": 300,
-                "help": "Response time cap in seconds (n_at = this + 1)",
-            },
-            "max_it_minutes": {
-                "type": int,
-                "default": 120,
-                "help": "Interval time cap in minutes (n_it = this + 1)",
-            },
-            "cluster_sample_size": {
-                "type": int,
-                "default": 300000,
-                "help": "Max interactions sampled for K-Means each epoch",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 0.002,
-                "short": "lr",
-                "help": "Learning rate",
-            },
-            "adam_beta1": {
-                "type": float,
-                "default": 0.1,
-                "help": "Adam beta1 (reference code uses 0.1)",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-6,
-                "short": "wd",
-                "help": "Weight decay",
-            },
-            "max_grad_norm": {
-                "type": float,
-                "default": 1.0,
-                "short": "mgn",
-                "help": "Max gradient norm for clipping, 0 disables",
-            },
-            "lr_decay_step": {
-                "type": int,
-                "default": 10,
-                "help": "StepLR step size",
-            },
-            "lr_decay_rate": {
-                "type": float,
-                "default": 0.5,
-                "help": "StepLR gamma",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 32,
-                "short": "bs",
-                "help": "Batch size",
-            },
-        }
-        return group_name, params
+    d_k: int = field(default=128, metadata={"help": "Hidden dimension d_k"})
+    d_a: int = field(
+        default=64,
+        metadata={"help": "Expansion dim for answer / difficulty (paper d_a)"},
+    )
+    d_e: int = field(default=128, metadata={"help": "Exercise embedding dim"})
+    num_heads: int = field(default=8, metadata={"help": "Attention heads"})
+    dropout: float = field(default=0.2, metadata={"help": "Dropout rate"})
+    q_gamma: float = field(default=0.03, metadata={"help": "Q-matrix smoothing factor"})
+    global_dict_size: int = field(
+        default=400, metadata={"help": "Global dictionary size N (K-Means clusters)"}
+    )
+    max_rt_seconds: int = field(
+        default=300,
+        metadata={"help": "Response time cap in seconds (n_at = this + 1)"},
+    )
+    max_it_minutes: int = field(
+        default=120,
+        metadata={"help": "Interval time cap in minutes (n_it = this + 1)"},
+    )
+    cluster_sample_size: int = field(
+        default=300000,
+        metadata={"help": "Max interactions sampled for K-Means each epoch"},
+    )
+    learning_rate: float = field(
+        default=0.002, metadata={"help": "Learning rate", "short": "lr"}
+    )
+    adam_beta1: float = field(
+        default=0.1, metadata={"help": "Adam beta1 (reference code uses 0.1)"}
+    )
+    weight_decay: float = field(
+        default=1e-6, metadata={"help": "Weight decay", "short": "wd"}
+    )
+    max_grad_norm: float = field(
+        default=1.0,
+        metadata={"help": "Max gradient norm for clipping, 0 disables", "short": "mgn"},
+    )
+    lr_decay_step: int = field(default=10, metadata={"help": "StepLR step size"})
+    lr_decay_rate: float = field(default=0.5, metadata={"help": "StepLR gamma"})
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    batch_size: int = field(default=32, metadata={"help": "Batch size", "short": "bs"})
 
 
 class GlobalDictRefreshCallback(Callback):
@@ -140,12 +96,7 @@ class GlobalDictRefreshCallback(Callback):
 class TCKTTrainer(BaseTrainer):
     """TCKT 训练器。"""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        from model.TCKT.TCKT_data import TCKTModelData
-        from model.TCKT.TCKT_model import TCKTNet
-
+    def build_components(self, rc, data_src):
         # Force the math SDP backend for nn.MultiheadAttention. PyTorch >=2.x
         # defaults to flash / memory-efficient attention, whose backward kernel
         # returns NaN gradients once this model's attention becomes peaked (which
@@ -157,75 +108,59 @@ class TCKTTrainer(BaseTrainer):
         torch.backends.cuda.enable_flash_sdp(False)
         torch.backends.cuda.enable_math_sdp(True)
 
-        # 数据
-        model_data = TCKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset, info = model_data.prepare_data(args)
+        from model.TCKT.TCKT_data import TCKTModelData
+        from model.TCKT.TCKT_model import TCKTNet
 
-        # 模型
+        train_dataset, val_dataset, test_dataset, info = TCKTModelData(
+            data_src
+        ).prepare_data(rc)
+        m = rc.model
         model = TCKTNet(
             num_questions=info["num_questions"],
             num_skills=info["num_skills"],
             n_at=info["n_at"],
             n_it=info["n_it"],
-            d_k=args.d_k,
-            d_a=args.d_a,
-            d_e=args.d_e,
-            num_heads=args.num_heads,
+            d_k=m.d_k,
+            d_a=m.d_a,
+            d_e=m.d_e,
+            num_heads=m.num_heads,
             seq_len=info["max_seq_len"],
-            global_dict_size=args.global_dict_size,
-            dropout=args.dropout,
+            global_dict_size=m.global_dict_size,
+            dropout=m.dropout,
         )
-        model.set_q_matrix(info["q_matrix"], args.q_gamma)
+        model.set_q_matrix(info["q_matrix"], m.q_gamma)
         model.set_difficulty(info["difficulty"])
 
-        # 记录聚类相关配置，供回调使用。
-        self.global_dict_size = args.global_dict_size
-        self.cluster_sample_size = args.cluster_sample_size
+        # Clustering config used by the refresh callback.
+        self.global_dict_size = m.global_dict_size
+        self.cluster_sample_size = m.cluster_sample_size
+        # refresh_global_dict seeds its K-Means clustering from this attribute.
+        self.seed = rc.general.seed
 
-        # 优化器 / 损失 / 调度器
         loss_fn = nn.BCELoss(reduction="none")
         optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=args.learning_rate,
+            lr=m.learning_rate,
             eps=1e-8,
-            betas=(args.adam_beta1, 0.999),
-            weight_decay=args.weight_decay,
+            betas=(m.adam_beta1, 0.999),
+            weight_decay=m.weight_decay,
         )
         lr_scheduler = torch.optim.lr_scheduler.StepLR(
-            optimizer, step_size=args.lr_decay_step, gamma=args.lr_decay_rate
+            optimizer, step_size=m.lr_decay_step, gamma=m.lr_decay_rate
         )
-
-        super().__init__(model)
-
-        early_stopping_cfg = EarlyStoppingConfig(
-            monitor=getattr(args, "es_monitor", "auc"),
-            mode=getattr(args, "es_mode", "max"),
-            patience=getattr(args, "es_patience", 10),
-            min_delta=getattr(args, "es_min_delta", 0.0),
-        )
-
-        self.with_callbacks(callbacks=[GlobalDictRefreshCallback(self)]).with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            max_clip_grad_norm=args.max_grad_norm or None,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="TCKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            max_clip_grad_norm=m.max_grad_norm or None,
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
+
+    def build_callbacks(self):
+        return [GlobalDictRefreshCallback(self)]
 
     def forward_pass(self, batch_data: tuple) -> dict[str, torch.Tensor]:
         """TCKT 前向传播。
@@ -282,7 +217,7 @@ class TCKTTrainer(BaseTrainer):
             emb = x[mask].detach().cpu().numpy().astype(np.float32)
             chunks.append(emb)
             collected += emb.shape[0]
-            # 控制峰值内存：累积到 2 倍上限时先抽样合并一次。
+            # Cap peak memory: once we accumulate 2x the cap, sample-merge back down.
             if collected >= cap * 2:
                 merged = np.concatenate(chunks, axis=0)
                 idx = rng.choice(merged.shape[0], cap, replace=False)
@@ -294,7 +229,7 @@ class TCKTTrainer(BaseTrainer):
             idx = rng.choice(embeds.shape[0], cap, replace=False)
             embeds = embeds[idx]
 
-        # 样本数不足簇数时，用重复采样补齐（保证 K-Means 能产出 N 个中心）。
+        # If fewer samples than clusters, upsample with replacement so K-Means yields N centers.
         n_samples = embeds.shape[0]
         if n_samples < self.global_dict_size:
             idx = rng.choice(n_samples, self.global_dict_size, replace=True)

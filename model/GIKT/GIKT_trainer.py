@@ -1,126 +1,140 @@
 """GIKT 模型训练器。"""
 
+from dataclasses import dataclass, field
+
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
-__all__ = ["GIKTTrainer", "GIKTModelParams"]
+__all__ = ["GIKTTrainer", "GIKTConfig"]
 
 
-@register_model_params("GIKT")
-class GIKTModelParams(BaseParamConfig):
-    def define_params(self) -> tuple[str, dict]:
-        return "GIKT Parameters", {
-            # 多跳采样聚合
-            "n_hop": {
-                "type": int,
-                "default": 3,
-                "short": "nh",
-                "help": "Number of GNN aggregation hops (default: 3)",
-            },
-            "skill_neighbor_num": {
-                "type": int,
-                "default": 4,
-                "help": "Number of skill neighbors sampled per hop (default: 4)",
-            },
-            "question_neighbor_num": {
-                "type": int,
-                "default": 4,
-                "help": "Number of question neighbors sampled per hop (default: 4)",
-            },
-            "hist_neighbor_num": {
-                "type": int,
-                "default": 3,
-                "short": "hn",
-                "help": "Number of historical neighbor samples M (default: 3)",
-            },
-            "next_neighbor_num": {
-                "type": int,
-                "default": 4,
-                "short": "nn",
-                "help": "Number of next-question neighbor samples N (default: 4)",
-            },
-            "att_bound": {
-                "type": float,
-                "default": 0.7,
-                "help": "Similarity threshold (default: 0.7)",
-            },
-            "aggregator": {
-                "type": str,
-                "default": "sum",
-                "help": "Aggregator type: sum or concat (default: sum)",
-            },
-            "variant": {
-                "type": str,
-                "default": "hsei",
-                "help": "History sampling variant: hssi/hsei (same skill) or ssei/dkt (similarity) (default: hsei)",
-            },
-            "sim_emb": {
-                "type": str,
-                "default": "question_emb",
-                "help": "Similarity embedding: skill_emb/question_emb/feature (default: question_emb)",
-            },
-            # 维度
-            "embedding_dim": {
-                "type": int,
-                "default": 100,
-                "short": "ed",
-                "help": "Embedding dimension (default: 100)",
-            },
-            "hidden_neurons": {
-                "type": int,
-                "default": [200, 100],
-                "nargs": "+",
-                "help": "Hidden sizes for each LSTM layer; last layer must equal embedding_dim (default: [200, 100])",
-            },
-            "dropout_probs": {
-                "type": float,
-                "default": [0.2, 0.2, 0.0],
-                "nargs": "+",
-                "help": "Keep probabilities for [LSTM, GNN, eval] (default: [0.2, 0.2, 0.0])",
-            },
-            # 训练
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs (default: 100)",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 0.001,
-                "short": "lr",
-                "help": "Learning rate (default: 0.001)",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch (default: no decay)",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-8,
-                "short": "wd",
-                "help": "Weight decay (default: 1e-8)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 32,
-                "short": "bs",
-                "help": "Batch size (default: 32)",
-            },
-        }
+@register_model_config("GIKT")
+@dataclass
+class GIKTConfig(ModelConfig):
+    """GIKT model configuration."""
+
+    n_hop: int = field(
+        default=3,
+        metadata={
+            "help": "Number of GNN aggregation hops",
+            "short": "nh",
+            "optuna": {"type": "int", "low": 1, "high": 5},
+        },
+    )
+    skill_neighbor_num: int = field(
+        default=4,
+        metadata={
+            "help": "Number of skill neighbors sampled per hop",
+            "optuna": {"type": "int", "low": 2, "high": 10},
+        },
+    )
+    question_neighbor_num: int = field(
+        default=4,
+        metadata={
+            "help": "Number of question neighbors sampled per hop",
+            "optuna": {"type": "int", "low": 2, "high": 10},
+        },
+    )
+    hist_neighbor_num: int = field(
+        default=3,
+        metadata={
+            "help": "Number of historical neighbor samples M",
+            "short": "hn",
+            "optuna": {"type": "int", "low": 3, "high": 10},
+        },
+    )
+    next_neighbor_num: int = field(
+        default=4,
+        metadata={
+            "help": "Number of next-question neighbor samples N",
+            "short": "nn",
+            "optuna": {"type": "int", "low": 2, "high": 10},
+        },
+    )
+    att_bound: float = field(
+        default=0.7,
+        metadata={
+            "help": "Similarity threshold",
+            "optuna": {"type": "float", "low": 0.0, "high": 0.8},
+        },
+    )
+    aggregator: str = field(
+        default="sum", metadata={"help": "Aggregator type: sum or concat"}
+    )
+    variant: str = field(
+        default="hsei",
+        metadata={
+            "help": "History sampling variant: hssi/hsei (same skill) or ssei/dkt (similarity)"
+        },
+    )
+    sim_emb: str = field(
+        default="question_emb",
+        metadata={"help": "Similarity embedding: skill_emb/question_emb/feature"},
+    )
+    embedding_dim: int = field(
+        default=100,
+        metadata={
+            "help": "Embedding dimension",
+            "short": "ed",
+            "optuna": {"type": "int", "low": 64, "high": 256, "log": True},
+        },
+    )
+    hidden_neurons: list[int] = field(
+        default_factory=lambda: [200, 100],
+        metadata={
+            "help": "Hidden sizes for each LSTM layer; last layer must equal embedding_dim",
+            "nargs": "+",
+        },
+    )
+    dropout_probs: list[float] = field(
+        default_factory=lambda: [0.2, 0.2, 0.0],
+        metadata={
+            "help": "Dropout probabilities for [LSTM, GNN, eval]",
+            "nargs": "+",
+        },
+    )
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={
+            "help": "Learning rate",
+            "short": "lr",
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True},
+        },
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=1e-8,
+        metadata={
+            "help": "Weight decay",
+            "short": "wd",
+            "optuna": {"type": "float", "low": 0.000001, "high": 0.001, "log": True},
+        },
+    )
+    batch_size: int = field(
+        default=32,
+        metadata={
+            "help": "Batch size",
+            "short": "bs",
+            "optuna": {"type": "categorical", "choices": [32, 64, 128, 256]},
+        },
+    )
 
 
 @register_trainer("GIKT")
 class GIKTTrainer(BaseTrainer):
     """GIKT 模型训练器。"""
 
-    def __init__(self, args=None, data_src=None, exp_manager=None):
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.GIKT.GIKT_data import GIKTModelData
         from model.GIKT.GIKT_model import GIKT
 
@@ -134,60 +148,64 @@ class GIKTTrainer(BaseTrainer):
             self.num_questions,
             train_collate_fn,
             val_collate_fn,
-        ) = model_data.prepare_data(args)
+        ) = model_data.prepare_data(rc)
 
         logger.info("Initializing GIKT model...")
-        model = GIKT(args=args, data_metadata=data_src.get_metadata())
-        super().__init__(model)
+        m = rc.model
+        model = GIKT(
+            data_metadata=data_src.get_metadata(),
+            embedding_dim=m.embedding_dim,
+            hidden_neurons=list(m.hidden_neurons),
+            dropout_probs=list(m.dropout_probs),
+            n_hop=m.n_hop,
+            skill_neighbor_num=m.skill_neighbor_num,
+            question_neighbor_num=m.question_neighbor_num,
+            hist_neighbor_num=m.hist_neighbor_num,
+            next_neighbor_num=m.next_neighbor_num,
+            att_bound=m.att_bound,
+            aggregator=m.aggregator,
+            variant=m.variant,
+            sim_emb=m.sim_emb,
+        )
 
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
         lr_scheduler = (
-            torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.lr_decay)
-            if args.lr_decay
+            torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=m.lr_decay)
+            if m.lr_decay
             else None
         )
-        early_stopping_cfg = EarlyStoppingConfig(
-            monitor=args.es_monitor,
-            mode=args.es_mode,
-            patience=args.es_patience,
-            min_delta=args.es_min_delta,
+
+        # Move static graph data to device and bind the shared embedding table.
+        # build_components runs before BaseTrainer.build() sets self.device_, so
+        # derive the device from rc the same way build() does.
+        dev = rc.general.device
+        device = (
+            torch.device(dev)
+            if dev
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-            collate_fn=train_collate_fn,
-            val_collate_fn=val_collate_fn,
-        ).with_optimization(
-            optimizer=optimizer,
-            loss_fn=torch.nn.BCEWithLogitsLoss(),
-            lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="GIKT",
-            dataset_name=args.dataset,
-        ).build()
-
-        # 静态图数据移到设备，并绑定共享嵌入表
         self.graph_data = {
-            key: value.to(self.device_) if hasattr(value, "to") else value
+            key: value.to(device) if hasattr(value, "to") else value
             for key, value in self.graph_data.items()
         }
-        self.graph_data["feature_embedding"] = self.model.feature_embedding.weight
+        self.graph_data["feature_embedding"] = model.feature_embedding.weight
 
         logger.info(
             f"GIKT Trainer: {self.num_skills} skills, {self.num_questions} questions"
+        )
+
+        return RuntimeComponents(
+            model=model,
+            optimizer=optimizer,
+            loss_fn=torch.nn.BCEWithLogitsLoss(),
+            lr_scheduler=lr_scheduler,
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+            collate_fn=train_collate_fn,
+            val_collate_fn=val_collate_fn,
         )
 
     def forward_pass(self, batch_data):

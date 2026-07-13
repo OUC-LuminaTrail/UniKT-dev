@@ -60,8 +60,8 @@ class LBKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args):
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc):
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
         if fold_idx is None:
@@ -83,7 +83,7 @@ class LBKTModelData(QuestionModelData):
             user_hint_factor,
         ) = self.load_sequence_data_with_factors(fold_idx=fold_idx)
 
-        q_matrix = self.build_q_matrix(gamma=args.q_gamma)
+        q_matrix = self.build_q_matrix(gamma=rc.model.q_gamma)
 
         train_data, val_data, test_data = self.split_kfold_data(
             user_sequence,
@@ -185,13 +185,13 @@ class LBKTModelData(QuestionModelData):
         question_stats = stats_df.groupby("question")["_log_time"].agg(["mean", "std"])
         question_stats["std"] = question_stats["std"].fillna(0)
 
-        # 训练集未覆盖的 question 回退到训练折全局统计
+        # Questions unseen in the training fold fall back to global training-fold statistics
         global_mean = float(stats_log_times.mean())
         global_std = float(stats_log_times.std())
         if np.isnan(global_std):
             global_std = 0.0
 
-        # 向量化：通过 map 查表获取每行的 mean/std，一次性计算 CDF
+        # Vectorized: map-lookup per-row mean/std, then compute CDF in one pass
         means = valid_questions.map(question_stats["mean"]).values.astype(np.float64)
         stds = valid_questions.map(question_stats["std"]).values.astype(np.float64)
 
@@ -222,7 +222,7 @@ class LBKTModelData(QuestionModelData):
         mean_attempts = train_data.groupby("question")["attempt_count"].mean()
         mean_per_row = data["question"].map(mean_attempts).values.astype(np.float64)
 
-        # 训练集未覆盖的 question 回退到训练折全局平均尝试次数
+        # Questions unseen in the training fold fall back to the global mean attempt count
         global_mean = float(train_data["attempt_count"].mean())
         mean_per_row[np.isnan(mean_per_row)] = global_mean
 
@@ -240,7 +240,7 @@ class LBKTModelData(QuestionModelData):
         mean_hints_series = train_data.groupby("question")["hint_count"].mean()
         mean_hints = data["question"].map(mean_hints_series).values.astype(np.float64)
 
-        # 训练集未覆盖的 question 回退到训练折全局平均提示次数
+        # Questions unseen in the training fold fall back to the global mean hint count
         global_mean = float(train_data["hint_count"].mean())
         mean_hints[np.isnan(mean_hints)] = global_mean
 

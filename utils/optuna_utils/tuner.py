@@ -1,13 +1,13 @@
 """Optuna tuner wrapper and utility tools."""
 
-import json
 import os
 from collections.abc import Callable
-from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import optuna
+from omegaconf import OmegaConf
 from optuna.samplers import GridSampler
 
 from utils.core import get_logger
@@ -186,39 +186,38 @@ class OptunaTuner:
             return {}
 
     def _save_results(self):
-        """Save search results to disk."""
+        """Save search results to disk as yaml."""
         if not self.study or not self.config.save_dir:
             return
 
         os.makedirs(self.config.save_dir, exist_ok=True)
 
-        # Save best parameters
-        best_params_path = os.path.join(self.config.save_dir, "best_params.json")
-        with open(best_params_path, "w") as f:
-            json.dump(self._best_params(), f, indent=2)
+        # Best parameters
+        best_params_path = os.path.join(self.config.save_dir, "best_params.yaml")
+        Path(best_params_path).write_text(
+            OmegaConf.to_yaml(OmegaConf.create(self._best_params())), encoding="utf-8"
+        )
 
-        # Save search history
-        history_path = os.path.join(self.config.save_dir, "search_history.json")
-        trials_data = []
-        for trial in self.study.trials:
-            trials_data.append(
-                {
-                    "number": trial.number,
-                    "value": trial.value,
-                    "params": trial.params,
-                    "state": trial.state.name,
-                }
-            )
-        with open(history_path, "w") as f:
-            json.dump(trials_data, f, indent=2)
+        # Search history
+        history_path = os.path.join(self.config.save_dir, "search_history.yaml")
+        trials_data = [
+            {
+                "number": trial.number,
+                "value": trial.value,
+                "params": trial.params,
+                "state": trial.state.name,
+            }
+            for trial in self.study.trials
+        ]
+        Path(history_path).write_text(
+            OmegaConf.to_yaml(OmegaConf.create(trials_data)), encoding="utf-8"
+        )
 
-        # Save configuration
-        config_path = os.path.join(self.config.save_dir, "optuna_config.json")
-        config_dict = asdict(self.config)
-        config_dict["sampler_kwargs"] = str(config_dict.get("sampler_kwargs", {}))
-        config_dict["pruner_kwargs"] = str(config_dict.get("pruner_kwargs", {}))
-        with open(config_path, "w") as f:
-            json.dump(config_dict, f, indent=2)
+        # Configuration echo
+        config_path = os.path.join(self.config.save_dir, "optuna_config.yaml")
+        Path(config_path).write_text(
+            OmegaConf.to_yaml(OmegaConf.structured(self.config)), encoding="utf-8"
+        )
 
         logger.info(f"Results saved to {self.config.save_dir}")
 

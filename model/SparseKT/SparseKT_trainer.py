@@ -1,134 +1,89 @@
 """SparseKT 模型训练器模块"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("SparseKT")
-class SparseKTModelParams(BaseParamConfig):
-    """SparseKT 模型参数配置
+@register_model_config("SparseKT")
+@dataclass
+class SparseKTConfig(ModelConfig):
+    """SparseKT model configuration.
 
-    Args:
-        d_model: 模型维度
-        n_blocks: Transformer 块数量
-        n_heads: 注意力头数量
-        dropout: Dropout 概率
-        d_ff: 前馈网络维度
-        kq_same: 是否共享 key 和 query 的权重
-        separate_qa: 是否使用独立的交互嵌入
-        final_fc_dim: 第一层全连接层维度
-        final_fc_dim2: 第二层全连接层维度
-        emb_type: 嵌入/注意力类型，决定稀疏化策略
-            ("qid_sparseattn" / "qid_accumulative" / "qid")
-        sparse_ratio: 累积稀疏化的累计阈值（仅 accumulative 模式使用）
-        k_index: top-k 稀疏注意力保留的分数数量
+    emb_type decides the sparsification strategy:
+        - "qid_sparseattn": top-k sparse attention
+        - "qid_accumulative": cumulative-threshold sparse attention
+        - "qid": dense attention
     """
 
-    def define_params(self) -> tuple[str, dict]:
-        """定义模型参数"""
-        group_name = "SparseKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Dimension of the model",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 2,
-                "help": "Number of transformer blocks",
-            },
-            "n_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of attention heads",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 256,
-                "help": "Dimension of feed-forward network",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether to share key and query weights (1 for yes, 0 for no)",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate interaction embedding (1 for yes, 0 for no)",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 512,
-                "help": "First fully connected layer dimension in output",
-            },
-            "final_fc_dim2": {
-                "type": int,
-                "default": 256,
-                "help": "Second fully connected layer dimension in output",
-            },
-            "emb_type": {
-                "type": str,
-                "default": "qid_sparseattn",
-                "help": (
-                    "Embedding/attention type. 'qid_sparseattn' (top-k sparse), "
-                    "'qid_accumulative' (cumulative-threshold sparse), 'qid' (dense)"
-                ),
-            },
-            "sparse_ratio": {
-                "type": float,
-                "default": 0.8,
-                "help": "Cumulative sum threshold for accumulative sparse attention",
-            },
-            "k_index": {
-                "type": int,
-                "default": 5,
-                "help": "Number of top-k attention scores kept in sparseattn mode",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-4,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(default=256, metadata={"help": "Dimension of the model"})
+    n_blocks: int = field(default=2, metadata={"help": "Number of transformer blocks"})
+    n_heads: int = field(default=8, metadata={"help": "Number of attention heads"})
+    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
+    d_ff: int = field(
+        default=256, metadata={"help": "Dimension of feed-forward network"}
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={"help": "Whether to share key and query weights (1 yes, 0 no)"},
+    )
+    separate_qa: int = field(
+        default=0,
+        metadata={
+            "help": "Whether to use separate interaction embedding (1 yes, 0 no)"
+        },
+    )
+    final_fc_dim: int = field(
+        default=512,
+        metadata={"help": "First fully connected layer dimension in output"},
+    )
+    final_fc_dim2: int = field(
+        default=256,
+        metadata={"help": "Second fully connected layer dimension in output"},
+    )
+    emb_type: str = field(
+        default="qid_sparseattn",
+        metadata={
+            "help": (
+                "Embedding/attention type. 'qid_sparseattn' (top-k sparse), "
+                "'qid_accumulative' (cumulative-threshold sparse), 'qid' (dense)"
+            )
+        },
+    )
+    sparse_ratio: float = field(
+        default=0.8,
+        metadata={"help": "Cumulative sum threshold for accumulative sparse attention"},
+    )
+    k_index: int = field(
+        default=5,
+        metadata={"help": "Number of top-k attention scores kept in sparseattn mode"},
+    )
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("SparseKT")
@@ -138,26 +93,23 @@ class SparseKTTrainer(BaseTrainer):
     负责初始化 SparseKT 模型、优化器和训练数据，并实现前向传播逻辑。
 
     Args:
-        args: 模型参数配置
+        rc: RunConfig (OmegaConf DictConfig)
         data_src: 数据源实例
         exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        # 准备数据
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.SparseKT.SparseKT_data import SparseKTModelData
 
         model_data = SparseKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
-        # 初始化模型
         from model.SparseKT.SparseKT_model import SparseKT
 
+        m = rc.model
         logger.info(
-            f"Initializing SparseKT model (emb_type={args.emb_type}, "
-            f"k_index={args.k_index}, sparse_ratio={args.sparse_ratio})..."
+            f"Initializing SparseKT model (emb_type={m.emb_type}, "
+            f"k_index={m.k_index}, sparse_ratio={m.sparse_ratio})..."
         )
         metadata = data_src.get_metadata()
         n_pid = metadata["num_questions"]
@@ -166,70 +118,41 @@ class SparseKTTrainer(BaseTrainer):
         model = SparseKT(
             num_skills=metadata["num_skills"],
             n_pid=n_pid,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            n_heads=args.n_heads,
-            seq_len=args.max_seq_len,
-            kq_same=args.kq_same,
-            separate_qa=bool(args.separate_qa),
-            final_fc_dim=args.final_fc_dim,
-            final_fc_dim2=args.final_fc_dim2,
-            emb_type=args.emb_type,
-            sparse_ratio=args.sparse_ratio,
-            k_index=args.k_index,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            d_ff=m.d_ff,
+            n_heads=m.n_heads,
+            seq_len=rc.data.max_seq_len,
+            kq_same=m.kq_same,
+            separate_qa=bool(m.separate_qa),
+            final_fc_dim=m.final_fc_dim,
+            final_fc_dim2=m.final_fc_dim2,
+            emb_type=m.emb_type,
+            sparse_ratio=m.sparse_ratio,
+            k_index=m.k_index,
         )
 
-        # 创建优化器和损失函数
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
-        # 创建学习率调度器
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        # 初始化基类训练器
-        super().__init__(model)
-
-        # 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 配置训练器
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="SparseKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _build_pid_data(
         self,
@@ -255,7 +178,6 @@ class SparseKTTrainer(BaseTrainer):
         Returns:
             包含 y_hat, y_label, y_predict 的字典
         """
-        # 解包数据并移动到设备
         sequence, response, mask, question = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
@@ -264,18 +186,14 @@ class SparseKTTrainer(BaseTrainer):
 
         pid_data = self._build_pid_data(question, mask)
 
-        # 模型前向传播
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
-        # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )
 
-        # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
         return {
@@ -314,12 +232,8 @@ class SparseKTTrainer(BaseTrainer):
         valid_mask = late_group_id >= 0
         pid_data = self._build_pid_data(question, valid_mask)
 
-        # 模型前向传播
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
-        # SparseKT 预测对齐
-        # y_hat[:, t] 预测的是 response[t]
-        # 使用 mask 筛选需要预测的位置（只有 mask=1 的位置需要预测）
         y_hat = torch.masked_select(y_hat_full, mask)
         y_label = torch.masked_select(true_labels, mask).float()
         group_ids = torch.masked_select(late_group_id, mask)

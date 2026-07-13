@@ -12,7 +12,9 @@ from .callbacks import (
     EarlyStoppingCallback,
     FunctionCallback,
     MemoryCleanupCallback,
+    TestEvaluationCallback,
 )
+from .early_stopping import EarlyStopping
 from .metric_logger import (
     LocalMetricLogger,
     MetricLogger,
@@ -22,12 +24,14 @@ from .metric_logger import (
 )
 from .metrics import MetricsAccumulator
 from .multi_trainer import MultiTrainer, StageComponents, StageConfig
+from .runtime_components import RuntimeComponents
 
 __all__ = [
     "BaseTrainer",
     "Callback",
     "CallbackManager",
     "CheckpointCallback",
+    "EarlyStopping",
     "EarlyStoppingCallback",
     "FunctionCallback",
     "LocalMetricLogger",
@@ -35,10 +39,12 @@ __all__ = [
     "MetricLogger",
     "MetricsAccumulator",
     "MultiTrainer",
+    "RuntimeComponents",
     "StageComponents",
     "StageConfig",
     "StageResult",
     "SwanLabMetricLogger",
+    "TestEvaluationCallback",
     "build_default_metric_loggers",
     "get_metric_logger",
 ]

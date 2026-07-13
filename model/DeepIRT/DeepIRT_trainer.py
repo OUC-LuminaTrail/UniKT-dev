@@ -1,177 +1,123 @@
 """DeepIRT trainer."""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("DeepIRT")
-class DeepIRTModelParams(BaseParamConfig):
-    """DeepIRT model parameter configuration."""
+@register_model_config("DeepIRT")
+@dataclass
+class DeepIRTConfig(ModelConfig):
+    """DeepIRT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DeepIRT Parameters"
-        params = {
-            "dim_s": {
-                "type": int,
-                "default": 200,
-                "help": "State dimension of key/value memory vectors",
-            },
-            "size_m": {
-                "type": int,
-                "default": 50,
-                "help": "Number of memory slots",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability before ability/difficulty layers",
-            },
-            "emb_type": {
-                "type": str,
-                "default": "qid",
-                "choices": ["qid"],
-                "help": "Embedding type; DeepIRT qid path is supported",
-            },
-            "irt_scale": {
-                "type": float,
-                "default": 3.0,
-                "help": "Scale applied to student ability in the IRT head",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for Adam optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay for Adam optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-            "test_batch_size": {
-                "type": int,
-                "default": 64,
-                "help": "Batch size for windowlate test evaluation",
-            },
-            "test_num_workers": {
-                "type": int,
-                "default": 0,
-                "help": "Number of DataLoader workers for windowlate test evaluation",
-            },
-            "test_pin_memory": {
-                "type": bool,
-                "default": False,
-                "help": "Use pinned memory for windowlate test DataLoader",
-            },
-            "test_prefetch_factor": {
-                "type": int,
-                "default": None,
-                "help": "DataLoader prefetch factor for windowlate test evaluation",
-            },
-            "max_grad_norm": {
-                "type": float,
-                "default": None,
-                "help": "Max gradient norm for clipping; None disables clipping",
-            },
-        }
-        return group_name, params
+    dim_s: int = field(
+        default=200, metadata={"help": "State dimension of key/value memory vectors"}
+    )
+    size_m: int = field(default=50, metadata={"help": "Number of memory slots"})
+    dropout: float = field(
+        default=0.2,
+        metadata={"help": "Dropout probability before ability/difficulty layers"},
+    )
+    emb_type: str = field(
+        default="qid",
+        metadata={
+            "choices": ["qid"],
+            "help": "Embedding type; DeepIRT qid path is supported",
+        },
+    )
+    irt_scale: float = field(
+        default=3.0,
+        metadata={"help": "Scale applied to student ability in the IRT head"},
+    )
+    epochs: int = field(
+        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for Adam optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0, metadata={"help": "Weight decay for Adam optimizer", "short": "wd"}
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
+    test_batch_size: int = field(
+        default=64, metadata={"help": "Batch size for windowlate test evaluation"}
+    )
+    test_num_workers: int = field(
+        default=0,
+        metadata={
+            "help": "Number of DataLoader workers for windowlate test evaluation"
+        },
+    )
+    test_pin_memory: bool = field(
+        default=False,
+        metadata={"help": "Use pinned memory for windowlate test DataLoader"},
+    )
+    test_prefetch_factor: int | None = field(
+        default=None,
+        metadata={"help": "DataLoader prefetch factor for windowlate test evaluation"},
+    )
+    max_grad_norm: float | None = field(
+        default=None,
+        metadata={"help": "Max gradient norm for clipping; None disables clipping"},
+    )
 
 
 @register_trainer("DeepIRT")
 class DeepIRTTrainer(BaseTrainer):
     """Trainer for DeepIRT."""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src):
         from model.DeepIRT.DeepIRT_data import DeepIRTModelData
         from model.DeepIRT.DeepIRT_model import DeepIRT
 
         model_data = DeepIRTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         logger.info("Initializing DeepIRT model...")
         metadata = data_src.get_metadata()
+        m = rc.model
         model = DeepIRT(
             num_c=metadata["num_skills"],
-            dim_s=args.dim_s,
-            size_m=args.size_m,
-            dropout=args.dropout,
-            emb_type=args.emb_type,
-            irt_scale=args.irt_scale,
+            dim_s=m.dim_s,
+            size_m=m.size_m,
+            dropout=m.dropout,
+            emb_type=m.emb_type,
+            irt_scale=m.irt_scale,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
+        return RuntimeComponents(
+            model=model,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            max_clip_grad_norm=m.max_grad_norm,
             train_data=train_dataset,
             val_data=val_dataset,
             test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            max_clip_grad_norm=args.max_grad_norm,
-            lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DeepIRT",
-            dataset_name=getattr(args, "dataset", ""),
-            skip_test=getattr(args, "skip_test", False),
-        ).build()
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]

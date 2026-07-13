@@ -15,8 +15,8 @@ logger = get_logger(__name__)
 
 # ===== Configuration =====
 @dataclass
-class DyGKTConfig:
-    """DyGKT dataset configuration."""
+class DyGKTNeighborConfig:
+    """DyGKT neighbor-sampling configuration (data-layer helper)."""
 
     num_question: int
     num_neighbor: int = 50
@@ -26,16 +26,15 @@ class DyGKTConfig:
     seed: int = 2020
 
     @classmethod
-    def from_args(cls, args: Any, num_question: int) -> "DyGKTConfig":
+    def from_run_config(cls, rc: Any, num_question: int) -> "DyGKTNeighborConfig":
+        m = rc.model
         return cls(
             num_question=num_question,
-            num_neighbor=int(getattr(args, "num_neighbor", 50)),
-            sampling_strategy=str(
-                getattr(args, "neighbor_sampling_strategy", "time_decay")
-            ).lower(),
-            time_decay_factor=float(getattr(args, "time_decay_factor", 1e-5)),
-            candidate_pool=int(getattr(args, "neighbor_candidate_pool", 200)),
-            seed=int(getattr(args, "neighbor_sampling_seed", 2020)),
+            num_neighbor=int(m.num_neighbor),
+            sampling_strategy=str(m.neighbor_sampling_strategy).lower(),
+            time_decay_factor=float(m.time_decay_factor),
+            candidate_pool=int(m.neighbor_candidate_pool),
+            seed=int(m.neighbor_sampling_seed),
         )
 
 
@@ -44,7 +43,7 @@ def sample_histories(
     all_history_indices: list[list[int]],
     all_history_times: list[list[int]],
     all_current_times: list[int],
-    config: DyGKTConfig,
+    config: DyGKTNeighborConfig,
 ) -> list[list[int]]:
     """Sample histories using time-decay or recent strategy."""
     n_samples = len(all_history_indices)
@@ -148,7 +147,7 @@ def sample_histories(
 
 def build_tensors(
     data_all: list[dict[str, Any]],
-    config: DyGKTConfig,
+    config: DyGKTNeighborConfig,
     history_data: list[dict[str, Any]] | None = None,
     target_user_ids: set[int] | None = None,
     target_global_ids: set[int] | None = None,
@@ -440,8 +439,8 @@ class DyGKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any):
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any):
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         if fold_idx is None:
             raise ValueError("fold_idx must be specified for K-fold cross-validation")
 
@@ -454,7 +453,7 @@ class DyGKTModelData(QuestionModelData):
         # Build q_table and config
         q_table = self.build_relationship_matrix(("question", "has", "skill"))
         num_questions = self.data_src.get_metadata("num_questions")
-        config = DyGKTConfig.from_args(args, num_questions)
+        config = DyGKTNeighborConfig.from_run_config(rc, num_questions)
 
         # Load sequences
         question_sequences, user_responses, user_masks, user_id_sequences = (

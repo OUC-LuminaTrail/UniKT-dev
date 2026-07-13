@@ -1,5 +1,3 @@
-from typing import Any
-
 import torch
 import torch.nn as nn
 
@@ -56,8 +54,8 @@ class LBKTcell(nn.Module):
         self.bias = nn.Parameter(torch.Tensor(1, num_units))
         nn.init.xavier_normal_(self.bias)
 
-        # 遗忘门：将单个 Linear 分解为各输入分段的权重
-        # 总输入 = [h_pre(num_units), interact_emb(num_units), time(factor_dim), attempt(factor_dim), hint(factor_dim)]
+        # Forget gate: a single Linear is decomposed into per-input-segment weights
+        # Inputs: h_pre(num_units), interact_emb(num_units), time(factor_dim), attempt(factor_dim), hint(factor_dim)
         self.gate_w_h = nn.Parameter(torch.Tensor(num_units, num_units))
         self.gate_w_interact = nn.Parameter(torch.Tensor(num_units, num_units))
         self.gate_w_time = nn.Parameter(torch.Tensor(num_units, self.factor_dim))
@@ -85,10 +83,9 @@ class LBKTcell(nn.Module):
         hint_factor: torch.Tensor,
         h_pre: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # 加权提取知识状态 [B, num_units]
+        # Weighted knowledge-state extraction -> [B, num_units]
         h_pre_tilde = torch.einsum("bm,bmn->bn", correlation_weight, h_pre)
 
-        # 预测
         preds = (
             torch.sum(
                 torch.sigmoid(
@@ -99,12 +96,10 @@ class LBKTcell(nn.Module):
             / self.num_units
         )
 
-        # 差异化行为效应
         time_gain = self.time_gain(time_factor, interact_emb, h_pre_tilde)
         attempt_gain = self.attempt_gain(attempt_factor, interact_emb, h_pre_tilde)
         hint_gain = self.hint_gain(hint_factor, interact_emb, h_pre_tilde)
 
-        # 融合行为效应
         pad = torch.ones_like(time_factor)
         fusion_all = (
             torch.matmul(torch.cat([time_gain, pad], -1), self.time_weight)
@@ -118,9 +113,8 @@ class LBKTcell(nn.Module):
 
         LG = torch.einsum("bm,bn->bmn", correlation_weight, learning_gain)
 
-        # 遗忘门
-        # h_pre: [B, M, num_units] → matmul 得 [B, M, num_units]
-        # 其余输入为 [B, dim]，结果通过广播加到 [B, M, num_units]
+        # h_pre: [B, M, num_units] -> matmul -> [B, M, num_units]
+        # other inputs are [B, dim], broadcast-added to [B, M, num_units]
         forget_gate = (
             torch.matmul(h_pre, self.gate_w_h.T)
             + torch.matmul(interact_emb, self.gate_w_interact.T).unsqueeze(1)
@@ -137,29 +131,34 @@ class LBKTcell(nn.Module):
 
 
 class LBKT(nn.Module):
-    def __init__(self, args: Any, data_metadata: dict[str, Any]):
+    def __init__(
+        self,
+        dim_tp: int,
+        dim_hidden: int,
+        num_units: int,
+        dropout: float,
+        data_metadata: dict,
+    ):
         super().__init__()
         num_questions = data_metadata["num_questions"]
         num_skills = data_metadata["num_skills"]
         memory_size = num_skills
 
         self.memory_size = memory_size
-        self.num_units = args.num_units
+        self.num_units = num_units
 
-        self.embedding_topic = nn.Embedding(num_questions, args.dim_tp)
+        self.embedding_topic = nn.Embedding(num_questions, dim_tp)
         nn.init.xavier_normal_(self.embedding_topic.weight)
 
-        self.embedding_resps = nn.Embedding(2, args.dim_hidden)
+        self.embedding_resps = nn.Embedding(2, dim_hidden)
         nn.init.xavier_normal_(self.embedding_resps.weight)
 
-        self.input_layer = nn.Linear(args.dim_tp + args.dim_hidden, args.num_units)
+        self.input_layer = nn.Linear(dim_tp + dim_hidden, num_units)
         nn.init.xavier_normal_(self.input_layer.weight)
 
-        self.lbkt_cell = LBKTcell(
-            args.num_units, memory_size, args.dim_tp, dropout=args.dropout
-        )
+        self.lbkt_cell = LBKTcell(num_units, memory_size, dim_tp, dropout=dropout)
 
-        self.init_h = nn.Parameter(torch.Tensor(memory_size, args.num_units))
+        self.init_h = nn.Parameter(torch.Tensor(memory_size, num_units))
         nn.init.xavier_normal_(self.init_h)
 
     def forward(

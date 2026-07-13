@@ -1,5 +1,4 @@
 import math
-from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -392,18 +391,34 @@ class Architecture(nn.Module):
 class RobustKT(nn.Module):
     """RobustKT knowledge tracing model."""
 
-    def __init__(self, args: Any, data_metadata: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        *,
+        num_skills: int,
+        num_questions: int,
+        dropout: float,
+        kq_same: int,
+        l2: float,
+        separate_qa: int,
+        d_model: int,
+        n_blocks: int,
+        num_attn_heads: int,
+        d_ff: int,
+        final_fc_dim: int,
+        kernel_size: int,
+        max_seq_len: int,
+    ) -> None:
         super().__init__()
         self.model_name = "robustkt"
-        self.num_skills = data_metadata["num_skills"]
-        self.num_questions = data_metadata["num_questions"]
+        self.num_skills = num_skills
+        self.num_questions = num_questions
         self.n_pid = self.num_questions
-        self.dropout = args.dropout
-        self.kq_same = args.kq_same
-        self.l2 = args.l2
-        self.separate_qa = bool(args.separate_qa)
+        self.dropout = dropout
+        self.kq_same = kq_same
+        self.l2 = l2
+        self.separate_qa = bool(separate_qa)
         self.emb_type = "qid"
-        embed_l = args.d_model
+        embed_l = d_model
 
         if self.num_questions > 0:
             self.difficult_param = nn.Embedding(self.num_questions + 1, 1)
@@ -417,21 +432,21 @@ class RobustKT(nn.Module):
             self.qa_embed = nn.Embedding(2, embed_l)
 
         self.model = Architecture(
-            n_blocks=args.n_blocks,
-            n_heads=args.num_attn_heads,
-            dropout=args.dropout,
-            d_model=args.d_model,
-            d_ff=args.d_ff,
-            kq_same=args.kq_same,
+            n_blocks=n_blocks,
+            n_heads=num_attn_heads,
+            dropout=dropout,
+            d_model=d_model,
+            d_ff=d_ff,
+            kq_same=kq_same,
             emb_type=self.emb_type,
-            kernel_size=args.kernel_size,
-            max_seq_len=args.max_seq_len,
+            kernel_size=kernel_size,
+            max_seq_len=max_seq_len,
         )
         self.out = nn.Sequential(
-            nn.Linear(args.d_model + embed_l, args.final_fc_dim),
+            nn.Linear(d_model + embed_l, final_fc_dim),
             nn.ReLU(),
             nn.Dropout(self.dropout),
-            nn.Linear(args.final_fc_dim, 256),
+            nn.Linear(final_fc_dim, 256),
             nn.ReLU(),
             nn.Dropout(self.dropout),
             nn.Linear(256, 1),

@@ -1,127 +1,84 @@
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("HawkesKT")
-class HawkesKTModelParams(BaseParamConfig):
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "HawkesKT Parameters"
-        params = {
-            "emb_size": {
-                "type": int,
-                "default": 64,
-                "help": "Size of embedding vectors",
-            },
-            "time_log": {
-                "type": float,
-                "default": 2.718281828459045,
-                "help": "Log base of time intervals",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+@register_model_config("HawkesKT")
+@dataclass
+class HawkesKTConfig(ModelConfig):
+    """HawkesKT model configuration."""
+
+    emb_size: int = field(default=64, metadata={"help": "Size of embedding vectors"})
+    time_log: float = field(
+        default=2.718281828459045, metadata={"help": "Log base of time intervals"}
+    )
+    epochs: int = field(
+        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("HawkesKT")
 class HawkesKTTrainer(BaseTrainer):
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.HawkesKT.HawkesKT_data import HawkesKTModelData
 
         model_data = HawkesKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         from model.HawkesKT.HawkesKT_model import HawkesKT
 
         logger.info("Initializing HawkesKT model...")
         metadata = data_src.get_metadata()
+        m = rc.model
         model = HawkesKT(
             num_c=metadata["num_skills"],
             num_q=metadata["num_questions"],
-            emb_size=args.emb_size,
-            time_log=args.time_log,
+            emb_size=m.emb_size,
+            time_log=m.time_log,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = args.es_patience or None
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=args.es_monitor,
-                mode=args.es_mode,
-                patience=es_patience,
-                min_delta=args.es_min_delta,
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="HawkesKT",
-            dataset_name=args.dataset,
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(self, batch_data: tuple) -> dict[str, torch.Tensor]:
         skill, problem, time, label, mask = batch_data
@@ -131,7 +88,7 @@ class HawkesKTTrainer(BaseTrainer):
         label = self._move_tensor_to_device(label)
         mask = self._move_tensor_to_device(mask)
 
-        # 模型同位置输出 y_hat_full[:,t] 预测 label[:,t]；same_position=True 由内置函数归一化
+        # Same-position output: y_hat_full[:, t] predicts label[:, t]; same_position=True applies built-in normalization
         y_hat_full = self.model(skill, problem, time, label)
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, label, mask, same_position=True

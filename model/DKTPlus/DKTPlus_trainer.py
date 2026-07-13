@@ -1,153 +1,102 @@
 """DKT+ 模型训练器模块"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("DKTPlus")
-class DKTPlusModelParams(BaseParamConfig):
-    """DKT+ 模型参数配置"""
+@register_model_config("DKTPlus")
+@dataclass
+class DKTPlusConfig(ModelConfig):
+    """DKT+ 模型配置。"""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DKTPlus Parameters"
-        params = {
-            "emb_size": {
-                "type": int,
-                "default": 200,
-                "help": "Embedding and LSTM hidden dimension",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability",
-            },
-            "lambda_r": {
-                "type": float,
-                "default": 0.2,
-                "help": "Weight for current-step consistency loss (loss_r)",
-            },
-            "lambda_w1": {
-                "type": float,
-                "default": 1.0,
-                "help": "Weight for output smoothness L1 loss (loss_w1)",
-            },
-            "lambda_w2": {
-                "type": float,
-                "default": 10.0,
-                "help": "Weight for output smoothness L2 loss (loss_w2)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    emb_size: int = field(
+        default=200, metadata={"help": "Embedding and LSTM hidden dimension"}
+    )
+    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
+    lambda_r: float = field(
+        default=0.2,
+        metadata={"help": "Weight for current-step consistency loss (loss_r)"},
+    )
+    lambda_w1: float = field(
+        default=1.0, metadata={"help": "Weight for output smoothness L1 loss (loss_w1)"}
+    )
+    lambda_w2: float = field(
+        default=10.0,
+        metadata={"help": "Weight for output smoothness L2 loss (loss_w2)"},
+    )
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("DKTPlus")
 class DKTPlusTrainer(BaseTrainer):
     """DKT+ 模型训练器"""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        # 准备数据
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.DKTPlus.DKTPlus_data import DKTPlusModelData
 
         model_data = DKTPlusModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
-        # 初始化模型
         from model.DKTPlus.DKTPlus_model import DKTPlus
 
         metadata = data_src.get_metadata()
+        m = rc.model
 
         logger.info("Initializing DKT+ model...")
         model = DKTPlus(
             num_c=metadata["num_skills"],
-            emb_size=args.emb_size,
-            lambda_r=args.lambda_r,
-            lambda_w1=args.lambda_w1,
-            lambda_w2=args.lambda_w2,
-            dropout=args.dropout,
+            emb_size=m.emb_size,
+            lambda_r=m.lambda_r,
+            lambda_w1=m.lambda_w1,
+            lambda_w2=m.lambda_w2,
+            dropout=m.dropout,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DKTPlus",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -192,7 +141,7 @@ class DKTPlusTrainer(BaseTrainer):
         late_group_id = self._move_tensor_to_device(late_group_id)
         true_labels = self._move_tensor_to_device(true_labels)
 
-        y_hat_full, _ = self.model(sequence, response, mask)  # [B, S]，忽略 reg_loss
+        y_hat_full, _ = self.model(sequence, response, mask)  # [B, S]
 
         y_hat_aligned = y_hat_full[:, 1:]
         true_labels_aligned = true_labels[:, 1:]

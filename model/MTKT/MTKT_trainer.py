@@ -1,152 +1,77 @@
 """MTKT 模型训练器"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("MTKT")
-class MTKTModelParams(BaseParamConfig):
-    """MTKT 模型参数配置
+@register_model_config("MTKT")
+@dataclass
+class MTKTConfig(ModelConfig):
+    """MTKT model configuration."""
 
-    Args:
-        d_model: 模型隐藏维度
-        n_blocks: Transformer 块数量
-        num_attn_heads: 注意力头数量
-        dropout: Dropout 概率
-        d_ff: CIC 隐藏维度
-        final_fc_dim: 输出全连接层维度 1
-        final_fc_dim2: 输出全连接层维度 2
-        kq_same: Key 和 Query 是否使用相同的线性变换
-        separate_qa: 是否使用独立的 QA 嵌入
-        l2: L2 正则化系数 (Rasch 模型)
-        k1: CIC 卷积核大小 1
-        k2: CIC 卷积核大小 2
-        num_rgap: 复习间隔桶数量
-        num_sgap: 连续间隔桶数量
-        num_pcount: 练习次数桶数量
-        epochs: 训练轮数
-        learning_rate: 学习率
-        weight_decay: 权重衰减
-        batch_size: 批次大小
-    """
-
-    def define_params(self) -> tuple[str, dict]:
-        """定义模型参数"""
-        group_name = "MTKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Hidden dimension of the model",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 2,
-                "help": "Number of transformer blocks",
-            },
-            "num_attn_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of attention heads",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 256,
-                "help": "CIC hidden dimension",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 512,
-                "help": "Output FC layer dimension 1",
-            },
-            "final_fc_dim2": {
-                "type": int,
-                "default": 256,
-                "help": "Output FC layer dimension 2",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether key and query use the same linear transformation (1=yes, 0=no)",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate QA embeddings (1=yes, 0=no)",
-            },
-            "l2": {
-                "type": float,
-                "default": 1e-5,
-                "help": "L2 regularization coefficient for Rasch model",
-            },
-            "k1": {
-                "type": int,
-                "default": 1,
-                "help": "CIC convolution kernel size 1",
-            },
-            "k2": {
-                "type": int,
-                "default": 3,
-                "help": "CIC convolution kernel size 2",
-            },
-            "num_rgap": {
-                "type": int,
-                "default": 100,
-                "help": "Number of review gap buckets",
-            },
-            "num_sgap": {
-                "type": int,
-                "default": 100,
-                "help": "Number of sequential gap buckets",
-            },
-            "num_pcount": {
-                "type": int,
-                "default": 15,
-                "help": "Number of practice count buckets",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-4,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=256, metadata={"help": "Hidden dimension of the model"}
+    )
+    n_blocks: int = field(default=2, metadata={"help": "Number of transformer blocks"})
+    num_attn_heads: int = field(
+        default=8, metadata={"help": "Number of attention heads"}
+    )
+    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
+    d_ff: int = field(default=256, metadata={"help": "CIC hidden dimension"})
+    final_fc_dim: int = field(
+        default=512, metadata={"help": "Output FC layer dimension 1"}
+    )
+    final_fc_dim2: int = field(
+        default=256, metadata={"help": "Output FC layer dimension 2"}
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={
+            "help": "Whether key and query use the same linear transformation (1=yes, 0=no)"
+        },
+    )
+    separate_qa: int = field(
+        default=0,
+        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
+    )
+    l2: float = field(
+        default=1e-5,
+        metadata={"help": "L2 regularization coefficient for Rasch model"},
+    )
+    k1: int = field(default=1, metadata={"help": "CIC convolution kernel size 1"})
+    k2: int = field(default=3, metadata={"help": "CIC convolution kernel size 2"})
+    num_rgap: int = field(
+        default=100, metadata={"help": "Number of review gap buckets"}
+    )
+    num_sgap: int = field(
+        default=100, metadata={"help": "Number of sequential gap buckets"}
+    )
+    num_pcount: int = field(
+        default=15, metadata={"help": "Number of practice count buckets"}
+    )
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"help": "Weight decay for optimizer", "short": "wd"},
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("MTKT")
@@ -154,19 +79,19 @@ class MTKTTrainer(BaseTrainer):
     """MTKT 模型训练器
 
     负责初始化 MTKT 模型、优化器和训练数据，并实现前向传播逻辑。
+
+    Args:
+        rc: RunConfig (OmegaConf DictConfig)
+        data_src: 数据源实例
+        exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.MTKT.MTKT_data import MTKTModelData
         from model.MTKT.MTKT_model import MTKT
 
         model_data = MTKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         logger.info("Initializing MTKT model...")
         metadata = data_src.get_metadata()
@@ -177,74 +102,51 @@ class MTKTTrainer(BaseTrainer):
         else:
             logger.info("MTKT: Problem ID not available, using skill-only model")
 
+        m = rc.model
         model = MTKT(
             num_skills=metadata["num_skills"],
             n_pid=n_pid,
-            num_rgap=args.num_rgap,
-            num_sgap=args.num_sgap,
-            num_pcount=args.num_pcount,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            kq_same=args.kq_same,
-            separate_qa=bool(args.separate_qa),
-            l2=args.l2,
-            k1=args.k1,
-            k2=args.k2,
-            num_attn_heads=args.num_attn_heads,
-            final_fc_dim=args.final_fc_dim,
-            final_fc_dim2=args.final_fc_dim2,
-            seq_len=args.max_seq_len,
+            num_rgap=m.num_rgap,
+            num_sgap=m.num_sgap,
+            num_pcount=m.num_pcount,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            d_ff=m.d_ff,
+            kq_same=m.kq_same,
+            separate_qa=bool(m.separate_qa),
+            l2=m.l2,
+            k1=m.k1,
+            k2=m.k2,
+            num_attn_heads=m.num_attn_heads,
+            final_fc_dim=m.final_fc_dim,
+            final_fc_dim2=m.final_fc_dim2,
+            seq_len=rc.data.max_seq_len,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=args.learning_rate,
-            weight_decay=args.weight_decay,
+            lr=m.learning_rate,
+            weight_decay=m.weight_decay,
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
                 optimizer,
-                gamma=args.lr_decay,
+                gamma=m.lr_decay,
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="MTKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _build_pid_data(
         self,

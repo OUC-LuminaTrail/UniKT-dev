@@ -51,21 +51,21 @@ class IEKTModelData(QuestionModelData):
         self.max_concepts = None
 
     @override
-    def prepare_data(self, args):
+    def prepare_data(self, rc):
         """准备训练、验证和测试数据
+
+        Args:
+            rc: RunConfig (OmegaConf DictConfig)
 
         Returns:
             (train_dataset, val_dataset, test_dataset) 元组
         """
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
-        # 构建用户答题序列
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
-        # 构建问题-技能关联矩阵
         q_matrix = self.build_relationship_matrix(("question", "has", "skill"))
 
-        # 从关联矩阵构建多概念技能序列
         self.max_concepts = int(q_matrix.sum(axis=1).max())
         user_skills = self._build_skill_sequences(user_sequence, q_matrix)
 
@@ -74,7 +74,6 @@ class IEKTModelData(QuestionModelData):
             f"num_questions={q_matrix.shape[0]}, num_skills={q_matrix.shape[1]}"
         )
 
-        # 划分训练集、验证集和测试集（K-fold）
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -119,7 +118,6 @@ class IEKTModelData(QuestionModelData):
         """
         num_questions = q_matrix.shape[0]
 
-        # 构建查找表
         question_skills = np.full(
             (num_questions, self.max_concepts), -1, dtype=np.int64
         )

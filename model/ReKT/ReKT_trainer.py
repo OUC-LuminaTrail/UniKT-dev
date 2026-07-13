@@ -1,67 +1,45 @@
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
-__all__ = ["ReKTTrainer", "ReKTModelParams"]
+__all__ = ["ReKTTrainer", "ReKTConfig"]
 
 
-@register_model_params("ReKT")
-class ReKTModelParams(BaseParamConfig):
-    def define_params(self) -> tuple[str, dict]:
-        return "ReKT Parameters", {
-            "hidden_dim": {
-                "type": int,
-                "default": 128,
-                "short": "hd",
-                "help": "Hidden layer dimension (default: 128)",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.4,
-                "short": "dp",
-                "help": "Dropout rate (default: 0.4)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 70,
-                "short": "ep",
-                "help": "Number of training epochs (default: 70)",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 0.002,
-                "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.002)",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-5,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) (default: 1e-5)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 80,
-                "short": "bs",
-                "help": "Batch size for training (default: 80)",
-            },
-        }
+@register_model_config("ReKT")
+@dataclass
+class ReKTConfig(ModelConfig):
+    """ReKT model configuration."""
+
+    hidden_dim: int = field(
+        default=128, metadata={"help": "Hidden layer dimension", "short": "hd"}
+    )
+    dropout: float = field(
+        default=0.4, metadata={"help": "Dropout rate", "short": "dp"}
+    )
+    epochs: int = field(
+        default=70, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=0.002, metadata={"help": "Learning rate for optimizer", "short": "lr"}
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"help": "Weight decay (L2 regularization)", "short": "wd"},
+    )
+    batch_size: int = field(
+        default=80, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("ReKT")
 class ReKTTrainer(BaseTrainer):
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.ReKT.ReKT_data import ReKTModelData
         from model.ReKT.ReKT_model import ReKT
 
@@ -71,53 +49,30 @@ class ReKTTrainer(BaseTrainer):
             val_dataset,
             test_dataset,
             extra_metadata,
-        ) = model_data.prepare_data(args)
+        ) = model_data.prepare_data(rc)
 
         metadata = dict(data_src.get_metadata())
         metadata.update(extra_metadata)
 
+        m = rc.model
         logger.info("Initializing ReKT model...")
-        model = ReKT(args, metadata)
+        model = ReKT(metadata, hidden_dim=m.hidden_dim, dropout=m.dropout)
 
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=None,
             max_clip_grad_norm=15.0,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="ReKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(
         self,

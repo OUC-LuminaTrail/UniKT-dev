@@ -137,9 +137,9 @@ class CIKTModelData(QuestionModelData):
         )
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练 / 验证 / 测试数据及 CIKT 专用查表。"""
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()
 
@@ -148,7 +148,7 @@ class CIKTModelData(QuestionModelData):
         user_concept = question_to_concept[user_sequence]
 
         difficulty_table = self._build_difficulty_table(
-            args.num_difficulty_levels, args.fold
+            rc.model.num_difficulty_levels, rc.data.fold
         )
         concept_question_table, concept_q_count = self._build_concept_question_table(
             q_matrix

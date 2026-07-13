@@ -1,137 +1,93 @@
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
-__all__ = ["ClusterKTTrainer", "ClusterKTModelParams"]
+__all__ = ["ClusterKTTrainer", "ClusterKTConfig"]
 
 
-@register_model_params("ClusterKT")
-class ClusterKTModelParams(BaseParamConfig):
-    """ClusterKT model parameter configuration."""
+@register_model_config("ClusterKT")
+@dataclass
+class ClusterKTConfig(ModelConfig):
+    """ClusterKT model configuration."""
 
-    def define_params(self):
-        group_name = "ClusterKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "short": "dm",
-                "help": "Hidden dimension of the model (default: 256)",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 4,
-                "short": "nb",
-                "help": "Number of transformer blocks (default: 4)",
-            },
-            "n_heads": {
-                "type": int,
-                "default": 8,
-                "short": "nh",
-                "help": "Number of attention heads (default: 8)",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.05,
-                "short": "dp",
-                "help": "Dropout probability (default: 0.05)",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 1024,
-                "short": "df",
-                "help": "Feed-forward network dimension (default: 1024)",
-            },
-            "cluster_size": {
-                "type": int,
-                "default": 10,
-                "short": "cs",
-                "help": "Number of cluster centers (default: 10)",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 512,
-                "short": "fc",
-                "help": "Final fully connected layer dimension (default: 512)",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether key and query use same linear transform (1=yes, 0=no)",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate QA embeddings (1=yes, 0=no)",
-            },
-            "n_st": {
-                "type": int,
-                "default": 300,
-                "help": "Spent time embedding vocabulary size (default: 300)",
-            },
-            "n_et": {
-                "type": int,
-                "default": 1440,
-                "help": "Elapsed time embedding vocabulary size (default: 1440)",
-            },
-            "cluster_loss_weight": {
-                "type": float,
-                "default": 0.001,
-                "help": "Weight for cluster regularization loss (default: 0.001)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs (default: 100)",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.001)",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch (default: None)",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay for optimizer (default: 0.0)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training (default: 64)",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=256, metadata={"help": "Hidden dimension of the model", "short": "dm"}
+    )
+    n_blocks: int = field(
+        default=4, metadata={"help": "Number of transformer blocks", "short": "nb"}
+    )
+    n_heads: int = field(
+        default=8, metadata={"help": "Number of attention heads", "short": "nh"}
+    )
+    dropout: float = field(
+        default=0.05, metadata={"help": "Dropout probability", "short": "dp"}
+    )
+    d_ff: int = field(
+        default=1024,
+        metadata={"help": "Feed-forward network dimension", "short": "df"},
+    )
+    cluster_size: int = field(
+        default=10, metadata={"help": "Number of cluster centers", "short": "cs"}
+    )
+    final_fc_dim: int = field(
+        default=512,
+        metadata={"help": "Final fully connected layer dimension", "short": "fc"},
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={
+            "help": "Whether key and query use same linear transform (1=yes, 0=no)"
+        },
+    )
+    separate_qa: int = field(
+        default=0,
+        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
+    )
+    n_st: int = field(
+        default=300,
+        metadata={"help": "Spent time embedding vocabulary size"},
+    )
+    n_et: int = field(
+        default=1440,
+        metadata={"help": "Elapsed time embedding vocabulary size"},
+    )
+    cluster_loss_weight: float = field(
+        default=0.001, metadata={"help": "Weight for cluster regularization loss"}
+    )
+    epochs: int = field(
+        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"help": "Weight decay for optimizer", "short": "wd"},
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("ClusterKT")
 class ClusterKTTrainer(BaseTrainer):
     """ClusterKT model trainer."""
 
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.ClusterKT.ClusterKT_data import ClusterKTModelData
 
         model_data = ClusterKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         from model.ClusterKT.ClusterKT_model import ClusterKT
 
@@ -145,68 +101,45 @@ class ClusterKTTrainer(BaseTrainer):
             f"n_pid(questions)={n_pid}"
         )
 
+        m = rc.model
         model = ClusterKT(
             n_question=num_skill_groups,
             n_pid=n_pid,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            kq_same=args.kq_same,
-            dropout=args.dropout,
-            cluster_size=args.cluster_size,
-            final_fc_dim=args.final_fc_dim,
-            n_heads=args.n_heads,
-            d_ff=args.d_ff,
-            n_st=args.n_st,
-            n_et=args.n_et,
-            separate_qa=bool(args.separate_qa),
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            kq_same=m.kq_same,
+            dropout=m.dropout,
+            cluster_size=m.cluster_size,
+            final_fc_dim=m.final_fc_dim,
+            n_heads=m.n_heads,
+            d_ff=m.d_ff,
+            n_st=m.n_st,
+            n_et=m.n_et,
+            separate_qa=bool(m.separate_qa),
         )
 
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
+        self.cluster_loss_weight = m.cluster_loss_weight
 
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.cluster_loss_weight = args.cluster_loss_weight
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="ClusterKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def forward_pass(self, batch_data):
         """ClusterKT forward pass.

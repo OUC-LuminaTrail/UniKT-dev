@@ -32,8 +32,8 @@ class RobustKTDataset(Dataset):
 
 class RobustKTModelData(SkillModelData):
     @override
-    def prepare_data(self, args: Any) -> tuple:
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any) -> tuple:
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
         )
@@ -63,8 +63,8 @@ class RobustKTModelData(SkillModelData):
         val_dataset = RobustKTDataset(
             val_data[0], val_data[1], val_data[2], val_question[0]
         )
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
-        test_batch_size = getattr(args, "test_batch_size", args.batch_size)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
+        test_batch_size = getattr(rc.model, "test_batch_size", rc.model.batch_size)
         test_dataset = DataLoader(
             window_test_data,
             batch_size=test_batch_size,

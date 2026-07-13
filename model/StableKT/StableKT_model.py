@@ -17,10 +17,6 @@ import torch.nn.functional as F
 from torch import nn
 from torch.nn.init import constant_, xavier_uniform_
 
-# ============================================================
-# Attention Functions
-# ============================================================
-
 
 def _map_psi(x, r):
     """将输入映射到双曲空间的半影锥表示
@@ -110,7 +106,7 @@ def _attention(
     seq_len = scores.size(-1)
 
     if emb_type.find("sin") != -1 or emb_type.find("wha") != -1:
-        pass  # 位置编码已在外部添加
+        pass  # position encoding already applied upstream
     elif emb_type.find("t5") != -1:
         scores = scores + rel_pos_bias(scores)
     elif emb_type.find("rotary") == -1:
@@ -191,11 +187,6 @@ def _attention_hakt(
     scores = dropout(scores)
     output = torch.matmul(scores, v)
     return output
-
-
-# ============================================================
-# Position Embeddings
-# ============================================================
 
 
 class CosinePositionalEmbedding(nn.Module):
@@ -331,11 +322,6 @@ class RotaryPositionalEmbeddings(nn.Module):
         return rx
 
 
-# ============================================================
-# ALiBi Utilities
-# ============================================================
-
-
 def _get_slopes(n):
     """计算 ALiBi 的注意力头斜率
 
@@ -359,11 +345,6 @@ def _get_slopes(n):
             _get_slopes_power_of_2(closest_power_of_2)
             + _get_slopes(2 * closest_power_of_2)[0::2][: n - closest_power_of_2]
         )
-
-
-# ============================================================
-# Architecture Components
-# ============================================================
 
 
 class MultiHeadAttention(nn.Module):
@@ -406,7 +387,6 @@ class MultiHeadAttention(nn.Module):
         self.proj_bias = bias
         self.out_proj = nn.Linear(d_model, d_model, bias=bias)
 
-        # 位置编码模块
         if emb_type.find("t5") != -1:
             self.rel_pos_bias = T5RelativePositionBias(
                 scale=d_model**0.5,
@@ -424,7 +404,7 @@ class MultiHeadAttention(nn.Module):
 
         self._reset_parameters()
 
-        # 将 ALiBi 偏置注册为缓冲区，随模型自动迁移设备
+        # Register ALiBi bias as a buffer so it follows the model to its device.
         maxpos = 1000
         context_position = torch.arange(maxpos).unsqueeze(1)
         memory_position = torch.arange(maxpos).unsqueeze(0)
@@ -465,7 +445,6 @@ class MultiHeadAttention(nn.Module):
         v = v.transpose(1, 2)
 
         if self.emb_type.find("woha") != -1:
-            # 所有关注头使用标准注意力
             scores = _attention(
                 q,
                 k,
@@ -480,7 +459,6 @@ class MultiHeadAttention(nn.Module):
                 rotary_pe=self.rotary_pe,
             )
         else:
-            # 半标准注意力 + 半 HAKT
             scores = _attention(
                 q[:, :half_h],
                 k[:, :half_h],
@@ -645,7 +623,7 @@ class Architecture(nn.Module):
             )
 
     def forward(self, q_embed_data, qa_embed_data):
-        # 添加位置编码（仅 sin 和 wha 模式）
+        # Add position encoding only for sin and wha modes.
         if self.emb_type.find("sin") != -1 or self.emb_type.find("wha") != -1:
             q_posemb = self.position_emb(q_embed_data)
             q_embed_data = q_embed_data + q_posemb
@@ -659,11 +637,6 @@ class Architecture(nn.Module):
             x = block(mask=0, query=x, key=x, values=y, apply_pos=True)
 
         return x
-
-
-# ============================================================
-# Main Model
-# ============================================================
 
 
 class StableKT(nn.Module):
@@ -730,7 +703,6 @@ class StableKT(nn.Module):
         self.num_buckets = num_buckets
         self.max_distance = max_distance
 
-        # Problem ID 嵌入（Rasch 模型）
         if self.n_pid > 0:
             if emb_type.find("scalar") != -1:
                 self.difficult_param = nn.Embedding(self.n_pid + 1, 1)
@@ -739,16 +711,13 @@ class StableKT(nn.Module):
             self.q_embed_diff = nn.Embedding(self.num_skills + 1, embed_l)
             self.qa_embed_diff = nn.Embedding(2 * self.num_skills + 1, embed_l)
 
-        # 技能嵌入层
         self.q_embed = nn.Embedding(num_skills, embed_l)
 
-        # 交互嵌入层
         if separate_qa:
             self.qa_embed = nn.Embedding(2 * num_skills + 1, embed_l)
         else:
             self.qa_embed = nn.Embedding(2, embed_l)
 
-        # Transformer 架构
         self.model = Architecture(
             n_blocks=n_blocks,
             d_model=d_model,
@@ -764,7 +733,6 @@ class StableKT(nn.Module):
             max_distance=max_distance,
         )
 
-        # 输出层
         self.out = nn.Sequential(
             nn.Linear(d_model + embed_l, final_fc_dim),
             nn.ReLU(),
@@ -822,30 +790,25 @@ class StableKT(nn.Module):
         """
         target = response
 
-        # 获取基础嵌入
         q_embed_data, qa_embed_data = self.base_emb(sequence, target)
 
-        # Problem ID 嵌入和 Rasch 难度调节
         if self.n_pid > 0 and self.emb_type.find("norasch") == -1:
             q_embed_diff_data = self.q_embed_diff(sequence)
             pid_embed_data = self.difficult_param(pid_data)
             q_embed_data = q_embed_data + pid_embed_data * q_embed_diff_data
 
             if self.emb_type.find("aktrasch") != -1:
-                # 增强版 Rasch：同时调节交互嵌入
+                # aktrasch variant: also modulate the interaction embedding.
                 qa_embed_diff_data = self.qa_embed_diff(target)
                 qa_embed_data = qa_embed_data + pid_embed_data * (
                     qa_embed_diff_data + q_embed_diff_data
                 )
 
-        # 通过 Transformer
         d_output = self.model(q_embed_data, qa_embed_data)
 
-        # 拼接输出和技能嵌入
         concat_q = torch.cat([d_output, q_embed_data], dim=-1)
         output = self.out(concat_q).squeeze(-1)
 
-        # Sigmoid 激活
         preds = torch.sigmoid(output)
 
         return preds

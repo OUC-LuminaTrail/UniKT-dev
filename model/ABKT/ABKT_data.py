@@ -29,12 +29,12 @@ class ABKTModelData(QuestionModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
-    def prepare_data(self, args) -> dict:
+    def prepare_data(self, rc) -> dict:
         """
         准备 ABKT 所需的全部数据。
 
         参数:
-            args: 命令行参数。
+            rc: RunConfig (OmegaConf DictConfig)。
 
         返回:
             dict: {
@@ -49,7 +49,7 @@ class ABKTModelData(QuestionModelData):
                 'num_records': int,
             }
         """
-        fold_idx = args.fold if hasattr(args, "fold") and args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         num_users = self.data_src.get_metadata("num_users")
         num_items = self.data_src.get_metadata("num_questions")
@@ -118,7 +118,6 @@ class ABKTModelData(QuestionModelData):
 
         data = self.data_src.get_sequence_data()
 
-        # 按用户聚合序列
         all_sequences = {}
         for row in tqdm(
             data.iter_rows(named=True),
@@ -200,7 +199,7 @@ class ABKTModelData(QuestionModelData):
         ):
             items = seq_data[0][0]  # [[item_ids]] -> [item_ids]
             for item_id in items:
-                # 用户 -> 题目，题目 -> 用户（无向图）
+                # Undirected graph: emit both user->item and item->user edges
                 rows.append(user_id)
                 cols.append(item_id + num_users)
                 rows.append(item_id + num_users)
@@ -213,19 +212,15 @@ class ABKTModelData(QuestionModelData):
             shape=(total_nodes, total_nodes),
         ).tocsr()
 
-        # 添加自环
         adj_matrix = adj_matrix + sparse.eye(total_nodes)
 
-        # 归一化
         logger.info("Normalizing adjacency matrix...")
         if symmetric:
-            # 对称归一化: D^{-1/2} A D^{-1/2}
             d = sparse.diags(
                 np.power(np.array(adj_matrix.sum(1)).flatten() + 1e-8, -0.5)
             )
             adj_norm = adj_matrix.dot(d).T.dot(d).tocoo()
         else:
-            # 行归一化: D^{-1} A
             d = sparse.diags(np.power(np.array(adj_matrix.sum(1)).flatten() + 1e-8, -1))
             adj_norm = d.dot(adj_matrix).tocoo()
 

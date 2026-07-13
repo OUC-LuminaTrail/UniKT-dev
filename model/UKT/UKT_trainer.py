@@ -1,119 +1,78 @@
 """UKT 模型训练器"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("UKT")
-class UKTModelParams(BaseParamConfig):
-    """UKT 模型参数配置"""
+@register_model_config("UKT")
+@dataclass
+class UKTConfig(ModelConfig):
+    """UKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "UKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Hidden dimension of the model",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 4,
-                "help": "Number of transformer blocks",
-            },
-            "num_attn_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of attention heads",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.2,
-                "help": "Dropout probability",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 512,
-                "help": "Feed-forward network dimension",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 512,
-                "help": "First fully connected layer dimension",
-            },
-            "final_fc_dim2": {
-                "type": int,
-                "default": 256,
-                "help": "Second fully connected layer dimension",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether key and query use the same linear transformation (1=yes, 0=no)",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate QA embeddings (1=yes, 0=no)",
-            },
-            "use_CL": {
-                "type": int,
-                "default": 1,
-                "help": "Enable contrastive learning (1=yes, 0=no)",
-            },
-            "cl_weight": {
-                "type": float,
-                "default": 0.02,
-                "help": "Weight for contrastive learning loss",
-            },
-            "l2": {
-                "type": float,
-                "default": 1e-5,
-                "help": "L2 regularization coefficient for Rasch difficulty",
-            },
-            "no_uncertainty_aug": {
-                "type": bool,
-                "default": False,
-                "help": "Disable uncertainty augmentation for contrastive learning",
-            },
-            "atten_type": {
-                "type": str,
-                "default": "w2",
-                "help": "Attention type: w2 (Wasserstein) or dp (dot product)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-4,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-5,
-                "short": "wd",
-                "help": "Weight decay for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=256, metadata={"help": "Hidden dimension of the model"}
+    )
+    n_blocks: int = field(default=4, metadata={"help": "Number of transformer blocks"})
+    num_attn_heads: int = field(
+        default=8, metadata={"help": "Number of attention heads"}
+    )
+    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
+    d_ff: int = field(default=512, metadata={"help": "Feed-forward network dimension"})
+    final_fc_dim: int = field(
+        default=512, metadata={"help": "First fully connected layer dimension"}
+    )
+    final_fc_dim2: int = field(
+        default=256, metadata={"help": "Second fully connected layer dimension"}
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={
+            "help": "Whether key and query use the same linear transformation (1=yes, 0=no)"
+        },
+    )
+    separate_qa: int = field(
+        default=0,
+        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
+    )
+    use_CL: int = field(
+        default=1, metadata={"help": "Enable contrastive learning (1=yes, 0=no)"}
+    )
+    cl_weight: float = field(
+        default=0.02, metadata={"help": "Weight for contrastive learning loss"}
+    )
+    l2: float = field(
+        default=1e-5,
+        metadata={"help": "L2 regularization coefficient for Rasch difficulty"},
+    )
+    no_uncertainty_aug: bool = field(
+        default=False,
+        metadata={"help": "Disable uncertainty augmentation for contrastive learning"},
+    )
+    atten_type: str = field(
+        default="w2",
+        metadata={"help": "Attention type: w2 (Wasserstein) or dp (dot product)"},
+    )
+    epochs: int = field(
+        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"help": "Weight decay for optimizer", "short": "wd"},
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("UKT")
@@ -122,15 +81,18 @@ class UKTTrainer(BaseTrainer):
 
     负责初始化UKT模型、优化器和训练数据，并实现前向传播逻辑。
     支持对比学习损失的组合训练。
+
+    Args:
+        rc: RunConfig (OmegaConf DictConfig)
+        data_src: 数据源实例
+        exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.UKT.UKT_data import UKTModelData
 
         model_data = UKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         from model.UKT.UKT_model import UKT
 
@@ -142,63 +104,40 @@ class UKTTrainer(BaseTrainer):
         else:
             logger.warning("UKT: Problem ID not available, using skill-only model")
 
+        m = rc.model
         model = UKT(
             num_c=metadata["num_skills"],
             n_pid=n_pid,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            final_fc_dim=args.final_fc_dim,
-            final_fc_dim2=args.final_fc_dim2,
-            num_attn_heads=args.num_attn_heads,
-            kq_same=args.kq_same,
-            separate_qa=bool(args.separate_qa),
-            use_CL=bool(args.use_CL),
-            cl_weight=args.cl_weight,
-            use_uncertainty_aug=not args.no_uncertainty_aug,
-            l2=args.l2,
-            atten_type=args.atten_type,
-            seq_len=args.max_seq_len,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            d_ff=m.d_ff,
+            final_fc_dim=m.final_fc_dim,
+            final_fc_dim2=m.final_fc_dim2,
+            num_attn_heads=m.num_attn_heads,
+            kq_same=m.kq_same,
+            separate_qa=bool(m.separate_qa),
+            use_CL=bool(m.use_CL),
+            cl_weight=m.cl_weight,
+            use_uncertainty_aug=not m.no_uncertainty_aug,
+            l2=m.l2,
+            atten_type=m.atten_type,
+            seq_len=rc.data.max_seq_len,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
+        return RuntimeComponents(
+            model=model,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
             train_data=train_dataset,
             val_data=val_dataset,
             test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="UKT",
-            dataset_name=args.dataset,
-        ).build()
+        )
 
     def _build_pid_data(
         self,

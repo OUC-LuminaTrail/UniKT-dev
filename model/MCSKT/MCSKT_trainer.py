@@ -1,127 +1,102 @@
 """MCSKT 模型训练器"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("MCSKT")
-class MCSKTModelParams(BaseParamConfig):
-    """MCSKT 模型参数配置。"""
+@register_model_config("MCSKT")
+@dataclass
+class MCSKTConfig(ModelConfig):
+    """MCSKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "MCSKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Hidden dimension (256 with n_blocks=5 reproduces the paper's "
-                "~5.6M param count)",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 5,
-                "help": "Number of Mamba blocks per encoder (Q/K)",
-            },
-            "num_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of dynamic k-sparse attention heads",
-            },
-            "d_state": {
-                "type": int,
-                "default": 16,
-                "help": "SSM latent state dimension in Mamba",
-            },
-            "d_conv": {
-                "type": int,
-                "default": 4,
-                "help": "Conv1D kernel width in Mamba block",
-            },
-            "expand": {
-                "type": int,
-                "default": 2,
-                "help": "Mamba internal expansion factor",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "help": "Dropout probability (applied to embeddings, Mamba blocks, "
-                "prediction head)",
-            },
-            "l2": {
-                "type": float,
-                "default": 1e-5,
-                "help": "L2 reg coefficient for Rasch difficulty parameter",
-            },
-            "num_rgap": {
-                "type": int,
-                "default": 100,
-                "help": "Number of review-gap (repeated time gap) buckets",
-            },
-            "num_sgap": {
-                "type": int,
-                "default": 100,
-                "help": "Number of sequence-gap buckets",
-            },
-            "num_pcount": {
-                "type": int,
-                "default": 15,
-                "help": "Number of past-trial-count buckets",
-            },
-            "delta1": {
-                "type": float,
-                "default": 0.25,
-                "help": "Lower bound of dynamic sparsity interval [d1, d2] (paper: 1/4)",
-            },
-            "delta2": {
-                "type": float,
-                "default": 0.667,
-                "help": "Upper bound of dynamic sparsity interval [d1, d2] (paper: 2/3)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 200,
-                "short": "ep",
-                "help": "Number of training epochs (paper: 200)",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-4,
-                "short": "lr",
-                "help": "Learning rate (paper: 1e-5; raised for stable Adam)",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-4,
-                "short": "wd",
-                "help": "Weight decay for optimizer",
-            },
-            "max_clip_grad_norm": {
-                "type": float,
-                "default": 1.0,
-                "short": "clip",
-                "help": "Max gradient norm for clipping (None to disable)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size (paper: 64)",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=256,
+        metadata={
+            "help": "Hidden dimension (256 with n_blocks=5 reproduces the paper's "
+            "~5.6M param count)"
+        },
+    )
+    n_blocks: int = field(
+        default=5, metadata={"help": "Number of Mamba blocks per encoder (Q/K)"}
+    )
+    num_heads: int = field(
+        default=8, metadata={"help": "Number of dynamic k-sparse attention heads"}
+    )
+    d_state: int = field(
+        default=16, metadata={"help": "SSM latent state dimension in Mamba"}
+    )
+    d_conv: int = field(
+        default=4, metadata={"help": "Conv1D kernel width in Mamba block"}
+    )
+    expand: int = field(default=2, metadata={"help": "Mamba internal expansion factor"})
+    dropout: float = field(
+        default=0.1,
+        metadata={
+            "help": "Dropout probability (applied to embeddings, Mamba blocks, "
+            "prediction head)"
+        },
+    )
+    l2: float = field(
+        default=1e-5,
+        metadata={"help": "L2 reg coefficient for Rasch difficulty parameter"},
+    )
+    num_rgap: int = field(
+        default=100,
+        metadata={"help": "Number of review-gap (repeated time gap) buckets"},
+    )
+    num_sgap: int = field(
+        default=100, metadata={"help": "Number of sequence-gap buckets"}
+    )
+    num_pcount: int = field(
+        default=15, metadata={"help": "Number of past-trial-count buckets"}
+    )
+    delta1: float = field(
+        default=0.25,
+        metadata={
+            "help": "Lower bound of dynamic sparsity interval [d1, d2] (paper: 1/4)"
+        },
+    )
+    delta2: float = field(
+        default=0.667,
+        metadata={
+            "help": "Upper bound of dynamic sparsity interval [d1, d2] (paper: 2/3)"
+        },
+    )
+    epochs: int = field(
+        default=200,
+        metadata={"help": "Number of training epochs (paper: 200)", "short": "ep"},
+    )
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={
+            "help": "Learning rate (paper: 1e-5; raised for stable Adam)",
+            "short": "lr",
+        },
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={"help": "Weight decay for optimizer", "short": "wd"},
+    )
+    max_clip_grad_norm: float = field(
+        default=1.0,
+        metadata={
+            "help": "Max gradient norm for clipping (None to disable)",
+            "short": "clip",
+        },
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size (paper: 64)", "short": "bs"}
+    )
 
 
 @register_trainer("MCSKT")
@@ -133,17 +108,12 @@ class MCSKTTrainer(BaseTrainer):
         - trainer 用 ``same_position=True`` 由内置函数归一化为 next-item 视图
     """
 
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.MCSKT.MCSKT_data import MCSKTModelData
         from model.MCSKT.MCSKT_model import MCSKT
 
         model_data = MCSKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         logger.info("Initializing MCSKT model...")
         metadata = data_src.get_metadata()
@@ -154,69 +124,46 @@ class MCSKTTrainer(BaseTrainer):
         else:
             logger.warning("MCSKT: Problem ID not available, using skill-only model")
 
+        m = rc.model
         model = MCSKT(
             num_c=metadata["num_skills"],
             n_pid=n_pid,
-            num_rgap=args.num_rgap,
-            num_sgap=args.num_sgap,
-            num_pcount=args.num_pcount,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            num_heads=args.num_heads,
-            d_state=args.d_state,
-            d_conv=args.d_conv,
-            expand=args.expand,
-            dropout=args.dropout,
-            l2=args.l2,
-            delta1=args.delta1,
-            delta2=args.delta2,
+            num_rgap=m.num_rgap,
+            num_sgap=m.num_sgap,
+            num_pcount=m.num_pcount,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            num_heads=m.num_heads,
+            d_state=m.d_state,
+            d_conv=m.d_conv,
+            expand=m.expand,
+            dropout=m.dropout,
+            l2=m.l2,
+            delta1=m.delta1,
+            delta2=m.delta2,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-            max_clip_grad_norm=getattr(args, "max_clip_grad_norm", None),
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="MCSKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            max_clip_grad_norm=m.max_clip_grad_norm,
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _build_pid_data(
         self, question: torch.Tensor, valid_mask: torch.Tensor
@@ -246,7 +193,7 @@ class MCSKTTrainer(BaseTrainer):
             sequence, response, mask, pid_data, rgap, sgap, pcount
         )
 
-        # same_position：out[t] 预测 response[t]，归一化为 next-item 视图
+        # same_position: out[t] predicts response[t], normalized to a next-item view
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )
@@ -294,8 +241,9 @@ class MCSKTTrainer(BaseTrainer):
         pcount = self._move_tensor_to_device(pcount)
 
         use_pid = self.model.n_pid > 0
-        # windowlate 的 mask 仅在目标位为 1；模型注意力需要"所有有效位置"作为 key 有效掩码，
-        # 故用 late_group_id>=0 构造完整有效掩码，目标位掩码仅用于选取评估预测。
+        # In windowlate, mask is 1 only at target positions; attention needs all valid
+        # positions as the key mask, so build valid_mask from late_group_id >= 0 and
+        # reserve the target mask for selecting evaluation predictions.
         valid_mask = late_group_id >= 0
         pid_data = self._build_pid_data(question, valid_mask) if use_pid else question
 
@@ -303,8 +251,8 @@ class MCSKTTrainer(BaseTrainer):
             sequence, response, valid_mask, pid_data, rgap, sgap, pcount
         )
 
-        # windowlate：每个窗口仅在目标位（mask=1）评估；
-        # same_position 下 out[target] 用历史 0..target-1 预测 response[target]
+        # Windowlate evaluates only at target positions (mask=1); under same_position,
+        # out[target] predicts response[target] using history 0..target-1.
         y_hat = torch.masked_select(y_hat_full, mask)
         y_label = torch.masked_select(true_labels.float(), mask)
         group_ids = torch.masked_select(late_group_id, mask)

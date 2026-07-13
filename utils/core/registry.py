@@ -156,7 +156,7 @@ class UniversalRegistry:
 # ============================================================================
 
 TRAINERS = UniversalRegistry("trainers")
-PARAM_CONFIGS = UniversalRegistry("param_configs")
+MODEL_CONFIGS = UniversalRegistry("model_configs")
 DATA_SOURCES = UniversalRegistry("data_sources")
 ANALYZERS = UniversalRegistry("analyzers")
 METRIC_LOGGERS = UniversalRegistry("metric_loggers")
@@ -179,16 +179,19 @@ def register_trainer(name: str | None = None):
     return TRAINERS.register(name)
 
 
-def register_model_params(name: str | None = None):
-    """Register model parameters into ``PARAM_CONFIGS``.
+def register_model_config(name: str | None = None):
+    """Register a per-model ModelConfig dataclass into ``MODEL_CONFIGS``.
+
+    The target class should be a :class:`~utils.config.run_config.ModelConfig`
+    subclass.
 
     Args:
         name: Optional registration name. Defaults to the class name.
 
     Returns:
-        A decorator that registers the class with ``PARAM_CONFIGS``.
+        A decorator that registers the dataclass with ``MODEL_CONFIGS``.
     """
-    return PARAM_CONFIGS.register(name)
+    return MODEL_CONFIGS.register(name)
 
 
 def register_data_source(name: str | None = None):

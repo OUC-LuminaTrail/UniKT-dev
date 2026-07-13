@@ -663,29 +663,6 @@ def build_default_metric_loggers(
     return MetricLoggerComposite(loggers)
 
 
-def resolve_metric_logging_flags(experiment_config, hyperparams) -> tuple[bool, bool]:
-    """Resolve ``no_swanlab`` and ``log_batch_metrics`` flags.
-
-    Explicitly passed values take precedence; otherwise fall back to
-    CLI arguments in ``hyperparams``. This ensures ``--no_swanlab``
-    and ``--log_batch_metrics`` work for all model trainers.
-
-    Args:
-        experiment_config: ExperimentConfig instance.
-        hyperparams: Hyperparameter object or namespace (optional).
-
-    Returns:
-        Tuple of ``(no_swanlab: bool, log_batch_metrics: bool)``.
-    """
-    no_swanlab = experiment_config.no_swanlab or bool(
-        getattr(hyperparams, "no_swanlab", False)
-    )
-    log_batch_metrics = experiment_config.log_batch_metrics or bool(
-        getattr(hyperparams, "log_batch_metrics", False)
-    )
-    return no_swanlab, log_batch_metrics
-
-
 __all__ = [
     "AsyncMetricLoggerProxy",
     "LocalMetricLogger",
@@ -694,5 +671,4 @@ __all__ = [
     "SwanLabMetricLogger",
     "build_default_metric_loggers",
     "get_metric_logger",
-    "resolve_metric_logging_flags",
 ]

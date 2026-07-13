@@ -16,13 +16,13 @@ from .registry import (
     ANALYZERS,
     DATA_SOURCES,
     METRIC_LOGGERS,
-    PARAM_CONFIGS,
+    MODEL_CONFIGS,
     TRAINERS,
     UniversalRegistry,
     register_analyzer,
     register_data_source,
     register_metric_logger,
-    register_model_params,
+    register_model_config,
     register_trainer,
 )
 
@@ -63,7 +63,7 @@ __all__ = [
     "ANALYZERS",
     "DATA_SOURCES",
     "METRIC_LOGGERS",
-    "PARAM_CONFIGS",
+    "MODEL_CONFIGS",
     # Registries
     "TRAINERS",
     "UniversalRegistry",
@@ -78,7 +78,7 @@ __all__ = [
     "register_analyzer",
     "register_data_source",
     "register_metric_logger",
-    "register_model_params",
+    "register_model_config",
     # Decorators
     "register_trainer",
     "reset_loggers",

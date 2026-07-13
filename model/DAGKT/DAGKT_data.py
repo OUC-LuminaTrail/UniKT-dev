@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import torch
 from torch.utils.data.dataset import Dataset
@@ -70,7 +72,6 @@ class DAGKTModelData(QuestionModelData):
         user_response[user_indices, seq_positions] = data["label"].values
         user_mask[user_indices, seq_positions] = 1
 
-        # 加载 attempt_count 字段
         if "attempt_count" in data.columns:
             user_attempt[user_indices, seq_positions] = data[
                 "attempt_count"
@@ -82,17 +83,15 @@ class DAGKTModelData(QuestionModelData):
         return user_sequence, user_response, user_mask, user_id_sequence, user_attempt
 
     @override
-    def prepare_data(self, args):
+    def prepare_data(self, rc: Any):
         r"""准备 DAGKT 模型所需的数据。"""
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
-        # 构建用户答题序列（含 attempt_count）
         user_sequence, user_response, user_mask, user_id_sequence, attempt_counts = (
             self.load_sequence_data()
         )
 
-        # 构建异构图（同 GIKT）
         graph = self.build_hetero_graph(
             [
                 (
@@ -103,21 +102,17 @@ class DAGKTModelData(QuestionModelData):
             ]
         )
 
-        # 构建问题-技能关联矩阵（同 GIKT）
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
         ).float()
 
-        # 计算题目正确率 [num_questions, 1]
         num_questions = self.data_src.get_metadata("num_questions")
         question_difficulty = self._compute_question_correct_rates(
             num_questions, fold_idx
         )
 
-        # 归一化 attempt_count 到 [0, 1]
         attempt_counts = self._normalize_attempt_counts(attempt_counts)
 
-        # K-fold 划分
         if fold_idx is not None:
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
                 raise ValueError(
@@ -136,7 +131,6 @@ class DAGKTModelData(QuestionModelData):
         else:
             raise ValueError("fold_idx must be specified for K-fold cross-validation")
 
-        # 构建模型数据集
         train_dataset = DAGKTDataset(*train_data)
         val_dataset = DAGKTDataset(*val_data)
         test_dataset = DAGKTDataset(*test_data)
@@ -169,22 +163,20 @@ class DAGKTModelData(QuestionModelData):
 
         data = self.data_src.get_sequence_data().to_pandas()
 
-        # 仅使用训练集数据：排除验证集（fold_idx）和测试集（fold == -1）
         if "fold" in data.columns:
-            mask = data["fold"] != -1  # 排除测试集
+            mask = data["fold"] != -1
             if fold_idx is not None:
-                mask &= data["fold"] != fold_idx  # 排除验证集
+                mask &= data["fold"] != fold_idx
             data = data[mask]
             logger.info(
                 f"Computing correct rates from training data only "
                 f"(excluded fold {fold_idx} and test fold -1)."
             )
 
-        # 统计每题正确率
         question_stats = data.groupby("question")["label"].mean()
 
-        # 构建正确率数组
-        correct_rates = torch.ones(num_questions, 1) * 0.5  # 默认 0.5
+        # Default 0.5 for questions absent from the training split
+        correct_rates = torch.ones(num_questions, 1) * 0.5
         for qid, rate in tqdm.tqdm(
             question_stats.items(),
             total=len(question_stats),

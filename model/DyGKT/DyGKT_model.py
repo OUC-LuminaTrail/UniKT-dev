@@ -117,19 +117,27 @@ class DyKTSeq(nn.Module):
 class DyGKT(nn.Module):
     """Dynamic Graph-based Knowledge Tracing model."""
 
-    def __init__(self, args: Any, data_metadata: dict[str, Any], **kwargs: Any) -> None:
+    def __init__(
+        self,
+        data_metadata: dict[str, Any],
+        *,
+        num_neighbor: int = 50,
+        ablation: str = "-1",
+        dim_time: int = 16,
+        edge_dim: int = 64,
+        node_dim: int = 64,
+        dropout: float = 0.1,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
 
-        self.args = args
         self.data_metadata = data_metadata
 
-        self.num_neighbors = int(
-            getattr(args, "num_neighbor", data_metadata.get("num_neighbor", 50))
-        )
-        self.ablation = str(getattr(args, "ablation", "-1"))
-        self.time_dim = int(getattr(args, "dim_time", 16))
-        self.edge_dim = int(getattr(args, "edge_dim", 64))
-        self.node_dim = int(getattr(args, "node_dim", 64))
+        self.num_neighbors = int(num_neighbor)
+        self.ablation = str(ablation)
+        self.time_dim = int(dim_time)
+        self.edge_dim = int(edge_dim)
+        self.node_dim = int(node_dim)
 
         num_questions = int(data_metadata["num_questions"])
         num_users = int(data_metadata["num_users"])
@@ -193,7 +201,7 @@ class DyGKT(nn.Module):
         self.output_layer = nn.Linear(
             in_features=self.node_dim, out_features=self.node_dim, bias=True
         )
-        self.dropout_layer = nn.Dropout(float(getattr(args, "dropout", 0.3)))
+        self.dropout_layer = nn.Dropout(float(dropout))
 
         self.src_node_updater = DyKTSeq(edge_dim=self.edge_dim, node_dim=self.node_dim)
         self.dst_node_updater = DyKTSeq(edge_dim=self.edge_dim, node_dim=self.node_dim)

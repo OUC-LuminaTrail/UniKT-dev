@@ -1,51 +1,44 @@
 """Unified configuration management module.
 
-Provides parameter configuration, data configuration, and training configuration.
+The RunConfig tree is the single source of truth; ConfigParser derives the CLI
+from it reflectively, and archive.py round-trips it to yaml. EarlyStopping
+(algorithm) and the runtime containers (TrainingConfig/DataConfig/...) live in
+utils.training, not here.
 """
 
+from .archive import (
+    load_run_config_archive,
+    load_run_metadata,
+    save_run_config_archive,
+)
+from .config_parser import ConfigParser, register_config_group
 from .data_config import (
     DataLoaderConfig,
     create_optimized_dataloader,
 )
-from .param_config import (
-    BaseParamConfig,
-    CompileParams,
-    DataParams,
-    EarlyStoppingParams,
-    GeneralParams,
-    SamplingParams,
-    get_model_params,
-    get_param_sources,
-    register_model_params,
-)
-from .training_config import (
-    DataConfig,
-    EarlyStopping,
+from .run_config import (
+    CompileConfig,
     EarlyStoppingConfig,
     ExperimentConfig,
-    OptimizationConfig,
-    TrainingConfig,
+    GeneralConfig,
+    ModelConfig,
+    RunConfig,
+    RunDataConfig,
 )
 
 __all__ = [
-    # Param Config
-    "BaseParamConfig",
-    "CompileParams",
-    "DataConfig",
-    # Data Config
+    "CompileConfig",
+    "ConfigParser",
     "DataLoaderConfig",
-    "DataParams",
-    "EarlyStopping",
-    # Training Config
     "EarlyStoppingConfig",
-    "EarlyStoppingParams",
     "ExperimentConfig",
-    "GeneralParams",
-    "OptimizationConfig",
-    "SamplingParams",
-    "TrainingConfig",
+    "GeneralConfig",
+    "ModelConfig",
+    "RunConfig",
+    "RunDataConfig",
     "create_optimized_dataloader",
-    "get_model_params",
-    "get_param_sources",
-    "register_model_params",
+    "load_run_config_archive",
+    "load_run_metadata",
+    "register_config_group",
+    "save_run_config_archive",
 ]

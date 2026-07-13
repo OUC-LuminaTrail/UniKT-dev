@@ -2,11 +2,32 @@
 
 from argparse import ArgumentParser
 
-from utils.config import DataParams, GeneralParams, SamplingParams
+from omegaconf import OmegaConf
+
+from utils.config import GeneralConfig, RunDataConfig, register_config_group
 from utils.core import get_logger, seed_everything
 from utils.data_process import get_data_source
 
 logger = get_logger(__name__)
+
+
+def _build_partial_rc(ns):
+    """Build a data+general RunConfig view from the parsed namespace.
+
+    Only ``data`` and ``general`` nodes are needed for ETL; config defaults come
+    from the structured schema, user flags (dot-path) override them.
+    """
+    nested: dict = {}
+    for key, value in vars(ns).items():
+        if "." not in key:
+            continue
+        parts = key.split(".")
+        cursor = nested
+        for part in parts[:-1]:
+            cursor = cursor.setdefault(part, {})
+        cursor[parts[-1]] = value
+    base = OmegaConf.structured({"data": RunDataConfig, "general": GeneralConfig})
+    return OmegaConf.merge(base, OmegaConf.create(nested))
 
 
 def build_parser():
@@ -18,8 +39,8 @@ def build_parser():
     dl = subparsers.add_parser(
         "download", help="Download raw dataset archive and extract"
     )
-    DataParams.add_args(dl)
-    GeneralParams.add_args(dl)
+    register_config_group(dl, "data", RunDataConfig)
+    register_config_group(dl, "general", GeneralConfig)
     dl.add_argument(
         "--data_url",
         type=str,
@@ -27,7 +48,6 @@ def build_parser():
         help="Override data URL for downloading (optional)",
     )
     dl.add_argument(
-        "-f",
         "--force",
         action="store_true",
         help="Force re-download even if file already exists",
@@ -44,58 +64,48 @@ def build_parser():
         default=4,
         help="Number of threads for parallel download (default: 4)",
     )
-    dl.set_defaults(func=cmd_download)
 
     # process subcommand
     proc = subparsers.add_parser(
         "process", help="Process raw data into standardized format"
     )
+    register_config_group(proc, "data", RunDataConfig)
+    register_config_group(proc, "general", GeneralConfig)
     proc.add_argument(
         "--extra",
         nargs="*",
         default=[],
         help="Extra processing steps",
     )
-    DataParams.add_args(proc)
-    GeneralParams.add_args(proc)
-    SamplingParams.add_args(proc)
-    proc.set_defaults(func=cmd_process)
 
     return parser
 
 
-def cmd_download(args):
+def cmd_download(rc, ns):
     """Handle `download` subcommand."""
-    dp = get_data_source(args.dataset, args)
-    # override data_url if provided
-    if getattr(args, "data_url", None):
-        dp.data_url = args.data_url
+    dp = get_data_source(rc)
+    if getattr(ns, "data_url", None):
+        dp.data_url = ns.data_url
 
     if not dp.data_url:
         raise ValueError(
             "No data_url available for this dataset. Provide --data_url explicitly."
         )
 
-    logger.info(f"Downloading dataset {args.dataset} to {dp.data_folder}")
-
-    # Get download parameters
-    force_download = getattr(args, "force", False)
-    max_retries = getattr(args, "max_retries", 3)
-    num_threads = getattr(args, "num_threads", 4)
-
-    # Call fetch_data with the extracted parameters
+    logger.info(f"Downloading dataset {rc.data.dataset} to {dp.data_folder}")
     dp.fetch_data(
-        force_download=force_download, max_retries=max_retries, num_threads=num_threads
+        force_download=getattr(ns, "force", False),
+        max_retries=getattr(ns, "max_retries", 3),
+        num_threads=getattr(ns, "num_threads", 4),
     )
-    # Persist metadata
     dp.save_metadata()
     logger.info("Download complete.")
 
 
-def cmd_process(args):
+def cmd_process(rc, ns):
     """Handle `process` subcommand."""
-    seed_everything(args.seed, deterministic=False)
-    dp = get_data_source(args.dataset, args)
+    seed_everything(rc.general.seed, deterministic=False)
+    dp = get_data_source(rc)
     dp.clean_raw_data()
     # The raw interaction frame is no longer needed after cleaning; release it so
     # it doesn't pile up against the (much larger) split-stage intermediates.
@@ -111,21 +121,21 @@ def cmd_process(args):
         if hasattr(dp, attr):
             setattr(dp, attr, None)
 
-    if args.sample_size is not None or args.sample_ratio is not None:
+    if rc.data.sample_size is not None or rc.data.sample_ratio is not None:
         dp.sample(
-            sample_size=args.sample_size,
-            sample_ratio=args.sample_ratio,
-            sample_strategy=args.sample_strategy,
-            attempts_bins=args.sample_attempts_bins,
-            correct_bins=args.sample_correct_bins,
+            sample_size=rc.data.sample_size,
+            sample_ratio=rc.data.sample_ratio,
+            sample_strategy=rc.data.sample_strategy,
+            attempts_bins=rc.data.sample_attempts_bins,
+            correct_bins=rc.data.sample_correct_bins,
         )
 
-    if args.kfold and args.kfold > 1:
-        dp.add_kfold_labels(n_splits=args.kfold, test_ratio=args.test_ratio)
+    if rc.data.kfold and rc.data.kfold > 1:
+        dp.add_kfold_labels(n_splits=rc.data.kfold, test_ratio=rc.data.test_ratio)
 
     dp.build_split_question_sequence_data()
     dp.build_split_skill_sequence_data()
-    if "windowlate" in args.extra:
+    if "windowlate" in (ns.extra or []):
         dp.build_windowlate_data()
 
     dp.save_data()
@@ -133,11 +143,12 @@ def cmd_process(args):
 
 if __name__ == "__main__":
     parser = build_parser()
-    args = parser.parse_args()
+    ns = parser.parse_args()
+    rc = _build_partial_rc(ns)
 
-    if args.command == "download":
-        cmd_download(args)
-    elif args.command == "process":
-        cmd_process(args)
+    if ns.command == "download":
+        cmd_download(rc, ns)
+    elif ns.command == "process":
+        cmd_process(rc, ns)
     else:
         parser.print_help()

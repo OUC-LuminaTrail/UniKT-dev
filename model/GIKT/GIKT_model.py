@@ -72,7 +72,7 @@ class GIKTGraphAggregator(nn.Module):
             raise ValueError("aggregator must be 'sum' or 'concat'")
         aggregator_cls = SumAggregator if aggregator == "sum" else ConcatAggregator
 
-        # 每跳一个 aggregator，在其层内的内层 hop 中复用
+        # One aggregator per hop, reused across inner hops within its layer.
         self.aggregators = nn.ModuleList(
             [
                 aggregator_cls(self.embedding_dim, self.dropout_gnn, torch.tanh)
@@ -85,10 +85,10 @@ class GIKTGraphAggregator(nn.Module):
         _, max_step = question_index.shape
         seeds = [question_index]
         for i in range(n_hop):
-            # 偶数跳 题目→技能(question_neighbors)，奇数跳 技能→题目(skill_neighbors)
+            # Even hops: question->skill (question_neighbors); odd hops: skill->question (skill_neighbors).
             table = question_neighbors if i % 2 == 0 else skill_neighbors
             num = self.question_neighbor_num if i % 2 == 0 else self.skill_neighbor_num
-            # -1 维吸收多跳邻居乘积，与原 TF reshape 一致
+            # -1 dim absorbs the multi-hop neighbor product shape.
             neighbor = table[seeds[i].reshape(-1)].reshape(-1, max_step, num)
             seeds.append(neighbor)
         return seeds
@@ -163,46 +163,63 @@ class GIKTGraphAggregator(nn.Module):
 class GIKT(nn.Module):
     """GIKT 主模型。"""
 
-    def __init__(self, args, data_metadata, **kwargs):
+    def __init__(
+        self,
+        data_metadata,
+        *,
+        embedding_dim: int,
+        hidden_neurons: list[int],
+        dropout_probs: list[float],
+        n_hop: int,
+        skill_neighbor_num: int,
+        question_neighbor_num: int,
+        hist_neighbor_num: int,
+        next_neighbor_num: int,
+        att_bound: float = 0.7,
+        aggregator: str = "sum",
+        variant: str = "hsei",
+        sim_emb: str = "question_emb",
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.num_skills = data_metadata["num_skills"]
         self.num_questions = data_metadata["num_questions"]
-        self.embedding_dim = args.embedding_dim
-        self.hidden_neurons = list(args.hidden_neurons)
+        self.embedding_dim = embedding_dim
+        self.hidden_neurons = list(hidden_neurons)
         self.hidden_size = self.hidden_neurons[-1]
-        self.dropout_prob = list(args.dropout_probs)[0]
-        self.model_name = getattr(args, "variant", "hsei")
-        self.sim_emb = getattr(args, "sim_emb", "question_emb")
-        self.hist_neighbor_num = args.hist_neighbor_num
-        self.next_neighbor_num = args.next_neighbor_num
-        self.n_hop = args.n_hop
+        self.dropout_prob = list(dropout_probs)[0]
+        self.model_name = variant
+        self.sim_emb = sim_emb
+        self.hist_neighbor_num = hist_neighbor_num
+        self.next_neighbor_num = next_neighbor_num
+        self.n_hop = n_hop
 
-        # 内积要求 LSTM 末层输出 == 嵌入维度
+        # Inner product requires the last LSTM layer output to equal embedding_dim.
         assert self.hidden_size == self.embedding_dim, (
             f"hidden_neurons[-1]({self.hidden_size}) must equal embedding_dim({self.embedding_dim})"
         )
 
-        # 共享嵌入表：[0, num_skills) 技能，[num_skills, +num_questions) 题目，末 2 行作答
+        # Shared embedding table: [0, num_skills) skills, [num_skills, +num_questions) questions, last 2 rows for responses.
         self.feature_embedding = nn.Embedding(
             self.num_skills + self.num_questions + 2, self.embedding_dim
         )
 
         self.graph_aggregator = GIKTGraphAggregator(
             self.embedding_dim,
-            args.question_neighbor_num,
-            args.skill_neighbor_num,
+            question_neighbor_num,
+            skill_neighbor_num,
             self.n_hop,
-            list(args.dropout_probs),
-            args.aggregator,
+            list(dropout_probs),
+            aggregator,
         )
-        # feature_layer 当前题/下一题共用（对应原 TF reuse=True）
+        # feature_layer shared by current and next question.
         self.feature_layer = nn.Linear(self.embedding_dim, self.hidden_size)
         self.feature_layer_act = nn.ReLU()
         self.input_trans_layer = nn.Linear(
             self.hidden_size + self.embedding_dim, self.hidden_size
         )
 
-        # 链式 LSTM 实现 MultiRNNCell（各层尺寸可不同，如 [200,100]）
+        # Chained LSTM layers (each layer may have a different size, e.g. [200,100]).
         sizes = [self.embedding_dim] + self.hidden_neurons
         self.lstm_layers = nn.ModuleList(
             [
@@ -211,13 +228,11 @@ class GIKT(nn.Module):
             ]
         )
 
-        self.history_recap = HistoryRecap(
-            self.hist_neighbor_num, getattr(args, "att_bound", 0.7)
-        )
+        self.history_recap = HistoryRecap(self.hist_neighbor_num, att_bound)
         self.general_interaction = GeneralInteraction(self.hidden_size)
 
     def _run_lstm(self, x):
-        """逐层 LSTM，每层输出接 dropout（对应 DropoutWrapper）。"""
+        """逐层 LSTM，每层输出接 dropout。"""
         drop_p = self.dropout_prob
         for lstm in self.lstm_layers:
             x, _ = lstm(x)
@@ -252,7 +267,7 @@ class GIKT(nn.Module):
         return_states=False,
     ):
         max_step = user_sequence.size(1) - 1
-        # 节点 id 布局：题目 +num_skills；作答 +num_skills+num_questions
+        # Node id layout: questions +num_skills; responses +num_skills+num_questions.
         question_indices = user_sequence[:, :-1] + self.num_skills
         next_question_indices = user_sequence[:, 1:] + self.num_skills
         answer_indices = user_response[:, :-1] + self.num_skills + self.num_questions
@@ -277,7 +292,7 @@ class GIKT(nn.Module):
         )
         output_series = self._run_lstm(input_trans_embedding)
 
-        # 历史邻居：hssi/hsei 用同技能索引采样，ssei/dkt 用相似度 top-k
+        # History neighbors: hssi/hsei sample by same-skill index, ssei/dkt use similarity top-k.
         if self.model_name in ("hssi", "hsei"):
             source = (
                 output_series if self.model_name == "hssi" else input_trans_embedding
@@ -302,7 +317,7 @@ class GIKT(nn.Module):
                 qe, nqe, qa_source, user_mask[:, :-1], hist_neighbor_index
             )
 
-        # 下一题邻居：[下一题特征, 采样的图邻居]
+        # Next-question neighbors: [next-question features, sampled graph neighbors].
         if self.next_neighbor_num != 0:
             Nn_sampled = self.graph_aggregator.sample_next_neighbors(
                 next_aggregate_embedding, self.next_neighbor_num
@@ -311,7 +326,7 @@ class GIKT(nn.Module):
         else:
             Nn = next_trans_embedding.unsqueeze(2)
 
-        # 学生状态：[LSTM 输出, 历史邻居]
+        # Student state: [LSTM output, history neighbors].
         if self.hist_neighbor_num != 0:
             Nh = torch.cat([output_series.unsqueeze(2), hist_neighbors_features], dim=2)
         else:

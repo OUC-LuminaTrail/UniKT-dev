@@ -110,7 +110,7 @@ class DIMKTModelData(SkillModelData):
         )
         stats = stats.select([key, level])
 
-        # 默认难度等级为 1
+        # Default difficulty level 1 for ids absent from the training split
         table = np.ones(num_items, dtype=np.int64)
         ids = stats[key].to_numpy()
         levels = stats["level"].to_numpy()
@@ -119,16 +119,14 @@ class DIMKTModelData(SkillModelData):
         return table
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
+    def prepare_data(self, rc: Any) -> tuple:
         """准备训练、验证与窗口评估数据。"""
-        fold_idx = args.fold if args.fold >= 0 else None
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
-        # 构建用户答题序列
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
         )
 
-        # K-fold 切分
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
             if fold_idx < 0 or fold_idx >= kfold_n_splits:
@@ -148,7 +146,7 @@ class DIMKTModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        stream_dataset = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        stream_dataset = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
 
         train_dataset = DIMKTDataset(
             train_data[0], train_data[1], train_data[2], train_data[3]
@@ -156,7 +154,7 @@ class DIMKTModelData(SkillModelData):
         val_dataset = DIMKTDataset(val_data[0], val_data[1], val_data[2], val_data[3])
         test_dataset = DataLoader(
             stream_dataset,
-            batch_size=args.batch_size,
+            batch_size=rc.model.batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,
@@ -169,7 +167,7 @@ class DIMKTModelData(SkillModelData):
         )
 
         skill_diff_table, question_diff_table = self.compute_difficulty_tables(
-            args.difficult_levels, args.fold
+            rc.model.difficult_levels, rc.data.fold
         )
 
         return (

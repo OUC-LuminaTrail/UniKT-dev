@@ -1,223 +1,169 @@
 """DyGKT model trainer."""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
-__all__ = ["DyGKTTrainer", "DyGKTModelParams"]
+__all__ = ["DyGKTTrainer", "DyGKTConfig"]
 
 
-@register_model_params("DyGKT")
-class DyGKTModelParams(BaseParamConfig):
-    """DyGKT model parameters."""
+@register_model_config("DyGKT")
+@dataclass
+class DyGKTConfig(ModelConfig):
+    """DyGKT model configuration."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "DyGKT Parameters"
-        params = {
-            "edge_dim": {
-                "type": int,
-                "default": 64,
-                "help": "Edge feature dimension (default: 64)",
-            },
-            "node_dim": {
-                "type": int,
-                "default": 64,
-                "short": "nd",
-                "help": "Node embedding dimension (default: 64)",
-            },
-            "dim_time": {
-                "type": int,
-                "default": 16,
-                "short": "dt",
-                "help": "Time encoding dimension (default: 16)",
-            },
-            "ablation": {
-                "type": str,
-                "default": "-1",
-                "help": "Ablation mode from original DyGKT (-1, counter, dual, q_qid, q_kid, embed, skill, time)",
-            },
-            "num_neighbor": {
-                "type": int,
-                "default": 50,
-                "short": "nn",
-                "help": "Number of neighbors for history (default: 50)",
-            },
-            "neighbor_sampling_strategy": {
-                "type": str,
-                "default": "time_decay",
-                "choices": ["recent", "time_decay"],
-                "help": "Neighbor sampling strategy in DyGKT data layer: recent truncation or time-decay weighted sampling (default: time_decay).",
-            },
-            "time_decay_factor": {
-                "type": float,
-                "default": 1e-5,
-                "help": "Time decay factor for time_decay neighbor sampling (weight=exp(-factor*delta_t), default: 1e-5).",
-            },
-            "neighbor_candidate_pool": {
-                "type": int,
-                "default": 200,
-                "help": "Candidate pool size before sampling neighbors; <=0 means full history (default: 200).",
-            },
-            "neighbor_sampling_seed": {
-                "type": int,
-                "default": 2020,
-                "help": "Random seed for time-decay neighbor sampling (default: 2020).",
-            },
-            "graph_neg_sampling": {
-                "type": bool,
-                "default": True,
-                "help": "Enable graph-style in-batch negative sampling auxiliary loss (default: True).",
-            },
-            "graph_neg_num_samples": {
-                "type": int,
-                "default": 2,
-                "help": "Number of in-batch negative samples per interaction for auxiliary contrastive loss (default: 2).",
-            },
-            "graph_neg_temperature": {
-                "type": float,
-                "default": 0.2,
-                "help": "Temperature for graph negative sampling contrastive logits (default: 0.2).",
-            },
-            "graph_neg_loss_weight": {
-                "type": float,
-                "default": 0.05,
-                "help": "Weight of graph negative sampling auxiliary loss (default: 0.05).",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.1,
-                "short": "dp",
-                "help": "Dropout rate (default: 0.1)",
-            },
-            "epochs": {
-                "type": int,
-                "default": 100,
-                "short": "ep",
-                "help": "Number of training epochs (default: 100)",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 0.0005,
-                "short": "lr",
-                "help": "Learning rate for optimizer (default: 0.0005)",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch (default: None)",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 1e-4,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer (default: 1e-4)",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 2000,
-                "short": "bs",
-                "help": "Batch size for training (default: 2000)",
-            },
-        }
-
-        return group_name, params
+    edge_dim: int = field(default=64, metadata={"help": "Edge feature dimension"})
+    node_dim: int = field(
+        default=64,
+        metadata={"help": "Node embedding dimension", "short": "nd"},
+    )
+    dim_time: int = field(
+        default=16,
+        metadata={"help": "Time encoding dimension", "short": "dt"},
+    )
+    ablation: str = field(
+        default="-1",
+        metadata={
+            "help": "Ablation mode from original DyGKT (-1, counter, dual, q_qid, q_kid, embed, skill, time)"
+        },
+    )
+    num_neighbor: int = field(
+        default=50,
+        metadata={"help": "Number of neighbors for history", "short": "nn"},
+    )
+    neighbor_sampling_strategy: str = field(
+        default="time_decay",
+        metadata={
+            "choices": ["recent", "time_decay"],
+            "help": "Neighbor sampling strategy in DyGKT data layer: recent truncation or time-decay weighted sampling.",
+        },
+    )
+    time_decay_factor: float = field(
+        default=1e-5,
+        metadata={
+            "help": "Time decay factor for time_decay neighbor sampling (weight=exp(-factor*delta_t))."
+        },
+    )
+    neighbor_candidate_pool: int = field(
+        default=200,
+        metadata={
+            "help": "Candidate pool size before sampling neighbors; <=0 means full history."
+        },
+    )
+    neighbor_sampling_seed: int = field(
+        default=2020,
+        metadata={"help": "Random seed for time-decay neighbor sampling."},
+    )
+    graph_neg_sampling: bool = field(
+        default=True,
+        metadata={
+            "help": "Enable graph-style in-batch negative sampling auxiliary loss."
+        },
+    )
+    graph_neg_num_samples: int = field(
+        default=2,
+        metadata={
+            "help": "Number of in-batch negative samples per interaction for auxiliary contrastive loss."
+        },
+    )
+    graph_neg_temperature: float = field(
+        default=0.2,
+        metadata={
+            "help": "Temperature for graph negative sampling contrastive logits."
+        },
+    )
+    graph_neg_loss_weight: float = field(
+        default=0.05,
+        metadata={"help": "Weight of graph negative sampling auxiliary loss."},
+    )
+    dropout: float = field(
+        default=0.1, metadata={"help": "Dropout rate", "short": "dp"}
+    )
+    epochs: int = field(
+        default=100,
+        metadata={"help": "Number of training epochs", "short": "ep"},
+    )
+    learning_rate: float = field(
+        default=5e-4,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=2000,
+        metadata={"help": "Batch size for training", "short": "bs"},
+    )
 
 
 @register_trainer("DyGKT")
 class DyGKTTrainer(BaseTrainer):
     """DyGKT 模型训练器"""
 
-    def __init__(
-        self,
-        args: Any = None,
-        data_src: Any = None,
-        exp_manager: Any = None,
-    ) -> None:
-        self.graph_neg_sampling = bool(getattr(args, "graph_neg_sampling", True))
-        self.graph_neg_num_samples = max(
-            1, int(getattr(args, "graph_neg_num_samples", 2))
-        )
-        self.graph_neg_temperature = max(
-            1e-6, float(getattr(args, "graph_neg_temperature", 0.2))
-        )
-        self.graph_neg_loss_weight = max(
-            0.0, float(getattr(args, "graph_neg_loss_weight", 0.05))
-        )
-
-        # 1. 准备数据
+    def build_components(self, rc, data_src):
         from model.DyGKT.DyGKT_data import DyGKTModelData
+        from model.DyGKT.DyGKT_model import DyGKT
+
+        m = rc.model
+        self.graph_neg_sampling = bool(m.graph_neg_sampling)
+        self.graph_neg_num_samples = max(1, int(m.graph_neg_num_samples))
+        self.graph_neg_temperature = max(1e-6, float(m.graph_neg_temperature))
+        self.graph_neg_loss_weight = max(0.0, float(m.graph_neg_loss_weight))
 
         model_data = DyGKTModelData(data_src)
         train_dataset, val_dataset, test_dataset, model_metadata = (
-            model_data.prepare_data(args)
+            model_data.prepare_data(rc)
         )
-
-        # 2. 初始化模型
-        from model.DyGKT.DyGKT_model import DyGKT
 
         logger.info("Initializing DyGKT model...")
-        model = DyGKT(args, model_metadata)
-
-        # 3. 创建优化器和损失函数
-        loss_fn = torch.nn.BCEWithLogitsLoss()
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+        model = DyGKT(
+            model_metadata,
+            num_neighbor=m.num_neighbor,
+            ablation=m.ablation,
+            dim_time=m.dim_time,
+            edge_dim=m.edge_dim,
+            node_dim=m.node_dim,
+            dropout=m.dropout,
         )
 
-        # 4. 创建学习率调度器
+        loss_fn = torch.nn.BCEWithLogitsLoss()
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
+        )
+
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        # 5. 初始化基类训练器
-        super().__init__(model)
-
-        # 6. 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 7. 配置训练器
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
+        return RuntimeComponents(
+            model=model,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            max_clip_grad_norm=10.0,
             train_data=train_dataset,
             val_data=val_dataset,
             test_data=test_dataset,
-            batch_size=args.batch_size,
             collate_fn=train_dataset.get_batch,
             val_collate_fn=val_dataset.get_batch,
             test_collate_fn=test_dataset.get_batch,
-        ).with_optimization(
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            max_clip_grad_norm=10.0,
-            lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="DyGKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+        )
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
         """Compute total loss = BCE + optional graph negative-sampling auxiliary loss."""
@@ -282,7 +228,6 @@ class DyGKTTrainer(BaseTrainer):
         Returns:
             包含 y_hat, y_label, y_predict 等的字典
         """
-        # 移动所有张量到设备
         batch = {}
         for key, value in batch_data.items():
             if isinstance(value, torch.Tensor):
@@ -296,17 +241,14 @@ class DyGKTTrainer(BaseTrainer):
         src_embeddings = self.model.dropout_layer(src_embeddings)
         dst_embeddings = self.model.dropout_layer(dst_embeddings)
 
-        # 模型前向传播，返回 logits
         y_hat = (
             self.model.link_predictor(src_embeddings, dst_embeddings)
             .squeeze(dim=-1)
             .float()
         )  # [B]
 
-        # 标签是 correctness
         y_label = batch["correctness"].float()
 
-        # 生成概率和二分类预测
         y_prob = torch.sigmoid(y_hat)
         y_predict = self._generate_binary_predictions(y_prob, threshold=0.5)
 

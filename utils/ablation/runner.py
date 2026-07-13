@@ -3,7 +3,6 @@
 Uses existing trainer infrastructure to run multiple ablations sequentially.
 """
 
-from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +17,7 @@ class AblationRunner:
 
     Example:
         >>> from utils.ablation import load_config, AblationRunner
-        >>> config = load_config("configs/ablation/hgikt_study.json")
+        >>> config = load_config("configs/ablation/hgikt_study.yaml")
         >>> runner = AblationRunner(config)
         >>> results = runner.run_all()
     """
@@ -84,36 +83,54 @@ class AblationRunner:
         Returns:
             Result dictionary with name, variant, and metrics
         """
+        from dataclasses import fields as dc_fields
+
+        from omegaconf import OmegaConf
+
+        from utils.config import build_run_config_schema
         from utils.data_process import get_data_source
         from utils.experiment_manager import ExperimentManager, ExperimentType
 
-        # Create args namespace
-        args = Namespace(**params)
-        args.dataset = self.config.dataset
-        args.model = ablation.variant  # Use variant as model name
-        args.ablation_name = ablation.name
+        # Build a RunConfig for this variant: the model's structured schema
+        # defaults overlaid with the ablation's flat params, routed to the
+        # correct node (model/data/general/...) by field-name lookup.
+        schema = build_run_config_schema(ablation.variant)
+        nested: dict = {}
+        matched: set[str] = set()
+        for node, cls in schema.items():
+            for f in dc_fields(cls):
+                if f.name in params:
+                    nested.setdefault(node, {})[f.name] = params[f.name]
+                    matched.add(f.name)
+        unmatched = sorted(set(params) - matched)
+        if unmatched:
+            logger.warning(
+                "Ablation '%s' params matched no %s config field (ignored): %s",
+                ablation.name,
+                ablation.variant,
+                unmatched,
+            )
+        rc = OmegaConf.merge(OmegaConf.structured(schema), OmegaConf.create(nested))
+        rc.experiment.model_name = ablation.variant
+        rc.experiment.dataset_name = self.config.dataset
+        rc.data.dataset = self.config.dataset
 
         # Reseed before constructing the trainer for reproducible weight init.
-        seed_everything(
-            getattr(args, "seed", 42),
-            deterministic=not getattr(args, "no_deterministic", False),
-        )
+        seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
 
-        # Create experiment manager with ABLATION type
-        # Use subdirectory within the top-level ablation study directory
+        # Create experiment manager with ABLATION type.
+        # Use subdirectory within the top-level ablation study directory.
         exp_manager = ExperimentManager(
             exp_type=ExperimentType.ABLATION,
             model_name=ablation.variant,
             dataset_name=self.config.dataset,
             base_dir=str(self.exp_base_dir),
-            tags=[f"fold{params.get('fold', 0)}", f"bs{params.get('batch_size', 64)}"],
+            tags=[f"fold{rc.data.fold}", f"bs{getattr(rc.model, 'batch_size', 64)}"],
         )
 
-        # Get data source
-        data_src = get_data_source(dataset_name=self.config.dataset, args=args)
-
-        # Create and run trainer
-        trainer = trainer_cls(args=args, data_src=data_src, exp_manager=exp_manager)
+        # Get data source and run trainer
+        data_src = get_data_source(rc)
+        trainer = trainer_cls(rc=rc, data_src=data_src, exp_manager=exp_manager)
         trainer.run()
 
         # Get final validation metrics from trainer's metrics accumulator

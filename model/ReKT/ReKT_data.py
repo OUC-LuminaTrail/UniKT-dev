@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import polars as pl
 import torch
@@ -66,8 +68,8 @@ class ReKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args):
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any):
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
         user_sequence, user_response, user_mask, _ = self.load_sequence_data()

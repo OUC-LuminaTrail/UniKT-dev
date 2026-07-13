@@ -1,9 +1,9 @@
 """Optuna configuration and parameter space utilities."""
 
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from omegaconf import OmegaConf
 from optuna.pruners import (
     BasePruner,
     MedianPruner,
@@ -218,44 +218,80 @@ class OptunaConfig:
             raise ValueError(f"Unsupported pruner: {pruner_name}")
 
 
-def load_config_from_json(config_path: str) -> OptunaConfig:
-    """Load an OptunaConfig from a JSON file.
+def load_optuna_config(config_path: str) -> OptunaConfig:
+    """Load an :class:`OptunaConfig` from a yaml file (OmegaConf).
+
+    The yaml is parsed with OmegaConf, resolved to a plain dict, and passed to
+    the ``OptunaConfig`` constructor (so methods like ``get_sampler`` are
+    preserved and unknown keys fail loudly).
 
     Args:
-        config_path: Path to the JSON configuration file.
+        config_path: Path to the yaml configuration file.
 
     Returns:
         An OptunaConfig instance.
     """
-    with open(config_path) as f:
-        config_dict = json.load(f)
-    return OptunaConfig(**config_dict)
+    cfg = OmegaConf.load(config_path)
+    return OptunaConfig(**OmegaConf.to_container(cfg, resolve=True))
 
 
-def load_param_space_from_json(space_path: str) -> list[HyperparameterSpace]:
-    """Load hyperparameter space definitions from a JSON file.
+def _default_fits(space: HyperparameterSpace, default: Any) -> bool:
+    """Whether a field default is compatible with the search space (for enqueue)."""
+    if default is None:
+        return False
+    if space.type in ("int", "float"):
+        return (
+            space.low is not None
+            and space.high is not None
+            and space.low <= default <= space.high
+        )
+    if space.type == "categorical":
+        return space.choices is not None and default in space.choices
+    return False
+
+
+def param_spaces_from_model_config(model_name: str) -> list[HyperparameterSpace]:
+    """Derive the optuna search space from a ModelConfig's field metadata.
+
+    Each searchable field carries an ``"optuna"`` metadata dict
+    (``{"type": "int"|"float"|"categorical", "low", "high", "log", "step",
+    "choices"}``). The field default becomes the enqueued-trial default when it
+    lies within the space; otherwise it is omitted (default=None).
 
     Args:
-        space_path: Path to the JSON parameter space file.
+        model_name: Registered model name.
 
     Returns:
-        A list of HyperparameterSpace instances.
+        A list of :class:`HyperparameterSpace` (one per field with optuna metadata).
+
+    Raises:
+        KeyError: If no ModelConfig is registered for ``model_name``.
     """
-    with open(space_path) as f:
-        spaces_dict = json.load(f)
+    from dataclasses import MISSING
+    from dataclasses import fields as dc_fields
 
-    param_spaces = []
-    for space_config in spaces_dict:
-        if isinstance(space_config, dict):
-            param_spaces.append(HyperparameterSpace(**space_config))
+    from utils.core import MODEL_CONFIGS
 
-    return param_spaces
+    model_cls = MODEL_CONFIGS.get(model_name)
+    if model_cls is None:
+        raise KeyError(f"No ModelConfig registered for '{model_name}'")
+
+    spaces: list[HyperparameterSpace] = []
+    for f in dc_fields(model_cls):
+        spec = f.metadata.get("optuna")
+        if not spec:
+            continue
+        default = f.default_factory() if f.default_factory is not MISSING else f.default
+        space = HyperparameterSpace(name=f.name, **spec)
+        space.default = default if _default_fits(space, default) else None
+        spaces.append(space)
+    return spaces
 
 
 __all__ = [
     "HyperparameterSpace",
     "OptunaConfig",
     "direction_for_metric",
-    "load_config_from_json",
-    "load_param_space_from_json",
+    "load_optuna_config",
+    "param_spaces_from_model_config",
 ]

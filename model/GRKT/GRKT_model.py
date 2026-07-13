@@ -41,19 +41,28 @@ class PositiveLinear(nn.Module):
 class GRKT(nn.Module):
     """Graph-based Recursive Knowledge Tracing model."""
 
-    def __init__(self, args, metadata, rel_map, pre_map):
+    def __init__(
+        self,
+        metadata,
+        rel_map,
+        pre_map,
+        *,
+        d_hidden: int,
+        k_hidden: int,
+        k_hop: int,
+        tau: float,
+        alpha: float,
+        pos_mode: str,
+        thresh: float,
+    ):
         super().__init__()
 
         num_questions = metadata["num_questions"]
         num_skills = metadata["num_skills"]
 
-        d_hidden = args.d_hidden
-        k_hidden = args.k_hidden
-        k_hop = args.k_hop
-
         self.k_hop = k_hop
-        self.tau = args.tau
-        self.alpha = args.alpha
+        self.tau = tau
+        self.alpha = alpha
         self.DH = d_hidden
         self.KH = k_hidden
         self.num_skills = num_skills
@@ -61,24 +70,24 @@ class GRKT(nn.Module):
 
         # Embeddings
         self.init_hidden = nn.Parameter(torch.randn(self.NK, k_hidden))
-        self.know_master_proj = PositiveLinear(k_hidden, 1, args.pos_mode)
+        self.know_master_proj = PositiveLinear(k_hidden, 1, pos_mode)
         self.know_embedding = nn.Embedding(
             num_skills + 1, d_hidden, padding_idx=num_skills
         )
         self.prob_embedding = nn.Embedding(num_questions, d_hidden)
 
         self.req_matrix = nn.Linear(d_hidden, d_hidden, bias=False)
-        self.pos_mode = args.pos_mode
+        self.pos_mode = pos_mode
 
         # Aggregation matrices
         self.agg_rel_matrix = nn.ModuleList(
-            [PositiveLinear(k_hidden, k_hidden, args.pos_mode) for _ in range(k_hop)]
+            [PositiveLinear(k_hidden, k_hidden, pos_mode) for _ in range(k_hop)]
         )
         self.agg_pre_matrix = nn.ModuleList(
-            [PositiveLinear(k_hidden, k_hidden, args.pos_mode) for _ in range(k_hop)]
+            [PositiveLinear(k_hidden, k_hidden, pos_mode) for _ in range(k_hop)]
         )
         self.agg_sub_matrix = nn.ModuleList(
-            [PositiveLinear(k_hidden, k_hidden, args.pos_mode) for _ in range(k_hop)]
+            [PositiveLinear(k_hidden, k_hidden, pos_mode) for _ in range(k_hop)]
         )
 
         # Problem difficulty
@@ -139,7 +148,6 @@ class GRKT(nn.Module):
         )
 
         # Graph maps (thresholded boolean)
-        thresh = args.thresh
         NK = self.NK
         if thresh == 0:
             full_rel = torch.ones(num_skills, num_skills, dtype=torch.bool)

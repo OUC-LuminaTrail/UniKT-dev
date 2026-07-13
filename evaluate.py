@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 import model  # noqa: F401
-from case_analysis import load_model_params
+from utils.config import load_run_config_archive
 from utils.core import TRAINERS, get_logger, seed_everything
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager
@@ -28,7 +28,7 @@ def parse_args():
     parser.add_argument(
         "--run_dir",
         required=True,
-        help="Path to the run directory (contains best_model.pth and hyperparameters.json)",
+        help="Path to the run directory (contains best_model.pth and run_config.yaml)",
     )
     parser.add_argument(
         "--checkpoint",
@@ -58,63 +58,46 @@ def main():
     """Evaluate a trained model checkpoint on the test set."""
     args = parse_args()
     run_dir = Path(args.run_dir).resolve()
-
     checkpoint_path = run_dir / args.checkpoint
-    hyperparams_path = run_dir / "hyperparameters.json"
+    run_config_path = run_dir / "run_config.yaml"
 
     if not checkpoint_path.exists():
         logger.error(f"Checkpoint not found: {checkpoint_path}")
         sys.exit(1)
-    if not hyperparams_path.exists():
-        logger.error(f"Hyperparameters file not found: {hyperparams_path}")
+    if not run_config_path.exists():
+        logger.error(f"RunConfig archive not found: {run_config_path}")
         sys.exit(1)
 
-    # Step 1: Load hyperparameters to reconstruct args
-    model_args, model_name, dataset_name = load_model_params(
-        checkpoint_path=str(checkpoint_path),
-        hyperparams_path=str(hyperparams_path),
-    )
+    rc = load_run_config_archive(run_config_path)
+    model_name = rc.experiment.model_name
+    dataset_name = rc.experiment.dataset_name or rc.data.dataset
 
     logger.info(f"Model: {model_name}  Dataset: {dataset_name}")
     logger.info(f"Checkpoint: {checkpoint_path}")
 
-    # Step 2: Override args for evaluation mode
-    model_args.no_swanlab = True
-    model_args.checkpoint_path = None  # We load weights manually after build
-    model_args.skip_test = True  # Prevent TestEvaluationCallback during build
-    model_args.device = args.device
-
+    # Override for evaluation mode
+    rc.general.no_swanlab = True
+    rc.general.checkpoint_path = None  # weights loaded manually after build
+    rc.general.skip_test = True  # prevent TestEvaluationCallback during build
+    if args.device is not None:
+        rc.general.device = args.device
     if args.batch_size is not None:
-        model_args.batch_size = args.batch_size
+        rc.model.batch_size = args.batch_size
     if args.data_base_path is not None:
-        model_args.data_base_path = args.data_base_path
+        rc.data.data_base_path = args.data_base_path
 
-    # Seed for reproducibility (eval is deterministic; defensive)
-    seed_everything(
-        getattr(model_args, "seed", 42),
-        deterministic=not getattr(model_args, "no_deterministic", False),
-    )
+    seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
 
-    # Step 3: Create experiment manager pointing to existing run dir
     exp_manager = ExperimentManager.from_run_dir(run_dir)
-
-    # Step 4: Build data source
     logger.info(f"Loading dataset: {dataset_name}...")
-    data_src = get_data_source(dataset_name, model_args)
+    data_src = get_data_source(rc)
 
-    # Step 5: Instantiate trainer
     logger.info(f"Initializing trainer for model: {model_name}...")
-    trainer_cls = TRAINERS.get(model_name)
-    trainer = trainer_cls(
-        args=model_args,
-        data_src=data_src,
-        exp_manager=exp_manager,
+    trainer = TRAINERS.get(model_name)(
+        rc=rc, data_src=data_src, exp_manager=exp_manager
     )
-
-    # Step 6: Load saved weights
     trainer.load_weights(str(checkpoint_path))
 
-    # Step 7: Run evaluation
     logger.info("Running evaluation on test set...")
     trainer.evaluate()
 

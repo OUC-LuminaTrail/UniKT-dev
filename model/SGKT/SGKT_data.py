@@ -105,12 +105,12 @@ class SGKTModelData(QuestionModelData):
     def __init__(self, data_src):
         super().__init__(data_src)
 
-    def prepare_data(self, args):
+    def prepare_data(self, rc):
         """
         Prepare data for SGKT model.
 
         Args:
-            args: Arguments containing model hyperparameters
+            rc: RunConfig (OmegaConf DictConfig)
 
         Returns:
             train_loader: Training data loader
@@ -137,15 +137,17 @@ class SGKTModelData(QuestionModelData):
         logger.info("Building question-skill neighbors for HRG")
 
         user_folds = self._build_user_folds(user_sequence.shape[0])
-        train_user_indices = np.where((user_folds != args.fold) & (user_folds != -1))[0]
+        train_user_indices = np.where(
+            (user_folds != rc.data.fold) & (user_folds != -1)
+        )[0]
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix=question_skill_matrix,
             user_sequence=user_sequence[train_user_indices],
             user_mask=user_mask[train_user_indices],
             num_skills=num_skills,
             num_questions=num_questions,
-            question_neighbor_num=getattr(args, "question_neighbor_num", 4),
-            skill_neighbor_num=getattr(args, "skill_neighbor_num", 4),
+            question_neighbor_num=rc.model.question_neighbor_num,
+            skill_neighbor_num=rc.model.skill_neighbor_num,
         )
         question_neighbors[:num_skills] = skill_neighbors
 
@@ -155,7 +157,7 @@ class SGKTModelData(QuestionModelData):
             user_response,
             user_mask,
             user_id_sequence,
-            fold_idx=args.fold,
+            fold_idx=rc.data.fold,
         )
 
         # Unpack train/val/test data
@@ -170,7 +172,7 @@ class SGKTModelData(QuestionModelData):
         test_skills = self._extract_skills(test_sequence)
 
         # 6. Create datasets
-        hist_neighbor_num = getattr(args, "hist_neighbor_num", 5)
+        hist_neighbor_num = rc.model.hist_neighbor_num
 
         train_dataset = SGKTDataset(
             train_sequence, train_response, train_mask, train_skills, hist_neighbor_num
@@ -195,7 +197,7 @@ class SGKTModelData(QuestionModelData):
         hrg_context = {
             "question_neighbors": torch.from_numpy(question_neighbors).long(),
             "feature_embedding": None,
-            "next_neighbor_num": getattr(args, "next_neighbor_num", 4),
+            "next_neighbor_num": rc.model.next_neighbor_num,
         }
 
         return (

@@ -64,8 +64,8 @@ class DTransformerModelData(SkillModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, args: Any) -> tuple:
-        fold_idx = args.fold if args.fold >= 0 else None
+    def prepare_data(self, rc: Any) -> tuple:
+        fold_idx = rc.data.fold if rc.data.fold >= 0 else None
 
         user_sequence, user_response, user_mask, _, user_question = (
             self.build_sequence_data()
@@ -89,7 +89,7 @@ class DTransformerModelData(SkillModelData):
         else:
             raise ValueError("K-fold cross-validation is not enabled.")
 
-        window_test_data = self.create_windowlate_iterable_dataset(args.max_seq_len)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
 
         train_dataset = DTransformerDataset(
             train_data[0], train_data[1], train_data[2], train_question[0]
@@ -99,7 +99,7 @@ class DTransformerModelData(SkillModelData):
         )
         test_dataset = DataLoader(
             window_test_data,
-            batch_size=args.batch_size,
+            batch_size=rc.model.batch_size,
             shuffle=False,
             num_workers=4,
             pin_memory=True,

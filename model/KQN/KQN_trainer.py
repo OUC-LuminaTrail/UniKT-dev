@@ -1,166 +1,114 @@
 """KQN baseline trainer."""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("KQN")
-class KQNModelParams(BaseParamConfig):
+@register_model_config("KQN")
+@dataclass
+class KQNConfig(ModelConfig):
     """KQN model and optimization parameters."""
 
-    def define_params(self) -> tuple[str, dict]:
-        group_name = "KQN Parameters"
-        params = {
-            "n_hidden": {
-                "type": int,
-                "default": 128,
-                "help": "Shared dimensionality of knowledge-state and skill vectors",
-            },
-            "n_rnn_hidden": {
-                "type": int,
-                "default": 128,
-                "help": "Hidden size of the RNN knowledge encoder",
-            },
-            "n_mlp_hidden": {
-                "type": int,
-                "default": 128,
-                "help": "Hidden size of the skill encoder MLP",
-            },
-            "n_rnn_layers": {
-                "type": int,
-                "default": 1,
-                "help": "Number of RNN layers in the knowledge encoder",
-            },
-            "rnn_type": {
-                "type": str,
-                "default": "lstm",
-                "choices": ["lstm", "gru"],
-                "help": "RNN cell type for the knowledge encoder",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.4,
-                "help": "Dropout probability applied to encoded knowledge states",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for Adam optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay for Adam optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 128,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-            "max_grad_norm": {
-                "type": float,
-                "default": None,
-                "help": "Optional max gradient norm for clipping",
-            },
-        }
-        return group_name, params
+    n_hidden: int = field(
+        default=128,
+        metadata={"help": "Shared dimensionality of knowledge-state and skill vectors"},
+    )
+    n_rnn_hidden: int = field(
+        default=128, metadata={"help": "Hidden size of the RNN knowledge encoder"}
+    )
+    n_mlp_hidden: int = field(
+        default=128, metadata={"help": "Hidden size of the skill encoder MLP"}
+    )
+    n_rnn_layers: int = field(
+        default=1, metadata={"help": "Number of RNN layers in the knowledge encoder"}
+    )
+    rnn_type: str = field(
+        default="lstm",
+        metadata={
+            "choices": ["lstm", "gru"],
+            "help": "RNN cell type for the knowledge encoder",
+        },
+    )
+    dropout: float = field(
+        default=0.4,
+        metadata={"help": "Dropout probability applied to encoded knowledge states"},
+    )
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for Adam optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0, metadata={"help": "Weight decay for Adam optimizer", "short": "wd"}
+    )
+    batch_size: int = field(
+        default=128, metadata={"help": "Batch size for training", "short": "bs"}
+    )
+    max_grad_norm: float | None = field(
+        default=None, metadata={"help": "Optional max gradient norm for clipping"}
+    )
 
 
 @register_trainer("KQN")
 class KQNTrainer(BaseTrainer):
     """Trainer for the KC-level KQN baseline."""
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.KQN.KQN_data import KQNModelData
         from model.KQN.KQN_model import KQN
 
         model_data = KQNModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
         metadata = data_src.get_metadata()
+        m = rc.model
         logger.info(
             f"Initializing KQN model with {metadata['num_skills']} skills, "
-            f"rnn_type={args.rnn_type}"
+            f"rnn_type={m.rnn_type}"
         )
         model = KQN(
             num_skills=metadata["num_skills"],
-            n_hidden=args.n_hidden,
-            n_rnn_hidden=args.n_rnn_hidden,
-            n_mlp_hidden=args.n_mlp_hidden,
-            n_rnn_layers=args.n_rnn_layers,
-            rnn_type=args.rnn_type,
-            dropout=args.dropout,
+            n_hidden=m.n_hidden,
+            n_rnn_hidden=m.n_rnn_hidden,
+            n_mlp_hidden=m.n_mlp_hidden,
+            n_rnn_layers=m.n_rnn_layers,
+            rnn_type=m.rnn_type,
+            dropout=m.dropout,
         )
 
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        super().__init__(model)
-
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
+        return RuntimeComponents(
+            model=model,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            lr_scheduler=lr_scheduler,
+            max_clip_grad_norm=m.max_grad_norm,
             train_data=train_dataset,
             val_data=val_dataset,
             test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            max_clip_grad_norm=args.max_grad_norm,
-            lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="KQN",
-            dataset_name=getattr(args, "dataset", ""),
-            skip_test=getattr(args, "skip_test", False),
-        ).build()
+        )
 
     @staticmethod
     def _build_shifted_inputs(
@@ -210,8 +158,8 @@ class KQNTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        # _build_shifted_inputs 产出模型所需的 current/next concept 对（模型吐
-        # [B, S-1] 的 next-item 预测）；提取时 pad 到 [B, S] 并喂原始 response/mask。
+        # _build_shifted_inputs yields the current/next concept pairs the model needs
+        # (it emits [B, S-1] next-item predictions); pad to [B, S] and feed original response/mask.
         current_concept, current_response, next_concept, _, _ = (
             self._build_shifted_inputs(concept, response, mask)
         )

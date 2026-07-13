@@ -4,13 +4,21 @@ Provides sequential multi-stage training on top of :class:`BaseTrainer`:
 each stage has its own model / optimizer / loss / data / early stopping
 configuration, and stages communicate via hooks.
 
+Construction is a single step, like the single-stage trainer::
+
+    trainer = ABKTTrainer(rc, data_src, exp_manager)
+    trainer.run()
+
+Unlike :class:`BaseTrainer`, infrastructure is built without a single
+``build_components`` — per-stage components are returned lazily by
+:meth:`build_stages` and attached via :meth:`_apply_stage`.
+
 Example:
     >>> @register_trainer("ABKT")
     ... class ABKTTrainer(MultiTrainer):
-    ...     def __init__(self, args, data_src, exp_manager):
-    ...         super().__init__(device=args.device)
-    ...         self.with_experiment(exp_manager, hyperparams=args,
-    ...                               model_name="ABKT").build()
+    ...     def __init__(self, rc, data_src, exp_manager):
+    ...         # prepare cross-stage data, then let the template build infra
+    ...         super().__init__(rc, data_src, exp_manager)
     ...
     ...     def build_stages(self):
     ...         return [StageConfig("km", self._build_km),
@@ -34,7 +42,7 @@ from typing import Any
 
 import torch
 
-from ..config import EarlyStopping, EarlyStoppingConfig
+from ..config import EarlyStoppingConfig
 from ..core import get_logger
 from .base_trainer import BaseTrainer, StageResult
 from .callbacks import (
@@ -42,11 +50,11 @@ from .callbacks import (
     CallbackManager,
     CheckpointCallback,
     EarlyStoppingCallback,
-    FunctionCallback,
     MemoryCleanupCallback,
 )
 from .checkpoint import CheckpointManager
-from .metric_logger import build_default_metric_loggers, resolve_metric_logging_flags
+from .early_stopping import EarlyStopping
+from .metric_logger import build_default_metric_loggers
 from .metrics import MetricsAccumulator
 
 logger = get_logger(__name__)
@@ -127,42 +135,45 @@ class MultiTrainer(BaseTrainer):
     4. :meth:`on_stage_complete`: Post-stage processing (default no-op), often used to pass data to the next stage.
     5. :meth:`_compute_loss`: Custom loss computation (defaults to ``self.loss(y_hat, y_label)``).
 
-    Construction accepts ``device`` / ``seed`` for device and random
-    seed, then uses chained :meth:`with_experiment` and :meth:`build`
-    for infrastructure initialization.
+    The constructor builds cross-stage infrastructure only (device, logging,
+    checkpoints); per-stage model/optimizer/data are assembled lazily by each
+    stage's builder.
     """
 
     def __init__(
         self,
-        *,
-        device: str | torch.device | None = None,
+        rc: Any,
+        data_src: Any,
+        exp_manager: Any = None,
     ):
-        """Initialize the multi-stage trainer.
+        """Initialize shared state and build cross-stage infrastructure.
 
-        Unlike the base trainer, no single model is passed — models
-        are created per stage and attached to ``self.model`` at runtime.
+        Per-stage components are not built here — they are returned lazily by
+        each :class:`StageConfig` builder during :meth:`run`.
 
         Args:
-            device: Compute device (auto-detected if None).
+            rc: RunConfig (OmegaConf ``DictConfig``).
+            data_src: Data source used by stage builders to prepare data.
+            exp_manager: Experiment manager (run directory / tracking).
         """
-        super().__init__(model=None)
-
-        self._device: str | torch.device | None = device
+        self._init_trainer_state(rc, data_src, exp_manager)
+        self._custom_callbacks = self.build_callbacks()
 
         # Stage state
         self._stages: list[StageConfig] = []
         self._stage_results: dict[str, StageResult] = {}
         self._elapsed_epochs: int = 0
 
+        self.build()
+
     # ==================== Build ====================
 
     def build(self) -> "MultiTrainer":
-        """Build the multi-stage trainer infrastructure.
+        """Build cross-stage infrastructure (device, logging, checkpoints).
 
         Unlike :meth:`BaseTrainer.build`, this does **not** configure
         model / data / optimizer (they change per stage). It only
-        initializes cross-stage shared facilities (device, seed, log
-        directory, metrics, checkpoints).
+        initializes cross-stage shared facilities.
 
         Returns:
             Self for method chaining.
@@ -171,26 +182,23 @@ class MultiTrainer(BaseTrainer):
             logger.warning("MultiTrainer already built. Skipping rebuild.")
             return self
 
-        if self._experiment_config is None:
-            raise ValueError(
-                "Experiment configuration not set. Call with_experiment() first."
-            )
+        rc = self.run_config
+        if rc is None:
+            raise ValueError("run_config is required.")
+        if self._exp_manager is None:
+            raise ValueError("exp_manager is required.")
 
         # 1. Device
-        self.device_ = (
-            torch.device(self._device) if self._device is not None else self._try_gpu()
-        )
+        dev = rc.general.device
+        self.device_ = torch.device(dev) if dev else self._try_gpu()
 
-        # 2. Resolve logging flags
-        hyperparams = self._experiment_config.hyperparams
-        self.no_swanlab, self.log_batch_metrics = resolve_metric_logging_flags(
-            self._experiment_config, hyperparams
-        )
+        # 2. Resolve logging flags from RunConfig
+        self.no_swanlab = bool(rc.general.no_swanlab)
+        self.log_batch_metrics = bool(rc.general.log_batch_metrics)
+        self.skip_test = bool(rc.general.skip_test)
 
         # 3. Log directory
-        exp_manager = self._experiment_config.exp_manager
-        if exp_manager is None:
-            raise ValueError("exp_manager is required.")
+        exp_manager = self._exp_manager
         self.log_dir = exp_manager.get_log_dir()
         os.makedirs(self.log_dir, exist_ok=True)
 
@@ -203,14 +211,10 @@ class MultiTrainer(BaseTrainer):
             no_swanlab=self.no_swanlab,
         )
 
-        # 5. Hyperparameters (model/opt may be None at this point;
-        #    _setup_hyperparameters skips them gracefully)
-        if hyperparams is not None:
-            self._setup_hyperparameters(
-                hyperparams,
-                model_name=self._experiment_config.model_name,
-                dataset_name=self._experiment_config.dataset_name,
-            )
+        # 5. Save RunConfig archive (skip when reusing an existing run dir, so
+        #    the training archive is preserved for evaluate/case_analysis).
+        if not getattr(exp_manager, "is_existing_run", False):
+            self._setup_run_config_archive()
 
         logger.info("MultiTrainer built successfully")
         self._built = True
@@ -349,10 +353,7 @@ class MultiTrainer(BaseTrainer):
         Returns:
             A CallbackManager configured for this stage.
         """
-        callbacks: list[Callback] = []
-        callbacks.extend(self._custom_callbacks)
-        if self._custom_callback_functions:
-            callbacks.append(FunctionCallback(self._custom_callback_functions))
+        callbacks: list[Callback] = list(self._custom_callbacks)
         callbacks.append(MemoryCleanupCallback(cleanup_interval=5))
         if self.early_stopping is not None:
             callbacks.append(
@@ -383,10 +384,12 @@ class MultiTrainer(BaseTrainer):
         Local CSV logging is always enabled; SwanLab is included unless
         ``--no_swanlab`` was set.
         """
+        from omegaconf import OmegaConf
+
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
         config = (
-            self.hyperparam_manager.get_hyperparameters_dict()
-            if self.hyperparam_manager is not None
+            OmegaConf.to_container(self.run_config, resolve=True)
+            if self.run_config is not None
             else {}
         )
         group = type(self).__name__.replace("Trainer", "")

@@ -57,6 +57,7 @@ class ProcessManager:
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
         self._recover_monitors: dict[int, threading.Thread] = {}
+        self._temp_configs: dict[int, str] = {}
         self._gpu_slots_capacity = 1
         self._lock = threading.RLock()
         self._wake = threading.Event()
@@ -113,7 +114,7 @@ class ProcessManager:
                 return
 
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
-            cmd = base_cmd + self._build_cli_args(model_name, params)
+            cmd = base_cmd + self._build_cli_args(task_id, model_name, params)
             env_type, env_name = env_id.split(":", 1)
 
             task.command = " ".join(cmd)
@@ -246,7 +247,7 @@ class ProcessManager:
             custom_python_path = task.python_path or None
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             params = json.loads(task.extra_params or "{}")
-            cmd = base_cmd + self._build_cli_args(task.model_name, params)
+            cmd = base_cmd + self._build_cli_args(task_id, task.model_name, params)
             env_type = task.env_type
 
             try:
@@ -361,23 +362,42 @@ class ProcessManager:
         with self._lock:
             self._master_fds.pop(task_id, None)
 
-    def _build_cli_args(self, model_name: str, params: dict) -> list[str]:
-        args = ["train.py", "-m", model_name]
-        for key, value in params.items():
-            if key == "model" or value is None:
-                continue
-            if isinstance(value, bool):
-                if value:
-                    args.append(f"--{key}")
-            elif isinstance(value, list):
-                if not value:
-                    continue
-                args.append(f"--{key}")
-                args.extend(str(v) for v in value)
-            else:
-                args.append(f"--{key}")
-                args.append(str(value))
-        return args
+    def _build_cli_args(self, task_id: int, model_name: str, params: dict) -> list[str]:
+        """Build a train.py invocation from frontend form values.
+
+        The flat ``params`` dict (field name -> value) is routed to the correct
+        RunConfig node (model/data/general/compile/early_stopping) by schema
+        field-name lookup, written to a temp yaml, and run via ``train.py --config``.
+        The yaml is registered for cleanup on task end (and a previous temp for
+        this task, if launch re-stamps, is removed).
+        """
+        import os
+        import tempfile
+        from dataclasses import fields as dc_fields
+
+        from omegaconf import OmegaConf
+
+        from utils.config.run_config import build_run_config_schema
+
+        schema = build_run_config_schema(model_name)
+        nested: dict = {}
+        for node, cls in schema.items():
+            for f in dc_fields(cls):
+                if f.name in params and params[f.name] is not None:
+                    nested.setdefault(node, {})[f.name] = params[f.name]
+        nested.setdefault("experiment", {})["model_name"] = model_name
+
+        # Replace any previous temp config for this task (launch_task stamps,
+        # then _do_launch re-builds); use mkstemp (not deprecated mktemp).
+        old = self._temp_configs.pop(task_id, None)
+        if old:
+            with contextlib.suppress(OSError):
+                os.unlink(old)
+        fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix=f"run_{model_name}_")
+        os.close(fd)
+        OmegaConf.save(OmegaConf.create(nested), yaml_path)
+        self._temp_configs[task_id] = yaml_path
+        return ["train.py", "--config", yaml_path]
 
     def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
         """Resize a running task's PTY; return True on success."""
@@ -419,6 +439,10 @@ class ProcessManager:
         return True
 
     def _cleanup(self, task_id: int) -> None:
+        temp_config = self._temp_configs.pop(task_id, None)
+        if temp_config:
+            with contextlib.suppress(OSError):
+                os.unlink(temp_config)
         master_fd = self._master_fds.pop(task_id, None)
         if master_fd is not None:
             with contextlib.suppress(OSError):

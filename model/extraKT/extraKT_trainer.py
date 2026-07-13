@@ -1,128 +1,74 @@
 """extraKT 模型训练器"""
 
-from typing import Any
+from dataclasses import dataclass, field
 
 import torch
 
-from utils.config import BaseParamConfig, EarlyStoppingConfig, register_model_params
-from utils.core import get_logger, register_trainer
-from utils.training import BaseTrainer
+from utils.config import ModelConfig
+from utils.core import get_logger, register_model_config, register_trainer
+from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
 
-@register_model_params("extraKT")
-class extraKTModelParams(BaseParamConfig):
-    """extraKT 模型参数配置
+@register_model_config("extraKT")
+@dataclass
+class extraKTConfig(ModelConfig):
+    """extraKT model configuration."""
 
-    Args:
-        d_model: 模型隐藏维度
-        n_blocks: Transformer块数量
-        num_attn_heads: 注意力头数量
-        dropout: Dropout概率
-        d_ff: 前馈网络维度
-        final_fc_dim: 最终全连接层维度
-        kq_same: Key和Query是否使用相同的线性变换
-        separate_qa: 是否使用独立的QA嵌入
-        l2: L2正则化系数
-        num_buckets: ALiBi桶数量
-        max_distance: ALiBi最大距离
-        epochs: 训练轮数
-        learning_rate: 学习率
-        weight_decay: 权重衰减
-        batch_size: 批次大小
-    """
-
-    def define_params(self) -> tuple[str, dict]:
-        """定义模型参数"""
-        group_name = "extraKT Parameters"
-        params = {
-            "d_model": {
-                "type": int,
-                "default": 256,
-                "help": "Hidden dimension of the model",
-            },
-            "n_blocks": {
-                "type": int,
-                "default": 4,
-                "help": "Number of transformer blocks",
-            },
-            "num_attn_heads": {
-                "type": int,
-                "default": 8,
-                "help": "Number of attention heads",
-            },
-            "dropout": {
-                "type": float,
-                "default": 0.05,
-                "help": "Dropout probability",
-            },
-            "d_ff": {
-                "type": int,
-                "default": 256,
-                "help": "Feed-forward network dimension",
-            },
-            "final_fc_dim": {
-                "type": int,
-                "default": 512,
-                "help": "Final fully connected layer dimension",
-            },
-            "kq_same": {
-                "type": int,
-                "default": 1,
-                "help": "Whether key and query use the same linear transformation (1=yes, 0=no)",
-            },
-            "separate_qa": {
-                "type": int,
-                "default": 0,
-                "help": "Whether to use separate QA embeddings (1=yes, 0=no)",
-            },
-            "l2": {
-                "type": float,
-                "default": 1e-5,
-                "help": "L2 regularization coefficient for Rasch model",
-            },
-            "num_buckets": {
-                "type": int,
-                "default": 32,
-                "help": "Number of buckets for ALiBi relative position",
-            },
-            "max_distance": {
-                "type": int,
-                "default": 100,
-                "help": "Maximum distance for ALiBi relative position",
-            },
-            "epochs": {
-                "type": int,
-                "default": 150,
-                "short": "ep",
-                "help": "Number of training epochs",
-            },
-            "learning_rate": {
-                "type": float,
-                "default": 1e-3,
-                "short": "lr",
-                "help": "Learning rate for optimizer",
-            },
-            "lr_decay": {
-                "type": float,
-                "default": None,
-                "help": "Learning rate decay factor per epoch",
-            },
-            "weight_decay": {
-                "type": float,
-                "default": 0.0,
-                "short": "wd",
-                "help": "Weight decay (L2 regularization) for optimizer",
-            },
-            "batch_size": {
-                "type": int,
-                "default": 64,
-                "short": "bs",
-                "help": "Batch size for training",
-            },
-        }
-        return group_name, params
+    d_model: int = field(
+        default=256, metadata={"help": "Hidden dimension of the model"}
+    )
+    n_blocks: int = field(default=4, metadata={"help": "Number of transformer blocks"})
+    num_attn_heads: int = field(
+        default=8, metadata={"help": "Number of attention heads"}
+    )
+    dropout: float = field(default=0.05, metadata={"help": "Dropout probability"})
+    d_ff: int = field(default=256, metadata={"help": "Feed-forward network dimension"})
+    final_fc_dim: int = field(
+        default=512, metadata={"help": "Final fully connected layer dimension"}
+    )
+    kq_same: int = field(
+        default=1,
+        metadata={
+            "help": "Whether key and query use the same linear transformation (1=yes, 0=no)"
+        },
+    )
+    separate_qa: int = field(
+        default=0,
+        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
+    )
+    l2: float = field(
+        default=1e-5,
+        metadata={"help": "L2 regularization coefficient for Rasch model"},
+    )
+    num_buckets: int = field(
+        default=32, metadata={"help": "Number of buckets for ALiBi relative position"}
+    )
+    max_distance: int = field(
+        default=100,
+        metadata={"help": "Maximum distance for ALiBi relative position"},
+    )
+    epochs: int = field(
+        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
+    )
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"help": "Learning rate for optimizer", "short": "lr"},
+    )
+    lr_decay: float | None = field(
+        default=None, metadata={"help": "Learning rate decay factor per epoch"}
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "help": "Weight decay (L2 regularization) for optimizer",
+            "short": "wd",
+        },
+    )
+    batch_size: int = field(
+        default=64, metadata={"help": "Batch size for training", "short": "bs"}
+    )
 
 
 @register_trainer("extraKT")
@@ -132,21 +78,17 @@ class extraKTTrainer(BaseTrainer):
     负责初始化extraKT模型、优化器和训练数据，并实现前向传播逻辑。
 
     Args:
-        args: 模型参数配置
+        rc: RunConfig (OmegaConf DictConfig)
         data_src: 数据源实例
         exp_manager: 实验管理器（可选）
     """
 
-    def __init__(
-        self, args: Any = None, data_src: Any = None, exp_manager: Any = None
-    ) -> None:
-        # 准备数据
+    def build_components(self, rc, data_src) -> RuntimeComponents:
         from model.extraKT.extraKT_data import extraKTModelData
 
         model_data = extraKTModelData(data_src)
-        train_dataset, val_dataset, test_dataset = model_data.prepare_data(args)
+        train_dataset, val_dataset, test_dataset = model_data.prepare_data(rc)
 
-        # 初始化模型
         from model.extraKT.extraKT_model import extraKT
 
         logger.info("Initializing extraKT model...")
@@ -160,71 +102,43 @@ class extraKTTrainer(BaseTrainer):
         else:
             logger.info("extraKT: Problem ID not available, using skill-only model")
 
+        m = rc.model
         model = extraKT(
             num_c=metadata["num_skills"],
             n_pid=n_pid,
-            d_model=args.d_model,
-            n_blocks=args.n_blocks,
-            dropout=args.dropout,
-            d_ff=args.d_ff,
-            final_fc_dim=args.final_fc_dim,
-            num_attn_heads=args.num_attn_heads,
-            kq_same=args.kq_same,
-            separate_qa=bool(args.separate_qa),
-            l2=args.l2,
-            num_buckets=args.num_buckets,
-            max_distance=args.max_distance,
+            d_model=m.d_model,
+            n_blocks=m.n_blocks,
+            dropout=m.dropout,
+            d_ff=m.d_ff,
+            final_fc_dim=m.final_fc_dim,
+            num_attn_heads=m.num_attn_heads,
+            kq_same=m.kq_same,
+            separate_qa=bool(m.separate_qa),
+            l2=m.l2,
+            num_buckets=m.num_buckets,
+            max_distance=m.max_distance,
         )
 
-        # 创建优化器和损失函数
         loss_fn = torch.nn.BCELoss()
         optimizer = torch.optim.Adam(
-            model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
 
-        # 创建学习率调度器
         lr_scheduler = None
-        if args.lr_decay:
+        if m.lr_decay:
             lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=args.lr_decay
+                optimizer, gamma=m.lr_decay
             )
 
-        # 初始化基类训练器
-        super().__init__(model)
-
-        # 构建早停配置
-        early_stopping_cfg = None
-        es_patience = getattr(args, "es_patience", None)
-        if es_patience is not None:
-            early_stopping_cfg = EarlyStoppingConfig(
-                monitor=getattr(args, "es_monitor", "auc"),
-                mode=getattr(args, "es_mode", "max"),
-                patience=es_patience,
-                min_delta=getattr(args, "es_min_delta", 0.0),
-            )
-
-        # 配置训练器
-        self.with_training(
-            epochs=args.epochs,
-            seed=args.seed,
-            device=args.device,
-            checkpoint_path=args.checkpoint_path,
-        ).with_data(
-            train_data=train_dataset,
-            val_data=val_dataset,
-            test_data=test_dataset,
-            batch_size=args.batch_size,
-        ).with_optimization(
+        return RuntimeComponents(
+            model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
             lr_scheduler=lr_scheduler,
-            early_stopping=early_stopping_cfg,
-        ).with_experiment(
-            exp_manager=exp_manager,
-            hyperparams=args,
-            model_name="extraKT",
-            dataset_name=getattr(args, "dataset", ""),
-        ).build()
+            train_data=train_dataset,
+            val_data=val_dataset,
+            test_data=test_dataset,
+        )
 
     def _build_pid_data(
         self,
@@ -259,20 +173,16 @@ class extraKTTrainer(BaseTrainer):
         use_pid = self.model.n_pid > 0
         pid_data = self._build_pid_data(question, mask) if use_pid else None
 
-        # 模型前向传播
         y_hat_full, c_reg_loss = self.model(
             sequence, response, mask, pid_data
         )  # [B, S]
 
-        # 提取有效位置的预测和标签
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )
 
-        # 处理空批次
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # 生成二分类预测
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
         result = {
@@ -283,7 +193,6 @@ class extraKTTrainer(BaseTrainer):
             "y_prob": y_hat,
         }
 
-        # 如果使用Rasch模型，添加正则化损失
         if use_pid:
             result["c_reg_loss"] = c_reg_loss
 
@@ -307,12 +216,8 @@ class extraKTTrainer(BaseTrainer):
         valid_mask = late_group_id >= 0
         pid_data = self._build_pid_data(question, valid_mask) if use_pid else None
 
-        # 模型前向传播
         y_hat_full, _ = self.model(sequence, response, mask, pid_data)  # [B, S]
 
-        # extraKT 预测对齐
-        # y_hat[:, t] 直接预测 response[t]
-        # 使用 mask 筛选需要预测的位置
         y_hat = torch.masked_select(y_hat_full, mask)
         y_label = torch.masked_select(true_labels, mask).float()
         group_ids = torch.masked_select(late_group_id, mask)
@@ -332,7 +237,6 @@ class extraKTTrainer(BaseTrainer):
         y_label = outputs["y_label"]
         bce_loss = self.loss(y_hat, y_label)
 
-        # 添加Rasch模型正则化损失
         if "c_reg_loss" in outputs and self.model.n_pid > 0:
             return bce_loss + outputs["c_reg_loss"]
 

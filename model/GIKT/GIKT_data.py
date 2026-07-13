@@ -1,6 +1,7 @@
 """GIKT 数据准备：构建问题-技能二部图邻居表（采样）与同技能历史邻居索引。"""
 
 from functools import partial
+from typing import Any
 
 import numpy as np
 import torch
@@ -29,7 +30,7 @@ def sample_hist_neighbors(
     result = np.full(
         (batch_size, max_seq_len, hist_neighbor_num), pad_index, dtype=np.int64
     )
-    result[:, 0, :] = pad_index  # 位置 0 无历史
+    result[:, 0, :] = pad_index  # position 0 has no history
 
     for b in range(batch_size):
         seq_skills = skills[b]
@@ -53,7 +54,7 @@ class GIKTModelData(QuestionModelData):
     def __init__(self, data_src):
         super().__init__(data_src)
 
-    def prepare_data(self, args):
+    def prepare_data(self, rc: Any):
         user_sequence, user_response, user_mask, user_id_sequence = (
             self.load_sequence_data()
         )
@@ -69,8 +70,8 @@ class GIKTModelData(QuestionModelData):
             question_skill_matrix,
             num_skills,
             num_questions,
-            args.question_neighbor_num,
-            args.skill_neighbor_num,
+            rc.model.question_neighbor_num,
+            rc.model.skill_neighbor_num,
         )
 
         train_data, val_data, test_data = self.split_kfold_data(
@@ -78,13 +79,13 @@ class GIKTModelData(QuestionModelData):
             user_response,
             user_mask,
             user_id_sequence,
-            fold_idx=args.fold,
+            fold_idx=rc.data.fold,
         )
         train_sequence, train_response, train_mask, _ = train_data
         val_sequence, val_response, val_mask, _ = val_data
         test_sequence, test_response, test_mask, _ = test_data
 
-        # 每位置首个技能 id（用于同技能历史采样与 sim_emb=skill_emb）
+        # First skill id per position (used for same-skill history sampling and sim_emb=skill_emb).
         train_skills = self._extract_skills(train_sequence)
         val_skills = self._extract_skills(val_sequence)
         test_skills = self._extract_skills(test_sequence)
@@ -96,10 +97,10 @@ class GIKTModelData(QuestionModelData):
         test_dataset = GIKTDataset(test_sequence, test_response, test_mask, test_skills)
 
         train_collate_fn = partial(
-            gikt_collate_fn, hist_neighbor_num=args.hist_neighbor_num
+            gikt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
         )
         val_collate_fn = partial(
-            gikt_collate_fn, hist_neighbor_num=args.hist_neighbor_num
+            gikt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
         )
 
         logger.info(
@@ -109,8 +110,8 @@ class GIKTModelData(QuestionModelData):
         graph_data = {
             "question_neighbors": torch.from_numpy(question_neighbors).long(),
             "skill_neighbors": torch.from_numpy(skill_neighbors).long(),
-            "next_neighbor_num": args.next_neighbor_num,
-            "feature_embedding": None,  # 训练器中绑定为 model.feature_embedding.weight
+            "next_neighbor_num": rc.model.next_neighbor_num,
+            "feature_embedding": None,  # bound in trainer to model.feature_embedding.weight
         }
         return (
             train_dataset,
@@ -131,7 +132,7 @@ class GIKTModelData(QuestionModelData):
         question_neighbor_num,
         skill_neighbor_num,
     ):
-        """构建问题-技能二部图邻居表并固定采样（对应原 extract_qs_relations）。
+        """构建问题-技能二部图邻居表并固定采样。
 
         节点 id 布局：技能 [0, num_skills)，题目 [num_skills, num_skills+num_questions)。
         """
@@ -201,7 +202,7 @@ def gikt_collate_fn(batch, hist_neighbor_num=3):
 
     batched = default_collate(batch)
     batch_size, full_seq_len = batched["skills"].shape
-    model_seq_len = full_seq_len - 1  # GIKT 在 max_step = full_seq_len - 1 上运行
+    model_seq_len = full_seq_len - 1  # GIKT runs on max_step = full_seq_len - 1
     batched["hist_neighbor_index"] = torch.from_numpy(
         sample_hist_neighbors(
             batch_size,

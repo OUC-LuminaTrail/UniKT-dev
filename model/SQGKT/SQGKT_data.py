@@ -1,5 +1,6 @@
 from collections import defaultdict
 from functools import partial
+from typing import Any
 
 import numpy as np
 import polars as pl
@@ -53,7 +54,7 @@ class SQGKTModelData(QuestionModelData):
     def __init__(self, data_src):
         super().__init__(data_src)
 
-    def prepare_data(self, args):
+    def prepare_data(self, rc: Any):
         user_sequence, user_response, user_mask, user_id_sequence = (
             self.load_sequence_data()
         )
@@ -63,7 +64,7 @@ class SQGKTModelData(QuestionModelData):
         )
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
-        # load_sequence_data 以切分后的“序列（窗口）”为行，用户 id 即行索引。
+        # load_sequence_data returns split sequences (windows) as rows; user id is the row index.
         num_users = user_sequence.shape[0]
 
         logger.info("Building question-skill neighbors...")
@@ -71,13 +72,13 @@ class SQGKTModelData(QuestionModelData):
             question_skill_matrix,
             num_skills,
             num_questions,
-            args.question_neighbor_num,
-            args.skill_neighbor_num,
+            rc.model.question_neighbor_num,
+            rc.model.skill_neighbor_num,
         )
 
         logger.info("Building student-question graph...")
         q_neighbors_2, uq_stat_q = self.build_sq_graph(
-            num_questions, args.user_neighbor_num, args.fold
+            num_questions, rc.model.user_neighbor_num, rc.data.fold
         )
 
         train_data, val_data, test_data = self.split_kfold_data(
@@ -85,7 +86,7 @@ class SQGKTModelData(QuestionModelData):
             user_response,
             user_mask,
             user_id_sequence,
-            fold_idx=args.fold,
+            fold_idx=rc.data.fold,
         )
         train_seq, train_res, train_mask, train_uid = train_data
         val_seq, val_res, val_mask, val_uid = val_data
@@ -103,7 +104,9 @@ class SQGKTModelData(QuestionModelData):
             test_seq, test_res, test_mask, test_uid, test_skills
         )
 
-        collate = partial(sqgkt_collate_fn, hist_neighbor_num=args.hist_neighbor_num)
+        collate = partial(
+            sqgkt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
+        )
 
         logger.info(
             f"Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)}"
@@ -114,7 +117,7 @@ class SQGKTModelData(QuestionModelData):
             "skill_neighbors": torch.from_numpy(skill_neighbors).long(),
             "q_neighbors_2": torch.from_numpy(q_neighbors_2).long(),
             "uq_stat_q": torch.from_numpy(uq_stat_q).float(),
-            "next_neighbor_num": args.next_neighbor_num,
+            "next_neighbor_num": rc.model.next_neighbor_num,
             "feature_embedding": None,
         }
         return (
@@ -181,19 +184,19 @@ class SQGKTModelData(QuestionModelData):
         ).to_pandas()
         eta, alpha, beta = 10.0, 0.3, 0.7
 
-        # 学生整体正确率 c_i（式 1）
+        # Per-student overall accuracy c_i (Eq.1)
         stu_total = data.groupby("user")["label"].size()
         stu_correct = data.groupby("user")["label"].sum()
         c_i = (stu_correct / stu_total.clip(lower=1)).to_dict()
 
-        # 每个问题的 attempt/hint 泊松参数 λ（MLE = 均值）
+        # Per-question Poisson λ for attempt/hint counts (MLE = mean)
         lam_p = data.groupby("question")["attempt_count"].mean().to_dict()
         lam_n = data.groupby("question")["hint_count"].mean().to_dict()
 
-        # 每个 (学生, 问题) 的累计 attempt/hint
+        # Cumulative attempt/hint per (student, question)
         pq = data.groupby(["user", "question"])["attempt_count"].sum().to_dict()
         nq = data.groupby(["user", "question"])["hint_count"].sum().to_dict()
-        # 每个问题答过的学生集合
+        # Students who answered each question
         q_to_students = defaultdict(list)
         for u, q in pq:
             q_to_students[q].append(u)

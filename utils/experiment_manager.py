@@ -72,6 +72,10 @@ class ExperimentManager:
         self.dataset_name = dataset_name
         self.base_dir = Path(base_dir)
         self.tags = tags or []
+        # True when wrapping an already-existing run dir (evaluate/case_analysis);
+        # trainers skip re-archiving run_config.yaml in that case to preserve the
+        # original training archive.
+        self.is_existing_run = False
 
         # Create experiment directory
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -179,6 +183,26 @@ class ExperimentManager:
         )
 
     @staticmethod
+    def from_run_config(rc, exp_type: ExperimentType) -> "ExperimentManager":
+        """Create a manager from a RunConfig (OmegaConf ``DictConfig``).
+
+        Reads model/dataset identity, fold, and batch_size tags from the
+        typed config tree.
+        """
+        tags = []
+        if rc.data.fold is not None:
+            tags.append(f"fold{rc.data.fold}")
+        if hasattr(rc.model, "batch_size"):
+            tags.append(f"bs{rc.model.batch_size}")
+        return ExperimentManager(
+            exp_type=exp_type,
+            model_name=rc.experiment.model_name,
+            dataset_name=rc.experiment.dataset_name,
+            base_dir="runs",
+            tags=tags,
+        )
+
+    @staticmethod
     def from_run_dir(run_dir: str | Path) -> "ExperimentManager":
         """Create an ExperimentManager wrapping an existing run directory.
 
@@ -205,6 +229,7 @@ class ExperimentManager:
         manager.base_dir = run_path.parent.parent
         manager.tags = []
         manager.exp_dir = run_path
+        manager.is_existing_run = True
 
         logger.debug(f"ExperimentManager bound to existing dir: {run_path}")
         return manager
