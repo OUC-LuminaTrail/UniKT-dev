@@ -9,6 +9,7 @@ Each registry maintains two tables:
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 
 class UniversalRegistry:
@@ -180,18 +181,25 @@ def register_trainer(name: str | None = None):
 
 
 def register_model_config(name: str | None = None):
-    """Register a per-model ModelConfig dataclass into ``MODEL_CONFIGS``.
+    """Register a per-model ``ModelConfig`` dataclass into ``MODEL_CONFIGS``.
 
-    The target class should be a :class:`~utils.config.run_config.ModelConfig`
-    subclass.
+    Combines ``@dataclass`` transformation and registry binding into a single
+    decorator: write ``@register_model_config("Name")`` directly on a
+    :class:`~utils.config.run_config.ModelConfig` subclass instead of stacking
+    it over ``@dataclass``.
 
     Args:
         name: Optional registration name. Defaults to the class name.
 
     Returns:
-        A decorator that registers the dataclass with ``MODEL_CONFIGS``.
+        A decorator that applies ``@dataclass`` then registers the result.
     """
-    return MODEL_CONFIGS.register(name)
+    register = MODEL_CONFIGS.register(name)
+
+    def decorator(cls: type) -> type:
+        return register(dataclass(cls))
+
+    return decorator
 
 
 def register_data_source(name: str | None = None):
