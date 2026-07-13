@@ -32,20 +32,7 @@ pixi shell -e mamba
 pixi shell -e dhg-gpu
 ```
 
-### 方式二：自动 Conda 配置
-
-:::{warning}
-该脚本未经充分测试，依赖版本可能落后于 pixi 配置文件。推荐使用 pixi。
-:::
-
-```bash
-./scripts/setup_env.sh # 自动检测 GPU
-./scripts/setup_env.sh --cpu # 强制 CPU
-./scripts/setup_env.sh -n myenv # 指定环境名
-./scripts/setup_env.sh --yes # 非交互模式
-```
-
-### 方式三：手动 Conda 配置
+### 方式二：手动 Conda 配置
 
 (gpu-环境cuda-128)=
 
