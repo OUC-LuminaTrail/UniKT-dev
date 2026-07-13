@@ -36,7 +36,7 @@ class TrainerObjectiveWrapper:
         Args:
             trainer_class: Trainer class.
             data_src_fn: Data source factory function.
-            base_rc: Base RunConfig (OmegaConf DictConfig).
+            base_rc: Base RunConfig instance.
             metric_name: Metric name to optimise.
             max_epochs: Maximum number of epochs.
             exp_manager: Experiment manager for creating trial subdirectories.

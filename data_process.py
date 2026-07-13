@@ -50,7 +50,7 @@ class _PartialRC:
 def cmd_download(rc, ns):
     """Handle `download` subcommand."""
     dp = get_data_source(rc)
-    sub_ns = ns[ns.command]
+    sub_ns = ns[ns.subcommand]
     if getattr(sub_ns, "data_url", None):
         dp.data_url = sub_ns.data_url
 
@@ -73,7 +73,7 @@ def cmd_process(rc, ns):
     """Handle `process` subcommand."""
     seed_everything(rc.general.seed, deterministic=False)
     dp = get_data_source(rc)
-    sub_ns = ns[ns.command]
+    sub_ns = ns[ns.subcommand]
     dp.clean_raw_data()
     # The raw interaction frame is no longer needed after cleaning; release it so
     # it doesn't pile up against the (much larger) split-stage intermediates.
@@ -110,13 +110,17 @@ def cmd_process(rc, ns):
 
 
 if __name__ == "__main__":
-    parser = build_parser()
-    ns = parser.parse_args()
-    rc = _PartialRC(ns[ns.command])
+    import sys
 
-    if ns.command == "download":
+    from utils.config.config_parser import _expand_short_flags
+
+    parser = build_parser()
+    ns = parser.parse_args(_expand_short_flags(sys.argv[1:]))
+    rc = _PartialRC(ns[ns.subcommand])
+
+    if ns.subcommand == "download":
         cmd_download(rc, ns)
-    elif ns.command == "process":
+    elif ns.subcommand == "process":
         cmd_process(rc, ns)
     else:
         parser.print_help()

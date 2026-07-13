@@ -185,7 +185,7 @@ class ExperimentManager:
 
     @staticmethod
     def from_run_config(rc, exp_type: ExperimentType) -> "ExperimentManager":
-        """Create a manager from a RunConfig (OmegaConf ``DictConfig``).
+        """Create a manager from a RunConfig instance.
 
         Reads model/dataset identity, fold, and batch_size tags from the
         typed config tree.

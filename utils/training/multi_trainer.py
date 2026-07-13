@@ -152,7 +152,7 @@ class MultiTrainer(BaseTrainer):
         each :class:`StageConfig` builder during :meth:`run`.
 
         Args:
-            rc: RunConfig (OmegaConf ``DictConfig``).
+            rc: RunConfig instance.
             data_src: Data source used by stage builders to prepare data.
             exp_manager: Experiment manager (run directory / tracking).
         """

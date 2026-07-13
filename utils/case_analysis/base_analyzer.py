@@ -60,7 +60,7 @@ class BaseCaseAnalyzer(BaseTrainer):
         """Configure inference data, batch size, and device override.
 
         Args:
-            rc: RunConfig (OmegaConf ``DictConfig``) — typically loaded from the
+            rc: RunConfig instance — typically loaded from the
                 run's archived ``run_config.yaml``.
             data: Validation/inference dataset (or a ready DataLoader).
             batch_size: Inference batch size.

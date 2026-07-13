@@ -219,11 +219,11 @@ class OptunaConfig:
 
 
 def load_optuna_config(config_path: str) -> OptunaConfig:
-    """Load an :class:`OptunaConfig` from a yaml file (OmegaConf).
+    """Load an :class:`OptunaConfig` from a yaml file.
 
-    The yaml is parsed with OmegaConf, resolved to a plain dict, and passed to
-    the ``OptunaConfig`` constructor (so methods like ``get_sampler`` are
-    preserved and unknown keys fail loudly).
+    The yaml is parsed with PyYAML into a dict and passed to the
+    ``OptunaConfig`` constructor (so methods like ``get_sampler`` are preserved
+    and unknown keys fail loudly).
 
     Args:
         config_path: Path to the yaml configuration file.

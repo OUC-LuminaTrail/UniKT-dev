@@ -35,7 +35,7 @@ def get_data_source(rc) -> DataSource:
     """Get a data source instance from a RunConfig, with on-demand lazy import.
 
     Args:
-        rc: RunConfig as an OmegaConf ``DictConfig``; the dataset is read from
+        rc: RunConfig instance; the dataset is read from
             ``rc.data.dataset``.
 
     Returns:

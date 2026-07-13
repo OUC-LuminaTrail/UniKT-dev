@@ -70,23 +70,29 @@ class ConfigParser:
         parser = self._build_parser(schema_nodes)
 
         ns = parser.parse_args(argv)
+        # An explicit -m/--experiment.model_name wins over any --config/default_config
+        # model_name (jsonargparse applies ActionConfigFile by argv position, so a config
+        # later in argv could otherwise override the explicit flag).
+        explicit = _peek_explicit_model_name(argv)
+        if explicit:
+            ns["experiment"]["model_name"] = explicit
         rc = _namespace_to_run_config(ns, schema_nodes)
         return rc, ns
 
     def _resolve_model_name(self, argv: list[str]) -> str:
-        """Pass one: find the model name from -m / --config / default_config."""
+        """Pass one: find the model name. ``-m`` wins, then ``--config``, then ``default_config``."""
         pre = argparse.ArgumentParser(add_help=False)
         pre.add_argument("-m", "--experiment.model_name", dest="model_name", default=None)
         pre.add_argument("--config", dest="config", default=None)
         pre_args, _ = pre.parse_known_args(argv)
 
+        if pre_args.model_name:
+            return pre_args.model_name
         for source in (pre_args.config, self.default_config):
             if source:
                 name = _read_model_name(source)
                 if name:
                     return name
-        if pre_args.model_name:
-            return pre_args.model_name
 
         argv_list = argv if argv is not None else sys.argv[1:]
         if "-h" in argv_list or "--help" in argv_list:
@@ -161,6 +167,17 @@ def _expand_short_flags(argv: list[str]) -> list[str]:
         out.append(token)
         i += 1
     return out
+
+
+def _peek_explicit_model_name(argv: list[str]) -> str | None:
+    """Read an explicit ``--experiment.model_name`` (post short-flag expansion) from argv."""
+    flag = "--experiment.model_name"
+    for i, token in enumerate(argv):
+        if token == flag and i + 1 < len(argv):
+            return argv[i + 1]
+        if token.startswith(flag + "="):
+            return token.split("=", 1)[1]
+    return None
 
 
 def _read_model_name(config_path: str) -> str | None:

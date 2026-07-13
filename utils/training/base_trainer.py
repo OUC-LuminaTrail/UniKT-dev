@@ -85,7 +85,7 @@ class BaseTrainer(ABC):
         """Construct and build the trainer in one step.
 
         Args:
-            rc: RunConfig (OmegaConf ``DictConfig``) — the single source of
+            rc: RunConfig instance — the single source of
                 truth for scalar configuration.
             data_src: Data source used by :meth:`build_components` to prepare
                 datasets and model metadata.

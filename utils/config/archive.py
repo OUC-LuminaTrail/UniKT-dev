@@ -66,6 +66,12 @@ def load_run_config_archive(yaml_path: str | Path) -> RunConfig:
     model_name = data.get("experiment", {}).get("model_name", "")
     schema_nodes = build_run_config_schema(model_name)
 
+    extra_top = sorted(set(data) - set(schema_nodes))
+    if extra_top:
+        raise TypeError(
+            f"Archived run_config.yaml has top-level node(s) absent from the current "
+            f"schema: {extra_top}"
+        )
     node_instances: dict[str, Any] = {}
     for node, cls in schema_nodes.items():
         node_instances[node] = _build_node_from_dict(cls, data.get(node, {}))
@@ -81,9 +87,15 @@ def load_run_metadata(log_dir: str | Path) -> dict[str, Any]:
 
 
 def _build_node_from_dict(cls: type, data: dict[str, Any]) -> Any:
-    """Construct a config dataclass from a dict, ignoring unknown archived keys."""
+    """Construct a config dataclass from a dict, raising on unknown archived keys."""
     valid = {f.name for f in fields(cls)}
-    return cls(**{k: v for k, v in data.items() if k in valid})
+    unknown = sorted(set(data) - valid)
+    if unknown:
+        raise TypeError(
+            f"Archived {cls.__name__} has field(s) absent from the current schema "
+            f"(likely renamed/removed): {unknown}"
+        )
+    return cls(**data)
 
 
 __all__ = [
