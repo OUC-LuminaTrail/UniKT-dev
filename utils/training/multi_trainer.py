@@ -192,26 +192,21 @@ class MultiTrainer(BaseTrainer):
         dev = rc.general.device
         self.device_ = torch.device(dev) if dev else self._try_gpu()
 
-        # 2. Resolve logging flags from RunConfig
-        self.no_swanlab = bool(rc.general.no_swanlab)
-        self.log_batch_metrics = bool(rc.general.log_batch_metrics)
-        self.skip_test = bool(rc.general.skip_test)
-
-        # 3. Log directory
+        # 2. Log directory
         exp_manager = self._exp_manager
         self.log_dir = exp_manager.get_log_dir()
         os.makedirs(self.log_dir, exist_ok=True)
 
-        # 4. Shared components
+        # 3. Shared components
         self.metrics_accumulator = MetricsAccumulator()
         self.checkpoint_manager = CheckpointManager(self.log_dir)
         self.metric_logger = build_default_metric_loggers(
             log_dir=self.log_dir,
-            log_batch_metrics=self.log_batch_metrics,
-            no_swanlab=self.no_swanlab,
+            log_batch_metrics=self.run_config.general.log_batch_metrics,
+            no_swanlab=self.run_config.general.no_swanlab,
         )
 
-        # 5. Save RunConfig archive (skip when reusing an existing run dir, so
+        # 4. Save RunConfig archive (skip when reusing an existing run dir, so
         #    the training archive is preserved for evaluate/case_analysis).
         if not getattr(exp_manager, "is_existing_run", False):
             self._setup_run_config_archive()

@@ -125,9 +125,6 @@ class BaseTrainer(ABC):
         self.metrics_accumulator = None
         self.checkpoint_manager = None
         self.callback_manager = None
-        self.no_swanlab = False
-        self.log_batch_metrics = False
-        self.skip_test = False
         self.metric_logger = None
         self._global_step = 0
 
@@ -180,9 +177,6 @@ class BaseTrainer(ABC):
         # 2. Scalar snapshot. ``epochs`` is a per-run scalar read from rc.model;
         #    multi-stage trainers override it per stage via _apply_stage.
         self.epochs = rc.model.epochs
-        self.no_swanlab = bool(rc.general.no_swanlab)
-        self.log_batch_metrics = bool(rc.general.log_batch_metrics)
-        self.skip_test = bool(rc.general.skip_test)
 
         # 3. Runtime instances
         self.model = c.model
@@ -207,8 +201,8 @@ class BaseTrainer(ABC):
         self.checkpoint_manager = CheckpointManager(self.log_dir)
         self.metric_logger = build_default_metric_loggers(
             log_dir=self.log_dir,
-            log_batch_metrics=self.log_batch_metrics,
-            no_swanlab=self.no_swanlab,
+            log_batch_metrics=self.run_config.general.log_batch_metrics,
+            no_swanlab=self.run_config.general.no_swanlab,
         )
 
         # 8. Callbacks
@@ -225,7 +219,7 @@ class BaseTrainer(ABC):
                 best_filename="best_model.pth",
             )
         )
-        if not self.skip_test:
+        if not self.run_config.general.skip_test:
             callbacks.append(TestEvaluationCallback(use_best_model=True))
             if self.test_data is None:
                 logger.warning(
@@ -299,7 +293,7 @@ class BaseTrainer(ABC):
         rc = self.run_config
         metadata: dict = {
             "model_name": rc.experiment.model_name,
-            "dataset_name": rc.experiment.dataset_name,
+            "dataset_name": rc.data.dataset,
             "seed": rc.general.seed,
         }
         if self.model is not None:
@@ -755,7 +749,7 @@ class BaseTrainer(ABC):
             total_loss += loss
 
             # Log per-batch loss (optional) and update global step
-            if self.log_batch_metrics:
+            if self.run_config.general.log_batch_metrics:
                 self.metric_logger.log_batch(
                     phase=phase,
                     global_step=self._global_step,

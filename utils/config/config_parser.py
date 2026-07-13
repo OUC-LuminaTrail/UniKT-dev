@@ -114,8 +114,6 @@ class ConfigParser:
             merge_sources.append(OmegaConf.create(nested))
         return OmegaConf.merge(*merge_sources)
 
-    # -- two passes -----------------------------------------------------------
-
     def _pass_one(self, argv: list[str] | None) -> tuple[str | None, Any]:
         pre = argparse.ArgumentParser(add_help=False)
         pre.add_argument(

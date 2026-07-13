@@ -70,7 +70,7 @@ def main():
 
     rc = load_run_config_archive(run_config_path)
     model_name = rc.experiment.model_name
-    dataset_name = rc.experiment.dataset_name or rc.data.dataset
+    dataset_name = rc.data.dataset
 
     logger.info(f"Model: {model_name}  Dataset: {dataset_name}")
     logger.info(f"Checkpoint: {checkpoint_path}")

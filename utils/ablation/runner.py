@@ -112,7 +112,6 @@ class AblationRunner:
             )
         rc = OmegaConf.merge(OmegaConf.structured(schema), OmegaConf.create(nested))
         rc.experiment.model_name = ablation.variant
-        rc.experiment.dataset_name = self.config.dataset
         rc.data.dataset = self.config.dataset
 
         # Reseed before constructing the trainer for reproducible weight init.

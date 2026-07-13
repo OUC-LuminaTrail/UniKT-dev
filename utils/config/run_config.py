@@ -173,7 +173,6 @@ class ExperimentConfig:
     """Experiment identity used for run naming and archive lookup."""
 
     model_name: str = field(default="", metadata={"help": "Model name", "short": "m"})
-    dataset_name: str = field(default="", metadata={"help": "Dataset name"})
 
 
 @dataclass

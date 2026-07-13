@@ -14,7 +14,6 @@ def main():
     rc = ConfigParser(
         prog="train.py", description="Knowledge Tracing Training Script"
     ).parse_args()
-    rc.experiment.dataset_name = rc.data.dataset
     model_name = rc.experiment.model_name
 
     # Seed as early as possible so init, data loading, and training RNG are reproducible.

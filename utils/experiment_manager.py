@@ -197,7 +197,7 @@ class ExperimentManager:
         return ExperimentManager(
             exp_type=exp_type,
             model_name=rc.experiment.model_name,
-            dataset_name=rc.experiment.dataset_name,
+            dataset_name=rc.data.dataset,
             base_dir="runs",
             tags=tags,
         )

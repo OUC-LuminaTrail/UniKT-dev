@@ -47,7 +47,6 @@ def main():
     rc = ConfigParser(
         prog="optuna_search.py", description="Unified Optuna Hyperparameter Search"
     ).parse_args(remaining)
-    rc.experiment.dataset_name = rc.data.dataset
     model_name = rc.experiment.model_name
 
     # Load config first to annotate experiment directory with n_trials
@@ -57,7 +56,7 @@ def main():
     exp_manager = ExperimentManager(
         exp_type=ExperimentType.HYPERPARAM_SEARCH,
         model_name=model_name,
-        dataset_name=rc.experiment.dataset_name,
+        dataset_name=rc.data.dataset,
         base_dir="runs",
         tags=[f"n_trials{optuna_config.n_trials}"],
     )
