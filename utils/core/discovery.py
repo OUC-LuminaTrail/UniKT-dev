@@ -4,6 +4,10 @@ Scans for ``@register_<role>("name")`` decorators and populates the correspondin
 registry's ``index``. This allows ``keys()`` to list all components at startup while
 component code is only imported on ``get()`` (lazy loading, multi-environment safe).
 
+The decorator→registry mapping is self-described: each :class:`UniversalRegistry`
+declares its own ``decorator_name``, so this module never hardcodes the role list —
+adding a registry anywhere is picked up automatically.
+
 Only recognizes the uniform ``@register_<role>("literal")`` form; non-literal arguments
 (variables, expressions) are ignored.
 """
@@ -14,25 +18,18 @@ import ast
 from pathlib import Path
 
 from .logger import get_logger
-from .registry import (
-    ANALYZERS,
-    DATA_SOURCES,
-    EFFICIENCY_STAGES,
-    MODEL_CONFIGS,
-    TRAINERS,
-    UniversalRegistry,
-)
+from .registry import UniversalRegistry
 
 _logger = get_logger(__name__)
 
-# @register_<role>("name") -> target registry
-_DECORATORS: dict[str, UniversalRegistry] = {
-    "register_trainer": TRAINERS,
-    "register_model_config": MODEL_CONFIGS,
-    "register_data_source": DATA_SOURCES,
-    "register_analyzer": ANALYZERS,
-    "register_efficiency_stage": EFFICIENCY_STAGES,
-}
+
+def _decorator_map() -> dict[str, UniversalRegistry]:
+    """Build ``{decorator_name: registry}`` from the registries themselves."""
+    return {
+        r.decorator_name: r
+        for r in UniversalRegistry._all_registries
+        if r.decorator_name
+    }
 
 
 def discover_registrations(root: str | Path, package: str) -> None:
@@ -43,6 +40,7 @@ def discover_registrations(root: str | Path, package: str) -> None:
         package: Dotted module name for the directory (e.g. ``"model"``, ``"utils.data_process"``).
     """
     root_path = Path(root)
+    decorators = _decorator_map()
     found = 0
     for py in root_path.rglob("*.py"):
         if py.name == "__init__.py":
@@ -56,7 +54,7 @@ def discover_registrations(root: str | Path, package: str) -> None:
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
                 for dec in node.decorator_list:
-                    registry = _target_registry(dec)
+                    registry = _target_registry(dec, decorators)
                     if registry is not None:
                         registry.index(dec.args[0].value, module_path)
                         found += 1
@@ -68,7 +66,9 @@ def _to_module_path(py: Path, root: Path, package: str) -> str:
     return ".".join((package, *rel.parts))
 
 
-def _target_registry(dec: ast.expr) -> UniversalRegistry | None:
+def _target_registry(
+    dec: ast.expr, decorators: dict[str, UniversalRegistry]
+) -> UniversalRegistry | None:
     """Identify ``@register_<role>("literal")`` and return the target registry, or ``None``."""
     if not isinstance(dec, ast.Call) or not dec.args:
         return None
@@ -76,4 +76,5 @@ def _target_registry(dec: ast.expr) -> UniversalRegistry | None:
         isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str)
     ):
         return None
-    return _DECORATORS.get(dec.func.id) if isinstance(dec.func, ast.Name) else None
+    return decorators.get(dec.func.id) if isinstance(dec.func, ast.Name) else None
+

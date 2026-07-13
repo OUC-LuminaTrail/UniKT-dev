@@ -28,15 +28,24 @@ class UniversalRegistry:
             loading.
     """
 
-    def __init__(self, name: str):
+    # Auto-populated roll-call of every registry instance; lets discovery iterate
+    # registries without hardcoding the decorator→registry mapping. Mutable by design.
+    _all_registries: list["UniversalRegistry"] = []  # noqa: RUF012
+
+    def __init__(self, name: str, decorator_name: str | None = None):
         """Initialize the registry.
 
         Args:
             name: Human-readable registry name (e.g. ``"trainers"``).
+            decorator_name: The ``@register_<role>`` function name that populates
+                this registry via static discovery. ``None`` marks an import-time-only
+                registry (not discovered), e.g. ``METRIC_LOGGERS``.
         """
         self._name = name
+        self.decorator_name = decorator_name
         self._registry: dict[str, type] = {}
         self._index: dict[str, str] = {}
+        UniversalRegistry._all_registries.append(self)
 
     def register(self, name: str | None = None) -> Callable[[type], type]:
         """Return a decorator that binds a class to ``name`` at import time.
@@ -156,12 +165,12 @@ class UniversalRegistry:
 # Global registries
 # ============================================================================
 
-TRAINERS = UniversalRegistry("trainers")
-MODEL_CONFIGS = UniversalRegistry("model_configs")
-DATA_SOURCES = UniversalRegistry("data_sources")
-ANALYZERS = UniversalRegistry("analyzers")
-METRIC_LOGGERS = UniversalRegistry("metric_loggers")
-EFFICIENCY_STAGES = UniversalRegistry("efficiency_stages")
+TRAINERS = UniversalRegistry("trainers", decorator_name="register_trainer")
+MODEL_CONFIGS = UniversalRegistry("model_configs", decorator_name="register_model_config")
+DATA_SOURCES = UniversalRegistry("data_sources", decorator_name="register_data_source")
+ANALYZERS = UniversalRegistry("analyzers", decorator_name="register_analyzer")
+METRIC_LOGGERS = UniversalRegistry("metric_loggers")  # import-time only, not discovered
+EFFICIENCY_STAGES = UniversalRegistry("efficiency_stages", decorator_name="register_efficiency_stage")
 
 
 # ============================================================================
