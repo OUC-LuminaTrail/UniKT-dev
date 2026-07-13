@@ -143,6 +143,12 @@ def _environment_table(env: EnvironmentInfo) -> Table:
             f"{env.cudnn_version} (benchmark={env.cudnn_benchmark}, det={env.cudnn_deterministic})",
         )
     table.add_row("Deterministic algos", str(env.deterministic_algorithms))
+    if env.cuda_available:
+        table.add_row("TF32 (matmul)", str(env.cuda_matmul_allow_tf32))
+        table.add_row("TF32 (cuDNN)", str(env.cudnn_allow_tf32))
+    table.add_row("Matmul precision", env.float32_matmul_precision or "default")
+    if env.model_dtype:
+        table.add_row("Model dtype", env.model_dtype)
     table.add_row("Python", env.python_version)
     table.add_row("Platform", env.platform)
     return table

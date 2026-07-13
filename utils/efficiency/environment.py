@@ -37,10 +37,14 @@ class EnvironmentInfo:
     cudnn_benchmark: bool = False
     cudnn_deterministic: bool = False
     deterministic_algorithms: bool = False
+    cuda_matmul_allow_tf32: bool = False
+    cudnn_allow_tf32: bool = False
+    float32_matmul_precision: str | None = None
+    model_dtype: str = ""
 
 
-def collect_environment(device: torch.device) -> EnvironmentInfo:
-    """采集一次性环境元数据。任何子项失败退化为 None，绝不抛错。"""
+def collect_environment(device: torch.device, model: torch.nn.Module | None = None) -> EnvironmentInfo:
+    """Collect one-shot environment metadata; subitems fall back to defaults on failure."""
     import sys
 
     info = EnvironmentInfo(
@@ -79,6 +83,15 @@ def collect_environment(device: torch.device) -> EnvironmentInfo:
     info.cudnn_deterministic = bool(torch.backends.cudnn.deterministic)
     with contextlib.suppress(Exception):
         info.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
+
+    # TF32 changes matmul/cuDNN effective throughput; record to explain latency vs logical FLOPs.
+    info.cuda_matmul_allow_tf32 = bool(torch.backends.cuda.matmul.allow_tf32)
+    info.cudnn_allow_tf32 = bool(torch.backends.cudnn.allow_tf32)
+    with contextlib.suppress(Exception):
+        info.float32_matmul_precision = torch.get_float32_matmul_precision()
+    if model is not None:
+        with contextlib.suppress(Exception):
+            info.model_dtype = str(next(model.parameters()).dtype)
 
     if device.type == "cuda" and torch.cuda.is_available():
         idx = device.index or 0

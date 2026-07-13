@@ -52,7 +52,7 @@ class EfficiencySession:
         self.trainer.model.to(device)
         if isinstance(self.trainer.loss, torch.nn.Module):
             self.trainer.loss.to(device)
-        environment = collect_environment(device)
+        environment = collect_environment(device, self.trainer.model)
 
         # Prefetch one representative batch; timing loops reuse it to avoid
         # DataLoader IPC noise.
