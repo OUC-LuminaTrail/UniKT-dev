@@ -1,7 +1,5 @@
 """SAKT trainer."""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,32 +11,29 @@ logger = get_logger(__name__)
 
 @register_model_config("SAKT")
 class SAKTConfig(ModelConfig):
-    """SAKT model configuration."""
+    """SAKT model configuration.
 
-    emb_size: int = field(
-        default=256,
-        metadata={"help": "Embedding dimension of interaction and exercise embeddings"},
-    )
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of multi-head attention heads"}
-    )
-    num_en: int = field(default=1, metadata={"help": "Number of SAKT attention blocks"})
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay for optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        emb_size: Embedding dimension of interaction and exercise embeddings.
+        num_attn_heads: Number of multi-head attention heads.
+        num_en: Number of SAKT attention blocks.
+        dropout: Dropout probability.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    emb_size: int = 256
+    num_attn_heads: int = 8
+    num_en: int = 1
+    dropout: float = 0.2
+    epochs: int = 200
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("SAKT")

@@ -1,6 +1,6 @@
 """GKT (Graph-based Knowledge Tracing) 训练器模块"""
 
-from dataclasses import field
+from typing import Literal
 
 import numpy as np
 import torch
@@ -65,41 +65,29 @@ def build_transition_graph(sequences: list, num_c: int) -> torch.Tensor:
 
 @register_model_config("GKT")
 class GKTConfig(ModelConfig):
-    """GKT model configuration."""
+    """GKT model configuration.
 
-    hidden_dim: int = field(
-        default=64, metadata={"help": "Hidden dimension of the model"}
-    )
-    embedding_dim: int = field(
-        default=64, metadata={"help": "Embedding dimension of the model"}
-    )
-    dropout: float = field(default=0.5, metadata={"help": "Dropout probability"})
-    graph_type: str = field(
-        default="dense",
-        metadata={
-            "choices": ["dense", "transition"],
-            "help": "Graph type for GKT model",
-        },
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=0.001, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0001,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        hidden_dim: Hidden dimension of the model.
+        embedding_dim: Embedding dimension of the model.
+        dropout: Dropout probability.
+        graph_type: Graph type for GKT model.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    hidden_dim: int = 64
+    embedding_dim: int = 64
+    dropout: float = 0.5
+    graph_type: Literal["dense", "transition"] = "dense"
+    epochs: int = 150
+    learning_rate: float = 0.001
+    lr_decay: float | None = None
+    weight_decay: float = 0.0001
+    batch_size: int = 128
 
 
 @register_trainer("GKT")

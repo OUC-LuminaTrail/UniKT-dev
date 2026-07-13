@@ -1,7 +1,5 @@
 """UKT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,65 +11,47 @@ logger = get_logger(__name__)
 
 @register_model_config("UKT")
 class UKTConfig(ModelConfig):
-    """UKT model configuration."""
+    """UKT model configuration.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model"}
-    )
-    n_blocks: int = field(default=4, metadata={"help": "Number of transformer blocks"})
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads"}
-    )
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    d_ff: int = field(default=512, metadata={"help": "Feed-forward network dimension"})
-    final_fc_dim: int = field(
-        default=512, metadata={"help": "First fully connected layer dimension"}
-    )
-    final_fc_dim2: int = field(
-        default=256, metadata={"help": "Second fully connected layer dimension"}
-    )
-    kq_same: int = field(
-        default=1,
-        metadata={
-            "help": "Whether key and query use the same linear transformation (1=yes, 0=no)"
-        },
-    )
-    separate_qa: int = field(
-        default=0,
-        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
-    )
-    use_CL: int = field(
-        default=1, metadata={"help": "Enable contrastive learning (1=yes, 0=no)"}
-    )
-    cl_weight: float = field(
-        default=0.02, metadata={"help": "Weight for contrastive learning loss"}
-    )
-    l2: float = field(
-        default=1e-5,
-        metadata={"help": "L2 regularization coefficient for Rasch difficulty"},
-    )
-    no_uncertainty_aug: bool = field(
-        default=False,
-        metadata={"help": "Disable uncertainty augmentation for contrastive learning"},
-    )
-    atten_type: str = field(
-        default="w2",
-        metadata={"help": "Attention type: w2 (Wasserstein) or dp (dot product)"},
-    )
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-4,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    weight_decay: float = field(
-        default=1e-5,
-        metadata={"help": "Weight decay for optimizer", "short": "wd"},
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        dropout: Dropout probability.
+        d_ff: Feed-forward network dimension.
+        final_fc_dim: First fully connected layer dimension.
+        final_fc_dim2: Second fully connected layer dimension.
+        kq_same: Whether key and query use the same linear transformation (1=yes, 0=no).
+        separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        use_CL: Enable contrastive learning (1=yes, 0=no).
+        cl_weight: Weight for contrastive learning loss.
+        l2: L2 regularization coefficient for Rasch difficulty.
+        no_uncertainty_aug: Disable uncertainty augmentation for contrastive learning.
+        atten_type: Attention type: w2 (Wasserstein) or dp (dot product).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 4
+    num_attn_heads: int = 8
+    dropout: float = 0.2
+    d_ff: int = 512
+    final_fc_dim: int = 512
+    final_fc_dim2: int = 256
+    kq_same: int = 1
+    separate_qa: int = 0
+    use_CL: int = 1
+    cl_weight: float = 0.02
+    l2: float = 1e-5
+    no_uncertainty_aug: bool = False
+    atten_type: str = "w2"
+    epochs: int = 200
+    learning_rate: float = 1e-4
+    weight_decay: float = 1e-5
+    batch_size: int = 64
 
 
 @register_trainer("UKT")

@@ -1,7 +1,5 @@
 """MCSKT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,89 +11,49 @@ logger = get_logger(__name__)
 
 @register_model_config("MCSKT")
 class MCSKTConfig(ModelConfig):
-    """MCSKT model configuration."""
+    """MCSKT model configuration.
 
-    d_model: int = field(
-        default=256,
-        metadata={
-            "help": "Hidden dimension (256 with n_blocks=5 reproduces the paper's "
-            "~5.6M param count)"
-        },
-    )
-    n_blocks: int = field(
-        default=5, metadata={"help": "Number of Mamba blocks per encoder (Q/K)"}
-    )
-    num_heads: int = field(
-        default=8, metadata={"help": "Number of dynamic k-sparse attention heads"}
-    )
-    d_state: int = field(
-        default=16, metadata={"help": "SSM latent state dimension in Mamba"}
-    )
-    d_conv: int = field(
-        default=4, metadata={"help": "Conv1D kernel width in Mamba block"}
-    )
-    expand: int = field(default=2, metadata={"help": "Mamba internal expansion factor"})
-    dropout: float = field(
-        default=0.1,
-        metadata={
-            "help": "Dropout probability (applied to embeddings, Mamba blocks, "
-            "prediction head)"
-        },
-    )
-    l2: float = field(
-        default=1e-5,
-        metadata={"help": "L2 reg coefficient for Rasch difficulty parameter"},
-    )
-    num_rgap: int = field(
-        default=100,
-        metadata={"help": "Number of review-gap (repeated time gap) buckets"},
-    )
-    num_sgap: int = field(
-        default=100, metadata={"help": "Number of sequence-gap buckets"}
-    )
-    num_pcount: int = field(
-        default=15, metadata={"help": "Number of past-trial-count buckets"}
-    )
-    delta1: float = field(
-        default=0.25,
-        metadata={
-            "help": "Lower bound of dynamic sparsity interval [d1, d2] (paper: 1/4)"
-        },
-    )
-    delta2: float = field(
-        default=0.667,
-        metadata={
-            "help": "Upper bound of dynamic sparsity interval [d1, d2] (paper: 2/3)"
-        },
-    )
-    epochs: int = field(
-        default=200,
-        metadata={"help": "Number of training epochs (paper: 200)", "short": "ep"},
-    )
-    learning_rate: float = field(
-        default=1e-4,
-        metadata={
-            "help": "Learning rate (paper: 1e-5; raised for stable Adam)",
-            "short": "lr",
-        },
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=1e-4,
-        metadata={"help": "Weight decay for optimizer", "short": "wd"},
-    )
-    max_clip_grad_norm: float = field(
-        default=1.0,
-        metadata={
-            "help": "Max gradient norm for clipping (None to disable)",
-            "short": "clip",
-        },
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size (paper: 64)", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension (256 with n_blocks=5 reproduces the paper's ~5.6M param count).
+        n_blocks: Number of Mamba blocks per encoder (Q/K).
+        num_heads: Number of dynamic k-sparse attention heads.
+        d_state: SSM latent state dimension in Mamba.
+        d_conv: Conv1D kernel width in Mamba block.
+        expand: Mamba internal expansion factor.
+        dropout: Dropout probability (applied to embeddings, Mamba blocks, prediction head).
+        l2: L2 reg coefficient for Rasch difficulty parameter.
+        num_rgap: Number of review-gap (repeated time gap) buckets.
+        num_sgap: Number of sequence-gap buckets.
+        num_pcount: Number of past-trial-count buckets.
+        delta1: Lower bound of dynamic sparsity interval [d1, d2] (paper: 1/4).
+        delta2: Upper bound of dynamic sparsity interval [d1, d2] (paper: 2/3).
+        epochs: Number of training epochs (paper: 200).
+        learning_rate: Learning rate (paper: 1e-5; raised for stable Adam).
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        max_clip_grad_norm: Max gradient norm for clipping (None to disable).
+        batch_size: Batch size (paper: 64).
+    """
+
+    d_model: int = 256
+    n_blocks: int = 5
+    num_heads: int = 8
+    d_state: int = 16
+    d_conv: int = 4
+    expand: int = 2
+    dropout: float = 0.1
+    l2: float = 1e-5
+    num_rgap: int = 100
+    num_sgap: int = 100
+    num_pcount: int = 15
+    delta1: float = 0.25
+    delta2: float = 0.667
+    epochs: int = 200
+    learning_rate: float = 1e-4
+    lr_decay: float | None = None
+    weight_decay: float = 1e-4
+    max_clip_grad_norm: float = 1.0
+    batch_size: int = 64
 
 
 @register_trainer("MCSKT")

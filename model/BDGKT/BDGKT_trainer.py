@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,46 +11,31 @@ __all__ = ["BDGKTTrainer", "BDGKTConfig"]
 
 @register_model_config("BDGKT")
 class BDGKTConfig(ModelConfig):
-    """BDGKT model configuration."""
+    """BDGKT model configuration.
 
-    hidden_dim: int = field(
-        default=128,
-        metadata={"help": "Hidden layer dimension (default: 128)", "short": "hd"},
-    )
-    layer_num: int = field(
-        default=2, metadata={"help": "Number of GNN layers (default: 2)", "short": "ln"}
-    )
-    drop1: float = field(
-        default=0.3, metadata={"help": "Feature dropout rate (default: 0.3)"}
-    )
-    drop2: float = field(
-        default=0.3, metadata={"help": "Attention dropout rate (default: 0.3)"}
-    )
-    question_max_length: int = field(
-        default=20,
-        metadata={"help": "Student history length l_s (default: 20)", "short": "qml"},
-    )
-    student_max_length: int = field(
-        default=5,
-        metadata={
-            "help": "Top similar students per question l_q (default: 5)",
-            "short": "sml",
-        },
-    )
-    learning_rate: float = field(
-        default=0.001,
-        metadata={"help": "Learning rate (default: 0.001)", "short": "lr"},
-    )
-    weight_decay: float = field(
-        default=1e-4, metadata={"help": "Weight decay (default: 1e-4)", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=2000, metadata={"help": "Batch size (default: 2000)", "short": "bs"}
-    )
-    epochs: int = field(
-        default=100,
-        metadata={"help": "Number of training epochs (default: 100)", "short": "ep"},
-    )
+    Args:
+        hidden_dim: Hidden layer dimension.
+        layer_num: Number of GNN layers.
+        drop1: Feature dropout rate.
+        drop2: Attention dropout rate.
+        question_max_length: Student history length l_s.
+        student_max_length: Top similar students per question l_q.
+        learning_rate: Learning rate.
+        weight_decay: Weight decay.
+        batch_size: Batch size.
+        epochs: Number of training epochs.
+    """
+
+    hidden_dim: int = 128
+    layer_num: int = 2
+    drop1: float = 0.3
+    drop2: float = 0.3
+    question_max_length: int = 20
+    student_max_length: int = 5
+    learning_rate: float = 0.001
+    weight_decay: float = 1e-4
+    batch_size: int = 2000
+    epochs: int = 100
 
 
 @register_trainer("BDGKT")

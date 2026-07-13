@@ -1,7 +1,5 @@
 """DKT+ 模型训练器模块"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,42 +11,31 @@ logger = get_logger(__name__)
 
 @register_model_config("DKTPlus")
 class DKTPlusConfig(ModelConfig):
-    """DKT+ 模型配置。"""
+    """DKT+ 模型配置。
 
-    emb_size: int = field(
-        default=200, metadata={"help": "Embedding and LSTM hidden dimension"}
-    )
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    lambda_r: float = field(
-        default=0.2,
-        metadata={"help": "Weight for current-step consistency loss (loss_r)"},
-    )
-    lambda_w1: float = field(
-        default=1.0, metadata={"help": "Weight for output smoothness L1 loss (loss_w1)"}
-    )
-    lambda_w2: float = field(
-        default=10.0,
-        metadata={"help": "Weight for output smoothness L2 loss (loss_w2)"},
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        emb_size: Embedding and LSTM hidden dimension.
+        dropout: Dropout probability.
+        lambda_r: Weight for current-step consistency loss (loss_r).
+        lambda_w1: Weight for output smoothness L1 loss (loss_w1).
+        lambda_w2: Weight for output smoothness L2 loss (loss_w2).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    emb_size: int = 200
+    dropout: float = 0.1
+    lambda_r: float = 0.2
+    lambda_w1: float = 1.0
+    lambda_w2: float = 10.0
+    epochs: int = 150
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("DKTPlus")

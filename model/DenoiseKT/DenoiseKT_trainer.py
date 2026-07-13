@@ -1,7 +1,5 @@
 """DenoiseKT 模型训练器。"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,54 +11,41 @@ logger = get_logger(__name__)
 
 @register_model_config("DenoiseKT")
 class DenoiseKTConfig(ModelConfig):
-    """DenoiseKT 模型配置。"""
+    """DenoiseKT 模型配置.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model"}
-    )
-    n_blocks: int = field(default=1, metadata={"help": "Number of transformer blocks"})
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads"}
-    )
-    dropout: float = field(
-        default=0.1, metadata={"help": "Dropout probability for the transformer"}
-    )
-    dropout1: float = field(
-        default=0.1, metadata={"help": "Dropout probability for the GCN"}
-    )
-    d_ff: int = field(default=64, metadata={"help": "Feed-forward network dimension"})
-    final_fc_dim: int = field(
-        default=256, metadata={"help": "First output MLP dimension"}
-    )
-    final_fc_dim2: int = field(
-        default=256, metadata={"help": "Second output MLP dimension"}
-    )
-    bf: float = field(
-        default=0.9,
-        metadata={"help": "Distance-decay base for same-concept boost focus"},
-    )
-    kq_same: int = field(
-        default=1,
-        metadata={
-            "help": "Whether key and query share the linear projection (1=yes, 0=no)"
-        },
-    )
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay for optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        dropout: Dropout probability for the transformer.
+        dropout1: Dropout probability for the GCN.
+        d_ff: Feed-forward network dimension.
+        final_fc_dim: First output MLP dimension.
+        final_fc_dim2: Second output MLP dimension.
+        bf: Distance-decay base for same-concept boost focus.
+        kq_same: Whether key and query share the linear projection (1=yes, 0=no).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 1
+    num_attn_heads: int = 8
+    dropout: float = 0.1
+    dropout1: float = 0.1
+    d_ff: int = 64
+    final_fc_dim: int = 256
+    final_fc_dim2: int = 256
+    bf: float = 0.9
+    kq_same: int = 1
+    epochs: int = 200
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("DenoiseKT")

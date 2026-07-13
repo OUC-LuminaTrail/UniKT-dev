@@ -1,7 +1,5 @@
 """DKT-Forget 模型训练器模块"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,32 +11,25 @@ logger = get_logger(__name__)
 
 @register_model_config("DKTForget")
 class DKTForgetConfig(ModelConfig):
-    """DKT-Forget 模型配置"""
+    """DKT-Forget 模型配置
 
-    emb_size: int = field(
-        default=100, metadata={"help": "Embedding and LSTM hidden dimension"}
-    )
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        emb_size: Embedding and LSTM hidden dimension.
+        dropout: Dropout probability.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    emb_size: int = 100
+    dropout: float = 0.1
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("DKTForget")

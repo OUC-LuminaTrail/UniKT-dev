@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,51 +11,33 @@ __all__ = ["GRKTTrainer", "GRKTConfig"]
 
 @register_model_config("GRKT")
 class GRKTConfig(ModelConfig):
-    """GRKT model configuration."""
+    """GRKT model configuration.
 
-    d_hidden: int = field(
-        default=128,
-        metadata={"help": "Dimension of embedding and hidden states", "short": "dh"},
-    )
-    k_hidden: int = field(
-        default=16,
-        metadata={"help": "Dimension of hidden knowledge mastery", "short": "kh"},
-    )
-    pos_mode: str = field(
-        default="softmax",
-        metadata={
-            "help": "Positive projection mode: sigmoid|softplus|relu|softmax|none",
-            "short": "pm",
-        },
-    )
-    k_hop: int = field(
-        default=1, metadata={"help": "Hops of graph operation", "short": "kp"}
-    )
-    thresh: float = field(
-        default=0.6,
-        metadata={
-            "help": "Threshold for relevance/prerequisite graph sparsity",
-            "short": "th",
-        },
-    )
-    tau: float = field(
-        default=0.2, metadata={"help": "Gumbel softmax temperature", "short": "tau"}
-    )
-    alpha: float = field(
-        default=0.01,
-        metadata={"help": "Time interval scaling factor", "short": "alpha"},
-    )
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=0.001, metadata={"help": "Learning rate", "short": "lr"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={"help": "Weight decay (L2 regularization)", "short": "wd"},
-    )
-    batch_size: int = field(default=128, metadata={"help": "Batch size", "short": "bs"})
+    Args:
+        d_hidden: Dimension of embedding and hidden states.
+        k_hidden: Dimension of hidden knowledge mastery.
+        pos_mode: Positive projection mode: sigmoid|softplus|relu|softmax|none.
+        k_hop: Hops of graph operation.
+        thresh: Threshold for relevance/prerequisite graph sparsity.
+        tau: Gumbel softmax temperature.
+        alpha: Time interval scaling factor.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate.
+        weight_decay: Weight decay (L2 regularization).
+        batch_size: Batch size.
+    """
+
+    d_hidden: int = 128
+    k_hidden: int = 16
+    pos_mode: str = "softmax"
+    k_hop: int = 1
+    thresh: float = 0.6
+    tau: float = 0.2
+    alpha: float = 0.01
+    epochs: int = 200
+    learning_rate: float = 0.001
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("GRKT")

@@ -1,6 +1,6 @@
 """MCKT trainer."""
 
-from dataclasses import field
+from typing import Literal
 
 import torch
 
@@ -13,74 +13,47 @@ logger = get_logger(__name__)
 
 @register_model_config("MCKT")
 class MCKTConfig(ModelConfig):
-    """MCKT model configuration."""
+    """MCKT model configuration.
 
-    d_model: int = field(
-        default=128, metadata={"help": "Embedding and hidden dimension"}
-    )
-    n_heads: int = field(default=8, metadata={"help": "Number of attention heads"})
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    temperature: float = field(
-        default=0.8, metadata={"help": "Contrastive learning temperature"}
-    )
-    sim_threshold: float = field(
-        default=0.8,
-        metadata={
-            "help": "Question cosine-similarity threshold for topic state attention"
-        },
-    )
-    cl_batch_size: int = field(
-        default=10000,
-        metadata={"help": "Chunk size for question/interaction contrastive loss"},
-    )
-    cl_exp_mode: str = field(
-        default="source",
-        metadata={
-            "choices": ["paper", "source"],
-            "help": (
-                "Use 'source' for the released MCKT code path's double-exp "
-                "question/interaction CL, or 'paper' for exp(cos/tau)"
-            ),
-        },
-    )
-    pro_loss_weight: float = field(
-        default=1.0, metadata={"help": "Question-level contrastive loss weight"}
-    )
-    react_loss_weight: float = field(
-        default=1.0, metadata={"help": "Interaction-level contrastive loss weight"}
-    )
-    state_loss_weight: float = field(
-        default=0.0001, metadata={"help": "Knowledge-state contrastive loss weight"}
-    )
-    pos_strategy: str = field(
-        default="shared_kc",
-        metadata={
-            "choices": ["same_kc_set", "shared_kc"],
-            "help": "How to build pos_matrix from question-KC relations",
-        },
-    )
-    pos_include_self: bool = field(
-        default=True,
-        metadata={"help": "Include diagonal self-positive pairs in pos_matrix"},
-    )
-    epochs: int = field(
-        default=70, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=0.002, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=1e-5, metadata={"help": "Weight decay for optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=80, metadata={"help": "Batch size for training", "short": "bs"}
-    )
-    max_grad_norm: float = field(
-        default=15.0, metadata={"help": "Max gradient norm for clipping"}
-    )
+    Args:
+        d_model: Embedding and hidden dimension.
+        n_heads: Number of attention heads.
+        dropout: Dropout probability.
+        temperature: Contrastive learning temperature.
+        sim_threshold: Question cosine-similarity threshold for topic state attention.
+        cl_batch_size: Chunk size for question/interaction contrastive loss.
+        cl_exp_mode: Use 'source' for the released MCKT code path's double-exp question/interaction CL, or 'paper' for exp(cos/tau).
+        pro_loss_weight: Question-level contrastive loss weight.
+        react_loss_weight: Interaction-level contrastive loss weight.
+        state_loss_weight: Knowledge-state contrastive loss weight.
+        pos_strategy: How to build pos_matrix from question-KC relations.
+        pos_include_self: Include diagonal self-positive pairs in pos_matrix.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+        max_grad_norm: Max gradient norm for clipping.
+    """
+
+    d_model: int = 128
+    n_heads: int = 8
+    dropout: float = 0.1
+    temperature: float = 0.8
+    sim_threshold: float = 0.8
+    cl_batch_size: int = 10000
+    cl_exp_mode: Literal["paper", "source"] = "source"
+    pro_loss_weight: float = 1.0
+    react_loss_weight: float = 1.0
+    state_loss_weight: float = 0.0001
+    pos_strategy: Literal["same_kc_set", "shared_kc"] = "shared_kc"
+    pos_include_self: bool = True
+    epochs: int = 70
+    learning_rate: float = 0.002
+    lr_decay: float | None = None
+    weight_decay: float = 1e-5
+    batch_size: int = 80
+    max_grad_norm: float = 15.0
 
 
 @register_trainer("MCKT")

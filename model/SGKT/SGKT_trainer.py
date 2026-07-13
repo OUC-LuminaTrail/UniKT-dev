@@ -18,113 +18,49 @@ __all__ = ["SGKTTrainer", "SGKTConfig"]
 
 @register_model_config("SGKT")
 class SGKTConfig(ModelConfig):
-    """SGKT model configuration."""
+    """SGKT model configuration.
 
-    n_hop: int = field(
-        default=3,
-        metadata={
-            "short": "nh",
-            "help": "Number of GCN layers for HRG graph (default: 3)",
-        },
-    )
-    sg_layers: int = field(
-        default=2,
-        metadata={
-            "help": "Number of GatedGraphConv layers for session graph (default: 2)"
-        },
-    )
-    hist_neighbor_num: int = field(
-        default=3,
-        metadata={
-            "short": "hn",
-            "help": "Number of historical neighbors to sample (default: 3)",
-        },
-    )
-    next_neighbor_num: int = field(
-        default=4,
-        metadata={
-            "short": "nn",
-            "help": "Number of next question neighbors to sample (default: 4)",
-        },
-    )
-    att_bound: float = field(
-        default=0.7,
-        metadata={
-            "help": "Similarity threshold for historical neighbor sampling (default: 0.7)"
-        },
-    )
-    cooc_neighbor_num: int = field(
-        default=0,
-        metadata={
-            "help": "Max number of co-occurrence neighbors per question in HRG graph (default: 0)"
-        },
-    )
-    skill_neighbor_num: int = field(
-        default=4,
-        metadata={"help": "Number of skill neighbors to sample per hop (default: 4)"},
-    )
-    question_neighbor_num: int = field(
-        default=4,
-        metadata={
-            "help": "Number of question neighbors to sample per hop (default: 4)"
-        },
-    )
-    aggregator: str = field(
-        default="sum",
-        metadata={"help": "Aggregator type: sum or concat (default: sum)"},
-    )
-    select_index: list[int] = field(
-        default_factory=lambda: [0, 1, 2],
-        metadata={
-            "nargs": "+",
-            "help": "Feature indices used for model inputs (default: [0, 1, 2])",
-        },
-    )
-    sim_emb: str = field(
-        default="question_emb",
-        metadata={"help": "Embedding type for similarity (default: question_emb)"},
-    )
-    embedding_dim: int = field(
-        default=100,
-        metadata={"short": "ed", "help": "Embedding dimension (default: 100)"},
-    )
-    hidden_dim: int = field(
-        default=100,
-        metadata={"short": "hd", "help": "Hidden layer dimension (default: 100)"},
-    )
-    dropout_keep_probs: list[float] = field(
-        default_factory=lambda: [0.8, 0.8, 1.0],
-        metadata={
-            "nargs": "+",
-            "help": "Dropout keep probabilities for each GCN layer in HRG (default: [0.8, 0.8, 1])",
-        },
-    )
-    epochs: int = field(
-        default=100,
-        metadata={"short": "ep", "help": "Number of training epochs (default: 100)"},
-    )
-    learning_rate: float = field(
-        default=0.00025,
-        metadata={
-            "short": "lr",
-            "help": "Learning rate for optimizer (default: 0.00025)",
-        },
-    )
-    lr_decay: float = field(
-        default=0.92,
-        metadata={"help": "Learning rate decay factor per epoch (default: 0.92)"},
-    )
-    weight_decay: float = field(
-        default=1e-8,
-        metadata={
-            "short": "wd",
-            "help": "Weight decay (L2 regularization) for optimizer (default: 1e-8)",
-        },
-    )
-    batch_size: int = field(
-        default=6,
-        metadata={"short": "bs", "help": "Batch size for training (default: 6)"},
-    )
+    Args:
+        n_hop: Number of GCN layers for HRG graph (default: 3).
+        sg_layers: Number of GatedGraphConv layers for session graph (default: 2).
+        hist_neighbor_num: Number of historical neighbors to sample (default: 3).
+        next_neighbor_num: Number of next question neighbors to sample (default: 4).
+        att_bound: Similarity threshold for historical neighbor sampling (default: 0.7).
+        cooc_neighbor_num: Max number of co-occurrence neighbors per question in HRG graph (default: 0).
+        skill_neighbor_num: Number of skill neighbors to sample per hop (default: 4).
+        question_neighbor_num: Number of question neighbors to sample per hop (default: 4).
+        aggregator: Aggregator type: sum or concat (default: sum).
+        select_index: Feature indices used for model inputs (default: [0, 1, 2]).
+        sim_emb: Embedding type for similarity (default: question_emb).
+        embedding_dim: Embedding dimension (default: 100).
+        hidden_dim: Hidden layer dimension (default: 100).
+        dropout_keep_probs: Dropout keep probabilities for each GCN layer in HRG (default: [0.8, 0.8, 1]).
+        epochs: Number of training epochs (default: 100).
+        learning_rate: Learning rate for optimizer (default: 0.00025).
+        lr_decay: Learning rate decay factor per epoch (default: 0.92).
+        weight_decay: Weight decay (L2 regularization) for optimizer (default: 1e-8).
+        batch_size: Batch size for training (default: 6).
+    """
+
+    n_hop: int = 3
+    sg_layers: int = 2
+    hist_neighbor_num: int = 3
+    next_neighbor_num: int = 4
+    att_bound: float = 0.7
+    cooc_neighbor_num: int = 0
+    skill_neighbor_num: int = 4
+    question_neighbor_num: int = 4
+    aggregator: str = "sum"
+    select_index: list[int] = field(default_factory=lambda: [0, 1, 2])
+    sim_emb: str = "question_emb"
+    embedding_dim: int = 100
+    hidden_dim: int = 100
+    dropout_keep_probs: list[float] = field(default_factory=lambda: [0.8, 0.8, 1.0])
+    epochs: int = 100
+    learning_rate: float = 0.00025
+    lr_decay: float = 0.92
+    weight_decay: float = 1e-8
+    batch_size: int = 6
 
 
 @register_trainer("SGKT")

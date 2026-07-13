@@ -3,8 +3,6 @@
 定义 DAGKT 模型特定的训练逻辑，包括组合损失函数。
 """
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -18,69 +16,43 @@ __all__ = ["DAGKTTrainer", "DAGKTConfig"]
 
 @register_model_config("DAGKT")
 class DAGKTConfig(ModelConfig):
-    """DAGKT model configuration."""
+    """DAGKT model configuration.
 
-    hidden_dim: int = field(
-        default=100, metadata={"help": "Hidden layer dimension", "short": "hd"}
-    )
-    embedding_dim: int = field(
-        default=100, metadata={"help": "Embedding dimension", "short": "ed"}
-    )
-    lstm_layers: int = field(
-        default=2, metadata={"help": "Number of LSTM layers", "short": "ll"}
-    )
-    n_hop: int = field(
-        default=3, metadata={"help": "Number of GNN hops", "short": "nh"}
-    )
-    heads: int = field(
-        default=2, metadata={"help": "Number of attention heads", "short": "hs"}
-    )
-    history_neighbour: int = field(
-        default=5, metadata={"help": "History neighbor count", "short": "hn"}
-    )
-    att_bound: float = field(
-        default=0.2, metadata={"help": "Attention bound", "short": "ab"}
-    )
-    dropout: float = field(
-        default=0.4, metadata={"help": "Dropout rate", "short": "dp"}
-    )
-    ae_hidden_dim: int = field(
-        default=50,
-        metadata={"help": "Autoencoder hidden layer dimension", "short": "aeh"},
-    )
-    loss_diff_weight: float = field(
-        default=1.0,
-        metadata={
-            "help": "Weight for difficulty autoencoder reconstruction loss",
-            "short": "ldw",
-        },
-    )
-    loss_attempt_weight: float = field(
-        default=1.0,
-        metadata={
-            "help": "Weight for attempt autoencoder reconstruction loss",
-            "short": "law",
-        },
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=0.001, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=1e-4,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        hidden_dim: Hidden layer dimension.
+        embedding_dim: Embedding dimension.
+        lstm_layers: Number of LSTM layers.
+        n_hop: Number of GNN hops.
+        heads: Number of attention heads.
+        history_neighbour: History neighbor count.
+        att_bound: Attention bound.
+        dropout: Dropout rate.
+        ae_hidden_dim: Autoencoder hidden layer dimension.
+        loss_diff_weight: Weight for difficulty autoencoder reconstruction loss.
+        loss_attempt_weight: Weight for attempt autoencoder reconstruction loss.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    hidden_dim: int = 100
+    embedding_dim: int = 100
+    lstm_layers: int = 2
+    n_hop: int = 3
+    heads: int = 2
+    history_neighbour: int = 5
+    att_bound: float = 0.2
+    dropout: float = 0.4
+    ae_hidden_dim: int = 50
+    loss_diff_weight: float = 1.0
+    loss_attempt_weight: float = 1.0
+    epochs: int = 150
+    learning_rate: float = 0.001
+    lr_decay: float | None = None
+    weight_decay: float = 1e-4
+    batch_size: int = 128
 
 
 @register_trainer("DAGKT")

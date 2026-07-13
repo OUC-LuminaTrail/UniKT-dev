@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -11,32 +9,27 @@ logger = get_logger(__name__)
 
 @register_model_config("DKVMN")
 class DKVMNConfig(ModelConfig):
-    """DKVMN model configuration."""
+    """DKVMN model configuration.
 
-    dim_s: int = field(
-        default=200, metadata={"help": "State dimension of memory vectors"}
-    )
-    size_m: int = field(default=50, metadata={"help": "Number of memory slots"})
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        dim_s: State dimension of memory vectors.
+        size_m: Number of memory slots.
+        dropout: Dropout probability.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    dim_s: int = 200
+    size_m: int = 50
+    dropout: float = 0.2
+    epochs: int = 150
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("DKVMN")

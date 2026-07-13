@@ -3,8 +3,6 @@
 定义 HDHKT 模型特定的训练逻辑。
 """
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -16,50 +14,37 @@ logger = get_logger(__name__)
 
 @register_model_config("HDHKT")
 class HDHKTConfig(ModelConfig):
-    """HDHKT 模型配置。"""
+    """HDHKT 模型配置。
 
-    hidden_dim: int = field(
-        default=250, metadata={"help": "Hidden layer dimension", "short": "hd"}
-    )
-    n_hop: int = field(
-        default=4, metadata={"help": "Number of GNN hops", "short": "nh"}
-    )
-    heads: int = field(
-        default=1, metadata={"help": "Number of attention heads", "short": "hs"}
-    )
-    lstm_layers: int = field(
-        default=1, metadata={"help": "Number of LSTM layers", "short": "ll"}
-    )
-    history_neighbour: int = field(
-        default=5, metadata={"help": "History neighbor count", "short": "hn"}
-    )
-    att_bound: float = field(
-        default=0.1, metadata={"help": "Attention bound", "short": "ab"}
-    )
-    num_difficulty_clusters: int = field(
-        default=5,
-        metadata={"help": "Number of difficulty clusters for weighted hypergraph"},
-    )
-    epochs: int = field(
-        default=120, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=0.0003, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    dropout: float = field(default=0.25, metadata={"help": "Dropout rate"})
-    weight_decay: float = field(
-        default=0.00001,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        hidden_dim: Hidden layer dimension.
+        n_hop: Number of GNN hops.
+        heads: Number of attention heads.
+        lstm_layers: Number of LSTM layers.
+        history_neighbour: History neighbor count.
+        att_bound: Attention bound.
+        num_difficulty_clusters: Number of difficulty clusters for weighted hypergraph.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        dropout: Dropout rate.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    hidden_dim: int = 250
+    n_hop: int = 4
+    heads: int = 1
+    lstm_layers: int = 1
+    history_neighbour: int = 5
+    att_bound: float = 0.1
+    num_difficulty_clusters: int = 5
+    epochs: int = 120
+    learning_rate: float = 0.0003
+    lr_decay: float | None = None
+    dropout: float = 0.25
+    weight_decay: float = 0.00001
+    batch_size: int = 64
 
 
 @register_trainer("HDHKT")

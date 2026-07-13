@@ -1,7 +1,5 @@
 """QIKT 模型训练器模块"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,60 +11,43 @@ logger = get_logger(__name__)
 
 @register_model_config("QIKT")
 class QIKTConfig(ModelConfig):
-    """QIKT model configuration."""
+    """QIKT model configuration.
 
-    emb_size: int = field(default=64, metadata={"help": "Embedding dimension"})
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    mlp_layer_num: int = field(
-        default=1, metadata={"help": "Number of MLP layers in prediction heads"}
-    )
-    output_mode: str = field(
-        default="an",
-        metadata={
-            "help": "Output fusion mode: 'an' (additive normalization) or 'an_irt'"
-        },
-    )
-    output_q_all_lambda: float = field(
-        default=1.0, metadata={"help": "Output weight for question-all predictions"}
-    )
-    output_c_all_lambda: float = field(
-        default=1.0, metadata={"help": "Output weight for concept-all predictions"}
-    )
-    output_c_next_lambda: float = field(
-        default=1.0, metadata={"help": "Output weight for concept-next predictions"}
-    )
-    loss_q_all_lambda: float = field(
-        default=1.0, metadata={"help": "Loss weight for question-all auxiliary loss"}
-    )
-    loss_c_all_lambda: float = field(
-        default=1.0, metadata={"help": "Loss weight for concept-all auxiliary loss"}
-    )
-    loss_c_next_lambda: float = field(
-        default=1.0, metadata={"help": "Loss weight for concept-next auxiliary loss"}
-    )
-    loss_q_next_lambda: float = field(
-        default=0.0, metadata={"help": "Loss weight for question-next auxiliary loss"}
-    )
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        emb_size: Embedding dimension.
+        dropout: Dropout probability.
+        mlp_layer_num: Number of MLP layers in prediction heads.
+        output_mode: Output fusion mode: 'an' (additive normalization) or 'an_irt'.
+        output_q_all_lambda: Output weight for question-all predictions.
+        output_c_all_lambda: Output weight for concept-all predictions.
+        output_c_next_lambda: Output weight for concept-next predictions.
+        loss_q_all_lambda: Loss weight for question-all auxiliary loss.
+        loss_c_all_lambda: Loss weight for concept-all auxiliary loss.
+        loss_c_next_lambda: Loss weight for concept-next auxiliary loss.
+        loss_q_next_lambda: Loss weight for question-next auxiliary loss.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    emb_size: int = 64
+    dropout: float = 0.1
+    mlp_layer_num: int = 1
+    output_mode: str = "an"
+    output_q_all_lambda: float = 1.0
+    output_c_all_lambda: float = 1.0
+    output_c_next_lambda: float = 1.0
+    loss_q_all_lambda: float = 1.0
+    loss_c_all_lambda: float = 1.0
+    loss_c_next_lambda: float = 1.0
+    loss_q_next_lambda: float = 0.0
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("QIKT")

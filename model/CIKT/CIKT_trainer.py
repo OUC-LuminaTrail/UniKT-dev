@@ -1,7 +1,5 @@
 """CIKT 模型训练器模块。"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,55 +11,35 @@ logger = get_logger(__name__)
 
 @register_model_config("CIKT")
 class CIKTConfig(ModelConfig):
-    """CIKT 模型配置。"""
+    """CIKT 模型配置。
 
-    d_model: int = field(default=64, metadata={"help": "Hidden dimension (d_model)."})
-    dropout: float = field(
-        default=0.5,
-        metadata={
-            "help": "GCN dropout probability (matches the reference implementation)."
-        },
-    )
-    num_difficulty_levels: int = field(
-        default=10,
-        metadata={"help": "Number of question-difficulty bins (trivial head classes)."},
-    )
-    loss_w_causal: float = field(
-        default=0.1,
-        metadata={"help": "Loss weight for the causal branch (lambda_1 in paper)."},
-    )
-    loss_w_intervention: float = field(
-        default=0.2,
-        metadata={
-            "help": "Loss weight for the response-invert intervention branch (lambda_3 in paper)."
-        },
-    )
-    loss_w_trivial: float = field(
-        default=0.6,
-        metadata={
-            "help": "Loss weight for the trivial (difficulty) branch (lambda_4 in paper)."
-        },
-    )
-    loss_w_replace: float = field(
-        default=0.3,
-        metadata={
-            "help": "Loss weight for the question-replace intervention branch (lambda_2 in paper)."
-        },
-    )
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs.", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for Adam.", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None,
-        metadata={"help": "Exponential LR decay per epoch (None disables)."},
-    )
-    weight_decay: float = field(
-        default=1e-5, metadata={"help": "Weight decay (L2).", "short": "wd"}
-    )
-    batch_size: int = field(default=8, metadata={"help": "Batch size.", "short": "bs"})
+    Args:
+        d_model: Hidden dimension (d_model).
+        dropout: GCN dropout probability (matches the reference implementation).
+        num_difficulty_levels: Number of question-difficulty bins (trivial head classes).
+        loss_w_causal: Loss weight for the causal branch (lambda_1 in paper).
+        loss_w_intervention: Loss weight for the response-invert intervention branch (lambda_3 in paper).
+        loss_w_trivial: Loss weight for the trivial (difficulty) branch (lambda_4 in paper).
+        loss_w_replace: Loss weight for the question-replace intervention branch (lambda_2 in paper).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for Adam.
+        lr_decay: Exponential LR decay per epoch (None disables).
+        weight_decay: Weight decay (L2).
+        batch_size: Batch size.
+    """
+
+    d_model: int = 64
+    dropout: float = 0.5
+    num_difficulty_levels: int = 10
+    loss_w_causal: float = 0.1
+    loss_w_intervention: float = 0.2
+    loss_w_trivial: float = 0.6
+    loss_w_replace: float = 0.3
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 1e-5
+    batch_size: int = 8
 
 
 @register_trainer("CIKT")

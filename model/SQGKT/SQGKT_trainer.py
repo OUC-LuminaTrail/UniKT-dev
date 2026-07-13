@@ -15,76 +15,47 @@ __all__ = ["SQGKTTrainer", "SQGKTConfig"]
 
 @register_model_config("SQGKT")
 class SQGKTConfig(ModelConfig):
-    """SQGKT model configuration."""
+    """SQGKT model configuration.
 
-    n_hop: int = field(
-        default=3,
-        metadata={"help": "Number of GNN aggregation hops", "short": "nh"},
-    )
-    skill_neighbor_num: int = field(
-        default=4, metadata={"help": "Number of skill neighbors sampled per hop"}
-    )
-    question_neighbor_num: int = field(
-        default=4, metadata={"help": "Number of question neighbors sampled per hop"}
-    )
-    user_neighbor_num: int = field(
-        default=5,
-        metadata={
-            "help": "Sampled students per question in the student-question graph"
-        },
-    )
-    hist_neighbor_num: int = field(
-        default=3,
-        metadata={"help": "Number of historical neighbor samples M", "short": "hn"},
-    )
-    next_neighbor_num: int = field(
-        default=4,
-        metadata={"help": "Number of next-question neighbor samples N", "short": "nn"},
-    )
-    att_bound: float = field(default=0.7, metadata={"help": "Similarity threshold"})
-    aggregator: str = field(
-        default="sum", metadata={"help": "Aggregator type: sum or concat"}
-    )
-    variant: str = field(
-        default="hsei",
-        metadata={
-            "help": "History sampling variant: hssi/hsei (same skill) or ssei/dkt (similarity)"
-        },
-    )
-    sim_emb: str = field(
-        default="question_emb",
-        metadata={"help": "Similarity embedding: skill_emb/question_emb/feature"},
-    )
-    embedding_dim: int = field(
-        default=100, metadata={"help": "Embedding dimension", "short": "ed"}
-    )
-    hidden_neurons: list[int] = field(
-        default_factory=lambda: [200, 100],
-        metadata={
-            "help": "Hidden sizes for each LSTM layer; last layer must equal embedding_dim",
-            "nargs": "+",
-        },
-    )
-    dropout_probs: list[float] = field(
-        default_factory=lambda: [0.2, 0.2, 0.0],
-        metadata={
-            "help": "Dropout probabilities for [LSTM, GNN, eval]",
-            "nargs": "+",
-        },
-    )
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=1e-8, metadata={"help": "Weight decay", "short": "wd"}
-    )
-    batch_size: int = field(default=32, metadata={"help": "Batch size", "short": "bs"})
+    Args:
+        n_hop: Number of GNN aggregation hops.
+        skill_neighbor_num: Number of skill neighbors sampled per hop.
+        question_neighbor_num: Number of question neighbors sampled per hop.
+        user_neighbor_num: Sampled students per question in the student-question graph.
+        hist_neighbor_num: Number of historical neighbor samples M.
+        next_neighbor_num: Number of next-question neighbor samples N.
+        att_bound: Similarity threshold.
+        aggregator: Aggregator type: sum or concat.
+        variant: History sampling variant: hssi/hsei (same skill) or ssei/dkt (similarity).
+        sim_emb: Similarity embedding: skill_emb/question_emb/feature.
+        embedding_dim: Embedding dimension.
+        hidden_neurons: Hidden sizes for each LSTM layer; last layer must equal embedding_dim.
+        dropout_probs: Dropout probabilities for [LSTM, GNN, eval].
+        epochs: Number of training epochs.
+        learning_rate: Learning rate.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay.
+        batch_size: Batch size.
+    """
+
+    n_hop: int = 3
+    skill_neighbor_num: int = 4
+    question_neighbor_num: int = 4
+    user_neighbor_num: int = 5
+    hist_neighbor_num: int = 3
+    next_neighbor_num: int = 4
+    att_bound: float = 0.7
+    aggregator: str = "sum"
+    variant: str = "hsei"
+    sim_emb: str = "question_emb"
+    embedding_dim: int = 100
+    hidden_neurons: list[int] = field(default_factory=lambda: [200, 100])
+    dropout_probs: list[float] = field(default_factory=lambda: [0.2, 0.2, 0.0])
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 1e-8
+    batch_size: int = 32
 
 
 @register_trainer("SQGKT")

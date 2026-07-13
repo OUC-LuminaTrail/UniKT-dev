@@ -13,8 +13,6 @@
 
 from __future__ import annotations
 
-from dataclasses import field
-
 import numpy as np
 import torch
 from torch import nn
@@ -29,51 +27,47 @@ logger = get_logger(__name__)
 
 @register_model_config("TCKT")
 class TCKTConfig(ModelConfig):
-    """TCKT model configuration."""
+    """TCKT model configuration.
 
-    d_k: int = field(default=128, metadata={"help": "Hidden dimension d_k"})
-    d_a: int = field(
-        default=64,
-        metadata={"help": "Expansion dim for answer / difficulty (paper d_a)"},
-    )
-    d_e: int = field(default=128, metadata={"help": "Exercise embedding dim"})
-    num_heads: int = field(default=8, metadata={"help": "Attention heads"})
-    dropout: float = field(default=0.2, metadata={"help": "Dropout rate"})
-    q_gamma: float = field(default=0.03, metadata={"help": "Q-matrix smoothing factor"})
-    global_dict_size: int = field(
-        default=400, metadata={"help": "Global dictionary size N (K-Means clusters)"}
-    )
-    max_rt_seconds: int = field(
-        default=300,
-        metadata={"help": "Response time cap in seconds (n_at = this + 1)"},
-    )
-    max_it_minutes: int = field(
-        default=120,
-        metadata={"help": "Interval time cap in minutes (n_it = this + 1)"},
-    )
-    cluster_sample_size: int = field(
-        default=300000,
-        metadata={"help": "Max interactions sampled for K-Means each epoch"},
-    )
-    learning_rate: float = field(
-        default=0.002, metadata={"help": "Learning rate", "short": "lr"}
-    )
-    adam_beta1: float = field(
-        default=0.1, metadata={"help": "Adam beta1 (reference code uses 0.1)"}
-    )
-    weight_decay: float = field(
-        default=1e-6, metadata={"help": "Weight decay", "short": "wd"}
-    )
-    max_grad_norm: float = field(
-        default=1.0,
-        metadata={"help": "Max gradient norm for clipping, 0 disables", "short": "mgn"},
-    )
-    lr_decay_step: int = field(default=10, metadata={"help": "StepLR step size"})
-    lr_decay_rate: float = field(default=0.5, metadata={"help": "StepLR gamma"})
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    batch_size: int = field(default=32, metadata={"help": "Batch size", "short": "bs"})
+    Args:
+        d_k: Hidden dimension d_k.
+        d_a: Expansion dim for answer / difficulty (paper d_a).
+        d_e: Exercise embedding dim.
+        num_heads: Attention heads.
+        dropout: Dropout rate.
+        q_gamma: Q-matrix smoothing factor.
+        global_dict_size: Global dictionary size N (K-Means clusters).
+        max_rt_seconds: Response time cap in seconds (n_at = this + 1).
+        max_it_minutes: Interval time cap in minutes (n_it = this + 1).
+        cluster_sample_size: Max interactions sampled for K-Means each epoch.
+        learning_rate: Learning rate.
+        adam_beta1: Adam beta1 (reference code uses 0.1).
+        weight_decay: Weight decay.
+        max_grad_norm: Max gradient norm for clipping, 0 disables.
+        lr_decay_step: StepLR step size.
+        lr_decay_rate: StepLR gamma.
+        epochs: Number of training epochs.
+        batch_size: Batch size.
+    """
+
+    d_k: int = 128
+    d_a: int = 64
+    d_e: int = 128
+    num_heads: int = 8
+    dropout: float = 0.2
+    q_gamma: float = 0.03
+    global_dict_size: int = 400
+    max_rt_seconds: int = 300
+    max_it_minutes: int = 120
+    cluster_sample_size: int = 300000
+    learning_rate: float = 0.002
+    adam_beta1: float = 0.1
+    weight_decay: float = 1e-6
+    max_grad_norm: float = 1.0
+    lr_decay_step: int = 10
+    lr_decay_rate: float = 0.5
+    epochs: int = 100
+    batch_size: int = 32
 
 
 class GlobalDictRefreshCallback(Callback):

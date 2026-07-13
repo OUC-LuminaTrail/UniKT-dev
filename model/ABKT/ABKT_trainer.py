@@ -1,5 +1,4 @@
-from dataclasses import field
-from typing import Any
+from typing import Any, Literal
 
 import torch
 import torch.nn as nn
@@ -26,75 +25,41 @@ __all__ = ["ABKTTrainer"]
 
 @register_model_config("ABKT")
 class ABKTConfig(ModelConfig):
-    """ABKT model configuration."""
+    """ABKT model configuration.
 
-    km_hidden_dim: int = field(
-        default=5,
-        metadata={
-            "help": "Hidden dimension for knowledge growth in K_CMF",
-            "short": "kmh",
-        },
-    )
-    km_guess: float = field(
-        default=0.25,
-        metadata={"help": "Guess parameter for IRT response function", "short": "kmg"},
-    )
-    km_lr: float = field(
-        default=0.001,
-        metadata={"help": "Learning rate for KM stage", "short": "kmlr"},
-    )
-    km_epochs: int = field(
-        default=100,
-        metadata={"help": "Number of epochs for KM stage", "short": "kme"},
-    )
-    km_patience: int = field(
-        default=10,
-        metadata={"help": "Early stopping patience for KM stage", "short": "kmp"},
-    )
-    am_embedding_dim: int = field(
-        default=50,
-        metadata={"help": "Embedding dimension for GMF", "short": "amed"},
-    )
-    am_lambda: float = field(
-        default=0.1,
-        metadata={"help": "L2 regularization weight for AM", "short": "aml"},
-    )
-    am_layer: int = field(
-        default=1,
-        metadata={"help": "Number of GNN layers in GMF (0-3)", "short": "amly"},
-    )
-    am_lr: float = field(
-        default=0.0001,
-        metadata={"help": "Learning rate for AM stage", "short": "amlr"},
-    )
-    am_epochs: int = field(
-        default=500,
-        metadata={"help": "Number of epochs for AM stage", "short": "ame"},
-    )
-    am_patience: int = field(
-        default=10,
-        metadata={"help": "Early stopping patience for AM stage", "short": "amp"},
-    )
-    pretrain_clip: float = field(
-        default=0.4,
-        metadata={"help": "Clip value for pretrained predictions", "short": "pc"},
-    )
-    combine_mode: str = field(
-        default="add",
-        metadata={
-            "help": "Combine mode for KM and AM predictions: 'add' or 'mul'",
-            "short": "cm",
-            "choices": ["add", "mul"],
-        },
-    )
-    batch_size: int = field(
-        default=128,
-        metadata={"help": "Batch size for AM training", "short": "bs"},
-    )
-    use_adj: bool = field(
-        default=True,
-        metadata={"help": "Whether to use learnable adjacency weights in GMF"},
-    )
+    Args:
+        km_hidden_dim: Hidden dimension for knowledge growth in K_CMF.
+        km_guess: Guess parameter for IRT response function.
+        km_lr: Learning rate for KM stage.
+        km_epochs: Number of epochs for KM stage.
+        km_patience: Early stopping patience for KM stage.
+        am_embedding_dim: Embedding dimension for GMF.
+        am_lambda: L2 regularization weight for AM.
+        am_layer: Number of GNN layers in GMF (0-3).
+        am_lr: Learning rate for AM stage.
+        am_epochs: Number of epochs for AM stage.
+        am_patience: Early stopping patience for AM stage.
+        pretrain_clip: Clip value for pretrained predictions.
+        combine_mode: Combine mode for KM and AM predictions: 'add' or 'mul'.
+        batch_size: Batch size for AM training.
+        use_adj: Whether to use learnable adjacency weights in GMF.
+    """
+
+    km_hidden_dim: int = 5
+    km_guess: float = 0.25
+    km_lr: float = 0.001
+    km_epochs: int = 100
+    km_patience: int = 10
+    am_embedding_dim: int = 50
+    am_lambda: float = 0.1
+    am_layer: int = 1
+    am_lr: float = 0.0001
+    am_epochs: int = 500
+    am_patience: int = 10
+    pretrain_clip: float = 0.4
+    combine_mode: Literal["add", "mul"] = "add"
+    batch_size: int = 128
+    use_adj: bool = True
 
 
 class KMUserDataset(Data.Dataset):

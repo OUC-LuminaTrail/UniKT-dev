@@ -1,6 +1,6 @@
 """DyGKT model trainer."""
 
-from dataclasses import field
+from typing import Literal
 
 import torch
 import torch.nn.functional as F
@@ -16,97 +16,49 @@ __all__ = ["DyGKTTrainer", "DyGKTConfig"]
 
 @register_model_config("DyGKT")
 class DyGKTConfig(ModelConfig):
-    """DyGKT model configuration."""
+    """DyGKT model configuration.
 
-    edge_dim: int = field(default=64, metadata={"help": "Edge feature dimension"})
-    node_dim: int = field(
-        default=64,
-        metadata={"help": "Node embedding dimension", "short": "nd"},
-    )
-    dim_time: int = field(
-        default=16,
-        metadata={"help": "Time encoding dimension", "short": "dt"},
-    )
-    ablation: str = field(
-        default="-1",
-        metadata={
-            "help": "Ablation mode from original DyGKT (-1, counter, dual, q_qid, q_kid, embed, skill, time)"
-        },
-    )
-    num_neighbor: int = field(
-        default=50,
-        metadata={"help": "Number of neighbors for history", "short": "nn"},
-    )
-    neighbor_sampling_strategy: str = field(
-        default="time_decay",
-        metadata={
-            "choices": ["recent", "time_decay"],
-            "help": "Neighbor sampling strategy in DyGKT data layer: recent truncation or time-decay weighted sampling.",
-        },
-    )
-    time_decay_factor: float = field(
-        default=1e-5,
-        metadata={
-            "help": "Time decay factor for time_decay neighbor sampling (weight=exp(-factor*delta_t))."
-        },
-    )
-    neighbor_candidate_pool: int = field(
-        default=200,
-        metadata={
-            "help": "Candidate pool size before sampling neighbors; <=0 means full history."
-        },
-    )
-    neighbor_sampling_seed: int = field(
-        default=2020,
-        metadata={"help": "Random seed for time-decay neighbor sampling."},
-    )
-    graph_neg_sampling: bool = field(
-        default=True,
-        metadata={
-            "help": "Enable graph-style in-batch negative sampling auxiliary loss."
-        },
-    )
-    graph_neg_num_samples: int = field(
-        default=2,
-        metadata={
-            "help": "Number of in-batch negative samples per interaction for auxiliary contrastive loss."
-        },
-    )
-    graph_neg_temperature: float = field(
-        default=0.2,
-        metadata={
-            "help": "Temperature for graph negative sampling contrastive logits."
-        },
-    )
-    graph_neg_loss_weight: float = field(
-        default=0.05,
-        metadata={"help": "Weight of graph negative sampling auxiliary loss."},
-    )
-    dropout: float = field(
-        default=0.1, metadata={"help": "Dropout rate", "short": "dp"}
-    )
-    epochs: int = field(
-        default=100,
-        metadata={"help": "Number of training epochs", "short": "ep"},
-    )
-    learning_rate: float = field(
-        default=5e-4,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=1e-4,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=2000,
-        metadata={"help": "Batch size for training", "short": "bs"},
-    )
+    Args:
+        edge_dim: Edge feature dimension.
+        node_dim: Node embedding dimension.
+        dim_time: Time encoding dimension.
+        ablation: Ablation mode from original DyGKT (-1, counter, dual, q_qid, q_kid, embed, skill, time).
+        num_neighbor: Number of neighbors for history.
+        neighbor_sampling_strategy: Neighbor sampling strategy in DyGKT data layer: recent truncation or time-decay weighted sampling.
+        time_decay_factor: Time decay factor for time_decay neighbor sampling (weight=exp(-factor*delta_t)).
+        neighbor_candidate_pool: Candidate pool size before sampling neighbors; <=0 means full history.
+        neighbor_sampling_seed: Random seed for time-decay neighbor sampling.
+        graph_neg_sampling: Enable graph-style in-batch negative sampling auxiliary loss.
+        graph_neg_num_samples: Number of in-batch negative samples per interaction for auxiliary contrastive loss.
+        graph_neg_temperature: Temperature for graph negative sampling contrastive logits.
+        graph_neg_loss_weight: Weight of graph negative sampling auxiliary loss.
+        dropout: Dropout rate.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    edge_dim: int = 64
+    node_dim: int = 64
+    dim_time: int = 16
+    ablation: str = "-1"
+    num_neighbor: int = 50
+    neighbor_sampling_strategy: Literal["recent", "time_decay"] = "time_decay"
+    time_decay_factor: float = 1e-5
+    neighbor_candidate_pool: int = 200
+    neighbor_sampling_seed: int = 2020
+    graph_neg_sampling: bool = True
+    graph_neg_num_samples: int = 2
+    graph_neg_temperature: float = 0.2
+    graph_neg_loss_weight: float = 0.05
+    dropout: float = 0.1
+    epochs: int = 100
+    learning_rate: float = 5e-4
+    lr_decay: float | None = None
+    weight_decay: float = 1e-4
+    batch_size: int = 2000
 
 
 @register_trainer("DyGKT")

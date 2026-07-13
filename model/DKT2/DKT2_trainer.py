@@ -15,56 +15,41 @@ __all__ = ["DKT2Trainer"]
 
 @register_model_config("DKT2")
 class DKT2Config(ModelConfig):
-    """DKT2 模型配置。"""
+    """DKT2 模型配置。
 
-    factor: float = field(
-        default=1.3, metadata={"help": "mLSTM/sLSTM feed-forward up-projection factor"}
-    )
-    num_blocks: int = field(default=1, metadata={"help": "Number of xLSTM blocks"})
-    num_heads: int = field(
-        default=2, metadata={"help": "Number of attention heads per block"}
-    )
-    slstm_at: list[int] = field(
-        default_factory=lambda: [0],
-        metadata={
-            "help": "Block indices using sLSTM (rest use mLSTM)",
-            "nargs": "+",
-        },
-    )
-    slstm_backend: str = field(
-        default="cuda",
-        metadata={"help": "sLSTM backend: cuda or vanilla (auto-fallback to vanilla)"},
-    )
-    conv1d_kernel_size: int = field(
-        default=4, metadata={"help": "Conv1d kernel size in xLSTM blocks"}
-    )
-    qkv_proj_blocksize: int = field(
-        default=4, metadata={"help": "Block size of the mLSTM qkv projection"}
-    )
-    embedding_size: int = field(
-        default=64, metadata={"help": "Embedding / hidden dimension", "short": "ed"}
-    )
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    length: int = field(
-        default=1, metadata={"help": "Prediction horizon (next-item when 1)"}
-    )
-    epochs: int = field(
-        default=300, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate", "short": "lr"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay", "short": "wd"}
-    )
-    max_grad_norm: float = field(
-        default=2.0,
-        metadata={
-            "help": "Max gradient norm for clipping, 0 to disable",
-            "short": "mgn",
-        },
-    )
-    batch_size: int = field(default=512, metadata={"help": "Batch size", "short": "bs"})
+    Args:
+        factor: mLSTM/sLSTM feed-forward up-projection factor.
+        num_blocks: Number of xLSTM blocks.
+        num_heads: Number of attention heads per block.
+        slstm_at: Block indices using sLSTM (rest use mLSTM).
+        slstm_backend: sLSTM backend: cuda or vanilla (auto-fallback to vanilla).
+        conv1d_kernel_size: Conv1d kernel size in xLSTM blocks.
+        qkv_proj_blocksize: Block size of the mLSTM qkv projection.
+        embedding_size: Embedding / hidden dimension.
+        dropout: Dropout probability.
+        length: Prediction horizon (next-item when 1).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate.
+        weight_decay: Weight decay.
+        max_grad_norm: Max gradient norm for clipping, 0 to disable.
+        batch_size: Batch size.
+    """
+
+    factor: float = 1.3
+    num_blocks: int = 1
+    num_heads: int = 2
+    slstm_at: list[int] = field(default_factory=lambda: [0])
+    slstm_backend: str = "cuda"
+    conv1d_kernel_size: int = 4
+    qkv_proj_blocksize: int = 4
+    embedding_size: int = 64
+    dropout: float = 0.2
+    length: int = 1
+    epochs: int = 300
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    max_grad_norm: float = 2.0
+    batch_size: int = 512
 
 
 @register_trainer("DKT2")

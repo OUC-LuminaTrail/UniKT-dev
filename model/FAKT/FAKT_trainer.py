@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -11,90 +9,61 @@ logger = get_logger(__name__)
 
 @register_model_config("FAKT")
 class FAKTConfig(ModelConfig):
-    """FAKT model configuration."""
+    """FAKT model configuration.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model"}
-    )
-    n_blocks: int = field(default=2, metadata={"help": "Number of transformer blocks"})
-    num_attn_heads: int = field(
-        default=4, metadata={"help": "Number of attention heads"}
-    )
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    d_ff: int = field(default=256, metadata={"help": "Feed-forward network dimension"})
-    final_fc_dim: int = field(
-        default=256, metadata={"help": "Final fully connected layer dimension"}
-    )
-    final_fc_dim2: int = field(
-        default=256,
-        metadata={"help": "Second final fully connected layer dimension"},
-    )
-    kernel_size1: int = field(
-        default=5,
-        metadata={"help": "Kernel size for the first frequency-band causal conv"},
-    )
-    kernel_size2: int = field(
-        default=5,
-        metadata={"help": "Kernel size for the second frequency-band causal conv"},
-    )
-    kq_same: bool = field(
-        default=True,
-        metadata={"help": "Whether key and query share the linear transform"},
-    )
-    separate_qa: bool = field(
-        default=False,
-        metadata={"help": "Whether to use separate QA embeddings"},
-    )
-    emb_type: str = field(
-        default="qidband",
-        metadata={
-            "help": "Embedding type (default enables frequency-band enhancement)"
-        },
-    )
-    use_moe: bool = field(
-        default=True, metadata={"help": "Whether to enable Mixture-of-Experts"}
-    )
-    num_experts: int = field(default=4, metadata={"help": "Number of experts in MoE"})
-    confidence_thresholds: str = field(
-        default="[0.8, 0.6, 0.4]",
-        metadata={"help": "Confidence thresholds for adaptive expert selection"},
-    )
-    mamba_d_state: int = field(
-        default=16, metadata={"help": "Mamba SSM state dimension"}
-    )
-    mamba_d_conv: int = field(
-        default=4, metadata={"help": "Mamba local convolution width"}
-    )
-    mamba_expand: int = field(default=2, metadata={"help": "Mamba expansion factor"})
-    min_experts: int = field(
-        default=1, metadata={"help": "Minimum number of experts selected adaptively"}
-    )
-    max_experts: int | None = field(
-        default=None,
-        metadata={
-            "help": "Maximum number of experts selected adaptively (None=num_experts)"
-        },
-    )
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-4,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        dropout: Dropout probability.
+        d_ff: Feed-forward network dimension.
+        final_fc_dim: Final fully connected layer dimension.
+        final_fc_dim2: Second final fully connected layer dimension.
+        kernel_size1: Kernel size for the first frequency-band causal conv.
+        kernel_size2: Kernel size for the second frequency-band causal conv.
+        kq_same: Whether key and query share the linear transform.
+        separate_qa: Whether to use separate QA embeddings.
+        emb_type: Embedding type (default enables frequency-band enhancement).
+        use_moe: Whether to enable Mixture-of-Experts.
+        num_experts: Number of experts in MoE.
+        confidence_thresholds: Confidence thresholds for adaptive expert selection.
+        mamba_d_state: Mamba SSM state dimension.
+        mamba_d_conv: Mamba local convolution width.
+        mamba_expand: Mamba expansion factor.
+        min_experts: Minimum number of experts selected adaptively.
+        max_experts: Maximum number of experts selected adaptively (None=num_experts).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 2
+    num_attn_heads: int = 4
+    dropout: float = 0.1
+    d_ff: int = 256
+    final_fc_dim: int = 256
+    final_fc_dim2: int = 256
+    kernel_size1: int = 5
+    kernel_size2: int = 5
+    kq_same: bool = True
+    separate_qa: bool = False
+    emb_type: str = "qidband"
+    use_moe: bool = True
+    num_experts: int = 4
+    confidence_thresholds: str = "[0.8, 0.6, 0.4]"
+    mamba_d_state: int = 16
+    mamba_d_conv: int = 4
+    mamba_expand: int = 2
+    min_experts: int = 1
+    max_experts: int | None = None
+    epochs: int = 200
+    learning_rate: float = 1e-4
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("FAKT")

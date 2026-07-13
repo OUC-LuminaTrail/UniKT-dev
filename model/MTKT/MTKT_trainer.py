@@ -1,7 +1,5 @@
 """MTKT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,64 +11,51 @@ logger = get_logger(__name__)
 
 @register_model_config("MTKT")
 class MTKTConfig(ModelConfig):
-    """MTKT model configuration."""
+    """MTKT model configuration.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model"}
-    )
-    n_blocks: int = field(default=2, metadata={"help": "Number of transformer blocks"})
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads"}
-    )
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    d_ff: int = field(default=256, metadata={"help": "CIC hidden dimension"})
-    final_fc_dim: int = field(
-        default=512, metadata={"help": "Output FC layer dimension 1"}
-    )
-    final_fc_dim2: int = field(
-        default=256, metadata={"help": "Output FC layer dimension 2"}
-    )
-    kq_same: int = field(
-        default=1,
-        metadata={
-            "help": "Whether key and query use the same linear transformation (1=yes, 0=no)"
-        },
-    )
-    separate_qa: int = field(
-        default=0,
-        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
-    )
-    l2: float = field(
-        default=1e-5,
-        metadata={"help": "L2 regularization coefficient for Rasch model"},
-    )
-    k1: int = field(default=1, metadata={"help": "CIC convolution kernel size 1"})
-    k2: int = field(default=3, metadata={"help": "CIC convolution kernel size 2"})
-    num_rgap: int = field(
-        default=100, metadata={"help": "Number of review gap buckets"}
-    )
-    num_sgap: int = field(
-        default=100, metadata={"help": "Number of sequential gap buckets"}
-    )
-    num_pcount: int = field(
-        default=15, metadata={"help": "Number of practice count buckets"}
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={"help": "Weight decay for optimizer", "short": "wd"},
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        dropout: Dropout probability.
+        d_ff: CIC hidden dimension.
+        final_fc_dim: Output FC layer dimension 1.
+        final_fc_dim2: Output FC layer dimension 2.
+        kq_same: Whether key and query use the same linear transformation (1=yes, 0=no).
+        separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        l2: L2 regularization coefficient for Rasch model.
+        k1: CIC convolution kernel size 1.
+        k2: CIC convolution kernel size 2.
+        num_rgap: Number of review gap buckets.
+        num_sgap: Number of sequential gap buckets.
+        num_pcount: Number of practice count buckets.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 2
+    num_attn_heads: int = 8
+    dropout: float = 0.2
+    d_ff: int = 256
+    final_fc_dim: int = 512
+    final_fc_dim2: int = 256
+    kq_same: int = 1
+    separate_qa: int = 0
+    l2: float = 1e-5
+    k1: int = 1
+    k2: int = 3
+    num_rgap: int = 100
+    num_sgap: int = 100
+    num_pcount: int = 15
+    epochs: int = 150
+    learning_rate: float = 1e-4
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("MTKT")

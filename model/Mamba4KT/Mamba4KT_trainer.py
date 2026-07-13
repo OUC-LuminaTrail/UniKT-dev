@@ -1,7 +1,5 @@
 """Mamba4KT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,48 +11,33 @@ logger = get_logger(__name__)
 
 @register_model_config("Mamba4KT")
 class Mamba4KTConfig(ModelConfig):
-    """Mamba4KT model configuration."""
+    """Mamba4KT model configuration.
 
-    d_model: int = field(
-        default=128,
-        metadata={"help": "Hidden dimension of the model (paper: {64,128,256})"},
-    )
-    n_blocks: int = field(
-        default=5, metadata={"help": "Number of Mamba blocks (paper N=5)"}
-    )
-    d_state: int = field(default=16, metadata={"help": "SSM latent state dimension"})
-    d_conv: int = field(
-        default=4, metadata={"help": "Conv1D kernel width in Mamba block"}
-    )
-    expand: int = field(
-        default=2,
-        metadata={
-            "help": "Mamba internal expansion factor (Conv1D out channels = expand*d_model)"
-        },
-    )
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    l2: float = field(
-        default=1e-5,
-        metadata={
-            "help": "L2 regularization coefficient for Rasch difficulty parameter (lambda in Eq.11)"
-        },
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={
-            "help": "Learning rate (paper: {0.003,0.002,0.001,0.0001})",
-            "short": "lr",
-        },
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay for optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size (paper=64)", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model (paper: {64,128,256}).
+        n_blocks: Number of Mamba blocks (paper N=5).
+        d_state: SSM latent state dimension.
+        d_conv: Conv1D kernel width in Mamba block.
+        expand: Mamba internal expansion factor (Conv1D out channels = expand*d_model).
+        dropout: Dropout probability.
+        l2: L2 regularization coefficient for Rasch difficulty parameter (lambda in Eq.11).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate (paper: {0.003,0.002,0.001,0.0001}).
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size (paper=64).
+    """
+
+    d_model: int = 128
+    n_blocks: int = 5
+    d_state: int = 16
+    d_conv: int = 4
+    expand: int = 2
+    dropout: float = 0.1
+    l2: float = 1e-5
+    epochs: int = 150
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("Mamba4KT")

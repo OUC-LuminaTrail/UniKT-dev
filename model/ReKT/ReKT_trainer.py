@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,27 +11,23 @@ __all__ = ["ReKTTrainer", "ReKTConfig"]
 
 @register_model_config("ReKT")
 class ReKTConfig(ModelConfig):
-    """ReKT model configuration."""
+    """ReKT model configuration.
 
-    hidden_dim: int = field(
-        default=128, metadata={"help": "Hidden layer dimension", "short": "hd"}
-    )
-    dropout: float = field(
-        default=0.4, metadata={"help": "Dropout rate", "short": "dp"}
-    )
-    epochs: int = field(
-        default=70, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=0.002, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    weight_decay: float = field(
-        default=1e-5,
-        metadata={"help": "Weight decay (L2 regularization)", "short": "wd"},
-    )
-    batch_size: int = field(
-        default=80, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        hidden_dim: Hidden layer dimension.
+        dropout: Dropout rate.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        weight_decay: Weight decay (L2 regularization).
+        batch_size: Batch size for training.
+    """
+
+    hidden_dim: int = 128
+    dropout: float = 0.4
+    epochs: int = 70
+    learning_rate: float = 0.002
+    weight_decay: float = 1e-5
+    batch_size: int = 80
 
 
 @register_trainer("ReKT")

@@ -1,6 +1,6 @@
 """KQN baseline trainer."""
 
-from dataclasses import field
+from typing import Literal
 
 import torch
 
@@ -13,51 +13,35 @@ logger = get_logger(__name__)
 
 @register_model_config("KQN")
 class KQNConfig(ModelConfig):
-    """KQN model and optimization parameters."""
+    """KQN model and optimization parameters.
 
-    n_hidden: int = field(
-        default=128,
-        metadata={"help": "Shared dimensionality of knowledge-state and skill vectors"},
-    )
-    n_rnn_hidden: int = field(
-        default=128, metadata={"help": "Hidden size of the RNN knowledge encoder"}
-    )
-    n_mlp_hidden: int = field(
-        default=128, metadata={"help": "Hidden size of the skill encoder MLP"}
-    )
-    n_rnn_layers: int = field(
-        default=1, metadata={"help": "Number of RNN layers in the knowledge encoder"}
-    )
-    rnn_type: str = field(
-        default="lstm",
-        metadata={
-            "choices": ["lstm", "gru"],
-            "help": "RNN cell type for the knowledge encoder",
-        },
-    )
-    dropout: float = field(
-        default=0.4,
-        metadata={"help": "Dropout probability applied to encoded knowledge states"},
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for Adam optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay for Adam optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
-    max_grad_norm: float | None = field(
-        default=None, metadata={"help": "Optional max gradient norm for clipping"}
-    )
+    Args:
+        n_hidden: Shared dimensionality of knowledge-state and skill vectors.
+        n_rnn_hidden: Hidden size of the RNN knowledge encoder.
+        n_mlp_hidden: Hidden size of the skill encoder MLP.
+        n_rnn_layers: Number of RNN layers in the knowledge encoder.
+        rnn_type: RNN cell type for the knowledge encoder.
+        dropout: Dropout probability applied to encoded knowledge states.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for Adam optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for Adam optimizer.
+        batch_size: Batch size for training.
+        max_grad_norm: Optional max gradient norm for clipping.
+    """
+
+    n_hidden: int = 128
+    n_rnn_hidden: int = 128
+    n_mlp_hidden: int = 128
+    n_rnn_layers: int = 1
+    rnn_type: Literal["lstm", "gru"] = "lstm"
+    dropout: float = 0.4
+    epochs: int = 150
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
+    max_grad_norm: float | None = None
 
 
 @register_trainer("KQN")

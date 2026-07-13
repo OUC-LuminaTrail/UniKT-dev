@@ -1,6 +1,6 @@
 """DeepIRT trainer."""
 
-from dataclasses import field
+from typing import Literal
 
 import torch
 
@@ -13,64 +13,41 @@ logger = get_logger(__name__)
 
 @register_model_config("DeepIRT")
 class DeepIRTConfig(ModelConfig):
-    """DeepIRT model configuration."""
+    """DeepIRT model configuration.
 
-    dim_s: int = field(
-        default=200, metadata={"help": "State dimension of key/value memory vectors"}
-    )
-    size_m: int = field(default=50, metadata={"help": "Number of memory slots"})
-    dropout: float = field(
-        default=0.2,
-        metadata={"help": "Dropout probability before ability/difficulty layers"},
-    )
-    emb_type: str = field(
-        default="qid",
-        metadata={
-            "choices": ["qid"],
-            "help": "Embedding type; DeepIRT qid path is supported",
-        },
-    )
-    irt_scale: float = field(
-        default=3.0,
-        metadata={"help": "Scale applied to student ability in the IRT head"},
-    )
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for Adam optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay for Adam optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
-    test_batch_size: int = field(
-        default=64, metadata={"help": "Batch size for windowlate test evaluation"}
-    )
-    test_num_workers: int = field(
-        default=0,
-        metadata={
-            "help": "Number of DataLoader workers for windowlate test evaluation"
-        },
-    )
-    test_pin_memory: bool = field(
-        default=False,
-        metadata={"help": "Use pinned memory for windowlate test DataLoader"},
-    )
-    test_prefetch_factor: int | None = field(
-        default=None,
-        metadata={"help": "DataLoader prefetch factor for windowlate test evaluation"},
-    )
-    max_grad_norm: float | None = field(
-        default=None,
-        metadata={"help": "Max gradient norm for clipping; None disables clipping"},
-    )
+    Args:
+        dim_s: State dimension of key/value memory vectors.
+        size_m: Number of memory slots.
+        dropout: Dropout probability before ability/difficulty layers.
+        emb_type: Embedding type; DeepIRT qid path is supported.
+        irt_scale: Scale applied to student ability in the IRT head.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for Adam optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for Adam optimizer.
+        batch_size: Batch size for training.
+        test_batch_size: Batch size for windowlate test evaluation.
+        test_num_workers: Number of DataLoader workers for windowlate test evaluation.
+        test_pin_memory: Use pinned memory for windowlate test DataLoader.
+        test_prefetch_factor: DataLoader prefetch factor for windowlate test evaluation.
+        max_grad_norm: Max gradient norm for clipping; None disables clipping.
+    """
+
+    dim_s: int = 200
+    size_m: int = 50
+    dropout: float = 0.2
+    emb_type: Literal["qid"] = "qid"
+    irt_scale: float = 3.0
+    epochs: int = 200
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
+    test_batch_size: int = 64
+    test_num_workers: int = 0
+    test_pin_memory: bool = False
+    test_prefetch_factor: int | None = None
+    max_grad_norm: float | None = None
 
 
 @register_trainer("DeepIRT")

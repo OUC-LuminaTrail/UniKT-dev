@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,48 +11,33 @@ __all__ = ["LBKTTrainer", "LBKTConfig"]
 
 @register_model_config("LBKT")
 class LBKTConfig(ModelConfig):
-    """LBKT model configuration."""
+    """LBKT model configuration.
 
-    dim_tp: int = field(
-        default=128,
-        metadata={"help": "Topic (question) embedding dimension (default: 128)"},
-    )
-    dim_hidden: int = field(
-        default=50, metadata={"help": "Response embedding dimension (default: 50)"}
-    )
-    num_units: int = field(
-        default=128, metadata={"help": "Hidden dimension (default: 128)"}
-    )
-    dropout: float = field(
-        default=0.2, metadata={"help": "Dropout rate (default: 0.2)"}
-    )
-    q_gamma: float = field(
-        default=0.1, metadata={"help": "Q-matrix smoothing factor (default: 0.1)"}
-    )
-    epochs: int = field(
-        default=100,
-        metadata={"help": "Number of training epochs (default: 100)", "short": "ep"},
-    )
-    learning_rate: float = field(
-        default=0.001,
-        metadata={
-            "help": "Learning rate for optimizer (default: 0.001)",
-            "short": "lr",
-        },
-    )
-    lr_decay_step: int = field(
-        default=1, metadata={"help": "Learning rate decay step size (default: 1)"}
-    )
-    lr_decay_rate: float = field(
-        default=0.5, metadata={"help": "Learning rate decay factor (default: 0.5)"}
-    )
-    weight_decay: float = field(
-        default=1e-6, metadata={"help": "Weight decay for optimizer (default: 1e-6)"}
-    )
-    batch_size: int = field(
-        default=16,
-        metadata={"help": "Batch size for training (default: 16)", "short": "bs"},
-    )
+    Args:
+        dim_tp: Topic (question) embedding dimension (default: 128).
+        dim_hidden: Response embedding dimension (default: 50).
+        num_units: Hidden dimension (default: 128).
+        dropout: Dropout rate (default: 0.2).
+        q_gamma: Q-matrix smoothing factor (default: 0.1).
+        epochs: Number of training epochs (default: 100).
+        learning_rate: Learning rate for optimizer (default: 0.001).
+        lr_decay_step: Learning rate decay step size (default: 1).
+        lr_decay_rate: Learning rate decay factor (default: 0.5).
+        weight_decay: Weight decay for optimizer (default: 1e-6).
+        batch_size: Batch size for training (default: 16).
+    """
+
+    dim_tp: int = 128
+    dim_hidden: int = 50
+    num_units: int = 128
+    dropout: float = 0.2
+    q_gamma: float = 0.1
+    epochs: int = 100
+    learning_rate: float = 0.001
+    lr_decay_step: int = 1
+    lr_decay_rate: float = 0.5
+    weight_decay: float = 1e-6
+    batch_size: int = 16
 
 
 @register_trainer("LBKT")

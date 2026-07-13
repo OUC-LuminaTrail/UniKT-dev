@@ -1,7 +1,5 @@
 """CSKT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,71 +11,45 @@ logger = get_logger(__name__)
 
 @register_model_config("CSKT")
 class CSKTConfig(ModelConfig):
-    """CSKT 模型配置。"""
+    """CSKT model configuration.
 
-    d_model: int = field(
-        default=128, metadata={"help": "Hidden dimension of the model"}
-    )
-    num_blocks: int = field(
-        default=2, metadata={"help": "Number of transformer blocks"}
-    )
-    num_attn_heads: int = field(
-        default=4, metadata={"help": "Number of attention heads"}
-    )
-    dropout: float = field(default=0.1, metadata={"help": "Dropout probability"})
-    d_ff: int = field(default=256, metadata={"help": "Feed-forward network dimension"})
-    r: float = field(default=0.6, metadata={"help": "Cone attention radius parameter"})
-    gamma: float = field(
-        default=1.0, metadata={"help": "Cone attention temperature parameter"}
-    )
-    kq_same: int = field(
-        default=1,
-        metadata={
-            "help": "Whether key and query share the same linear projection (1=yes, 0=no)"
-        },
-    )
-    separate_qa: int = field(
-        default=0,
-        metadata={
-            "help": "Whether to use separate interaction embedding (1=yes, 0=no)"
-        },
-    )
-    final_fc_dim: int = field(
-        default=512,
-        metadata={"help": "First fully connected layer dimension in output head"},
-    )
-    final_fc_dim2: int = field(
-        default=256,
-        metadata={"help": "Second fully connected layer dimension in output head"},
-    )
-    emb_type: str = field(
-        default="qid",
-        metadata={
-            "help": (
-                "Embedding type. 'qid' (default, vector question difficulty), "
-                "'qid_scalar' (scalar question difficulty)"
-            )
-        },
-    )
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        num_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        dropout: Dropout probability.
+        d_ff: Feed-forward network dimension.
+        r: Cone attention radius parameter.
+        gamma: Cone attention temperature parameter.
+        kq_same: Whether key and query share the linear projection (1=yes, 0=no).
+        separate_qa: Whether to use a separate interaction embedding (1=yes, 0=no).
+        final_fc_dim: First fully connected layer dimension in output head.
+        final_fc_dim2: Second fully connected layer dimension in output head.
+        emb_type: Embedding type ('qid' vector difficulty, 'qid_scalar' scalar).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 128
+    num_blocks: int = 2
+    num_attn_heads: int = 4
+    dropout: float = 0.1
+    d_ff: int = 256
+    r: float = 0.6
+    gamma: float = 1.0
+    kq_same: int = 1
+    separate_qa: int = 0
+    final_fc_dim: int = 512
+    final_fc_dim2: int = 256
+    emb_type: str = "qid"
+    epochs: int = 100
+    learning_rate: float = 1e-4
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("CSKT")

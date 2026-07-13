@@ -1,7 +1,5 @@
 """RobustKT trainer."""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,51 +11,43 @@ logger = get_logger(__name__)
 
 @register_model_config("RobustKT")
 class RobustKTConfig(ModelConfig):
-    """RobustKT model configuration."""
+    """RobustKT model configuration.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model"}
-    )
-    n_blocks: int = field(default=4, metadata={"help": "Number of transformer blocks"})
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads"}
-    )
-    d_ff: int = field(default=512, metadata={"help": "Feed-forward network dimension"})
-    final_fc_dim: int = field(
-        default=512, metadata={"help": "Final fully connected layer dimension"}
-    )
-    kernel_size: int = field(
-        default=5, metadata={"help": "Causal smoothing kernel size"}
-    )
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    kq_same: int = field(
-        default=1,
-        metadata={"help": "Whether key and query use the same linear transformation"},
-    )
-    separate_qa: int = field(
-        default=0, metadata={"help": "Whether to use separate QA embeddings"}
-    )
-    l2: float = field(
-        default=1e-5, metadata={"help": "Rasch difficulty regularization coefficient"}
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0, metadata={"help": "Weight decay for optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
-    test_batch_size: int = field(
-        default=512, metadata={"help": "Batch size for windowlate test evaluation"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        d_ff: Feed-forward network dimension.
+        final_fc_dim: Final fully connected layer dimension.
+        kernel_size: Causal smoothing kernel size.
+        dropout: Dropout probability.
+        kq_same: Whether key and query use the same linear transformation.
+        separate_qa: Whether to use separate QA embeddings.
+        l2: Rasch difficulty regularization coefficient.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+        test_batch_size: Batch size for windowlate test evaluation.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 4
+    num_attn_heads: int = 8
+    d_ff: int = 512
+    final_fc_dim: int = 512
+    kernel_size: int = 5
+    dropout: float = 0.2
+    kq_same: int = 1
+    separate_qa: int = 0
+    l2: float = 1e-5
+    epochs: int = 150
+    learning_rate: float = 1e-4
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
+    test_batch_size: int = 512
 
 
 @register_trainer("RobustKT")

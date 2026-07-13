@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -11,48 +9,35 @@ logger = get_logger(__name__)
 
 @register_model_config("IEKT")
 class IEKTConfig(ModelConfig):
-    """IEKT 模型配置"""
+    """IEKT 模型配置
 
-    emb_size: int = field(default=64, metadata={"help": "Embedding dimension"})
-    dropout: float = field(default=0.0, metadata={"help": "Dropout probability"})
-    n_layer: int = field(
-        default=1, metadata={"help": "Number of hidden layers in MLP heads"}
-    )
-    cog_levels: int = field(
-        default=10,
-        metadata={"help": "Number of cognitive estimation levels (m_t action space)"},
-    )
-    acq_levels: int = field(
-        default=10,
-        metadata={
-            "help": "Number of knowledge acquisition sensitivity levels (s_t action space)"
-        },
-    )
-    lamb: int = field(
-        default=40, metadata={"help": "Weight of the reinforcement learning loss"}
-    )
-    gamma: float = field(
-        default=0.93, metadata={"help": "Reward discount factor for policy gradient"}
-    )
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        emb_size: Embedding dimension.
+        dropout: Dropout probability.
+        n_layer: Number of hidden layers in MLP heads.
+        cog_levels: Number of cognitive estimation levels (m_t action space).
+        acq_levels: Number of knowledge acquisition sensitivity levels (s_t action space).
+        lamb: Weight of the reinforcement learning loss.
+        gamma: Reward discount factor for policy gradient.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    emb_size: int = 64
+    dropout: float = 0.0
+    n_layer: int = 1
+    cog_levels: int = 10
+    acq_levels: int = 10
+    lamb: int = 40
+    gamma: float = 0.93
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("IEKT")

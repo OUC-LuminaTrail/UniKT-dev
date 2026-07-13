@@ -1,7 +1,5 @@
 """MIKT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,47 +11,29 @@ logger = get_logger(__name__)
 
 @register_model_config("MIKT")
 class MIKTConfig(ModelConfig):
-    """MIKT 模型配置。"""
+    """MIKT 模型配置。
 
-    embed_dim: int = field(
-        default=64,
-        metadata={"help": "Embedding dimension (default: 64)", "short": "ed"},
-    )
-    state_dim: int = field(
-        default=64,
-        metadata={
-            "help": "State representation dimension (default: 64)",
-            "short": "sd",
-        },
-    )
-    dropout: float = field(
-        default=0.4, metadata={"help": "Dropout rate (default: 0.4)", "short": "dp"}
-    )
-    grad_clip: float = field(
-        default=15.0, metadata={"help": "Gradient clipping norm (default: 15.0)"}
-    )
-    epochs: int = field(
-        default=200,
-        metadata={"help": "Number of training epochs (default: 200)", "short": "ep"},
-    )
-    learning_rate: float = field(
-        default=0.002,
-        metadata={
-            "help": "Learning rate for optimizer (default: 0.002)",
-            "short": "lr",
-        },
-    )
-    weight_decay: float = field(
-        default=1e-5,
-        metadata={"help": "Weight decay for optimizer (default: 1e-5)", "short": "wd"},
-    )
-    batch_size: int = field(
-        default=80,
-        metadata={"help": "Batch size for training (default: 80)", "short": "bs"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
+    Args:
+        embed_dim: Embedding dimension (default: 64).
+        state_dim: State representation dimension (default: 64).
+        dropout: Dropout rate (default: 0.4).
+        grad_clip: Gradient clipping norm (default: 15.0).
+        epochs: Number of training epochs (default: 200).
+        learning_rate: Learning rate for optimizer (default: 0.002).
+        weight_decay: Weight decay for optimizer (default: 1e-5).
+        batch_size: Batch size for training (default: 80).
+        lr_decay: Learning rate decay factor per epoch.
+    """
+
+    embed_dim: int = 64
+    state_dim: int = 64
+    dropout: float = 0.4
+    grad_clip: float = 15.0
+    epochs: int = 200
+    learning_rate: float = 0.002
+    weight_decay: float = 1e-5
+    batch_size: int = 80
+    lr_decay: float | None = None
 
 
 @register_trainer("MIKT")

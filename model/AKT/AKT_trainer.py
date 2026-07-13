@@ -1,7 +1,5 @@
 """AKT 模型训练器"""
 
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,50 +11,39 @@ logger = get_logger(__name__)
 
 @register_model_config("AKT")
 class AKTConfig(ModelConfig):
-    """AKT model configuration."""
+    """AKT model configuration.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model"}
-    )
-    n_blocks: int = field(default=4, metadata={"help": "Number of transformer blocks"})
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads"}
-    )
-    dropout: float = field(default=0.2, metadata={"help": "Dropout probability"})
-    d_ff: int = field(default=512, metadata={"help": "Feed-forward network dimension"})
-    final_fc_dim: int = field(
-        default=512, metadata={"help": "Final fully connected layer dimension"}
-    )
-    kq_same: int = field(
-        default=1,
-        metadata={
-            "help": "Whether key and query use the same linear transformation (1=yes, 0=no)"
-        },
-    )
-    separate_qa: int = field(
-        default=0,
-        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
-    )
-    l2: float = field(default=1e-5, metadata={"help": "L2 regularization coefficient"})
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-4, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        num_attn_heads: Number of attention heads.
+        dropout: Dropout probability.
+        d_ff: Feed-forward network dimension.
+        final_fc_dim: Final fully connected layer dimension.
+        kq_same: Whether key and query share the linear transformation (1=yes, 0=no).
+        separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        l2: L2 regularization coefficient.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 4
+    num_attn_heads: int = 8
+    dropout: float = 0.2
+    d_ff: int = 512
+    final_fc_dim: int = 512
+    kq_same: int = 1
+    separate_qa: int = 0
+    l2: float = 1e-5
+    epochs: int = 150
+    learning_rate: float = 1e-4
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("AKT")

@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -11,31 +9,25 @@ logger = get_logger(__name__)
 
 @register_model_config("HawkesKT")
 class HawkesKTConfig(ModelConfig):
-    """HawkesKT model configuration."""
+    """HawkesKT model configuration.
 
-    emb_size: int = field(default=64, metadata={"help": "Size of embedding vectors"})
-    time_log: float = field(
-        default=2.718281828459045, metadata={"help": "Log base of time intervals"}
-    )
-    epochs: int = field(
-        default=200, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={
-            "help": "Weight decay (L2 regularization) for optimizer",
-            "short": "wd",
-        },
-    )
-    batch_size: int = field(
-        default=128, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        emb_size: Size of embedding vectors.
+        time_log: Log base of time intervals.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay (L2 regularization) for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    emb_size: int = 64
+    time_log: float = 2.718281828459045
+    epochs: int = 200
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 128
 
 
 @register_trainer("HawkesKT")

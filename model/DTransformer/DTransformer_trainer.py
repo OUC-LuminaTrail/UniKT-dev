@@ -1,7 +1,6 @@
 """DTransformer 模型训练器"""
 
 import random
-from dataclasses import field
 
 import torch
 import torch.nn.functional as F
@@ -17,58 +16,43 @@ MIN_SEQ_LEN = 5
 
 @register_model_config("DTransformer")
 class DTransformerConfig(ModelConfig):
-    """DTransformer 模型配置"""
+    """DTransformer 模型配置
 
-    d_model: int = field(
-        default=128, metadata={"help": "Hidden dimension of the model"}
-    )
-    d_ff: int = field(default=256, metadata={"help": "Feed-forward network dimension"})
-    num_attn_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads"}
-    )
-    n_know: int = field(
-        default=16, metadata={"help": "Number of learnable knowledge parameters"}
-    )
-    n_blocks: int = field(
-        default=3, metadata={"help": "Number of transformer blocks (1-3)"}
-    )
-    dropout: float = field(default=0.3, metadata={"help": "Dropout probability"})
-    separate_qa: int = field(
-        default=0,
-        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
-    )
-    l2: float = field(
-        default=1e-3, metadata={"help": "L2 regularization coefficient for Rasch model"}
-    )
-    shortcut: int = field(
-        default=0, metadata={"help": "Use AKT-like shortcut mode (1=yes, 0=no)"}
-    )
-    lambda_cl: float = field(
-        default=0.0,
-        metadata={"help": "Contrastive learning loss weight (0 = disabled)"},
-    )
-    hard_neg: int = field(
-        default=0,
-        metadata={"help": "Use hard negatives for contrastive learning (1=yes, 0=no)"},
-    )
-    proj: int = field(
-        default=0,
-        metadata={
-            "help": "Use projection layer for contrastive learning (1=yes, 0=no)"
-        },
-    )
-    epochs: int = field(
-        default=150, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3, metadata={"help": "Learning rate for optimizer", "short": "lr"}
-    )
-    weight_decay: float = field(
-        default=1e-5, metadata={"help": "Weight decay for optimizer", "short": "wd"}
-    )
-    batch_size: int = field(
-        default=32, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        d_ff: Feed-forward network dimension.
+        num_attn_heads: Number of attention heads.
+        n_know: Number of learnable knowledge parameters.
+        n_blocks: Number of transformer blocks (1-3).
+        dropout: Dropout probability.
+        separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        l2: L2 regularization coefficient for Rasch model.
+        shortcut: Use AKT-like shortcut mode (1=yes, 0=no).
+        lambda_cl: Contrastive learning loss weight (0 = disabled).
+        hard_neg: Use hard negatives for contrastive learning (1=yes, 0=no).
+        proj: Use projection layer for contrastive learning (1=yes, 0=no).
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 128
+    d_ff: int = 256
+    num_attn_heads: int = 8
+    n_know: int = 16
+    n_blocks: int = 3
+    dropout: float = 0.3
+    separate_qa: int = 0
+    l2: float = 1e-3
+    shortcut: int = 0
+    lambda_cl: float = 0.0
+    hard_neg: int = 0
+    proj: int = 0
+    epochs: int = 150
+    learning_rate: float = 1e-3
+    weight_decay: float = 1e-5
+    batch_size: int = 32
 
 
 @register_trainer("DTransformer")

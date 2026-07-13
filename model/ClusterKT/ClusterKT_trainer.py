@@ -1,5 +1,3 @@
-from dataclasses import field
-
 import torch
 
 from utils.config import ModelConfig
@@ -13,69 +11,45 @@ __all__ = ["ClusterKTTrainer", "ClusterKTConfig"]
 
 @register_model_config("ClusterKT")
 class ClusterKTConfig(ModelConfig):
-    """ClusterKT model configuration."""
+    """ClusterKT model configuration.
 
-    d_model: int = field(
-        default=256, metadata={"help": "Hidden dimension of the model", "short": "dm"}
-    )
-    n_blocks: int = field(
-        default=4, metadata={"help": "Number of transformer blocks", "short": "nb"}
-    )
-    n_heads: int = field(
-        default=8, metadata={"help": "Number of attention heads", "short": "nh"}
-    )
-    dropout: float = field(
-        default=0.05, metadata={"help": "Dropout probability", "short": "dp"}
-    )
-    d_ff: int = field(
-        default=1024,
-        metadata={"help": "Feed-forward network dimension", "short": "df"},
-    )
-    cluster_size: int = field(
-        default=10, metadata={"help": "Number of cluster centers", "short": "cs"}
-    )
-    final_fc_dim: int = field(
-        default=512,
-        metadata={"help": "Final fully connected layer dimension", "short": "fc"},
-    )
-    kq_same: int = field(
-        default=1,
-        metadata={
-            "help": "Whether key and query use same linear transform (1=yes, 0=no)"
-        },
-    )
-    separate_qa: int = field(
-        default=0,
-        metadata={"help": "Whether to use separate QA embeddings (1=yes, 0=no)"},
-    )
-    n_st: int = field(
-        default=300,
-        metadata={"help": "Spent time embedding vocabulary size"},
-    )
-    n_et: int = field(
-        default=1440,
-        metadata={"help": "Elapsed time embedding vocabulary size"},
-    )
-    cluster_loss_weight: float = field(
-        default=0.001, metadata={"help": "Weight for cluster regularization loss"}
-    )
-    epochs: int = field(
-        default=100, metadata={"help": "Number of training epochs", "short": "ep"}
-    )
-    learning_rate: float = field(
-        default=1e-3,
-        metadata={"help": "Learning rate for optimizer", "short": "lr"},
-    )
-    lr_decay: float | None = field(
-        default=None, metadata={"help": "Learning rate decay factor per epoch"}
-    )
-    weight_decay: float = field(
-        default=0.0,
-        metadata={"help": "Weight decay for optimizer", "short": "wd"},
-    )
-    batch_size: int = field(
-        default=64, metadata={"help": "Batch size for training", "short": "bs"}
-    )
+    Args:
+        d_model: Hidden dimension of the model.
+        n_blocks: Number of transformer blocks.
+        n_heads: Number of attention heads.
+        dropout: Dropout probability.
+        d_ff: Feed-forward network dimension.
+        cluster_size: Number of cluster centers.
+        final_fc_dim: Final fully connected layer dimension.
+        kq_same: Whether key and query use same linear transform (1=yes, 0=no).
+        separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        n_st: Spent time embedding vocabulary size.
+        n_et: Elapsed time embedding vocabulary size.
+        cluster_loss_weight: Weight for cluster regularization loss.
+        epochs: Number of training epochs.
+        learning_rate: Learning rate for optimizer.
+        lr_decay: Learning rate decay factor per epoch.
+        weight_decay: Weight decay for optimizer.
+        batch_size: Batch size for training.
+    """
+
+    d_model: int = 256
+    n_blocks: int = 4
+    n_heads: int = 8
+    dropout: float = 0.05
+    d_ff: int = 1024
+    cluster_size: int = 10
+    final_fc_dim: int = 512
+    kq_same: int = 1
+    separate_qa: int = 0
+    n_st: int = 300
+    n_et: int = 1440
+    cluster_loss_weight: float = 0.001
+    epochs: int = 100
+    learning_rate: float = 1e-3
+    lr_decay: float | None = None
+    weight_decay: float = 0.0
+    batch_size: int = 64
 
 
 @register_trainer("ClusterKT")
