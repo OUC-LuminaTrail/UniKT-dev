@@ -88,9 +88,7 @@ def register_config_group(
         parser.add_argument(*arg_names, **kwargs)
 
 
-def _register_nodes(
-    parser: argparse.ArgumentParser, nodes: dict[str, type]
-) -> None:
+def _register_nodes(parser: argparse.ArgumentParser, nodes: dict[str, type]) -> None:
     """Register every node's dataclass fields as dot-path flags on ``parser``."""
     for node, cls in nodes.items():
         register_config_group(parser, node, cls)
