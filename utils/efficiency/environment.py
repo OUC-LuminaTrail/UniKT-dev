@@ -201,9 +201,14 @@ class ResourceSampler:
         self._current = None
 
     def _sample_once(self) -> None:
-        if self._current is None:
+        # Snapshot _current once; end_stage() on the main thread can flip it to
+        # None between two attribute reads, so a second load risks KeyError.
+        current = self._current
+        if current is None:
             return
-        bucket = self._buckets[self._current]
+        bucket = self._buckets.get(current)
+        if bucket is None:
+            return
         if self._proc is not None:
             try:
                 import psutil
