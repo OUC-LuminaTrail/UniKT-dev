@@ -88,6 +88,14 @@ def register_config_group(
         parser.add_argument(*arg_names, **kwargs)
 
 
+def _register_nodes(
+    parser: argparse.ArgumentParser, nodes: dict[str, type]
+) -> None:
+    """Register every node's dataclass fields as dot-path flags on ``parser``."""
+    for node, cls in nodes.items():
+        register_config_group(parser, node, cls)
+
+
 class ConfigParser:
     """Build argparse flags reflectively from a RunConfig schema and parse to an OmegaConf node."""
 
@@ -104,6 +112,8 @@ class ConfigParser:
 
         parser = self._build_full_parser(schema_nodes)
         ns = parser.parse_args(argv)
+        # Config flags use ``node.field`` dot dests; the only non-dot dest
+        # (``config``) is SUPPRESSed, so dot-presence marks a user override.
         overrides = {k: v for k, v in vars(ns).items() if "." in k}
         nested = _dot_to_nested(overrides)
 
@@ -162,8 +172,7 @@ class ConfigParser:
         parser.add_argument("--config", help="Path to a RunConfig yaml base.")
         # The experiment node registers -m/--experiment.model_name via its field
         # metadata; do not add -m manually (would conflict).
-        for node, cls in _FRAMEWORK_NODES.items():
-            register_config_group(parser, node, cls)
+        _register_nodes(parser, _FRAMEWORK_NODES)
         parser.parse_args(["-h"])  # prints help and exits 0
 
     def _build_full_parser(
@@ -176,14 +185,8 @@ class ConfigParser:
         parser.add_argument(
             "--config", dest="config", default=argparse.SUPPRESS, help=argparse.SUPPRESS
         )
-        for node, cls in schema_nodes.items():
-            self._register_node(parser, node, cls)
+        _register_nodes(parser, schema_nodes)
         return parser
-
-    def _register_node(
-        self, parser: argparse.ArgumentParser, node: str, cls: type
-    ) -> None:
-        register_config_group(parser, node, cls)
 
 
 def _dot_to_nested(dot_dict: dict[str, Any]) -> dict[str, Any]:
