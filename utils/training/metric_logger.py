@@ -325,8 +325,8 @@ class SwanLabMetricLogger(MetricLogger):
 
         swanlab.init(
             workspace=os.getenv("SWANLAB_WORKSPACE") or None,
-            project_name="kt-exp-graph",
-            experiment_name=f"Run_{experiment_name}",
+            project="kt-exp-graph",
+            name=f"Run_{experiment_name}",
             config=config,
             callbacks=callbacks,
             group=group,
