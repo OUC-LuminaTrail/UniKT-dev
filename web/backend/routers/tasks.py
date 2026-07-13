@@ -6,6 +6,7 @@ as well as managing the task execution queue (list and reorder).
 
 import contextlib
 import json
+import logging
 from datetime import datetime
 
 from config import TASK_LOGS_DIR
@@ -21,6 +22,8 @@ from services.task_state import transition
 from sqlalchemy import desc, select
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=TaskResponse, status_code=201)
@@ -65,6 +68,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
             custom_python_path=body.custom_python_path,
         )
     except Exception:
+        logger.exception("Failed to launch task %s (%s)", task_id, body.model_name)
         with SessionLocal() as session:
             transition(
                 session,

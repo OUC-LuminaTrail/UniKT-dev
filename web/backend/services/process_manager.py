@@ -365,27 +365,49 @@ class ProcessManager:
     def _build_cli_args(self, task_id: int, model_name: str, params: dict) -> list[str]:
         """Build a train.py invocation from frontend form values.
 
-        The flat ``params`` dict (field name -> value) is routed to the correct
-        RunConfig node (model/data/general/compile/early_stopping) by schema
-        field-name lookup, written to a temp yaml, and run via ``train.py --config``.
-        The yaml is registered for cleanup on task end (and a previous temp for
-        this task, if launch re-stamps, is removed).
+        The flat ``params`` dict is routed to RunConfig nodes (model/data/general/
+        compile/early_stopping) by schema field-name lookup, written to a temp
+        yaml, and run via ``train.py --config``. Routing needs the model config,
+        which only imports under a torch-capable Python, so it runs in a
+        subprocess (the web backend itself is torch-free and cannot build the
+        schema in-process). The yaml is registered for cleanup on task end (and a
+        previous temp for this task, if launch re-stamps, is removed).
         """
+        import json
         import os
+        import subprocess
         import tempfile
-        from dataclasses import fields as dc_fields
 
+        from config import PROJECT_ROOT
         from omegaconf import OmegaConf
 
-        from utils.config.run_config import build_run_config_schema
-
-        schema = build_run_config_schema(model_name)
-        nested: dict = {}
-        for node, cls in schema.items():
-            for f in dc_fields(cls):
-                if f.name in params and params[f.name] is not None:
-                    nested.setdefault(node, {})[f.name] = params[f.name]
-        nested.setdefault("experiment", {})["model_name"] = model_name
+        builder = str(
+            PROJECT_ROOT / "web" / "backend" / "services" / "_config_builder.py"
+        )
+        cmd = [*self._env_manager.resolve_default_command(), builder]
+        result = subprocess.run(
+            cmd,
+            input=json.dumps({"model_name": model_name, "params": params}),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(PROJECT_ROOT),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"config builder subprocess exited {result.returncode}: "
+                f"{result.stderr.strip() or result.stdout.strip()}"
+            )
+        # Take the last stdout line so stray import warnings don't break parsing.
+        lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+        try:
+            payload = json.loads(lines[-1]) if lines else {}
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"config builder returned no JSON: {result.stdout!r}"
+            ) from e
+        if payload.get("error") or not payload.get("nested"):
+            raise RuntimeError(f"config builder error: {payload.get('error')}")
 
         # Replace any previous temp config for this task (launch_task stamps,
         # then _do_launch re-builds); use mkstemp (not deprecated mktemp).
@@ -395,7 +417,7 @@ class ProcessManager:
                 os.unlink(old)
         fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix=f"run_{model_name}_")
         os.close(fd)
-        OmegaConf.save(OmegaConf.create(nested), yaml_path)
+        OmegaConf.save(OmegaConf.create(payload["nested"]), yaml_path)
         self._temp_configs[task_id] = yaml_path
         return ["train.py", "--config", yaml_path]
 
