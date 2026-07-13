@@ -55,11 +55,20 @@ def benchmark_inference(
     model = trainer.model
     model.eval()
 
-    # warmup: cuDNN autotune / Inductor JIT / GPU 时钟爬升
+    # warmup: cuDNN autotune / Inductor JIT / GPU clock ramp
     with torch.inference_mode():
         for _ in range(warmup_iters):
             trainer.forward_pass(sample_batch)
     synchronize(device)
+
+    # Sustained throughput: wall-clock over iters without per-step sync,
+    # matching the training benchmark so the two throughputs are comparable.
+    with torch.inference_mode():
+        sustained_start = time.perf_counter()
+        for _ in range(iters):
+            trainer.forward_pass(sample_batch)
+        synchronize(device)
+    sustained_wall = time.perf_counter() - sustained_start
 
     all_latencies: list[float] = []
     per_repeat_means: list[float] = []
@@ -106,8 +115,12 @@ def benchmark_inference(
         float(np.std(per_repeat_means, ddof=1)) if len(per_repeat_means) > 1 else 0.0
     )
     repeat_cv = repeat_std / mean_ms if mean_ms > 0 else 0.0
-    throughput = valid_tokens / (mean_ms / 1000) if mean_ms > 0 else 0.0
-    ns_per = (mean_ms * 1e6) / valid_tokens if valid_tokens > 0 else 0.0
+    throughput = (valid_tokens * iters) / sustained_wall if sustained_wall > 0 else 0.0
+    ns_per = (
+        (sustained_wall * 1e9) / (valid_tokens * iters)
+        if valid_tokens > 0 and iters > 0
+        else 0.0
+    )
 
     logger.info(
         f"[Inference] latency_mean={mean_ms:.3f}ms latency_p95={summary['p95']:.3f}ms "

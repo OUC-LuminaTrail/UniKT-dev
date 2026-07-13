@@ -40,7 +40,8 @@ class TrainingStage(EfficiencyStage):
         table.add_row("Iterations", f"{result.iters}")
         table.add_row("Per step", f"{result.ms_per_train_step:.3f} ms")
         table.add_row(
-            "Throughput", f"{result.throughput_interactions_per_sec:,.0f} interactions/s"
+            "Throughput (sustained)",
+            f"{result.throughput_interactions_per_sec:,.0f} interactions/s",
         )
         table.add_row("Samples/s", f"{result.samples_per_sec:,.0f}")
         table.add_row("Wall time", format_duration(result.wall_time_s))

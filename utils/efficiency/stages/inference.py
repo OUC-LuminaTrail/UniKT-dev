@@ -45,7 +45,8 @@ class InferenceStage(EfficiencyStage):
         table.add_row("Latency cv", f"{result.latency_cv:.3f}")
         table.add_row("Repeat cv (stability)", f"{result.latency_repeat_cv:.3f}")
         table.add_row(
-            "Throughput", f"{result.throughput_interactions_per_sec:,.0f} interactions/s"
+            "Throughput (sustained)",
+            f"{result.throughput_interactions_per_sec:,.0f} interactions/s",
         )
         table.add_row("Per interaction", f"{result.ns_per_interaction:,.0f} ns")
         if result.gpu_peak_allocated_mib is not None:
