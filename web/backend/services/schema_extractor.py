@@ -5,11 +5,16 @@ CLI parameter schemas, returning structured data for the schemas API.
 """
 
 import json
+import logging
 import subprocess
 import sys
 
 from config import PROJECT_ROOT
 from schemas import ModelSchemaResponse, ParamField, ParamGroup
+
+from services.python_env import EnvironmentNotConfigured
+
+logger = logging.getLogger(__name__)
 
 HELPER_SCRIPT = str(PROJECT_ROOT / "web" / "backend" / "services" / "_schema_helper.py")
 
@@ -61,11 +66,13 @@ class SchemaExtractor:
     def _resolve_base_cmd(self) -> list[str]:
         """Resolve the base Python command for the helper script.
 
-        Returns:
-            A command list, defaulting to ``sys.executable``.
+        Uses the wizard-configured default environment.
+
+        Raises:
+            EnvironmentNotConfigured: If no default environment is configured.
         """
         if self._env_manager:
-            return self._env_manager.resolve_default_command()
+            return self._env_manager.resolve_command()
         return [sys.executable]
 
     def _run_helper(self) -> None:
@@ -76,12 +83,18 @@ class SchemaExtractor:
         """
         if self._models is not None:
             return
-        base = self._resolve_base_cmd()
-        cmd = [*base, HELPER_SCRIPT]
         try:
+            base = self._resolve_base_cmd()
+            cmd = [*base, HELPER_SCRIPT]
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
             )
+        except EnvironmentNotConfigured as e:
+            # No env configured (user skipped the setup wizard) — fail safe with
+            # an empty model list rather than crashing the schemas endpoint.
+            logger.error("Schema extraction skipped — %s", e)
+            self._models = []
+            return
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             self._models = []
             return

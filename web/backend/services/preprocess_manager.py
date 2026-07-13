@@ -414,10 +414,9 @@ class PreprocessManager:
         env_id: str | None,
         custom_python_path: str | None,
     ) -> list[str]:
-        if env_id:
-            base = self._env_manager.resolve_command(env_id, custom_python_path)
-        else:
-            base = self._env_manager.resolve_default_command()
+        # env_id wins; when unset, resolve_command falls back to the
+        # wizard-configured default env (or raises EnvironmentNotConfigured).
+        base = self._env_manager.resolve_command(env_id, custom_python_path)
         cmd = [*base, "data_process.py", action, "-d", dataset]
         if action == "download":
             if params.get("force"):

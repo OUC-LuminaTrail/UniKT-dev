@@ -18,6 +18,7 @@ from pagination import Page, Params
 from pydantic import BaseModel
 from schemas import TaskCreate, TaskResponse
 from services.process_manager import ProcessManager
+from services.python_env import EnvironmentNotConfigured
 from services.task_state import transition
 from sqlalchemy import desc, select
 
@@ -67,6 +68,17 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
             env_id=body.env_id,
             custom_python_path=body.custom_python_path,
         )
+    except EnvironmentNotConfigured as e:
+        with SessionLocal() as session:
+            transition(
+                session,
+                Task,
+                task_id,
+                "pending",
+                "failed",
+                finished_at=datetime.now(),
+            )
+        raise HTTPException(400, str(e))
     except Exception:
         logger.exception("Failed to launch task %s (%s)", task_id, body.model_name)
         with SessionLocal() as session:

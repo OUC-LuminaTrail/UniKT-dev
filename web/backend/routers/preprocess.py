@@ -19,6 +19,7 @@ from fastapi import (
 from pydantic import BaseModel
 from services.log_reader import stream_log
 from services.preprocess_manager import PreprocessManager
+from services.python_env import EnvironmentNotConfigured
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +77,12 @@ def start_preprocess(
         raise HTTPException(400, "action must be 'download' or 'process'")
     if not body.dataset:
         raise HTTPException(400, "dataset is required")
-    task = pm.start(
-        body.action, body.dataset, body.params, body.env_id, body.custom_python_path
-    )
+    try:
+        task = pm.start(
+            body.action, body.dataset, body.params, body.env_id, body.custom_python_path
+        )
+    except EnvironmentNotConfigured as e:
+        raise HTTPException(400, str(e))
     return {
         "id": task.id,
         "command": task.command,

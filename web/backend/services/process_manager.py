@@ -114,7 +114,9 @@ class ProcessManager:
                 return
 
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
-            cmd = base_cmd + self._build_cli_args(task_id, model_name, params)
+            cmd = base_cmd + self._build_cli_args(
+                task_id, model_name, params, base_cmd
+            )
             env_type, env_name = env_id.split(":", 1)
 
             task.command = " ".join(cmd)
@@ -247,7 +249,9 @@ class ProcessManager:
             custom_python_path = task.python_path or None
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             params = json.loads(task.extra_params or "{}")
-            cmd = base_cmd + self._build_cli_args(task_id, task.model_name, params)
+            cmd = base_cmd + self._build_cli_args(
+                task_id, task.model_name, params, base_cmd
+            )
             env_type = task.env_type
 
             try:
@@ -362,16 +366,24 @@ class ProcessManager:
         with self._lock:
             self._master_fds.pop(task_id, None)
 
-    def _build_cli_args(self, task_id: int, model_name: str, params: dict) -> list[str]:
+    def _build_cli_args(
+        self,
+        task_id: int,
+        model_name: str,
+        params: dict,
+        base_cmd: list[str],
+    ) -> list[str]:
         """Build a train.py invocation from frontend form values.
 
         The flat ``params`` dict is routed to RunConfig nodes (model/data/general/
         compile/early_stopping) by schema field-name lookup, written to a temp
         yaml, and run via ``train.py --config``. Routing needs the model config,
         which only imports under a torch-capable Python, so it runs in a
-        subprocess (the web backend itself is torch-free and cannot build the
-        schema in-process). The yaml is registered for cleanup on task end (and a
-        previous temp for this task, if launch re-stamps, is removed).
+        subprocess via ``base_cmd`` — the same environment the task uses to run
+        train.py, so any env that can train can route (the web backend itself is
+        torch-free and cannot build the schema in-process). The yaml is
+        registered for cleanup on task end (and a previous temp for this task,
+        if launch re-stamps, is removed).
         """
         import json
         import os
@@ -384,7 +396,7 @@ class ProcessManager:
         builder = str(
             PROJECT_ROOT / "web" / "backend" / "services" / "_config_builder.py"
         )
-        cmd = [*self._env_manager.resolve_default_command(), builder]
+        cmd = [*base_cmd, builder]
         result = subprocess.run(
             cmd,
             input=json.dumps({"model_name": model_name, "params": params}),

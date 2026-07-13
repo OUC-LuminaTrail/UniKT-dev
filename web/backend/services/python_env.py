@@ -46,6 +46,17 @@ def _find_conda() -> str | None:
     return shutil.which("conda")
 
 
+class EnvironmentNotConfigured(RuntimeError):
+    """No Python environment is available for subprocess launch.
+
+    Raised (never silently worked around) when neither an explicit ``env_id``
+    nor a wizard-configured default exists, or a custom env has no path. The
+    web backend's own interpreter lacks torch, so falling back to a bare
+    ``python`` would just defer the failure into an opaque subprocess error —
+    callers surface this to the user as a setup prompt instead.
+    """
+
+
 class PythonEnvManager:
     """Discovers Python environments and resolves commands for subprocess launch.
 
@@ -91,46 +102,50 @@ class PythonEnvManager:
         return envs
 
     def resolve_command(
-        self, env_id: str, custom_python_path: str | None = None
+        self, env_id: str | None = None, custom_python_path: str | None = None
     ) -> list[str]:
-        """Resolve the Python interpreter command for the given environment.
+        """Resolve the Python interpreter command for an environment.
 
         Args:
             env_id: Environment identifier (e.g. ``pixi:default``,
-                ``conda:base``, ``custom:0``).
-            custom_python_path: Optional custom Python interpreter path
-                (used for ``custom`` type environments).
+                ``conda:base``, ``custom:0``). If None, falls back to the
+                wizard-configured default environment.
+            custom_python_path: Custom interpreter path (for ``custom`` type).
+                When ``env_id`` is None, read from settings alongside the
+                default env.
 
         Returns:
             A command list suitable for subprocess execution.
+
+        Raises:
+            EnvironmentNotConfigured: If no ``env_id`` is given and no default
+                environment is configured, or a custom env has no path. Never
+                silently falls back to a bare ``python``.
         """
+        if env_id is None:
+            env_id = self._settings_manager.get_default_env()
+            if env_id is None:
+                raise EnvironmentNotConfigured(
+                    "未配置训练环境，请先在设置中完成初始化"
+                )
+            custom_python_path = self._settings_manager.get_custom_python_path()
+
         parts = env_id.split(":", 1)
         env_type = parts[0]
         env_name = parts[1] if len(parts) > 1 else ""
         if env_type == "pixi":
             pixi_bin = _find_pixi() or "pixi"
             return [pixi_bin, "run", "--environment", env_name, "python"]
-        elif env_type == "conda":
+        if env_type == "conda":
             conda_bin = _find_conda() or "conda"
             return [conda_bin, "run", "-n", env_name, "--no-banner", "python"]
-        elif env_type == "custom":
+        if env_type == "custom":
             if not custom_python_path:
-                return ["python"]
+                raise EnvironmentNotConfigured(
+                    "自定义环境未配置 python 路径，请在设置中补全"
+                )
             return [custom_python_path]
-        return ["python"]
-
-    def resolve_default_command(self) -> list[str]:
-        """Resolve the Python interpreter command for the default environment.
-
-        Returns:
-            A command list using the default environment, or ``['python']``
-            if no default is set.
-        """
-        default_env = self._settings_manager.get_default_env()
-        if default_env:
-            custom_path = self._settings_manager.get_custom_python_path()
-            return self.resolve_command(default_env, custom_path)
-        return ["python"]
+        raise ValueError(f"Unknown environment type: {env_type!r} (env_id={env_id})")
 
     async def health_check(
         self, env_id: str, custom_python_path: str | None = None
