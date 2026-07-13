@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ __all__ = ["ClusterKTTrainer", "ClusterKTConfig"]
 
 
 @register_model_config("ClusterKT")
-@dataclass
 class ClusterKTConfig(ModelConfig):
     """ClusterKT model configuration."""
 

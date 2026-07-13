@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ __all__ = ["GRKTTrainer", "GRKTConfig"]
 
 
 @register_model_config("GRKT")
-@dataclass
 class GRKTConfig(ModelConfig):
     """GRKT model configuration."""
 

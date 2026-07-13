@@ -1,6 +1,6 @@
 """GKT (Graph-based Knowledge Tracing) 训练器模块"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import numpy as np
 import torch
@@ -64,7 +64,6 @@ def build_transition_graph(sequences: list, num_c: int) -> torch.Tensor:
 
 
 @register_model_config("GKT")
-@dataclass
 class GKTConfig(ModelConfig):
     """GKT model configuration."""
 

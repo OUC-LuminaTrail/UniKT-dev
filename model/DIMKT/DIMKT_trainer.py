@@ -1,6 +1,6 @@
 """DIMKT 模型训练器模块。"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("DIMKT")
-@dataclass
 class DIMKTConfig(ModelConfig):
     """DIMKT model configuration."""
 

@@ -1,7 +1,7 @@
 """DTransformer 模型训练器"""
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 import torch.nn.functional as F
@@ -16,7 +16,6 @@ MIN_SEQ_LEN = 5
 
 
 @register_model_config("DTransformer")
-@dataclass
 class DTransformerConfig(ModelConfig):
     """DTransformer 模型配置"""
 

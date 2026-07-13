@@ -3,7 +3,7 @@
 定义 HDHKT 模型特定的训练逻辑。
 """
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -15,7 +15,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("HDHKT")
-@dataclass
 class HDHKTConfig(ModelConfig):
     """HDHKT 模型配置。"""
 

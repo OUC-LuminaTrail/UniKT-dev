@@ -1,6 +1,6 @@
 """UKT 模型训练器"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("UKT")
-@dataclass
 class UKTConfig(ModelConfig):
     """UKT model configuration."""
 

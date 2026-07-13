@@ -1,6 +1,6 @@
 """DyGKT model trainer."""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 import torch.nn.functional as F
@@ -15,7 +15,6 @@ __all__ = ["DyGKTTrainer", "DyGKTConfig"]
 
 
 @register_model_config("DyGKT")
-@dataclass
 class DyGKTConfig(ModelConfig):
     """DyGKT model configuration."""
 

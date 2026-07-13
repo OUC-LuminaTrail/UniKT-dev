@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import numpy as np
 import torch
@@ -28,7 +28,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("TCKT")
-@dataclass
 class TCKTConfig(ModelConfig):
     """TCKT model configuration."""
 

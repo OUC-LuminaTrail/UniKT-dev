@@ -3,7 +3,7 @@
 定义 DAGKT 模型特定的训练逻辑，包括组合损失函数。
 """
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -17,7 +17,6 @@ __all__ = ["DAGKTTrainer", "DAGKTConfig"]
 
 
 @register_model_config("DAGKT")
-@dataclass
 class DAGKTConfig(ModelConfig):
     """DAGKT model configuration."""
 

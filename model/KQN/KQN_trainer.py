@@ -1,6 +1,6 @@
 """KQN baseline trainer."""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("KQN")
-@dataclass
 class KQNConfig(ModelConfig):
     """KQN model and optimization parameters."""
 

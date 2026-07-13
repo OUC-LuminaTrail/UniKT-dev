@@ -1,6 +1,6 @@
 """QIKT 模型训练器模块"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("QIKT")
-@dataclass
 class QIKTConfig(ModelConfig):
     """QIKT model configuration."""
 

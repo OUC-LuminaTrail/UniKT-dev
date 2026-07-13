@@ -1,6 +1,6 @@
 """DKT2 模型训练器。"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -14,7 +14,6 @@ __all__ = ["DKT2Trainer"]
 
 
 @register_model_config("DKT2")
-@dataclass
 class DKT2Config(ModelConfig):
     """DKT2 模型配置。"""
 

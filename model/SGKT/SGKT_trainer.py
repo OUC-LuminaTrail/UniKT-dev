@@ -3,7 +3,7 @@
 Defines training logic for Session Graph-based Knowledge Tracing model.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -17,7 +17,6 @@ __all__ = ["SGKTTrainer", "SGKTConfig"]
 
 
 @register_model_config("SGKT")
-@dataclass
 class SGKTConfig(ModelConfig):
     """SGKT model configuration."""
 

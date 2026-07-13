@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -10,7 +10,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("FAKT")
-@dataclass
 class FAKTConfig(ModelConfig):
     """FAKT model configuration."""
 

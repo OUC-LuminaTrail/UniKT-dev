@@ -1,6 +1,6 @@
 """SQGKT 模型训练器。"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -14,7 +14,6 @@ __all__ = ["SQGKTTrainer", "SQGKTConfig"]
 
 
 @register_model_config("SQGKT")
-@dataclass
 class SQGKTConfig(ModelConfig):
     """SQGKT model configuration."""
 

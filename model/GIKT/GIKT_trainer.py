@@ -1,6 +1,6 @@
 """GIKT 模型训练器。"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -14,7 +14,6 @@ __all__ = ["GIKTTrainer", "GIKTConfig"]
 
 
 @register_model_config("GIKT")
-@dataclass
 class GIKTConfig(ModelConfig):
     """GIKT model configuration."""
 

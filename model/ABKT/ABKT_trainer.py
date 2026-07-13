@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import field
 from typing import Any
 
 import torch
@@ -25,7 +25,6 @@ __all__ = ["ABKTTrainer"]
 
 
 @register_model_config("ABKT")
-@dataclass
 class ABKTConfig(ModelConfig):
     """ABKT model configuration."""
 

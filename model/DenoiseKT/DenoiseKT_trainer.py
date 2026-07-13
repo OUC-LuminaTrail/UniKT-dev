@@ -1,6 +1,6 @@
 """DenoiseKT 模型训练器。"""
 
-from dataclasses import dataclass, field
+from dataclasses import field
 
 import torch
 
@@ -12,7 +12,6 @@ logger = get_logger(__name__)
 
 
 @register_model_config("DenoiseKT")
-@dataclass
 class DenoiseKTConfig(ModelConfig):
     """DenoiseKT 模型配置。"""
 
