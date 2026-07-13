@@ -1,7 +1,7 @@
 """Inference benchmark: latency distribution, throughput, peak memory."""
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import torch
@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class InferenceMetrics:
-    """推理效率指标。"""
+    """Inference efficiency metrics."""
 
     iters: int = 0
     repeats: int = 0
@@ -27,6 +27,9 @@ class InferenceMetrics:
     latency_min_ms: float = 0.0
     latency_max_ms: float = 0.0
     latency_cv: float = 0.0
+    latency_repeat_std_ms: float = 0.0
+    latency_repeat_cv: float = 0.0
+    per_repeat_mean_ms: list[float] = field(default_factory=list)
     throughput_interactions_per_sec: float = 0.0
     ns_per_interaction: float = 0.0
     gpu_peak_allocated_mib: float | None = None
@@ -43,10 +46,11 @@ def benchmark_inference(
     repeats: int,
     device: torch.device,
 ) -> InferenceMetrics:
-    """推理延迟/吞吐/显存基准。
+    """Inference latency/throughput/memory benchmark.
 
-    预取的 ``sample_batch`` 复用，规避 DataLoader IPC 噪声；CUDA Event 在每次迭代
-    ``end.synchronize()`` 后读 elapsed_time，覆盖主机发射到 kernel 完成的真实时间。
+    Reuses the prefetched ``sample_batch`` to avoid DataLoader IPC noise; a CUDA
+    Event per iteration reads elapsed_time after ``end.synchronize()``, covering
+    host launch through kernel completion.
     """
     model = trainer.model
     model.eval()
@@ -58,6 +62,7 @@ def benchmark_inference(
     synchronize(device)
 
     all_latencies: list[float] = []
+    per_repeat_means: list[float] = []
     peak_alloc: float | None = None
     peak_reserved: float | None = None
 
@@ -83,6 +88,8 @@ def benchmark_inference(
                     trainer.forward_pass(sample_batch)
                     latencies_ms.append((time.perf_counter() - t0) * 1000)
         all_latencies.extend(latencies_ms)
+        if latencies_ms:
+            per_repeat_means.append(sum(latencies_ms) / len(latencies_ms))
 
         if device.type == "cuda":
             alloc = torch.cuda.max_memory_allocated(device) / 1024**2
@@ -94,12 +101,18 @@ def benchmark_inference(
 
     summary = summarize_latencies(all_latencies)
     mean_ms = summary["mean"]
+    # Run-to-run stability: spread of per-repeat means (latency_cv captures within-repeat jitter).
+    repeat_std = (
+        float(np.std(per_repeat_means, ddof=1)) if len(per_repeat_means) > 1 else 0.0
+    )
+    repeat_cv = repeat_std / mean_ms if mean_ms > 0 else 0.0
     throughput = valid_tokens / (mean_ms / 1000) if mean_ms > 0 else 0.0
     ns_per = (mean_ms * 1e6) / valid_tokens if valid_tokens > 0 else 0.0
 
     logger.info(
         f"[Inference] latency_mean={mean_ms:.3f}ms latency_p95={summary['p95']:.3f}ms "
-        f"latency_cv={summary['cv']:.3f} | throughput={throughput:,.0f} int/s"
+        f"latency_cv={summary['cv']:.3f} repeat_cv={repeat_cv:.3f} | "
+        f"throughput={throughput:,.0f} int/s"
         + (f" | gpu_peak={peak_alloc:.0f} MiB" if peak_alloc is not None else "")
     )
 
@@ -116,6 +129,9 @@ def benchmark_inference(
         latency_min_ms=summary["min"],
         latency_max_ms=summary["max"],
         latency_cv=summary["cv"],
+        latency_repeat_std_ms=repeat_std,
+        latency_repeat_cv=repeat_cv,
+        per_repeat_mean_ms=per_repeat_means,
         throughput_interactions_per_sec=throughput,
         ns_per_interaction=ns_per,
         gpu_peak_allocated_mib=peak_alloc,

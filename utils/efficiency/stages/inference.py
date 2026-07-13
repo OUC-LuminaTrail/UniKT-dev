@@ -43,6 +43,7 @@ class InferenceStage(EfficiencyStage):
             f"{result.latency_p50_ms:.3f} / {result.latency_p95_ms:.3f} / {result.latency_p99_ms:.3f} ms",
         )
         table.add_row("Latency cv", f"{result.latency_cv:.3f}")
+        table.add_row("Repeat cv (stability)", f"{result.latency_repeat_cv:.3f}")
         table.add_row(
             "Throughput", f"{result.throughput_interactions_per_sec:,.0f} interactions/s"
         )

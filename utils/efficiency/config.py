@@ -17,7 +17,7 @@ class EfficiencyConfig:
             e.g. ``--efficiency.modes profile,inference``.
         benchmark_iters: Forward passes per repeat for inference latency.
         warmup_iters: Discarded iters before timing (cuDNN autotune / clock ramp).
-        repeats: Full benchmark repeats; median latency reported.
+        repeats: Independent repeats; per-repeat mean spread (repeat_cv) gauges run-to-run stability.
         train_iters: Forward+backward+step iters for training memory/throughput.
         resource_sample_interval: Background resource sampling interval (s).
         profile_flops: Estimate forward FLOPs via torch flop_counter.
