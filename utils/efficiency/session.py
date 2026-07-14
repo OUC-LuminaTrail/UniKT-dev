@@ -78,6 +78,7 @@ class EfficiencySession:
             seq_len=seq_len,
             cfg=self.cfg,
             environment=environment,
+            output_dir=self.output_dir,
         )
 
         sampler = ResourceSampler(device, self.cfg.resource_sample_interval)

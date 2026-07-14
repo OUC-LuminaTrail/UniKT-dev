@@ -26,6 +26,11 @@ class EfficiencyConfig:
         checkpoint: Checkpoint filename inside ``run_dir``.
         weights: Standalone checkpoint to load after building the model.
         output_dir: Where to write efficiency_report.json; default = exp dir.
+        trace_iters: Forward (and train-step) iterations captured by torch.profiler
+            per segment; kept below benchmark_iters since profiling adds overhead.
+        trace_top_ops: Operators retained per segment in the report, sorted by
+            self device time.
+        trace_export: Export a chrome/perfetto trace JSON per segment.
     """
 
     modes: str = ""
@@ -39,3 +44,6 @@ class EfficiencyConfig:
     checkpoint: str = "best_model.pth"
     weights: str | None = None
     output_dir: str | None = None
+    trace_iters: int = 20
+    trace_top_ops: int = 15
+    trace_export: bool = True

@@ -9,6 +9,7 @@ serializable result to the report.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, ClassVar
 
 import torch
@@ -30,6 +31,7 @@ class StageContext:
     seq_len: int | None
     cfg: EfficiencyConfig
     environment: EnvironmentInfo
+    output_dir: Path | None = None
 
 
 class EfficiencyStage(ABC):
