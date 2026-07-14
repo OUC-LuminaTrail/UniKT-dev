@@ -10,11 +10,13 @@ from services.gpu_monitor import GpuMonitor
 from services.preprocess_manager import PreprocessManager
 from services.process_manager import ProcessManager
 from services.python_env import PythonEnvManager
+from services.schema_extractor import SchemaExtractor
 from services.settings_manager import SettingsManager
 
 process_manager: ProcessManager | None = None
 gpu_monitor: GpuMonitor | None = None
 python_env_manager: PythonEnvManager | None = None
+schema_extractor: SchemaExtractor | None = None
 settings_manager: SettingsManager | None = None
 preprocess_manager: PreprocessManager | None = None
 
@@ -82,3 +84,19 @@ def get_settings_manager() -> SettingsManager:
     """
     assert settings_manager is not None
     return settings_manager
+
+
+def get_schema_extractor() -> SchemaExtractor:
+    """Return the global SchemaExtractor singleton.
+
+    Shared by the schemas API and ProcessManager so the model schema is
+    extracted once and its field->node route map is reused at task creation.
+
+    Returns:
+        The initialized SchemaExtractor instance.
+
+    Raises:
+        AssertionError: If the extractor has not been initialized.
+    """
+    assert schema_extractor is not None
+    return schema_extractor

@@ -154,10 +154,14 @@ class ParamGroup(BaseModel):
 
     Attributes:
         group_name: Display name for the parameter group.
+        node: RunConfig node key the group routes to (general/compile/
+            early_stopping/data/model), used by the backend to route params
+            without importing torch. None when unknown.
         params: Mapping of parameter names to their metadata.
     """
 
     group_name: str
+    node: str | None = None
     params: dict[str, ParamField]
 
 

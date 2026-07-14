@@ -39,7 +39,7 @@ def _parse_group(data: dict) -> ParamGroup:
             short=cfg.get("short"),
             nargs=cfg.get("nargs"),
         )
-    return ParamGroup(group_name=data["group_name"], params=fields)
+    return ParamGroup(group_name=data["group_name"], node=data.get("node"), params=fields)
 
 
 class SchemaExtractor:
@@ -142,3 +142,31 @@ class SchemaExtractor:
             raise KeyError(f"Model '{model_name}' not found")
         groups = [_parse_group(g) for g in raw_groups]
         return ModelSchemaResponse(model_name=model_name, param_groups=groups)
+
+    def get_field_routes(self, model_name: str) -> dict[str, str]:
+        """Return a {field_name: RunConfig node} map for routing flat params.
+
+        Derived from the cached schema so the backend can route frontend params
+        into RunConfig nodes without importing the model config under torch.
+
+        Args:
+            model_name: The model name to look up.
+
+        Returns:
+            A dict mapping each parameter field name to its RunConfig node.
+
+        Raises:
+            KeyError: If the model name is not found.
+        """
+        self._run_helper()
+        raw_groups = self._schemas.get(model_name)
+        if raw_groups is None:
+            raise KeyError(f"Model '{model_name}' not found")
+        routes: dict[str, str] = {}
+        for group in raw_groups:
+            node = group.get("node")
+            if not node:
+                continue
+            for field_name in group.get("params", {}):
+                routes[field_name] = node
+        return routes

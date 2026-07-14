@@ -33,6 +33,7 @@ from models import Task
 
 from services.gpu_monitor import GpuMonitor
 from services.python_env import PythonEnvManager
+from services.schema_extractor import SchemaExtractor
 from services.task_state import transition
 
 logger = logging.getLogger(__name__)
@@ -48,10 +49,16 @@ class ProcessManager:
         gpu_monitor: GpuMonitor used to detect the number of GPU lanes.
     """
 
-    def __init__(self, env_manager: PythonEnvManager, gpu_monitor: GpuMonitor):
+    def __init__(
+        self,
+        env_manager: PythonEnvManager,
+        gpu_monitor: GpuMonitor,
+        schema_extractor: SchemaExtractor,
+    ):
         """Initialize the manager and start the background scheduler thread."""
         self._env_manager = env_manager
         self._gpu_monitor = gpu_monitor
+        self._schema_extractor = schema_extractor
         self._queue: deque[tuple[int, int | None]] = deque()
         self._running: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
@@ -114,7 +121,7 @@ class ProcessManager:
                 return
 
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
-            cmd = base_cmd + self._build_cli_args(task_id, model_name, params, base_cmd)
+            cmd = base_cmd + self._build_cli_args(task_id, model_name, params)
             env_type, env_name = env_id.split(":", 1)
 
             task.command = " ".join(cmd)
@@ -247,9 +254,7 @@ class ProcessManager:
             custom_python_path = task.python_path or None
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             params = json.loads(task.extra_params or "{}")
-            cmd = base_cmd + self._build_cli_args(
-                task_id, task.model_name, params, base_cmd
-            )
+            cmd = base_cmd + self._build_cli_args(task_id, task.model_name, params)
             env_type = task.env_type
 
             try:
@@ -369,58 +374,22 @@ class ProcessManager:
         task_id: int,
         model_name: str,
         params: dict,
-        base_cmd: list[str],
     ) -> list[str]:
-        """Build a train.py invocation from frontend form values.
+        """Build a ``train.py --config`` invocation from frontend form values.
 
-        The flat ``params`` dict is routed to RunConfig nodes (model/data/general/
-        compile/early_stopping) by schema field-name lookup, written to a temp
-        yaml, and run via ``train.py --config``. Routing needs the model config,
-        which only imports under a torch-capable Python, so it runs in a
-        subprocess via ``base_cmd`` — the same environment the task uses to run
-        train.py, so any env that can train can route (the web backend itself is
-        torch-free and cannot build the schema in-process). The yaml is
-        registered for cleanup on task end (and a previous temp for this task,
-        if launch re-stamps, is removed).
+        Routes the flat ``params`` dict into RunConfig nodes via the cached
+        schema route map, writes the nested dict to a temp yaml, and returns
+        the CLI args. The yaml is registered for cleanup on task end; a previous
+        temp for this task is removed first if launch re-stamps it. Uses mkstemp
+        (not the deprecated mktemp).
         """
-        import json
-        import os
-        import subprocess
         import tempfile
 
         import yaml
-        from config import PROJECT_ROOT
 
-        builder = str(
-            PROJECT_ROOT / "web" / "backend" / "services" / "_config_builder.py"
-        )
-        cmd = [*base_cmd, builder]
-        result = subprocess.run(
-            cmd,
-            input=json.dumps({"model_name": model_name, "params": params}),
-            capture_output=True,
-            text=True,
-            timeout=60,
-            cwd=str(PROJECT_ROOT),
-        )
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"config builder subprocess exited {result.returncode}: "
-                f"{result.stderr.strip() or result.stdout.strip()}"
-            )
-        # Take the last stdout line so stray import warnings don't break parsing.
-        lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
-        try:
-            payload = json.loads(lines[-1]) if lines else {}
-        except json.JSONDecodeError as e:
-            raise RuntimeError(
-                f"config builder returned no JSON: {result.stdout!r}"
-            ) from e
-        if payload.get("error") or not payload.get("nested"):
-            raise RuntimeError(f"config builder error: {payload.get('error')}")
+        nested = self._route_params(model_name, params)
 
-        # Replace any previous temp config for this task (launch_task stamps,
-        # then _do_launch re-builds); use mkstemp (not deprecated mktemp).
+        # Replace a previous temp config if this task is re-stamped.
         old = self._temp_configs.pop(task_id, None)
         if old:
             with contextlib.suppress(OSError):
@@ -428,11 +397,28 @@ class ProcessManager:
         fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix=f"run_{model_name}_")
         os.close(fd)
         Path(yaml_path).write_text(
-            yaml.safe_dump(payload["nested"], sort_keys=False, allow_unicode=True),
+            yaml.safe_dump(nested, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
         self._temp_configs[task_id] = yaml_path
         return ["train.py", "--config", yaml_path]
+
+    def _route_params(self, model_name: str, params: dict) -> dict:
+        """Route flat params into a RunConfig nested dict ``{node: {field: value}}``.
+
+        Uses the cached schema route map (field -> node), extracted once when
+        the model's params page is loaded, so routing stays torch-free. The
+        experiment node is absent from the schema (model_name is set by the
+        backend from the chosen model, not user-editable), so it is stamped here.
+        """
+        routes = self._schema_extractor.get_field_routes(model_name)
+        nested: dict = {}
+        for field, value in params.items():
+            node = routes.get(field)
+            if node and value is not None:
+                nested.setdefault(node, {})[field] = value
+        nested.setdefault("experiment", {})["model_name"] = model_name
+        return nested
 
     def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
         """Resize a running task's PTY; return True on success."""

@@ -14,12 +14,14 @@ from utils.config import (
 )
 from utils.core import MODEL_CONFIGS, get_supported_models
 
-# Fixed framework groups, in display order: (group_name, dataclass).
+# Fixed framework groups, in display order: (group_name, RunConfig node, dataclass).
+# The node key lets the backend route flat params into RunConfig nodes without
+# re-importing the model config under torch.
 _FRAMEWORK_GROUPS = [
-    ("General", GeneralConfig),
-    ("Compile", CompileConfig),
-    ("Early Stopping", EarlyStoppingConfig),
-    ("Data", RunDataConfig),
+    ("General", "general", GeneralConfig),
+    ("Compile", "compile", CompileConfig),
+    ("Early Stopping", "early_stopping", EarlyStoppingConfig),
+    ("Data", "data", RunDataConfig),
 ]
 
 
@@ -57,9 +59,9 @@ def _field_spec(f):
     }
 
 
-def _group(group_name, cls):
+def _group(group_name, node, cls):
     params = {f.name: _field_spec(f) for f in fields(cls)}
-    return {"group_name": group_name, "params": params}
+    return {"group_name": group_name, "node": node, "params": params}
 
 
 models = get_supported_models()
@@ -70,8 +72,8 @@ for model_name in models:
         model_cls = MODEL_CONFIGS.get(model_name)
         if model_cls is None:
             continue
-        groups = [_group(name, cls) for name, cls in _FRAMEWORK_GROUPS]
-        groups.append(_group(model_name, model_cls))
+        groups = [_group(name, node, cls) for name, node, cls in _FRAMEWORK_GROUPS]
+        groups.append(_group(model_name, "model", model_cls))
         print(json.dumps({"type": "schema", "model": model_name, "data": groups}))
     except Exception as e:
         print(json.dumps({"type": "error", "model": model_name, "error": str(e)}))
