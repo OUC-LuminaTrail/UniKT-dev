@@ -22,6 +22,9 @@ from ..measures.formatting import (  # noqa: F401  — re-exported for stages
 )
 from ..target import BenchmarkTarget
 
+# Title style for efficiency result table.
+TITLE_STYLE = "bold cyan"
+
 
 @dataclass
 class StageContext:
@@ -71,3 +74,11 @@ class EfficiencyStage(ABC):
     @abstractmethod
     def format_table(cls, result: Any) -> Table | None:
         """Render the result as a Rich table, or ``None`` to print nothing."""
+
+    @classmethod
+    def make_kv_table(cls, title: str) -> Table:
+        """Standard Key/Value result table (no header/frame) with uniform title."""
+        table = Table(title=title, title_style=TITLE_STYLE, show_header=False, box=None)
+        table.add_column("Key", style="yellow", no_wrap=True)
+        table.add_column("Value", style="white")
+        return table

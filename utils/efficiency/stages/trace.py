@@ -332,14 +332,7 @@ class TraceStage(EfficiencyStage):
     @classmethod
     def format_table(cls, result: TraceProfile) -> Table | None:
         """Render the forward + train operator breakdown as a Rich table."""
-        table = Table(
-            title="Computation Trace",
-            title_style="bold cyan",
-            show_header=False,
-            box=None,
-        )
-        table.add_column("Key", style="yellow", no_wrap=True)
-        table.add_column("Value", style="white")
+        table = cls.make_kv_table("Computation Trace")
         if result.forward:
             _add_segment_rows(table, result.forward, "Forward")
         if result.train:

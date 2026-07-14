@@ -17,6 +17,7 @@ from rich.table import Table
 from utils.core import EFFICIENCY_STAGES, get_logger
 
 from .environment import RESOURCE_METRICS, EnvironmentInfo, ResourceStats
+from .stages.base import TITLE_STYLE
 
 logger = get_logger(__name__)
 
@@ -86,7 +87,7 @@ class EfficiencyReport:
 
 
 def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Table:
-    table = Table(title=title, title_style="bold magenta", show_header=False, box=None)
+    table = Table(title=title, title_style=TITLE_STYLE, show_header=False, box=None)
     table.add_column("Key", style="yellow", no_wrap=True)
     table.add_column("Mean", style="white")
     table.add_column("Peak", style="white")
@@ -109,7 +110,7 @@ def _rs(summary, unit: str = "") -> tuple[str, str]:
 
 def _environment_table(env: EnvironmentInfo) -> Table:
     table = Table(
-        title="Environment", title_style="bold blue", show_header=False, box=None
+        title="Environment", title_style=TITLE_STYLE, show_header=False, box=None
     )
     table.add_column("Key", style="yellow", no_wrap=True)
     table.add_column("Value", style="white")

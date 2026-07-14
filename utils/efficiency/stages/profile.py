@@ -107,11 +107,7 @@ class ProfileStage(EfficiencyStage):
     @classmethod
     def format_table(cls, result: ModelProfile) -> Table | None:
         """Render the model profile as a Rich table."""
-        table = Table(
-            title="Model Profile", title_style="bold cyan", show_header=False, box=None
-        )
-        table.add_column("Key", style="yellow", no_wrap=True)
-        table.add_column("Value", style="white")
+        table = cls.make_kv_table("Model Profile")
         table.add_row("Parameters", f"{result.params:,}")
         table.add_row("Trainable params", f"{result.trainable_params:,}")
         table.add_row("Model size", f"{result.model_size_mb:.2f} MB")

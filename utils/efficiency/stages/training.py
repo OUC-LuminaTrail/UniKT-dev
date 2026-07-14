@@ -122,14 +122,7 @@ class TrainingStage(EfficiencyStage):
     @classmethod
     def format_table(cls, result: TrainingMetrics) -> Table | None:
         """Render training throughput/memory as a Rich table."""
-        table = Table(
-            title="Training (pseudo loop)",
-            title_style="bold green",
-            show_header=False,
-            box=None,
-        )
-        table.add_column("Key", style="yellow", no_wrap=True)
-        table.add_column("Value", style="white")
+        table = cls.make_kv_table("Training (pseudo loop)")
         table.add_row("Iterations", f"{result.iters}")
         table.add_row("Per step", f"{result.ms_per_train_step:.3f} ms")
         table.add_row(

@@ -182,11 +182,7 @@ class InferenceStage(EfficiencyStage):
     @classmethod
     def format_table(cls, result: InferenceMetrics) -> Table | None:
         """Render inference latency/throughput as a Rich table."""
-        table = Table(
-            title="Inference", title_style="bold green", show_header=False, box=None
-        )
-        table.add_column("Key", style="yellow", no_wrap=True)
-        table.add_column("Value", style="white")
+        table = cls.make_kv_table("Inference")
         table.add_row("Iterations", f"{result.iters} x {result.repeats}")
         table.add_row("Valid tokens / batch", f"{result.valid_tokens_per_batch:,}")
         table.add_row("Latency mean", f"{result.latency_mean_ms:.3f} ms")
