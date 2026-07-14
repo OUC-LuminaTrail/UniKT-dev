@@ -4,19 +4,12 @@
 """
 
 import math
-from enum import IntEnum
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn.init import constant_, xavier_uniform_
-
-
-class Dim(IntEnum):
-    batch = 0
-    seq = 1
-    feature = 2
 
 
 def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None):
@@ -190,11 +183,23 @@ class TransformerLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
 
+        self._causal_mask_cache: dict[tuple[int, int], torch.Tensor] = {}
+
+    def _get_causal_mask(
+        self, seqlen: int, mask_k: int, device: torch.device
+    ) -> torch.Tensor:
+        key = (seqlen, mask_k)
+        cached = self._causal_mask_cache.get(key)
+        if cached is not None and cached.device == device:
+            return cached
+        arr = np.triu(np.ones((1, 1, seqlen, seqlen)), k=mask_k).astype("uint8")
+        src_mask = (torch.from_numpy(arr) == 0).to(device)
+        self._causal_mask_cache[key] = src_mask
+        return src_mask
+
     def forward(self, mask, query, key, values, apply_pos=True, pdiff=None):
-        device = query.device
-        seqlen, _ = query.size(1), query.size(0)
-        nopeek_mask = np.triu(np.ones((1, 1, seqlen, seqlen)), k=mask).astype("uint8")
-        src_mask = (torch.from_numpy(nopeek_mask) == 0).to(device)
+        seqlen = query.size(1)
+        src_mask = self._get_causal_mask(seqlen, mask, query.device)
 
         if mask == 0:
             query2 = self.masked_attn_head(

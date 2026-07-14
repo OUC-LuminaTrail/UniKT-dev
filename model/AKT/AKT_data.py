@@ -31,12 +31,17 @@ class AKTDataset(Dataset):
         late_group_ids=None,
         true_labels=None,
     ):
-        self.sequences = sequences
-        self.responses = responses
-        self.masks = masks
-        self.questions = questions
+        self.sequences = torch.from_numpy(sequences).long()
+        self.responses = torch.from_numpy(responses).long()
+        self.masks = torch.from_numpy(masks).bool()
+        self.questions = torch.from_numpy(questions).long()
         self.late_group_ids = late_group_ids
         self.true_labels = true_labels
+
+        if late_group_ids is not None:
+            self.late_group_ids = torch.from_numpy(late_group_ids).long()
+        if true_labels is not None:
+            self.true_labels = torch.from_numpy(true_labels).long()
 
         self._is_window_mode = late_group_ids is not None and true_labels is not None
 
@@ -44,14 +49,14 @@ class AKTDataset(Dataset):
         return len(self.sequences)
 
     def __getitem__(self, idx: int):
-        sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
-        response = torch.tensor(self.responses[idx], dtype=torch.long)
-        mask = torch.tensor(self.masks[idx], dtype=torch.bool)
-        question = torch.tensor(self.questions[idx], dtype=torch.long)
+        sequence = self.sequences[idx]
+        response = self.responses[idx]
+        mask = self.masks[idx]
+        question = self.questions[idx]
 
         if self._is_window_mode:
-            late_group_id = torch.tensor(self.late_group_ids[idx], dtype=torch.long)
-            true_labels = torch.tensor(self.true_labels[idx], dtype=torch.long)
+            late_group_id = self.late_group_ids[idx]
+            true_labels = self.true_labels[idx]
             return sequence, response, mask, late_group_id, true_labels, question
 
         return sequence, response, mask, question
