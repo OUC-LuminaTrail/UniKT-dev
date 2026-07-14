@@ -22,25 +22,16 @@ def estimate_disk_size_mb(model: torch.nn.Module) -> float:
 
 def count_flops(
     forward_fn: Callable[[], Any], device: torch.device
-) -> tuple[int | None, dict[str, int], str | None]:
+) -> tuple[int | None, dict[str, int]]:
     """Count forward FLOPs with ``torch.utils.flop_counter.FlopCounterMode``.
 
-    Under cuDNN, fused ops like ``aten::_cudnn_lstm`` are not decomposable and
-    FlopCounterMode undercounts, so cuDNN is temporarily disabled during measurement
-    to force LSTM decomposition into countable ``aten::mm``/``addmm``. Latency/memory
-    measurements still use the default cuDNN config — this trade-off is documented
-    in ``flops_note``.
+    cuDNN stays enabled: fused ``aten::_cudnn_rnn`` (LSTM/GRU/RNN) is covered by a
+    custom formula registered on import of :mod:`utils.efficiency.measures`, so FLOPs
+    share the cuDNN config used for latency and memory.
     """
     from torch.utils.flop_counter import FlopCounterMode
 
-    note = (
-        "Forward FLOPs measured with cuDNN disabled so LSTM/cuDNN-fused ops decompose "
-        "into countable aten::mm; latency/memory use the default cuDNN config."
-    )
-    saved_cudnn = torch.backends.cudnn.enabled
     try:
-        torch.backends.cudnn.enabled = False
-
         # Grad-enabled (NOT inference_mode/no_grad): FlopCounterMode's ModuleTracker
         # fw_pre_hook registers grad hooks that read grad_fn.next_functions; under
         # inference_mode grad_fn is None -> AttributeError. Forward builds a graph
@@ -54,12 +45,10 @@ def count_flops(
 
         flops = flop_counter.get_total_flops()
         breakdown = format_breakdown(flop_counter)
-        return flops, breakdown, note
+        return flops, breakdown
     except Exception as e:
         logger.warning(f"[Profile] FLOPs measurement failed (non-fatal): {e}")
-        return None, {}, note
-    finally:
-        torch.backends.cudnn.enabled = saved_cudnn
+        return None, {}
 
 
 def format_breakdown(flop_counter) -> dict[str, int]:

@@ -29,7 +29,6 @@ class ModelProfile:
     model_size_mb: float = 0.0
     flops_forward: int | None = None
     op_breakdown: dict[str, int] = field(default_factory=dict)
-    flops_note: str | None = None
 
 
 @dataclass
@@ -67,10 +66,9 @@ def profile_model(
     )
 
     if count_flops:
-        flops, breakdown, note = _count_flops(forward_fn, device)
+        flops, breakdown = _count_flops(forward_fn, device)
         profile.flops_forward = flops
         profile.op_breakdown = breakdown
-        profile.flops_note = note
 
     if flops := profile.flops_forward:
         gflops = flops / 1e9
