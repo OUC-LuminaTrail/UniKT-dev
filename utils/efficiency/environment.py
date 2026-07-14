@@ -27,7 +27,7 @@ class EnvironmentInfo:
     device_type: str = "cpu"
     gpu_name: str | None = None
     gpu_count: int = 0
-    gpu_total_memory_gib: float | None = None
+    gpu_total_memory_mib: float | None = None
     gpu_capability: str | None = None
     gpu_max_sm_clock_mhz: int | None = None
     cpu_logical_cores: int | None = None
@@ -101,7 +101,7 @@ def collect_environment(device: torch.device, model: torch.nn.Module | None = No
         info.gpu_count = torch.cuda.device_count()
         try:
             props = torch.cuda.get_device_properties(idx)
-            info.gpu_total_memory_gib = props.total_memory / 1024**3
+            info.gpu_total_memory_mib = props.total_memory / 1024**2
             info.gpu_capability = f"{props.major}.{props.minor}"
         except Exception:
             pass

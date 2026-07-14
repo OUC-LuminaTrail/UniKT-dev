@@ -131,8 +131,8 @@ def _environment_table(env: EnvironmentInfo) -> Table:
     table.add_row("Device", env.device_type)
     if env.gpu_name:
         table.add_row("GPU", f"{env.gpu_name} ({env.gpu_capability})")
-    if env.gpu_total_memory_gib:
-        table.add_row("GPU memory", f"{env.gpu_total_memory_gib:.1f} GiB")
+    if env.gpu_total_memory_mib is not None:
+        table.add_row("GPU memory", f"{env.gpu_total_memory_mib:,.0f} MiB")
     if env.gpu_max_sm_clock_mhz:
         table.add_row("GPU max SM clock", f"{env.gpu_max_sm_clock_mhz} MHz")
     table.add_row(
