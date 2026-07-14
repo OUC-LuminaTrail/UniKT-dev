@@ -817,19 +817,18 @@ class BaseTrainer(ABC):
 
         return total_loss
 
-    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
-        """Execute a single training batch.
+    def compute_train_step(
+        self, batch_data: tuple[Any, ...]
+    ) -> tuple[dict, torch.Tensor]:
+        """Execute one training step's pure computation.
 
-        Performs forward pass, loss computation, backpropagation,
-        gradient clipping, and optimizer step.
-
-        Args:
-            batch_data: A batch of training data.
-
-        Returns:
-            Loss value for this batch (Python scalar).
+        ``zero_grad -> forward_pass -> _compute_loss -> backward -> clip -> step``.
+        Shared by the training loop (:meth:`_run_train_batch`) and the efficiency
+        benchmark, so the two never drift apart. Excludes the metrics accumulator
+        and ``loss.item()`` so callers (the benchmark) can measure throughput
+        cleanly. Returns ``(output, loss_tensor)``.
         """
-        self.opt.zero_grad()
+        self.opt.zero_grad(set_to_none=True)
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
         loss.backward()
@@ -838,9 +837,23 @@ class BaseTrainer(ABC):
                 self.model.parameters(), max_norm=self.max_clip_grad_norm
             )
         self.opt.step()
+        return output, loss
 
+    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
+        """Execute a single training batch.
+
+        Performs forward pass, loss computation, backpropagation, gradient
+        clipping, and optimizer step via :meth:`compute_train_step`, then records
+        train metrics.
+
+        Args:
+            batch_data: A batch of training data.
+
+        Returns:
+            Loss value for this batch (Python scalar).
+        """
+        output, loss = self.compute_train_step(batch_data)
         self.metrics_accumulator.update("train", output)
-
         return loss.item()
 
     @torch.inference_mode()

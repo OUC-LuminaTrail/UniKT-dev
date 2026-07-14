@@ -224,13 +224,34 @@ def _namespace_to_run_config(ns: Namespace, schema_nodes: dict[str, type]) -> Ru
     node_instances: dict[str, Any] = {}
     for node, cls in schema_nodes.items():
         if node in rc_fields:
-            node_instances[node] = _build_node(cls, ns[node])
+            node_instances[node] = build_node(cls, ns[node])
     return RunConfig(**node_instances)
 
 
-def _build_node(cls: type, node_ns: Namespace) -> Any:
-    """Instantiate a config dataclass from its Namespace slice."""
-    return cls(**{f.name: node_ns[f.name] for f in fields(cls)})
+def build_node(cls: type, node_ns: Namespace) -> Any:
+    """Instantiate a (possibly nested) config dataclass from its Namespace slice.
+
+    Scalar fields map straight through; a dataclass-valued field whose slice is
+    still a Namespace recurses. The efficiency node is the repo's first nested
+    config (general + per-stage sub-nodes); RunConfig nodes have only scalar
+    fields, so this is a no-op for them.
+    """
+    from dataclasses import is_dataclass
+    from typing import get_type_hints
+
+    try:
+        hints = get_type_hints(cls)
+    except Exception:
+        hints = {}
+    kwargs: dict[str, Any] = {}
+    for f in fields(cls):
+        val = node_ns[f.name]
+        ftype = hints.get(f.name, f.type)
+        if is_dataclass(ftype) and isinstance(val, Namespace):
+            kwargs[f.name] = build_node(ftype, val)
+        else:
+            kwargs[f.name] = val
+    return cls(**kwargs)
 
 
 __all__ = ["ConfigParser"]

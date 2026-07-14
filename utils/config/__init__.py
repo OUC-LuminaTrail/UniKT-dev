@@ -11,7 +11,7 @@ from .archive import (
     load_run_metadata,
     save_run_config_archive,
 )
-from .config_parser import ConfigParser
+from .config_parser import ConfigParser, build_node
 from .data_config import (
     DataLoaderConfig,
     create_optimized_dataloader,
@@ -37,6 +37,7 @@ __all__ = [
     "ModelConfig",
     "RunConfig",
     "RunDataConfig",
+    "build_node",
     "config_to_dict",
     "create_optimized_dataloader",
     "load_run_config_archive",

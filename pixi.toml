@@ -28,7 +28,7 @@ swanlab = ">=0.8,<0.9"
 psutil = ">=7.2.0"
 nvidia-ml-py = "*"
 py-cpuinfo = ">=9.0.0"
-jsonargparse = ">=4.30"
+jsonargparse = ">=4.49,<5"
 
 [feature.gpu]
 platforms = ["gpu"]
