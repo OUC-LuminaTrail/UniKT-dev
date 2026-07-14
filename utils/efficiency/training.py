@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class TrainingMetrics:
-    """训练效率指标（伪训练循环测得）。"""
+    """Training efficiency metrics (measured via a pseudo train loop)."""
 
     iters: int = 0
     batch_size: int = 0
@@ -37,16 +37,16 @@ def benchmark_training(
     iters: int,
     device: torch.device,
 ) -> TrainingMetrics:
-    """训练显存峰值 + 吞吐基准。
+    """Training peak memory + throughput benchmark.
 
-    镜像 ``BaseTrainer._run_train_batch``：``zero_grad → forward_pass → _compute_loss →
-    backward → clip → step``。不直接调 ``_run_train_batch`` 是为避开 ``metrics_accumulator``
-    累积开销，保证吞吐纯净。
+    Mirrors ``BaseTrainer._run_train_batch``: ``zero_grad -> forward_pass -> _compute_loss ->
+    backward -> clip -> step``. Does not call ``_run_train_batch`` directly to avoid
+    ``metrics_accumulator`` overhead, keeping throughput measurement clean.
     """
     model = trainer.model
     model.train()
 
-    # warmup：含反向，填充 cudnn backward autotune + Adam 动量到稳态
+    # warmup: includes backward pass to fill cudnn backward autotune + Adam momentum to steady state
     for _ in range(warmup_iters):
         _one_train_step(trainer, sample_batch)
     synchronize(device)
@@ -95,7 +95,7 @@ def benchmark_training(
 
 
 def _one_train_step(trainer, batch) -> None:
-    """镜像 ``BaseTrainer._run_train_batch`` 的纯计算路径。"""
+    """Mirror the pure computation path of ``BaseTrainer._run_train_batch``."""
     trainer.opt.zero_grad(set_to_none=True)
     out = trainer.forward_pass(batch)
     loss = trainer._compute_loss(out)

@@ -73,7 +73,9 @@ class GIKTConfig(ModelConfig):
     epochs: int = 100
     learning_rate: float = field(
         default=1e-3,
-        metadata={"optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}},
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
     )
     lr_decay: float | None = None
     weight_decay: float = field(

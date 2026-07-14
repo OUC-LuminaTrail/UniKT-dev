@@ -76,4 +76,3 @@ def _target_registry(
     ):
         return None
     return decorators.get(dec.func.id) if isinstance(dec.func, ast.Name) else None
-

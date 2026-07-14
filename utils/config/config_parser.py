@@ -58,7 +58,9 @@ class ConfigParser:
         rc, _ = self.parse_with_extras(argv)
         return rc
 
-    def parse_with_extras(self, argv: list[str] | None = None) -> tuple[RunConfig, Namespace]:
+    def parse_with_extras(
+        self, argv: list[str] | None = None
+    ) -> tuple[RunConfig, Namespace]:
         """Parse and return ``(RunConfig, full Namespace)`` — Namespace exposes extra nodes."""
         argv = sys.argv[1:] if argv is None else list(argv)
         argv = _expand_short_flags(argv)

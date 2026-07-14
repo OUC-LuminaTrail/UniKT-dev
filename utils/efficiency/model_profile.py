@@ -13,7 +13,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class ModelProfile:
-    """模型静态画像。"""
+    """Static model profile."""
 
     params: int = 0
     trainable_params: int = 0
@@ -29,14 +29,16 @@ def profile_model(
     device: torch.device,
     count_flops: bool = True,
 ) -> ModelProfile:
-    """统计参数量、磁盘大小，可选前向 FLOPs。
+    """Count parameter counts, disk size, and optionally forward FLOPs.
 
     Args:
-        model: PyTorch 模型。
-        forward_fn: 零参数可调用，执行一次完整前向（通常是 ``trainer.forward_pass(batch)``）。
-            由调用方提供，保证模型 forward 签名正确，并触发 trainer 侧状态（如 GIKT 的 graph_data）。
-        device: 模型所在设备。
-        count_flops: 是否估算 FLOPs（默认 True）。
+        model: PyTorch model.
+        forward_fn: Zero-argument callable that executes one full forward pass
+            (typically ``trainer.forward_pass(batch)``). Provided by the caller to
+            ensure correct model forward signature and trigger trainer-side state
+            (e.g. GIKT's graph_data).
+        device: Device the model is on.
+        count_flops: Whether to estimate FLOPs (default True).
     """
     total = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -72,7 +74,7 @@ def profile_model(
 
 
 def _estimate_disk_size_mb(model: torch.nn.Module) -> float:
-    """模拟 state_dict 序列化大小（参数 + buffer，按各自动 element_size）。"""
+    """Estimate state_dict serialization size (params + buffers, by element_size)."""
     size_bytes = 0
     for p in model.parameters():
         size_bytes += p.numel() * p.element_size()
@@ -85,11 +87,13 @@ def _count_flops(
     forward_fn: Callable[[], Any],
     device: torch.device,
 ) -> tuple[int | None, dict[str, int], str | None]:
-    """用 ``torch.utils.flop_counter.FlopCounterMode`` 统计前向 FLOPs。
+    """Count forward FLOPs with ``torch.utils.flop_counter.FlopCounterMode``.
 
-    cuDNN 下 ``aten::_cudnn_lstm`` 等融合算子不可分解、FlopCounterMode 漏计，故测量期间
-    临时关闭 cuDNN，强制 LSTM 分解为可计数的 ``aten::mm``/``addmm``。延迟/显存测量仍用默认
-    cuDNN 配置 —— 该取舍在报告 ``flops_note`` 中明示。
+    Under cuDNN, fused ops like ``aten::_cudnn_lstm`` are not decomposable and
+    FlopCounterMode undercounts, so cuDNN is temporarily disabled during measurement
+    to force LSTM decomposition into countable ``aten::mm``/``addmm``. Latency/memory
+    measurements still use the default cuDNN config — this trade-off is documented
+    in ``flops_note``.
     """
     from torch.utils.flop_counter import FlopCounterMode
 
@@ -123,7 +127,7 @@ def _count_flops(
 
 
 def _format_breakdown(flop_counter) -> dict[str, int]:
-    """从 FlopCounterMode 提取顶层 aten op → FLOPs 映射，按 FLOPs 降序。"""
+    """Extract top-level aten op to FLOPs mapping from FlopCounterMode, sorted by FLOPs descending."""
     try:
         counts = flop_counter.get_flop_counts()
         global_counts = counts.get("Global", {})

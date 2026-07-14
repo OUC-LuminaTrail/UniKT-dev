@@ -78,16 +78,16 @@ class EfficiencyReport:
             stats = (self.resource or {}).get(stage_name)
             if stats is None:
                 continue
-            console.print(_resource_table(stats, title=f"Resource Usage — {stage_name}"))
+            console.print(
+                _resource_table(stats, title=f"Resource Usage — {stage_name}")
+            )
             console.print()
         console.print(_environment_table(self.environment))
         console.print()
 
 
 def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Table:
-    table = Table(
-        title=title, title_style="bold magenta", show_header=False, box=None
-    )
+    table = Table(title=title, title_style="bold magenta", show_header=False, box=None)
     table.add_column("Key", style="yellow", no_wrap=True)
     table.add_column("Mean", style="white")
     table.add_column("Peak", style="white")

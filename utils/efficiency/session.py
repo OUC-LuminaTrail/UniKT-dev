@@ -31,7 +31,9 @@ logger = get_logger(__name__)
 class EfficiencySession:
     """Coordinate one efficiency benchmark run over the enabled stages."""
 
-    def __init__(self, trainer, rc, eff_cfg, output_dir: str | Path | None = None) -> None:
+    def __init__(
+        self, trainer, rc, eff_cfg, output_dir: str | Path | None = None
+    ) -> None:
         """Resolve the enabled stages from ``eff_cfg.modes`` (comma-separated)."""
         self.trainer = trainer
         self.rc = rc
@@ -43,7 +45,9 @@ class EfficiencySession:
 
     def run(self) -> EfficiencyReport:
         """Run the enabled stages under a shared resource sampler and assemble the report."""
-        seed_everything(self.rc.general.seed, deterministic=not self.rc.general.no_deterministic)
+        seed_everything(
+            self.rc.general.seed, deterministic=not self.rc.general.no_deterministic
+        )
 
         device = self.device
         # trainer.run() would move model/loss to device; we skip run(), so do it

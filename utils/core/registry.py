@@ -165,11 +165,15 @@ class UniversalRegistry:
 # ============================================================================
 
 TRAINERS = UniversalRegistry("trainers", decorator_name="register_trainer")
-MODEL_CONFIGS = UniversalRegistry("model_configs", decorator_name="register_model_config")
+MODEL_CONFIGS = UniversalRegistry(
+    "model_configs", decorator_name="register_model_config"
+)
 DATA_SOURCES = UniversalRegistry("data_sources", decorator_name="register_data_source")
 ANALYZERS = UniversalRegistry("analyzers", decorator_name="register_analyzer")
 METRIC_LOGGERS = UniversalRegistry("metric_loggers")  # import-time only, not discovered
-EFFICIENCY_STAGES = UniversalRegistry("efficiency_stages", decorator_name="register_efficiency_stage")
+EFFICIENCY_STAGES = UniversalRegistry(
+    "efficiency_stages", decorator_name="register_efficiency_stage"
+)
 
 
 # ============================================================================

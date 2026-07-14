@@ -125,9 +125,7 @@ class PythonEnvManager:
         if env_id is None:
             env_id = self._settings_manager.get_default_env()
             if env_id is None:
-                raise EnvironmentNotConfigured(
-                    "未配置训练环境，请先在设置中完成初始化"
-                )
+                raise EnvironmentNotConfigured("未配置训练环境，请先在设置中完成初始化")
             custom_python_path = self._settings_manager.get_custom_python_path()
 
         parts = env_id.split(":", 1)

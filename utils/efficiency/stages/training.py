@@ -46,7 +46,11 @@ class TrainingStage(EfficiencyStage):
         table.add_row("Samples/s", f"{result.samples_per_sec:,.0f}")
         table.add_row("Wall time", format_duration(result.wall_time_s))
         if result.gpu_peak_allocated_mib is not None:
-            table.add_row("GPU peak (allocated)", f"{result.gpu_peak_allocated_mib:,.0f} MiB")
+            table.add_row(
+                "GPU peak (allocated)", f"{result.gpu_peak_allocated_mib:,.0f} MiB"
+            )
         if result.gpu_peak_reserved_mib is not None:
-            table.add_row("GPU peak (reserved)", f"{result.gpu_peak_reserved_mib:,.0f} MiB")
+            table.add_row(
+                "GPU peak (reserved)", f"{result.gpu_peak_reserved_mib:,.0f} MiB"
+            )
         return table

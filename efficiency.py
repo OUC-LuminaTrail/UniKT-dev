@@ -63,7 +63,9 @@ def _parse() -> tuple:
     run_dir = _peek_run_dir()
     default_config = None
     if run_dir:
-        _reject_model_flag(sys.argv[1:])  # run_dir mode reconstructs the model from the archive
+        _reject_model_flag(
+            sys.argv[1:]
+        )  # run_dir mode reconstructs the model from the archive
         archive = Path(run_dir) / "run_config.yaml"
         if not archive.exists():
             raise SystemExit(f"[Benchmark] run_config.yaml not found in {run_dir}")

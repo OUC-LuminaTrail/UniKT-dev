@@ -295,6 +295,7 @@ class LocalMetricLogger(MetricLogger):
         self._write_row(path, [("step", step)], dict(metrics))
 
     def log_timing(self, *, step, epoch, timings, stage=None) -> None:
+        """Log per-epoch timing breakdown (train/val/total) for a stage."""
         filename = f"timing_{stage}.csv" if stage else "timing.csv"
         path = os.path.join(self._log_dir, filename)
         self._write_row(path, [("epoch", epoch)], dict(timings))
@@ -437,6 +438,7 @@ class SwanLabMetricLogger(MetricLogger):
         swanlab.log(metrics, step=step)
 
     def log_timing(self, *, step, epoch, timings, stage=None) -> None:
+        """Log per-epoch timing breakdown to SwanLab for a stage."""
         if not self._initialized:
             return
         import swanlab
@@ -504,6 +506,7 @@ class MetricLoggerComposite(MetricLogger):
         self._fanout("log_final", **kwargs)
 
     def log_timing(self, **kwargs) -> None:
+        """Log per-epoch timing breakdown to all backends."""
         self._fanout("log_timing", **kwargs)
 
     def finish(self) -> None:

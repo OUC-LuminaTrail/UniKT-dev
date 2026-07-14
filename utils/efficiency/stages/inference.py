@@ -50,7 +50,11 @@ class InferenceStage(EfficiencyStage):
         )
         table.add_row("Per interaction", f"{result.ns_per_interaction:,.0f} ns")
         if result.gpu_peak_allocated_mib is not None:
-            table.add_row("GPU peak (allocated)", f"{result.gpu_peak_allocated_mib:,.0f} MiB")
+            table.add_row(
+                "GPU peak (allocated)", f"{result.gpu_peak_allocated_mib:,.0f} MiB"
+            )
         if result.gpu_peak_reserved_mib is not None:
-            table.add_row("GPU peak (reserved)", f"{result.gpu_peak_reserved_mib:,.0f} MiB")
+            table.add_row(
+                "GPU peak (reserved)", f"{result.gpu_peak_reserved_mib:,.0f} MiB"
+            )
         return table

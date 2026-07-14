@@ -153,17 +153,17 @@ def benchmark_inference(
 
 
 def synchronize(device: torch.device) -> None:
-    """CUDA 上等所有 kernel 完成；CPU 空操作。"""
+    """Wait for all CUDA kernels to complete; no-op on CPU."""
     if device.type == "cuda":
         torch.cuda.synchronize(device)
 
 
 def count_valid_interactions(trainer, sample_batch) -> int:
-    """模型一次前向中真正参与 loss 的有效交互数，用作吞吐量分母。
+    """Number of valid interactions per forward pass that participate in loss, used as throughput denominator.
 
-    跑一次 forward_pass，从对齐+掩码后的 1D ``y_label`` 取 numel，等于
-    ``_extract_valid_predictions`` 经相邻对掩码选择后保留的交互数，即 ``_compute_loss``
-    实际计算的样本数。
+    Runs one forward_pass, takes numel of the aligned+masked 1D ``y_label``, which equals
+    the number of interactions retained by ``_extract_valid_predictions`` after the
+    adjacent-pair mask selection — i.e., the samples actually computed by ``_compute_loss``.
     """
     trainer.model.eval()
     with torch.inference_mode():
@@ -174,7 +174,7 @@ def count_valid_interactions(trainer, sample_batch) -> int:
 
 
 def batch_size_of(batch) -> int:
-    """batch 行数（学生序列数 B）。"""
+    """Number of rows (student sequences B) in a batch."""
     first = _first_tensor(batch)
     return int(first.size(0)) if first is not None and first.dim() >= 1 else 0
 
@@ -192,7 +192,7 @@ def _first_tensor(batch) -> torch.Tensor | None:
 
 
 def summarize_latencies(xs_ms: list[float]) -> dict:
-    """延迟分布统计：mean/std/p50/p95/p99/min/max/cv。"""
+    """Latency distribution statistics: mean/std/p50/p95/p99/min/max/cv."""
     if not xs_ms:
         return {
             "mean": 0.0,

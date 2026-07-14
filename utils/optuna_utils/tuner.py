@@ -2,13 +2,13 @@
 
 import os
 from collections.abc import Callable
+from dataclasses import asdict, is_dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import optuna
 import yaml
-from dataclasses import asdict, is_dataclass
 from optuna.samplers import GridSampler
 
 from utils.core import get_logger

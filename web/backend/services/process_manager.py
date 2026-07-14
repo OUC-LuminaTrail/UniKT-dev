@@ -114,9 +114,7 @@ class ProcessManager:
                 return
 
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
-            cmd = base_cmd + self._build_cli_args(
-                task_id, model_name, params, base_cmd
-            )
+            cmd = base_cmd + self._build_cli_args(task_id, model_name, params, base_cmd)
             env_type, env_name = env_id.split(":", 1)
 
             task.command = " ".join(cmd)

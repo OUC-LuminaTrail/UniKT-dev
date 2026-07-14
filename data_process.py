@@ -25,15 +25,30 @@ def build_parser() -> ArgumentParser:
 
     download = ArgumentParser(prog="data_process.py download")
     _add_common_nodes(download)
-    download.add_argument("--data_url", type=str, default=None, help="Override data URL for downloading.")
-    download.add_argument("--force", action="store_true", help="Force re-download even if the file exists.")
-    download.add_argument("--max_retries", type=int, default=3, help="Maximum download retries.")
-    download.add_argument("--num_threads", type=int, default=4, help="Parallel download threads.")
+    download.add_argument(
+        "--data_url", type=str, default=None, help="Override data URL for downloading."
+    )
+    download.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-download even if the file exists.",
+    )
+    download.add_argument(
+        "--max_retries", type=int, default=3, help="Maximum download retries."
+    )
+    download.add_argument(
+        "--num_threads", type=int, default=4, help="Parallel download threads."
+    )
     subs.add_subcommand("download", download)
 
     process = ArgumentParser(prog="data_process.py process")
     _add_common_nodes(process)
-    process.add_argument("--extra", nargs="*", default=[], help="Extra processing steps (e.g. windowlate).")
+    process.add_argument(
+        "--extra",
+        nargs="*",
+        default=[],
+        help="Extra processing steps (e.g. windowlate).",
+    )
     subs.add_subcommand("process", process)
 
     return parser
@@ -43,8 +58,12 @@ class _PartialRC:
     """Lightweight rc view exposing only the ``data`` and ``general`` nodes."""
 
     def __init__(self, sub_ns):
-        self.data = RunDataConfig(**{f.name: sub_ns.data[f.name] for f in dataclass_fields(RunDataConfig)})
-        self.general = GeneralConfig(**{f.name: sub_ns.general[f.name] for f in dataclass_fields(GeneralConfig)})
+        self.data = RunDataConfig(
+            **{f.name: sub_ns.data[f.name] for f in dataclass_fields(RunDataConfig)}
+        )
+        self.general = GeneralConfig(
+            **{f.name: sub_ns.general[f.name] for f in dataclass_fields(GeneralConfig)}
+        )
 
 
 def cmd_download(rc, ns):

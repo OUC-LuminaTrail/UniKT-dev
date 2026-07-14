@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class EnvironmentInfo:
-    """硬件/软件环境快照（一次性采集）。"""
+    """Hardware/software environment snapshot (one-shot collection)."""
 
     python_version: str = ""
     torch_version: str = ""
@@ -44,7 +44,9 @@ class EnvironmentInfo:
     model_dtype: str = ""
 
 
-def collect_environment(device: torch.device, model: torch.nn.Module | None = None) -> EnvironmentInfo:
+def collect_environment(
+    device: torch.device, model: torch.nn.Module | None = None
+) -> EnvironmentInfo:
     """Collect one-shot environment metadata; subitems fall back to defaults on failure."""
     import sys
 
@@ -123,7 +125,7 @@ def collect_environment(device: torch.device, model: torch.nn.Module | None = No
 
 @dataclass
 class ResourceSummary:
-    """单指标聚合：mean/peak/min/p50 + 样本数。"""
+    """Single metric aggregation: mean/peak/min/p50 + sample count."""
 
     mean: float | None = None
     peak: float | None = None
@@ -134,7 +136,7 @@ class ResourceSummary:
 
 @dataclass
 class ResourceStats:
-    """后台资源采样聚合结果。"""
+    """Background resource sampling aggregation results."""
 
     cpu_percent: ResourceSummary = field(default_factory=ResourceSummary)
     process_rss_mib: ResourceSummary = field(default_factory=ResourceSummary)
@@ -153,6 +155,12 @@ class ResourceSampler:
     """
 
     def __init__(self, device: torch.device, interval_s: float = 0.05) -> None:
+        """Initialize the resource sampler.
+
+        Args:
+            device: PyTorch device for GPU sampling (NVML).
+            interval_s: Sampling interval in seconds (default 0.05).
+        """
         self.device = device
         self.interval = interval_s
         self._stop = threading.Event()
@@ -166,6 +174,7 @@ class ResourceSampler:
         self._nvml_inited = False
 
     def start(self) -> None:
+        """Start the background sampling thread (psutil + pynvml)."""
         try:
             import psutil
 
@@ -270,6 +279,7 @@ class ResourceSampler:
                 pass
 
     def stop(self) -> dict[str, ResourceStats]:
+        """Stop the sampling thread and return per-stage aggregated ResourceStats."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=2.0)
@@ -309,7 +319,7 @@ def _new_bucket() -> dict[str, list[float]]:
 
 
 def _summarize(xs: list[float]) -> ResourceSummary:
-    """聚合样本为 mean/peak/min/p50。"""
+    """Aggregate samples into mean/peak/min/p50."""
     if not xs:
         return ResourceSummary()
     return ResourceSummary(

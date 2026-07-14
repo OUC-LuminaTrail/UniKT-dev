@@ -134,7 +134,7 @@ class BaseTrainer(ABC):
         self._current_stage: str | None = None
         self._metric_step_offset: int = 0
 
-        # 用时统计
+        # Timing statistics
         self._run_start_time: float | None = None
         self._train_end_time: float | None = None
         self._epoch_times: list[float] = []
@@ -551,9 +551,7 @@ class BaseTrainer(ABC):
         from utils.config import config_to_dict
 
         experiment_name = os.path.basename(self.log_dir) if self.log_dir else "run"
-        config = (
-            config_to_dict(self.run_config) if self.run_config is not None else {}
-        )
+        config = config_to_dict(self.run_config) if self.run_config is not None else {}
         self.metric_logger.init_run(
             log_dir=self.log_dir,
             experiment_name=experiment_name,
@@ -587,7 +585,7 @@ class BaseTrainer(ABC):
         self._finish()
 
     def _train_core(self) -> None:
-        """训练核心。单阶段为一次 epoch 循环；多阶段训练器重写本方法串联多个阶段。"""
+        """Training core. Single stage runs one epoch loop; multi-stage trainers override this to chain multiple stages."""
         self._run_training_loop()
 
     def _run_training_loop(self, start_epoch: int | None = None) -> StageResult:
@@ -685,7 +683,7 @@ class BaseTrainer(ABC):
                     epoch, train_loss, val_loss, trainer=self
                 )
 
-                # 记录本 epoch 用时（train/val/总）
+                # Record epoch time (train/val/total)
                 epoch_time = time.perf_counter() - epoch_start
                 self._epoch_times.append(epoch_time)
                 self.metric_logger.log_timing(
@@ -1046,7 +1044,7 @@ class BaseTrainer(ABC):
         return (self.early_stopping.cfg.monitor or "auc").lower()
 
     def _print_timing_summary(self) -> None:
-        """打印训练总用时与平均每 epoch 用时。"""
+        """Print total training time and average time per epoch."""
         if self._run_start_time is None:
             return
         total = self._train_end_time - self._run_start_time
