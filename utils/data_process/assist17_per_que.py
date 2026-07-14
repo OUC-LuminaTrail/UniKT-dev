@@ -1,4 +1,13 @@
-"""ASSISTments 2017 action-level dataset."""
+"""ASSISTments 2017 per-encounter dataset.
+
+Each encounter (``studentId`` / ``problemId`` / ``assignmentId``) is split into
+separate sessions when consecutive actions are more than 1 hour apart, then each
+session collapses to one row whose label follows a three-tier fallback: the main
+problem's first real attempt (``scaffold=0, hint=0``), then the first scaffolding
+substep (``scaffold=1``), then ``0`` for encounters with no answer at all.
+Scaffolding substeps reuse the main problem's ``problemId`` and are guided
+retries, used only as a fallback label source when no independent attempt exists.
+"""
 
 import os
 
@@ -17,14 +26,14 @@ logger = get_logger(__name__)
 _RAW_CSV = "anonymized_full_release_competition_dataset.csv"
 
 
-@register_data_source("assistments17")
-class Assistments2017Data(DataSource):
-    """ASSISTments 2017 action-level dataset handler."""
+@register_data_source("assistments17_per_que")
+class Assistments2017PerQueData(DataSource):
+    """ASSISTments 2017 per-encounter dataset handler."""
 
     def __init__(self, args):
-        """Initialize the ASSISTments 2017 action-level dataset handler."""
+        """Initialize the ASSISTments 2017 per-encounter dataset handler."""
         super().__init__(
-            dataset="assistments17",
+            dataset="assistments17_per_que",
             data_base_path=args.data_base_path,
             data_url="http://cdn.lionhao.top/KTDataset/assistments17.zip",
             seed=args.seed,
@@ -117,100 +126,97 @@ class Assistments2017Data(DataSource):
         self.sequence_data = sequence_data
 
     def clean_raw_data(self):
-        """Clean raw action-level data."""
+        """Aggregate action-level rows into per-encounter rows.
+
+        Cross-session splitting: a gap > 1 hour between consecutive actions
+        within the same (student, problem, assignment) starts a new session,
+        so a student re-attempting a problem days later becomes a separate
+        encounter instead of being merged into the first attempt.
+
+        Label priority: main-problem first real attempt (scaffold=0, hint=0) →
+        first scaffolding substep (scaffold=1) → 0 (no answer at all). This
+        retains hint-only encounters that previously had no extractable label.
+        """
         if self.raw_data is None:
             self.load_src_data()
 
-        data = self.raw_data.drop(
+        data = self.raw_data.select(
             [
-                "MiddleSchoolId",
-                "InferredGender",
-                "SY ASSISTments Usage",
-                "AveKnow",
-                "AveCarelessness",
-                "AveCorrect",
-                "NumActions",
-                "AveResBored",
-                "AveResEngcon",
-                "AveResConf",
-                "AveResFrust",
-                "AveResOfftask",
-                "AveResGaming",
+                "studentId",
+                "problemId",
+                "assignmentId",
                 "action_num",
-                "problemType",
-                "assistmentId",
-                "endTime",
-                "hint",
-                "hintTotal",
+                "skill",
+                "correct",
                 "scaffold",
-                "bottomHint",
-                "frIsHelpRequest",
-                "frPast5HelpRequest",
-                "frPast8HelpRequest",
-                "stlHintUsed",
-                "past8BottomOut",
-                "totalFrPercentPastWrong",
-                "totalFrPastWrongCount",
-                "frPast5WrongCount",
-                "frPast8WrongCount",
-                "totalFrTimeOnSkill",
-                "timeSinceSkill",
-                "frWorkingInSchool",
-                "totalFrAttempted",
-                "totalFrSkillOpportunities",
-                "responseIsFillIn",
-                "responseIsChosen",
-                "endsWithScaffolding",
-                "endsWithAutoScaffolding",
-                "frTimeTakenOnScaffolding",
-                "frTotalSkillOpportunitiesScaffolding",
-                "totalFrSkillOpportunitiesByScaffolding",
-                "frIsHelpRequestScaffolding",
-                "timeGreater5Secprev2wrong",
-                "sumRight",
-                "helpAccessUnder2Sec",
-                "timeGreater10SecAndNextActionRight",
-                "consecutiveErrorsInRow",
-                "sumTime3SDWhen3RowRight",
-                "sumTimePerSkill",
-                "totalTimeByPercentCorrectForskill",
-                "Prev5count",
-                "timeOver80",
-                "manywrong",
-                "confidence(BORED)",
-                "confidence(CONCENTRATING)",
-                "confidence(CONFUSED)",
-                "confidence(FRUSTRATED)",
-                "confidence(OFF TASK)",
-                "confidence(GAMING)",
-                "RES_BORED",
-                "RES_CONCENTRATING",
-                "RES_CONFUSED",
-                "RES_FRUSTRATED",
-                "RES_OFFTASK",
-                "RES_GAMING",
-                "Ln-1",
-                "Ln",
-                "MCAS",
-                "Enrolled",
-                "Selective",
-                "isSTEM",
+                "hint",
+                "startTime",
+                "timeTaken",
             ]
-        ).rename(
-            {
-                "studentId": "user",
-                "problemId": "question",
-                "correct": "label",
-                "skill": "skill",
-                "assignmentId": "assignment",
-                "hintCount": "hint_count",
-                "attemptCount": "attempt_count",
-                "startTime": "timestamp",
-                "timeTaken": "ms_first_response",
-            }
         )
 
-        data = data.unique().collect()
+        is_main_real = (pl.col("scaffold") == 0) & (pl.col("hint") == 0)
+        is_scaffold = pl.col("scaffold") == 1
+
+        _SESSION_GAP_SEC = 3600
+        encounter_keys = ["studentId", "problemId", "assignmentId"]
+
+        data = (
+            data.sort([*encounter_keys, "action_num"])
+            .with_columns(pl.col("startTime").diff().over(encounter_keys).alias("_gap"))
+            .with_columns(
+                (pl.col("_gap") > _SESSION_GAP_SEC)
+                .fill_null(False)
+                .cum_sum()
+                .over(encounter_keys)
+                .alias("_session")
+            )
+            .group_by([*encounter_keys, "_session"])
+            .agg(
+                pl.coalesce(
+                    pl.col("correct").filter(is_main_real).first(),
+                    pl.col("correct").filter(is_scaffold).first(),
+                    pl.lit(0, dtype=pl.Int64),
+                ).alias("label"),
+                is_main_real.sum().cast(pl.Int64).alias("attempt_count"),
+                ((pl.col("scaffold") == 0) & (pl.col("hint") == 1))
+                .sum()
+                .cast(pl.Int64)
+                .alias("hint_count"),
+                pl.coalesce(
+                    pl.col("timeTaken").filter(is_main_real).first(),
+                    pl.col("timeTaken").filter(is_scaffold).first(),
+                ).alias("ms_first_response"),
+                pl.col("startTime").min().alias("timestamp"),
+                pl.col("skill").first().alias("skill"),
+                (pl.col("scaffold") == 0).sum().alias("_n_main"),
+                is_main_real.sum().alias("_n_main_real"),
+                is_scaffold.sum().alias("_n_scaffold"),
+            )
+            .filter(pl.col("_n_main") > 0)
+        )
+
+        data = data.collect()
+        n_main = data.filter(pl.col("_n_main_real") > 0).height
+        n_scaffold_fb = data.filter(
+            (pl.col("_n_main_real") == 0) & (pl.col("_n_scaffold") > 0)
+        ).height
+        n_default = data.filter(
+            (pl.col("_n_main_real") == 0) & (pl.col("_n_scaffold") == 0)
+        ).height
+        logger.info(
+            "Per-encounter rebuild: %d encounters "
+            "(main=%d, scaffold-fallback=%d, default-0=%d)",
+            data.height,
+            n_main,
+            n_scaffold_fb,
+            n_default,
+        )
+        data = data.drop(["_n_main", "_n_main_real", "_n_scaffold", "_session"])
+
+        data = data.rename(
+            {"studentId": "user", "problemId": "question", "assignmentId": "assignment"}
+        )
 
         data = data.with_columns(
             (pl.col("timestamp") * 1000).cast(pl.Int64).alias("timestamp"),
@@ -227,11 +233,10 @@ class Assistments2017Data(DataSource):
         data = data.sort(["user", "timestamp"])
         data = data.with_columns(pl.col("user").cast(pl.Int32))
         data = data.filter(pl.col("skill").is_not_null())
-        data = data.filter(pl.col("label").is_in([0, 1]))
 
         data = exclude_short_sequences(data, self.args.min_seq_len)
 
         self.cleaned_raw_data = data
 
 
-__all__ = ["Assistments2017Data"]
+__all__ = ["Assistments2017PerQueData"]
