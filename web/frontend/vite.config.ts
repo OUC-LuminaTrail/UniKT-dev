@@ -43,6 +43,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: FRONTEND_PORT,
+      allowedHosts: true,
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:8765',
@@ -52,6 +53,7 @@ export default defineConfig(({ mode }) => {
     },
     preview: {
       port: FRONTEND_PORT,
+      allowedHosts: true,
       proxy: {
         '/api': {
           target: 'http://127.0.0.1:8765',
