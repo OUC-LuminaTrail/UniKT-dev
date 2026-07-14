@@ -75,12 +75,17 @@ class ConfigParser:
         if explicit:
             ns["experiment"]["model_name"] = explicit
         rc = _namespace_to_run_config(ns, schema_nodes)
+        _require_dataset(rc)
         return rc, ns
 
     def _resolve_model_name(self, argv: list[str]) -> str:
         """Pass one: find the model name. ``-m`` wins, then ``--config``, then ``default_config``."""
         pre = argparse.ArgumentParser(add_help=False)
-        pre.add_argument("-m", "--experiment.model_name", dest="model_name", default=None)
+        # nargs='?' so a bare ``-m`` (no value) yields None instead of crashing the
+        # pre-parser with a truncated usage line.
+        pre.add_argument(
+            "-m", "--experiment.model_name", dest="model_name", nargs="?", default=None
+        )
         pre.add_argument("--config", dest="config", default=None)
         pre_args, _ = pre.parse_known_args(argv)
 
@@ -95,8 +100,11 @@ class ConfigParser:
         argv_list = argv if argv is not None else sys.argv[1:]
         if "-h" in argv_list or "--help" in argv_list:
             self._print_framework_help()
+        from utils.core import get_supported_models
+
         raise SystemExit(
-            "model name is required: pass -m/--experiment.model_name, or a --config / "
+            "model name is required: pass -m/--experiment.model_name "
+            f"(available: {', '.join(get_supported_models())}), or a --config/"
             "default_config yaml carrying experiment.model_name"
         )
 
@@ -176,6 +184,22 @@ def _peek_explicit_model_name(argv: list[str]) -> str | None:
         if token.startswith(flag + "="):
             return token.split("=", 1)[1]
     return None
+
+
+def _require_dataset(rc: RunConfig) -> None:
+    """Fail fast with a clear message when no dataset is selected.
+
+    Without this, an empty ``rc.data.dataset`` reaches ``get_data_source`` late
+    (after the run directory is created) as an opaque "Unsupported dataset:" error.
+    """
+    if rc.data.dataset:
+        return
+    from utils.core import get_supported_datasets
+
+    raise SystemExit(
+        "dataset is required: pass -d/--data.dataset "
+        f"(available: {', '.join(get_supported_datasets())})"
+    )
 
 
 def _read_model_name(config_path: str) -> str | None:
