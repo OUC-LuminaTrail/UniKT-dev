@@ -1,9 +1,15 @@
 """ASSISTments 2017 datasets, built from one raw release at two granularities.
 
 - ``assistments17``: original action-level (one row per student action).
-- ``assistments17_per_que``: per-encounter rebuild. Scaffolding substeps
-  (``scaffold=1``) are dropped: they reuse the main problem's ``problemId`` and
-  are guided retries, not independent questions.
+- ``assistments17_per_que``: per-encounter rebuild. Each encounter
+  (``studentId`` / ``problemId`` / ``assignmentId``) is split into separate
+  sessions when consecutive actions are more than 1 hour apart, then each
+  session collapses to one row whose
+  label follows a three-tier fallback: the main problem's first real attempt
+  (``scaffold=0, hint=0``), then the first scaffolding substep (``scaffold=1``),
+  then ``0`` for encounters with no answer at all. Scaffolding substeps reuse
+  the main problem's ``problemId`` and are guided retries, used only as a
+  fallback label source when no independent attempt exists.
 """
 
 import os
@@ -257,14 +263,24 @@ class Assistments2017Data(Assistments2017Base):
 
 @register_data_source("assistments17_per_que")
 class Assistments2017PerQueData(Assistments2017Base):
-    """Per-encounter rebuild with scaffolding split into independent questions."""
+    """Per-encounter rebuild."""
 
     def __init__(self, args):
         """Initialize the per-encounter AS17 handler."""
         super().__init__(args=args, dataset="assistments17_per_que")
 
     def clean_raw_data(self):
-        """Aggregate action-level rows into per-encounter rows."""
+        """Aggregate action-level rows into per-encounter rows.
+
+        Cross-session splitting: a gap > 1 hour between consecutive actions
+        within the same (student, problem, assignment) starts a new session,
+        so a student re-attempting a problem days later becomes a separate
+        encounter instead of being merged into the first attempt.
+
+        Label priority: main-problem first real attempt (scaffold=0, hint=0) →
+        first scaffolding substep (scaffold=1) → 0 (no answer at all). This
+        retains hint-only encounters that previously had no extractable label.
+        """
         if self.raw_data is None:
             self.load_src_data()
 
@@ -283,29 +299,76 @@ class Assistments2017PerQueData(Assistments2017Base):
             ]
         )
 
-        data = data.filter(pl.col("scaffold") == 0)
+        # Main-problem real attempt: scaffold=0 & hint=0 (a genuine answer, not
+        # a hint request). Scaffolding rows are all hint=0, so is_main_real never
+        # overlaps with is_scaffold.
+        is_main_real = (pl.col("scaffold") == 0) & (pl.col("hint") == 0)
+        is_scaffold = pl.col("scaffold") == 1
 
-        logger.info("Rebuilding AS17 per-encounter data (scaffold dropped)...")
+        # Split cross-session encounters: a gap > 1 hour between consecutive
+        # actions starts a new session. The inter-action gap distribution has a
+        # stable dead zone between 2h and 24h (almost no gaps land there), so the
+        # exact threshold in [30min, 24h] barely changes the result; 1h is a
+        # standard EDM session boundary. Without this, a student re-attempting
+        # the same problem days later is merged into the first attempt's
+        # encounter, silently dropping the later session's data.
+        _SESSION_GAP_SEC = 3600
+        encounter_keys = ["studentId", "problemId", "assignmentId"]
 
         data = (
-            data.sort(["studentId", "problemId", "assignmentId", "action_num"])
-            .group_by(["studentId", "problemId", "assignmentId"])
+            data.sort([*encounter_keys, "action_num"])
+            .with_columns(pl.col("startTime").diff().over(encounter_keys).alias("_gap"))
+            .with_columns(
+                (pl.col("_gap") > _SESSION_GAP_SEC)
+                .fill_null(False)
+                .cum_sum()
+                .over(encounter_keys)
+                .alias("_session")
+            )
+            .group_by([*encounter_keys, "_session"])
             .agg(
-                pl.col("correct").filter(pl.col("hint") == 0).first().alias("label"),
-                (pl.col("hint") == 0).sum().cast(pl.Int64).alias("attempt_count"),
-                (pl.col("hint") == 1).sum().cast(pl.Int64).alias("hint_count"),
-                pl.col("timeTaken")
-                .filter(pl.col("hint") == 0)
-                .first()
-                .alias("ms_first_response"),
+                pl.coalesce(
+                    pl.col("correct").filter(is_main_real).first(),
+                    pl.col("correct").filter(is_scaffold).first(),
+                    pl.lit(0, dtype=pl.Int64),
+                ).alias("label"),
+                is_main_real.sum().cast(pl.Int64).alias("attempt_count"),
+                ((pl.col("scaffold") == 0) & (pl.col("hint") == 1))
+                .sum()
+                .cast(pl.Int64)
+                .alias("hint_count"),
+                pl.coalesce(
+                    pl.col("timeTaken").filter(is_main_real).first(),
+                    pl.col("timeTaken").filter(is_scaffold).first(),
+                ).alias("ms_first_response"),
                 pl.col("startTime").min().alias("timestamp"),
                 pl.col("skill").first().alias("skill"),
+                # Tracking columns: exclude scaffold-only sessions (no main
+                # problem row) and log the label-source breakdown.
+                (pl.col("scaffold") == 0).sum().alias("_n_main"),
+                is_main_real.sum().alias("_n_main_real"),
+                is_scaffold.sum().alias("_n_scaffold"),
             )
-            .filter(pl.col("label").is_in([0, 1]))
+            .filter(pl.col("_n_main") > 0)
         )
 
         data = data.collect()
-        logger.info("Per-encounter rebuild: %d encounters", data.height)
+        n_main = data.filter(pl.col("_n_main_real") > 0).height
+        n_scaffold_fb = data.filter(
+            (pl.col("_n_main_real") == 0) & (pl.col("_n_scaffold") > 0)
+        ).height
+        n_default = data.filter(
+            (pl.col("_n_main_real") == 0) & (pl.col("_n_scaffold") == 0)
+        ).height
+        logger.info(
+            "Per-encounter rebuild: %d encounters "
+            "(main=%d, scaffold-fallback=%d, default-0=%d)",
+            data.height,
+            n_main,
+            n_scaffold_fb,
+            n_default,
+        )
+        data = data.drop(["_n_main", "_n_main_real", "_n_scaffold", "_session"])
 
         data = data.rename(
             {"studentId": "user", "problemId": "question", "assignmentId": "assignment"}
