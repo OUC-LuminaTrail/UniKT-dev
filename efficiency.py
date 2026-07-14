@@ -21,7 +21,7 @@ import model  # noqa: F401  — triggers trainer/model-config discovery
 from utils.config import ConfigParser
 from utils.core import TRAINERS, get_logger
 from utils.data_process import get_data_source
-from utils.efficiency import EfficiencyConfig, EfficiencySession
+from utils.efficiency import EfficiencyConfig, EfficiencySession, EfficiencySweep
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
 logger = get_logger(__name__)
@@ -40,6 +40,14 @@ def main() -> None:
         f"[Benchmark] model={rc.experiment.model_name} dataset={rc.data.dataset}"
     )
 
+    if eff_cfg.batch_sizes:
+        _run_sweep(rc, eff_cfg, weights_path)
+    else:
+        _run_single_efficiency(rc, eff_cfg, weights_path)
+
+
+def _run_single_efficiency(rc, eff_cfg, weights_path: str | None) -> None:
+    """Build one trainer and run a single efficiency session."""
     exp_manager = ExperimentManager.from_run_config(rc, ExperimentType.EFFICIENCY)
     output_dir = eff_cfg.output_dir or exp_manager.get_log_dir()
     logger.info(f"[Benchmark] output_dir={output_dir}")
@@ -56,6 +64,14 @@ def main() -> None:
     EfficiencySession(
         trainer=trainer, rc=rc, eff_cfg=eff_cfg, output_dir=output_dir
     ).run().print_console()
+
+
+def _run_sweep(rc, eff_cfg, weights_path: str | None) -> None:
+    """Sweep a set of batch sizes, rebuilding the trainer per size."""
+    data_src = get_data_source(rc)
+    EfficiencySweep(
+        rc=rc, eff_cfg=eff_cfg, data_src=data_src, weights_path=weights_path
+    ).run()
 
 
 def _parse() -> tuple:

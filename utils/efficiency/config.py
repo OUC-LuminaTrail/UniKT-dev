@@ -31,6 +31,10 @@ class EfficiencyConfig:
         trace_top_ops: Operators retained per segment in the report, sorted by
             self device time.
         trace_export: Export a chrome/perfetto trace JSON per segment.
+        batch_sizes: Comma-separated batch sizes to sweep (empty = single run). When
+            set, a fresh trainer is rebuilt per size, giving each measurement a clean
+            CUDA allocator and isolating peak memory across sizes;
+            e.g. ``--efficiency.batch_sizes 32,64,128``.
     """
 
     modes: str = ""
@@ -47,3 +51,4 @@ class EfficiencyConfig:
     trace_iters: int = 20
     trace_top_ops: int = 15
     trace_export: bool = True
+    batch_sizes: str = ""

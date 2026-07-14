@@ -24,6 +24,7 @@ from .model_profile import ModelProfile, profile_model
 from .report import EfficiencyReport
 from .session import EfficiencySession
 from .stages.base import EfficiencyStage, StageContext
+from .sweep import EfficiencySweep, SweepReport
 from .trace import TraceProfile, benchmark_trace
 from .training import TrainingMetrics, benchmark_training
 
@@ -32,6 +33,7 @@ __all__ = [
     "EfficiencyReport",
     "EfficiencySession",
     "EfficiencyStage",
+    "EfficiencySweep",
     "EnvironmentInfo",
     "InferenceMetrics",
     "ModelProfile",
@@ -39,6 +41,7 @@ __all__ = [
     "ResourceStats",
     "ResourceSummary",
     "StageContext",
+    "SweepReport",
     "TraceProfile",
     "TrainingMetrics",
     "benchmark_inference",
