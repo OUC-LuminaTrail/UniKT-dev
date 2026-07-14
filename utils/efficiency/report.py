@@ -97,6 +97,7 @@ def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Tabl
     table.add_row("GPU power", *_rs(stats.gpu_power_w, "W"))
     table.add_row("GPU mem used", *_rs(stats.gpu_mem_used_mib, "MiB"))
     table.add_row("GPU temp", *_rs(stats.gpu_temp_c, "C"))
+    table.add_row("GPU SM clock", *_rs(stats.gpu_sm_clock_mhz, "MHz"))
     if all(
         getattr(stats, f).n == 0
         for f in (
@@ -106,6 +107,7 @@ def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Tabl
             "gpu_power_w",
             "gpu_mem_used_mib",
             "gpu_temp_c",
+            "gpu_sm_clock_mhz",
         )
     ):
         table.add_row("(no samples)", "", "")
@@ -131,6 +133,8 @@ def _environment_table(env: EnvironmentInfo) -> Table:
         table.add_row("GPU", f"{env.gpu_name} ({env.gpu_capability})")
     if env.gpu_total_memory_gib:
         table.add_row("GPU memory", f"{env.gpu_total_memory_gib:.1f} GiB")
+    if env.gpu_max_sm_clock_mhz:
+        table.add_row("GPU max SM clock", f"{env.gpu_max_sm_clock_mhz} MHz")
     table.add_row(
         "CPU",
         f"{env.cpu_model or 'unknown'} ({env.cpu_physical_cores or '?'}c/{env.cpu_logical_cores or '?'}t)",

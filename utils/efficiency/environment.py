@@ -29,6 +29,7 @@ class EnvironmentInfo:
     gpu_count: int = 0
     gpu_total_memory_gib: float | None = None
     gpu_capability: str | None = None
+    gpu_max_sm_clock_mhz: int | None = None
     cpu_logical_cores: int | None = None
     cpu_physical_cores: int | None = None
     cpu_model: str | None = None
@@ -104,6 +105,18 @@ def collect_environment(device: torch.device, model: torch.nn.Module | None = No
             info.gpu_capability = f"{props.major}.{props.minor}"
         except Exception:
             pass
+        # Max SM clock (device capability) for normalizing sampled clock.
+        with contextlib.suppress(Exception):
+            import pynvml
+
+            pynvml.nvmlInit()
+            try:
+                handle = pynvml.nvmlDeviceGetHandleByIndex(idx)
+                info.gpu_max_sm_clock_mhz = int(
+                    pynvml.nvmlDeviceGetMaxClockInfo(handle, pynvml.NVML_CLOCK_SM)
+                )
+            finally:
+                pynvml.nvmlShutdown()
 
     return info
 
@@ -129,6 +142,7 @@ class ResourceStats:
     gpu_power_w: ResourceSummary = field(default_factory=ResourceSummary)
     gpu_mem_used_mib: ResourceSummary = field(default_factory=ResourceSummary)
     gpu_temp_c: ResourceSummary = field(default_factory=ResourceSummary)
+    gpu_sm_clock_mhz: ResourceSummary = field(default_factory=ResourceSummary)
 
 
 class ResourceSampler:
@@ -245,6 +259,13 @@ class ResourceSampler:
                         )
                     )
                 )
+                bucket["gpu_sm_clock"].append(
+                    float(
+                        pynvml.nvmlDeviceGetClockInfo(
+                            self._nv_handle, pynvml.NVML_CLOCK_SM
+                        )
+                    )
+                )
             except Exception:
                 pass
 
@@ -268,6 +289,7 @@ class ResourceSampler:
                 gpu_power_w=_summarize(b["gpu_power"]),
                 gpu_mem_used_mib=_summarize(b["gpu_mem"]),
                 gpu_temp_c=_summarize(b["gpu_temp"]),
+                gpu_sm_clock_mhz=_summarize(b["gpu_sm_clock"]),
             )
             for name, b in self._buckets.items()
         }
@@ -282,6 +304,7 @@ def _new_bucket() -> dict[str, list[float]]:
         "gpu_power": [],
         "gpu_mem": [],
         "gpu_temp": [],
+        "gpu_sm_clock": [],
     }
 
 
