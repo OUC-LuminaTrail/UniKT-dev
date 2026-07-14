@@ -1,54 +1,84 @@
-"""Efficiency benchmark config node (entry-point-specific, not part of RunConfig).
+"""Efficiency benchmark config: general node + one sub-node per registered stage.
 
-Exposed via ``ConfigParser(extra_nodes={"efficiency": EfficiencyConfig})`` in
-``efficiency.py``. Lives outside the shared :class:`RunConfig` tree so it never
+The ``EfficiencyConfig`` dataclass is composed at schema-build time from
+:class:`GeneralEfficiencyConfig` plus each registered stage's own ``config_cls``
+(mirroring ``build_run_config_schema``'s model-name → subclass binding). This is
+the repo's first nested config node, so reconstruction recurses
+(see :func:`utils.config.config_parser.build_node`).
+
+Exposed via ``ConfigParser(extra_nodes={"efficiency": get_efficiency_config_cls()})``
+in ``efficiency.py``. Lives outside the shared :class:`RunConfig` tree so it never
 appears in ``train.py``'s flags.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, make_dataclass
 
 
 @dataclass
-class EfficiencyConfig:
-    """Efficiency benchmark knobs.
+class GeneralEfficiencyConfig:
+    """Cross-stage knobs and entry-point routing (owned by no single stage).
 
     Args:
-        modes: Comma-separated stages to run (empty = all discovered stages);
-            e.g. ``--efficiency.modes profile,inference``.
-        benchmark_iters: Forward passes per repeat for inference latency.
-        warmup_iters: Discarded iters before timing (cuDNN autotune / clock ramp).
-        repeats: Independent repeats; per-repeat mean spread (repeat_cv) gauges run-to-run stability.
-        train_iters: Forward+backward+step iters for training memory/throughput.
+        modes: Comma-separated stages to run (empty = all discovered stages).
+        batch_sizes: Comma-separated batch sizes to sweep (empty = single run).
+            Each size rebuilds a fresh trainer for a clean CUDA allocator.
+        warmup_iters: Discarded iters before timing (cuDNN autotune / clock ramp);
+            shared by the inference/train/trace stages.
         resource_sample_interval: Background resource sampling interval (s).
-        profile_flops: Estimate forward FLOPs via torch flop_counter.
         run_dir: Trained run dir; seed rc from its run_config.yaml and benchmark
             its checkpoint.
         checkpoint: Checkpoint filename inside ``run_dir``.
         weights: Standalone checkpoint to load after building the model.
         output_dir: Where to write efficiency_report.json; default = exp dir.
-        trace_iters: Forward (and train-step) iterations captured by torch.profiler
-            per segment; kept below benchmark_iters since profiling adds overhead.
-        trace_top_ops: Operators retained per segment in the report, sorted by
-            self device time.
-        trace_export: Export a chrome/perfetto trace JSON per segment.
-        batch_sizes: Comma-separated batch sizes to sweep (empty = single run). When
-            set, a fresh trainer is rebuilt per size, giving each measurement a clean
-            CUDA allocator and isolating peak memory across sizes;
-            e.g. ``--efficiency.batch_sizes 32,64,128``.
     """
 
     modes: str = ""
-    benchmark_iters: int = 200
+    batch_sizes: str = ""
     warmup_iters: int = 50
-    repeats: int = 3
-    train_iters: int = 50
     resource_sample_interval: float = 0.05
-    profile_flops: bool = True
     run_dir: str | None = None
     checkpoint: str = "best_model.pth"
     weights: str | None = None
     output_dir: str | None = None
-    trace_iters: int = 20
-    trace_top_ops: int = 15
-    trace_export: bool = True
-    batch_sizes: str = ""
+
+
+@dataclass
+class DefaultStageConfig:
+    """Fallback config for a stage that declares no ``config_cls``."""
+
+
+_EFFICIENCY_CONFIG_CLS: type | None = None
+
+
+def build_efficiency_config_schema() -> type:
+    """Compose (once, cached) the ``EfficiencyConfig`` dataclass.
+
+    Builds ``general`` plus one sub-node per registered efficiency stage, bound
+    to that stage's ``config_cls``. Cached because ``make_dataclass`` returns a
+    new type each call and all callers (``extra_nodes``, ``asdict``,
+    ``dataclass_fields``) must share the same class object.
+    """
+    global _EFFICIENCY_CONFIG_CLS
+    if _EFFICIENCY_CONFIG_CLS is not None:
+        return _EFFICIENCY_CONFIG_CLS
+
+    from utils.core import EFFICIENCY_STAGES, get_supported_stages
+
+    stage_fields = [
+        (
+            "general",
+            GeneralEfficiencyConfig,
+            field(default_factory=GeneralEfficiencyConfig),
+        )
+    ]
+    for name in get_supported_stages():
+        stage_cls = EFFICIENCY_STAGES.get(name)
+        cfg_cls = getattr(stage_cls, "config_cls", DefaultStageConfig)
+        stage_fields.append((name, cfg_cls, field(default_factory=cfg_cls)))
+    _EFFICIENCY_CONFIG_CLS = make_dataclass("EfficiencyConfig", stage_fields)
+    return _EFFICIENCY_CONFIG_CLS
+
+
+def get_efficiency_config_cls() -> type:
+    """Return the cached composed ``EfficiencyConfig`` class (builds on first call)."""
+    return build_efficiency_config_schema()

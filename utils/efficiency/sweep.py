@@ -1,12 +1,19 @@
-"""Batch-size sweep: run the efficiency benchmark across multiple batch sizes.
+"""Axis sweep: run the efficiency benchmark across a set of config mutations.
 
-Each size rebuilds a fresh trainer (reusing data_src) under its own sub-dir and
-prints its full efficiency report, so per-size data is captured faithfully
-without cross-size metric aggregation. A lightweight index lists the runs.
+A sweep is a list of :class:`SweepPoint` ``(label, mutate)`` entries. Each point
+runs on a fresh deepcopy of the run config with its ``mutate`` applied, rebuilds
+a trainer under its own sub-dir (clean CUDA allocator, isolated peak memory),
+and prints its full efficiency report. :func:`batch_size_sweep` is the built-in
+factory; ``seq_len``/precision/fold sweeps are the same shape.
+
+A lightweight index lists the runs; per-point metrics stay in each point's own
+report (no cross-point aggregation).
 """
 
+import copy
 import gc
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,35 +22,47 @@ import torch
 from rich.console import Console
 
 from utils.config import config_to_dict
-from utils.core import TRAINERS, get_logger
+from utils.core import get_logger
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
 from .report import EfficiencyReport
-from .session import EfficiencySession
+from .session import EfficiencySession, build_target
 
 logger = get_logger(__name__)
 
 
 @dataclass
-class SweepRun:
-    """Location of one per-size efficiency report within the sweep dir."""
+class SweepPoint:
+    """One sweep axis point: a label and a config mutator.
 
-    batch_size: int
+    ``mutate(rc, eff_cfg)`` applies absolute values to the (already deepcopied)
+    run/efficiency config, so points are independent and need no restore.
+    """
+
+    label: str
+    mutate: Callable[..., None]
+
+
+@dataclass
+class SweepRun:
+    """Location of one point's efficiency report within the sweep dir."""
+
+    label: str
     dir: str
 
 
 @dataclass
 class SweepReport:
-    """Lightweight sweep index: which sizes ran and where their reports live.
+    """Lightweight sweep index: which points ran and where their reports live.
 
-    Holds no per-size metrics — each size's full EfficiencyReport stays in its
+    Holds no per-point metrics — each point's full EfficiencyReport stays in its
     own sub-directory; this index only points to them.
     """
 
     model_name: str
     dataset_name: str
     timestamp: str
-    batch_sizes: list[int]
+    labels: list[str]
     modes: list[str]
     config: dict
     sweep_dir: str
@@ -57,31 +76,53 @@ class SweepReport:
             "model_name": self.model_name,
             "dataset_name": self.dataset_name,
             "timestamp": self.timestamp,
-            "batch_sizes": self.batch_sizes,
+            "labels": self.labels,
             "modes": self.modes,
             "config": self.config,
             "sweep_dir": self.sweep_dir,
-            "runs": [{"batch_size": r.batch_size, "dir": r.dir} for r in self.runs],
+            "runs": [{"label": r.label, "dir": r.dir} for r in self.runs],
         }
         with path.open("w") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
         logger.info(f"[Sweep] index saved to {path}")
 
 
-class EfficiencySweep:
-    """Run the efficiency benchmark across a set of batch sizes.
+def batch_size_sweep(sizes: list[int]) -> list[SweepPoint]:
+    """Build sweep points that vary ``rc.model.batch_size`` across ``sizes``."""
+    return [
+        SweepPoint(
+            f"bs{size}",
+            lambda rc, _eff_cfg, s=size: setattr(rc.model, "batch_size", s),
+        )
+        for size in sizes
+    ]
 
-    Each size rebuilds a fresh trainer (reusing data_src) under its own
-    sub-experiment directory and prints its full report; the sweep keeps a
-    lightweight index rather than aggregating metrics across sizes.
+
+class EfficiencySweep:
+    """Run the efficiency benchmark across a set of :class:`SweepPoint` entries.
+
+    Defaults to :func:`batch_size_sweep` parsed from
+    ``eff_cfg.general.batch_sizes``; pass ``points`` for any other axis.
     """
 
-    def __init__(self, rc, eff_cfg, data_src, weights_path: str | None = None) -> None:
-        """Bind run config, data source, and optional weights; create the sweep dir."""
+    def __init__(
+        self,
+        rc,
+        eff_cfg,
+        data_src,
+        weights_path: str | None = None,
+        points: list[SweepPoint] | None = None,
+    ) -> None:
+        """Bind run config, data source, optional weights, and sweep points."""
         self.rc = rc
         self.cfg = eff_cfg
         self.data_src = data_src
         self.weights_path = weights_path
+        self.points = (
+            points
+            if points is not None
+            else batch_size_sweep(_parse_batch_sizes(eff_cfg.general.batch_sizes))
+        )
         tags = [f"fold{rc.data.fold}"] if rc.data.fold is not None else []
         tags.append("sweep")
         self.parent_exp = ExperimentManager(
@@ -94,40 +135,40 @@ class EfficiencySweep:
         self.sweep_dir = self.parent_exp.get_log_dir()
 
     def run(self) -> SweepReport:
-        """Sweep all parsed batch sizes, printing each report and indexing the runs."""
-        batch_sizes = _parse_batch_sizes(self.cfg.batch_sizes)
-        original_bs = self.rc.model.batch_size
-        if self.cfg.output_dir:
+        """Run every point (printing each report) and index the runs."""
+        if self.cfg.general.output_dir:
             logger.warning(
-                "[Sweep] --efficiency.output_dir ignored in sweep mode; "
-                "each size writes to <sweep_dir>/bs{N}/."
+                "[Sweep] --efficiency.general.output_dir ignored in sweep mode; "
+                "each point writes to <sweep_dir>/<label>/."
             )
-        logger.info(f"[Sweep] sweep_dir={self.sweep_dir} batch_sizes={batch_sizes}")
+        logger.info(
+            f"[Sweep] sweep_dir={self.sweep_dir} points={[p.label for p in self.points]}"
+        )
 
         runs: list[SweepRun] = []
         modes: list[str] = []
-        for bs in batch_sizes:
-            self.rc.model.batch_size = bs
-            logger.info(f"[Sweep] === batch_size={bs} ===")
+        for point in self.points:
+            logger.info(f"[Sweep] === {point.label} ===")
             try:
-                report, child_dir = self._run_single(bs)
+                report, child_dir = self._run_point(point)
             except Exception as e:
-                logger.error(f"[Sweep] bs={bs} failed, skipping: {e}", exc_info=True)
+                logger.error(
+                    f"[Sweep] {point.label} failed, skipping: {e}", exc_info=True
+                )
                 continue
             finally:
                 self._cleanup_cuda()
-            runs.append(SweepRun(bs, child_dir))
+            runs.append(SweepRun(point.label, child_dir))
             if not modes:
                 modes = report.modes
-        self.rc.model.batch_size = original_bs
 
         if not runs:
-            raise SystemExit("[Sweep] no batch size completed successfully.")
+            raise SystemExit("[Sweep] no sweep point completed successfully.")
         sweep_report = SweepReport(
             model_name=self.rc.experiment.model_name,
             dataset_name=self.rc.data.dataset,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            batch_sizes=[r.batch_size for r in runs],
+            labels=[r.label for r in runs],
             modes=modes,
             config=config_to_dict(self.cfg),
             sweep_dir=self.sweep_dir,
@@ -137,17 +178,15 @@ class EfficiencySweep:
         self._print_summary(sweep_report)
         return sweep_report
 
-    def _run_single(self, bs: int) -> tuple[EfficiencyReport, str]:
-        """Build a fresh trainer for one size; run + print its report; return (report, dir)."""
-        child_exp = self.parent_exp.create_sub_experiment(f"bs{bs}")
-        trainer = TRAINERS.get(self.rc.experiment.model_name)(
-            rc=self.rc, data_src=self.data_src, exp_manager=child_exp
-        )
-        if self.weights_path:
-            trainer.load_weights(self.weights_path)
+    def _run_point(self, point: SweepPoint) -> tuple[EfficiencyReport, str]:
+        """Apply ``point`` to a fresh rc copy, rebuild, run + print its report."""
+        rc = copy.deepcopy(self.rc)
+        point.mutate(rc, self.cfg)
+        child_exp = self.parent_exp.create_sub_experiment(point.label)
+        target = build_target(rc, self.data_src, child_exp, self.weights_path)
         report = EfficiencySession(
-            trainer=trainer,
-            rc=self.rc,
+            target=target,
+            rc=rc,
             eff_cfg=self.cfg,
             output_dir=child_exp.get_log_dir(),
         ).run()
@@ -155,7 +194,7 @@ class EfficiencySweep:
         return report, child_exp.get_log_dir()
 
     def _print_summary(self, sweep_report: SweepReport) -> None:
-        """Print a short index of which sizes ran and where their reports live."""
+        """Print a short index of which points ran and where their reports live."""
         console = Console()
         console.print()
         console.print(
@@ -164,11 +203,11 @@ class EfficiencySweep:
             f"({sweep_report.timestamp})"
         )
         console.print(
-            f"  batch_sizes={','.join(str(b) for b in sweep_report.batch_sizes)}  "
+            f"  points={','.join(sweep_report.labels)}  "
             f"modes={','.join(sweep_report.modes)}"
         )
         for run in sweep_report.runs:
-            console.print(f"  bs{run.batch_size} -> {run.dir}")
+            console.print(f"  {run.label} -> {run.dir}")
         console.print()
 
     def _cleanup_cuda(self) -> None:
@@ -187,7 +226,7 @@ def _parse_batch_sizes(s: str) -> list[int]:
     """Parse comma-separated batch sizes: validate int > 0, de-duplicate preserving order."""
     raw = [t.strip() for t in s.split(",") if t.strip()]
     if not raw:
-        raise SystemExit("[Sweep] --efficiency.batch_sizes is empty.")
+        raise SystemExit("[Sweep] --efficiency.general.batch_sizes is empty.")
     sizes: list[int] = []
     for t in raw:
         try:
@@ -200,4 +239,4 @@ def _parse_batch_sizes(s: str) -> list[int]:
     return list(dict.fromkeys(sizes))
 
 
-__all__ = ["EfficiencySweep", "SweepReport"]
+__all__ = ["EfficiencySweep", "SweepPoint", "SweepReport", "batch_size_sweep"]

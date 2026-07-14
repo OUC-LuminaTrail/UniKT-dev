@@ -11,7 +11,7 @@ via ``@register_efficiency_stage("name")``, and is auto-discovered. Entry:
 """
 
 from . import stages  # noqa: F401  — triggers static stage discovery
-from .config import EfficiencyConfig
+from .config import GeneralEfficiencyConfig, get_efficiency_config_cls
 from .environment import (
     EnvironmentInfo,
     ResourceSampler,
@@ -19,34 +19,37 @@ from .environment import (
     ResourceSummary,
     collect_environment,
 )
-from .inference import InferenceMetrics, benchmark_inference
-from .model_profile import ModelProfile, profile_model
 from .report import EfficiencyReport
 from .session import EfficiencySession
 from .stages.base import EfficiencyStage, StageContext
-from .sweep import EfficiencySweep, SweepReport
-from .trace import TraceProfile, benchmark_trace
-from .training import TrainingMetrics, benchmark_training
+from .stages.inference import InferenceMetrics, benchmark_inference
+from .stages.profile import ModelProfile, profile_model
+from .stages.trace import TraceProfile, benchmark_trace
+from .stages.training import TrainingMetrics, benchmark_training
+from .sweep import EfficiencySweep, SweepPoint, SweepReport, batch_size_sweep
 
 __all__ = [
-    "EfficiencyConfig",
     "EfficiencyReport",
     "EfficiencySession",
     "EfficiencyStage",
     "EfficiencySweep",
     "EnvironmentInfo",
+    "GeneralEfficiencyConfig",
     "InferenceMetrics",
     "ModelProfile",
     "ResourceSampler",
     "ResourceStats",
     "ResourceSummary",
     "StageContext",
+    "SweepPoint",
     "SweepReport",
     "TraceProfile",
     "TrainingMetrics",
+    "batch_size_sweep",
     "benchmark_inference",
     "benchmark_trace",
     "benchmark_training",
     "collect_environment",
+    "get_efficiency_config_cls",
     "profile_model",
 ]

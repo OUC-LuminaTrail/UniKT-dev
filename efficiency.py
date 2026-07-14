@@ -1,27 +1,28 @@
 """UniKT model efficiency benchmark.
 
 Two mutually exclusive entry modes:
-    - ``-m/-d``                build the model fresh (random weights, or
-                                ``--efficiency.weights`` to load a file) + data
-    - ``--efficiency.run_dir`` seed the RunConfig from a trained run's
-                                ``run_config.yaml`` and benchmark its checkpoint
+    - ``-m/-d``                       build the model fresh (random weights, or
+                                      ``--efficiency.general.weights`` to load a file) + data
+    - ``--efficiency.general.run_dir`` seed the RunConfig from a trained run's
+                                      ``run_config.yaml`` and benchmark its checkpoint
 
 Usage:
     python efficiency.py -m GIKT -d assistments09
-    python efficiency.py -m SAKT -d assistments09 --efficiency.weights runs/.../best_model.pth
-    python efficiency.py --efficiency.run_dir runs/normal/GIKT_assist09_..._fold0_bs128
-    python efficiency.py -m AKT -d assistments09 --efficiency.modes inference --efficiency.benchmark_iters 500
+    python efficiency.py -m SAKT -d assistments09 --efficiency.general.weights runs/.../best_model.pth
+    python efficiency.py --efficiency.general.run_dir runs/normal/GIKT_assist09_..._fold0_bs128
+    python efficiency.py -m AKT -d assistments09 --efficiency.general.modes inference --efficiency.inference.iters 500
 """
 
 import sys
-from dataclasses import fields as dataclass_fields
 from pathlib import Path
 
 import model  # noqa: F401  — triggers trainer/model-config discovery
-from utils.config import ConfigParser
-from utils.core import TRAINERS, get_logger
+from utils.config import ConfigParser, build_node
+from utils.core import get_logger
 from utils.data_process import get_data_source
-from utils.efficiency import EfficiencyConfig, EfficiencySession, EfficiencySweep
+from utils.efficiency import EfficiencySession, EfficiencySweep
+from utils.efficiency.config import get_efficiency_config_cls
+from utils.efficiency.session import build_target
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
 logger = get_logger(__name__)
@@ -40,7 +41,7 @@ def main() -> None:
         f"[Benchmark] model={rc.experiment.model_name} dataset={rc.data.dataset}"
     )
 
-    if eff_cfg.batch_sizes:
+    if eff_cfg.general.batch_sizes:
         _run_sweep(rc, eff_cfg, weights_path)
     else:
         _run_single_efficiency(rc, eff_cfg, weights_path)
@@ -49,20 +50,15 @@ def main() -> None:
 def _run_single_efficiency(rc, eff_cfg, weights_path: str | None) -> None:
     """Build one trainer and run a single efficiency session."""
     exp_manager = ExperimentManager.from_run_config(rc, ExperimentType.EFFICIENCY)
-    output_dir = eff_cfg.output_dir or exp_manager.get_log_dir()
+    output_dir = eff_cfg.general.output_dir or exp_manager.get_log_dir()
     logger.info(f"[Benchmark] output_dir={output_dir}")
 
     data_src = get_data_source(rc)
-    trainer = TRAINERS.get(rc.experiment.model_name)(
-        rc=rc, data_src=data_src, exp_manager=exp_manager
-    )
-
     if weights_path:
         logger.info(f"[Benchmark] loading weights: {weights_path}")
-        trainer.load_weights(weights_path)
-
+    target = build_target(rc, data_src, exp_manager, weights_path)
     EfficiencySession(
-        trainer=trainer, rc=rc, eff_cfg=eff_cfg, output_dir=output_dir
+        target=target, rc=rc, eff_cfg=eff_cfg, output_dir=output_dir
     ).run().print_console()
 
 
@@ -76,6 +72,8 @@ def _run_sweep(rc, eff_cfg, weights_path: str | None) -> None:
 
 def _parse() -> tuple:
     """Parse RunConfig + EfficiencyConfig; in run_dir mode seed from the archive."""
+    EfficiencyConfig = get_efficiency_config_cls()
+
     run_dir = _peek_run_dir()
     default_config = None
     if run_dir:
@@ -93,18 +91,17 @@ def _parse() -> tuple:
         extra_nodes={"efficiency": EfficiencyConfig},
         default_config=default_config,
     ).parse_with_extras()
-    eff_cfg = EfficiencyConfig(
-        **{f.name: ns["efficiency"][f.name] for f in dataclass_fields(EfficiencyConfig)}
-    )
+    eff_cfg = build_node(EfficiencyConfig, ns["efficiency"])
     return rc, eff_cfg
 
 
 def _peek_run_dir() -> str | None:
-    """Read --efficiency.run_dir before ConfigParser (default_config path needs it)."""
+    """Read --efficiency.general.run_dir before ConfigParser (default_config path needs it)."""
+    flag = "--efficiency.general.run_dir"
     for i, a in enumerate(sys.argv):
-        if a == "--efficiency.run_dir" and i + 1 < len(sys.argv):
+        if a == flag and i + 1 < len(sys.argv):
             return sys.argv[i + 1]
-        if a.startswith("--efficiency.run_dir="):
+        if a.startswith(flag + "="):
             return a.split("=", 1)[1]
     return None
 
@@ -114,16 +111,17 @@ def _reject_model_flag(argv: list[str]) -> None:
     for a in argv:
         if a.startswith("-m") or a.startswith("--experiment.model"):
             raise SystemExit(
-                "[Benchmark] --efficiency.run_dir cannot be combined with -m/--experiment.model_name"
+                "[Benchmark] --efficiency.general.run_dir cannot be combined with "
+                "-m/--experiment.model_name"
             )
 
 
-def _resolve_weights(eff_cfg: EfficiencyConfig) -> str | None:
-    weights = eff_cfg.weights
-    if weights:
-        path = Path(weights)
-    elif eff_cfg.run_dir:
-        path = Path(eff_cfg.run_dir) / eff_cfg.checkpoint
+def _resolve_weights(eff_cfg) -> str | None:
+    general = eff_cfg.general
+    if general.weights:
+        path = Path(general.weights)
+    elif general.run_dir:
+        path = Path(general.run_dir) / general.checkpoint
     else:
         return None
     # Fail fast before the expensive model+data build.

@@ -1,11 +1,102 @@
 """Training stage: peak memory + throughput via a pseudo train loop."""
 
+import time
+from dataclasses import dataclass
+
+import torch
 from rich.table import Table
 
-from utils.core import register_efficiency_stage
+from utils.core import get_logger, register_efficiency_stage
 
-from ..training import TrainingMetrics, benchmark_training
+from ..device import DeviceBackend
+from ..measures.train_step import run_train_step
 from .base import EfficiencyStage, StageContext, format_duration
+
+logger = get_logger(__name__)
+
+
+@dataclass
+class TrainingMetrics:
+    """Training efficiency metrics (measured via a pseudo train loop)."""
+
+    iters: int = 0
+    batch_size: int = 0
+    valid_tokens_per_batch: int = 0
+    wall_time_s: float = 0.0
+    ms_per_train_step: float = 0.0
+    throughput_interactions_per_sec: float = 0.0
+    samples_per_sec: float = 0.0
+    ns_per_interaction: float = 0.0
+    gpu_peak_allocated_mib: float | None = None
+    gpu_peak_reserved_mib: float | None = None
+
+
+@dataclass
+class TrainStageConfig:
+    """Training stage knobs."""
+
+    iters: int = 50
+
+
+def benchmark_training(
+    target,
+    sample_batch,
+    batch_size: int,
+    valid_tokens: int,
+    warmup_iters: int,
+    iters: int,
+    device: torch.device,
+) -> TrainingMetrics:
+    """Training peak memory + throughput benchmark.
+
+    Runs ``zero_grad -> forward_pass -> _compute_loss -> backward -> clip -> step``
+    via :func:`run_train_step`, which delegates to ``target.compute_train_step``
+    — the same computation the real training loop performs. The metrics
+    accumulator is bypassed to keep throughput measurement clean.
+    """
+    model = target.model
+    model.train()
+    dev = DeviceBackend(device)
+
+    # warmup: includes backward pass to fill cudnn backward autotune + Adam momentum to steady state
+    for _ in range(warmup_iters):
+        run_train_step(target, sample_batch)
+    dev.sync()
+
+    with dev.peak_memory() as mem:
+        start = time.perf_counter()
+        for _ in range(iters):
+            run_train_step(target, sample_batch)
+        dev.sync()
+    wall = time.perf_counter() - start
+
+    peak_alloc = mem.allocated_mib
+    peak_reserved = mem.reserved_mib
+
+    throughput = (valid_tokens * iters) / wall if wall > 0 else 0.0
+    samples_per_sec = (batch_size * iters) / wall if wall > 0 else 0.0
+    ms_per_step = (wall / iters) * 1000 if iters > 0 else 0.0
+    ns_per = (
+        (wall / iters) * 1e9 / valid_tokens if valid_tokens > 0 and iters > 0 else 0.0
+    )
+
+    logger.info(
+        f"[Training] step={ms_per_step:.3f}ms | throughput={throughput:,.0f} int/s"
+        + (f" | gpu_peak={peak_alloc:.0f} MiB" if peak_alloc is not None else "")
+    )
+
+    return TrainingMetrics(
+        iters=iters,
+        batch_size=batch_size,
+        valid_tokens_per_batch=valid_tokens,
+        wall_time_s=wall,
+        ms_per_train_step=ms_per_step,
+        throughput_interactions_per_sec=throughput,
+        samples_per_sec=samples_per_sec,
+        ns_per_interaction=ns_per,
+        gpu_peak_allocated_mib=peak_alloc,
+        gpu_peak_reserved_mib=peak_reserved,
+    )
 
 
 @register_efficiency_stage("train")
@@ -14,20 +105,22 @@ class TrainingStage(EfficiencyStage):
 
     name = "train"
     priority = 30
+    config_cls = TrainStageConfig
 
     def run(self, ctx: StageContext) -> TrainingMetrics:
         """Benchmark training peak memory and throughput over a pseudo loop."""
         return benchmark_training(
-            ctx.trainer,
+            ctx.target,
             ctx.sample_batch,
             ctx.batch_size,
             ctx.valid_tokens,
-            ctx.cfg.warmup_iters,
-            ctx.cfg.train_iters,
+            ctx.general.warmup_iters,
+            ctx.stage_cfg(self.name).iters,
             ctx.device,
         )
 
-    def format_table(self, result: TrainingMetrics) -> Table | None:
+    @classmethod
+    def format_table(cls, result: TrainingMetrics) -> Table | None:
         """Render training throughput/memory as a Rich table."""
         table = Table(
             title="Training (pseudo loop)",

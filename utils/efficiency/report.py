@@ -16,7 +16,7 @@ from rich.table import Table
 
 from utils.core import EFFICIENCY_STAGES, get_logger
 
-from .environment import EnvironmentInfo, ResourceStats
+from .environment import RESOURCE_METRICS, EnvironmentInfo, ResourceStats
 
 logger = get_logger(__name__)
 
@@ -68,8 +68,7 @@ class EfficiencyReport:
             result = self.results.get(name)
             if result is None:
                 continue
-            stage = EFFICIENCY_STAGES.get(name)()
-            table = stage.format_table(result)
+            table = EFFICIENCY_STAGES.get(name).format_table(result)
             if table is not None:
                 console.print(table)
                 console.print()
@@ -91,25 +90,11 @@ def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Tabl
     table.add_column("Key", style="yellow", no_wrap=True)
     table.add_column("Mean", style="white")
     table.add_column("Peak", style="white")
-    table.add_row("CPU%", *_rs(stats.cpu_percent))
-    table.add_row("Process RSS", *_rs(stats.process_rss_mib, "MiB"))
-    table.add_row("GPU util", *_rs(stats.gpu_util_pct, "%"))
-    table.add_row("GPU power", *_rs(stats.gpu_power_w, "W"))
-    table.add_row("GPU mem used", *_rs(stats.gpu_mem_used_mib, "MiB"))
-    table.add_row("GPU temp", *_rs(stats.gpu_temp_c, "C"))
-    table.add_row("GPU SM clock", *_rs(stats.gpu_sm_clock_mhz, "MHz"))
-    if all(
-        getattr(stats, f).n == 0
-        for f in (
-            "cpu_percent",
-            "process_rss_mib",
-            "gpu_util_pct",
-            "gpu_power_w",
-            "gpu_mem_used_mib",
-            "gpu_temp_c",
-            "gpu_sm_clock_mhz",
+    for metric in RESOURCE_METRICS:
+        table.add_row(
+            metric.label, *_rs(getattr(stats, metric.stats_field), metric.unit)
         )
-    ):
+    if all(getattr(stats, m.stats_field).n == 0 for m in RESOURCE_METRICS):
         table.add_row("(no samples)", "", "")
     return table
 

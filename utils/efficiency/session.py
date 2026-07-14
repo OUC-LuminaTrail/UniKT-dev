@@ -10,37 +10,51 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import torch
-
 from utils.config import config_to_dict
 from utils.core import (
     EFFICIENCY_STAGES,
+    TRAINERS,
     get_logger,
     get_supported_stages,
     seed_everything,
 )
 
 from .environment import ResourceSampler, collect_environment
-from .inference import batch_size_of, count_valid_interactions
+from .measures.batch import batch_size_of, count_valid_interactions, to_device
 from .report import EfficiencyReport
 from .stages.base import EfficiencyStage, StageContext
+from .target import TrainerBenchmarkAdapter
 
 logger = get_logger(__name__)
+
+
+def build_target(rc, data_src, exp_manager, weights_path: str | None = None):
+    """Build a trainer from ``rc`` and wrap it as a :class:`BenchmarkTarget`.
+
+    Shared by the single-run entry and the per-point sweep so the two never
+    duplicate the build + optional weight-load + adapter-wrap sequence.
+    """
+    trainer = TRAINERS.get(rc.experiment.model_name)(
+        rc=rc, data_src=data_src, exp_manager=exp_manager
+    )
+    if weights_path:
+        trainer.load_weights(weights_path)
+    return TrainerBenchmarkAdapter(trainer)
 
 
 class EfficiencySession:
     """Coordinate one efficiency benchmark run over the enabled stages."""
 
     def __init__(
-        self, trainer, rc, eff_cfg, output_dir: str | Path | None = None
+        self, target, rc, eff_cfg, output_dir: str | Path | None = None
     ) -> None:
-        """Resolve the enabled stages from ``eff_cfg.modes`` (comma-separated)."""
-        self.trainer = trainer
+        """Bind the benchmark target, run config, and enabled stages."""
+        self.target = target
         self.rc = rc
         self.cfg = eff_cfg
-        self.device = trainer.device_
+        self.device = target.device
         self.output_dir = Path(output_dir) if output_dir else None
-        modes = [m.strip() for m in eff_cfg.modes.split(",") if m.strip()]
+        modes = [m.strip() for m in eff_cfg.general.modes.split(",") if m.strip()]
         self.stages = _resolve_stages(modes)
 
     def run(self) -> EfficiencyReport:
@@ -50,19 +64,17 @@ class EfficiencySession:
         )
 
         device = self.device
-        # trainer.run() would move model/loss to device; we skip run(), so do it
-        # manually — otherwise forward_pass moves inputs to device and clashes with
-        # CPU-resident weights.
-        self.trainer.model.to(device)
-        if isinstance(self.trainer.loss, torch.nn.Module):
-            self.trainer.loss.to(device)
-        environment = collect_environment(device, self.trainer.model)
+        # Move model/loss onto the device via the target; the benchmark never
+        # calls trainer.run(), so without this the forward moves inputs to device
+        # and clashes with CPU-resident weights.
+        self.target.prepare(device)
+        environment = collect_environment(device, self.target.model)
 
         # Prefetch one representative batch; timing loops reuse it to avoid
         # DataLoader IPC noise.
-        sample_batch = _to_device(next(iter(self.trainer.train_data)), device)
+        sample_batch = to_device(next(iter(self.target.train_data)), device)
         batch_size = batch_size_of(sample_batch)
-        valid_tokens = count_valid_interactions(self.trainer, sample_batch)
+        valid_tokens = count_valid_interactions(self.target, sample_batch)
         seq_len = getattr(self.rc.data, "max_seq_len", None)
         logger.info(
             f"[Setup] batch_size={batch_size} seq_len={seq_len} "
@@ -70,7 +82,7 @@ class EfficiencySession:
         )
 
         ctx = StageContext(
-            trainer=self.trainer,
+            target=self.target,
             device=device,
             sample_batch=sample_batch,
             batch_size=batch_size,
@@ -81,7 +93,7 @@ class EfficiencySession:
             output_dir=self.output_dir,
         )
 
-        sampler = ResourceSampler(device, self.cfg.resource_sample_interval)
+        sampler = ResourceSampler(device, self.cfg.general.resource_sample_interval)
         sampler.start()
         results: dict[str, Any] = {}
         resources: dict[str, Any] = {}
@@ -108,9 +120,7 @@ class EfficiencySession:
             determinism={
                 "seed": self.rc.general.seed,
                 "deterministic": not self.rc.general.no_deterministic,
-                "cudnn_benchmark": environment.cudnn_benchmark,
-                "cudnn_deterministic": environment.cudnn_deterministic,
-                "deterministic_algorithms": environment.deterministic_algorithms,
+                **environment.determinism_dict(),
             },
             environment=environment,
             resource=resources,
@@ -138,14 +148,3 @@ def _resolve_stages(modes: list[str]) -> list[tuple[str, EfficiencyStage]]:
     selected = list(dict.fromkeys(modes if modes else available))
     stages = [(n, EFFICIENCY_STAGES.get(n)()) for n in selected]
     return sorted(stages, key=lambda ns: ns[1].priority)
-
-
-def _to_device(batch, device: torch.device):
-    """Recursively move batch tensors to device (tuple/list/dict aware)."""
-    if isinstance(batch, torch.Tensor):
-        return batch.to(device)
-    if isinstance(batch, (list, tuple)):
-        return type(batch)(_to_device(b, device) for b in batch)
-    if isinstance(batch, dict):
-        return {k: _to_device(v, device) for k, v in batch.items()}
-    return batch

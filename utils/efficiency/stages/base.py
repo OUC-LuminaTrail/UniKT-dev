@@ -15,23 +15,41 @@ from typing import Any, ClassVar
 import torch
 from rich.table import Table
 
-from ..config import EfficiencyConfig
 from ..environment import EnvironmentInfo
+from ..measures.formatting import (  # noqa: F401  — re-exported for stages
+    format_duration,
+    format_flops,
+)
+from ..target import BenchmarkTarget
 
 
 @dataclass
 class StageContext:
-    """Shared runtime context injected into every stage by the session."""
+    """Shared runtime context injected into every stage by the session.
 
-    trainer: Any
+    ``cfg`` is the composed EfficiencyConfig (general + per-stage sub-nodes),
+    typed ``Any`` to avoid a config↔stages import cycle. Stages read it via
+    :attr:`general` and :meth:`stage_cfg`.
+    """
+
+    target: BenchmarkTarget
     device: torch.device
     sample_batch: Any
     batch_size: int
     valid_tokens: int
     seq_len: int | None
-    cfg: EfficiencyConfig
+    cfg: Any
     environment: EnvironmentInfo
     output_dir: Path | None = None
+
+    @property
+    def general(self) -> Any:
+        """Cross-stage config node (warmup, modes, routing, ...)."""
+        return self.cfg.general
+
+    def stage_cfg(self, name: str) -> Any:
+        """This stage's own config sub-node (its registered name)."""
+        return getattr(self.cfg, name)
 
 
 class EfficiencyStage(ABC):
@@ -49,28 +67,7 @@ class EfficiencyStage(ABC):
     def run(self, ctx: StageContext) -> Any:
         """Execute the measurement and return a serializable result."""
 
+    @classmethod
     @abstractmethod
-    def format_table(self, result: Any) -> Table | None:
+    def format_table(cls, result: Any) -> Table | None:
         """Render the result as a Rich table, or ``None`` to print nothing."""
-
-
-def format_flops(flops: int) -> str:
-    """Human-readable FLOPs (K/M/G)."""
-    if flops >= 1e9:
-        return f"{flops / 1e9:.2f} G"
-    if flops >= 1e6:
-        return f"{flops / 1e6:.2f} M"
-    if flops >= 1e3:
-        return f"{flops / 1e3:.2f} K"
-    return f"{flops}"
-
-
-def format_duration(seconds: float) -> str:
-    """Human-readable wall-clock duration."""
-    minutes, sec = divmod(int(seconds), 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours > 0:
-        return f"{hours}h {minutes}m {sec}s"
-    if minutes > 0:
-        return f"{minutes}m {sec}s"
-    return f"{sec}s"
