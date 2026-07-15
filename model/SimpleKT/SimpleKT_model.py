@@ -128,8 +128,11 @@ class TransformerLayer(nn.Module):
     def forward(self, mask, query, key, values, apply_pos=True):
         seqlen = query.size(1)
         src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
-        if (src_mask is None or seqlen != self._const_seqlen
-                or src_mask.device != query.device):
+        if (
+            src_mask is None
+            or seqlen != self._const_seqlen
+            or src_mask.device != query.device
+        ):
             self._build_constants(seqlen, query.device)
             src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
 

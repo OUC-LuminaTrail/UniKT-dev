@@ -11,7 +11,9 @@ from torch import nn
 from torch.nn.init import constant_, xavier_uniform_
 
 
-def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None, position_effect=None):
+def attention(
+    q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None, position_effect=None
+):
     """
     注意力计算函数
 
@@ -136,7 +138,15 @@ class MultiHeadAttention(nn.Module):
             if self.emb_type.find("pdiff") == -1:
                 pdiff = None
             scores = attention(
-                q, k, v, self.d_k, mask, self.dropout, zero_pad, gammas, pdiff,
+                q,
+                k,
+                v,
+                self.d_k,
+                mask,
+                self.dropout,
+                zero_pad,
+                gammas,
+                pdiff,
                 position_effect=position_effect,
             )
 
@@ -204,7 +214,12 @@ class TransformerLayer(nn.Module):
         src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
 
         query2 = self.masked_attn_head(
-            query, key, values, mask=src_mask, zero_pad=mask == 0, pdiff=pdiff,
+            query,
+            key,
+            values,
+            mask=src_mask,
+            zero_pad=mask == 0,
+            pdiff=pdiff,
             position_effect=pe,
         )
 
