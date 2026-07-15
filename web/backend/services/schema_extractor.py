@@ -39,7 +39,9 @@ def _parse_group(data: dict) -> ParamGroup:
             short=cfg.get("short"),
             nargs=cfg.get("nargs"),
         )
-    return ParamGroup(group_name=data["group_name"], node=data.get("node"), params=fields)
+    return ParamGroup(
+        group_name=data["group_name"], node=data.get("node"), params=fields
+    )
 
 
 class SchemaExtractor:
