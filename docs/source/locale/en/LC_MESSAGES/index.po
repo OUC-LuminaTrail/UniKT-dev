@@ -8,118 +8,119 @@ msgid ""
 msgstr ""
 "Project-Id-Version: UniKT \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-12 15:25+0800\n"
+"POT-Creation-Date: 2026-07-15 18:10+0800\n"
 "PO-Revision-Date: 2026-07-12 15:25+0800\n"
 "Last-Translator: UniKT Team\n"
-"Language-Team: en <LL@li.org>\n"
 "Language: en\n"
+"Language-Team: en <LL@li.org>\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: ../../source/index.md:42
+#: ../../source/index.md:41
 msgid "目录"
 msgstr "Table of Contents"
 
-#: ../../source/index.md:1 61a172e5ac6846609049a9ccb461cb0c
+#: ../../source/index.md:1 3b9f009ab5c0410592791920f7d04ab4
 msgid "UniKT"
 msgstr "UniKT"
 
-#: ../../source/index.md:3 b357181d9901414b8782497e04f1dbcb
-msgid ""
-"**统一知识追踪实验框架** —— 内置 35 个知识追踪模型（GNN、注意力、Mamba "
-"等），覆盖训练、评估、超参数搜索、消融实验与案例分析全流程。"
+#: ../../source/index.md:3 d351ac9e91ae491b964294176291c013
+msgid "**统一知识追踪实验框架** —— 内置 35 个知识追踪模型（GNN、注意力、Mamba 等），覆盖训练、评估、超参数搜索与案例分析全流程。"
 msgstr ""
-"**A unified knowledge tracing experiment framework** — 35 built-in knowledge "
-"tracing models (GNN, attention, Mamba, etc.), covering the full workflow of "
-"training, evaluation, hyperparameter search, ablation studies, and case analysis."
+"**A unified knowledge tracing experiment framework** — 35 built-in "
+"knowledge tracing models (GNN, attention, Mamba, etc.), covering the full "
+"workflow of training, evaluation, hyperparameter search, and case analysis."
 
-#: ../../source/index.md:5 227dd65a67964d2a895be77443a3cdfc
+#: ../../source/index.md:5 122f55bf7b254204ba99e76f64610499
 msgid "快速导航"
 msgstr "Quick navigation"
 
-#: ../../source/index.md:8 014f412e17054a8e88036c8eb7d0a700
+#: ../../source/index.md:8 6f83f97912cd4538887b99564d0f1cea
 msgid "[快速上手](getting-started/quick-start.md) —— 安装与第一次训练"
-msgstr "[Quick start](getting-started/quick-start.md) — Installation and your first training run"
+msgstr ""
+"[Quick start](getting-started/quick-start.md) — Installation and your "
+"first training run"
 
-#: ../../source/index.md:9 c18b787f10674cbf8f91b89183a44979
+#: ../../source/index.md:9 b27209a9390f44cabf1e6a4023255dc0
 msgid "[模型基准](model-zoo.md) —— 各模型在标准数据集上的性能对比"
-msgstr "[Model zoo](model-zoo.md) — Performance comparison of models on standard datasets"
+msgstr ""
+"[Model zoo](model-zoo.md) — Performance comparison of models on standard "
+"datasets"
 
-#: ../../source/index.md:10 6f786c3df950408db2647e2c7b09d034
+#: ../../source/index.md:10 2c32aa06f6084abcb816ad31656a35eb
 msgid "[框架数据流](advanced/data-flow.md) —— 端到端架构详解"
-msgstr "[Framework data flow](advanced/data-flow.md) — End-to-end architecture walkthrough"
+msgstr ""
+"[Framework data flow](advanced/data-flow.md) — End-to-end architecture "
+"walkthrough"
 
-#: ../../source/index.md:15 bb411ea9110340a987eba80f5c87a1c1
+#: ../../source/index.md:15 3c4294459a6048869cbb02fc1166c279
 msgid "多模型支持"
 msgstr "Multi-model support"
 
-#: ../../source/index.md:16 410ed904abbb4c579ecfac093956ec26
+#: ../../source/index.md:16 75c044ea34654fa6af531883f3c2d8ba
 msgid "35 个内置知识追踪模型（GNN、注意力、Mamba）"
 msgstr "35 built-in knowledge tracing models (GNN, attention, Mamba)"
 
-#: ../../source/index.md:17 689d365330a44d66baeb5efdc1feeba9
+#: ../../source/index.md:17 53d91bacf4b74e45a5984b9118397477
 msgid "装饰器注册 + 静态发现懒加载"
 msgstr "Decorator registration + static discovery with lazy loading"
 
-#: ../../source/index.md:18 d8cd0e21b9c043e6b77c8d0804064efb
+#: ../../source/index.md:18 bbce8bae79c046509a0a7451191ef51e
 msgid "统一的训练器 API"
 msgstr "Unified trainer API"
 
-#: ../../source/index.md:21 9039f233a4a141398c3dc8b89c08d8e3
+#: ../../source/index.md:21 e23cefc046da4a92bcc11cfb03659114
 msgid "实验管理"
 msgstr "Experiment management"
 
-#: ../../source/index.md:22 31bfb2e615d2410f85800096007d597d
+#: ../../source/index.md:22 44ad8b83e91c4f7182901901f282d80e
 msgid "K 折交叉验证"
 msgstr "K-fold cross validation"
 
-#: ../../source/index.md:23 789d76a2cd3047b683ca9cbaf56276a3
+#: ../../source/index.md:23 90f0b9d63fc54ef8904144ef4eebfde1
 msgid "基于 Optuna 的超参数搜索"
 msgstr "Optuna-based hyperparameter search"
 
-#: ../../source/index.md:24 12f2ec1677524513abc1f5eaab94b486
-msgid "消融实验框架"
-msgstr "Ablation study framework"
-
-#: ../../source/index.md:25 a041e6de3f9a4e7f99406be4481f0fe4
+#: ../../source/index.md:24 509717bb687d4d49b060267fa0ccb981
 msgid "SwanLab 实验追踪"
 msgstr "SwanLab experiment tracking"
 
-#: ../../source/index.md:28 01a0c89a7e3f4bd6b93aa40f46f05756
+#: ../../source/index.md:27 a4fea3e327844a418d1c1a325427bc0e
 msgid "数据处理"
 msgstr "Data processing"
 
-#: ../../source/index.md:29 46d9f17bec314e47a149420cb85bde79
+#: ../../source/index.md:28 dd6080ca6ec1491c84eb6d998460fa30
 msgid "11 个支持的数据集"
 msgstr "11 supported datasets"
 
-#: ../../source/index.md:30 72fc9543df2b4506855bc7477b77f698
+#: ../../source/index.md:29 e545a2c46b15459a82e58634c8cf9181
 msgid "自动下载与预处理"
 msgstr "Automatic download and preprocessing"
 
-#: ../../source/index.md:31 ff375a0979e147f59600a858af16970a
+#: ../../source/index.md:30 64fbf090fc794b4eb45dda9e7960ddc9
 msgid "可配置的采样策略"
 msgstr "Configurable sampling strategies"
 
-#: ../../source/index.md:32 cec8a3579f87471dafe93c9649afab9d
+#: ../../source/index.md:31 2b9da722d9b04b1f99a2b248677dd29d
 msgid "标准化 Parquet 输出"
 msgstr "Standardized Parquet output"
 
-#: ../../source/index.md:35 5aab17aa18e34b0fbb58158382a639a8
+#: ../../source/index.md:34 729f1041fea04cf5a59146dee4655741
 msgid "案例分析"
 msgstr "Case analysis"
 
-#: ../../source/index.md:36 39a433a0ccb24e04a6429f321a2e28a3
+#: ../../source/index.md:35 9d5191c007534d029c1de25862e74e9e
 msgid "模型推理与预测"
 msgstr "Model inference and prediction"
 
-#: ../../source/index.md:37 89bb57886f2d4a48938651c8eefd306a
+#: ../../source/index.md:36 a02e7b85ffca4411b4bbde7b39e7d657
 msgid "按策略选择学生"
 msgstr "Strategy-based student selection"
 
-#: ../../source/index.md:38 da5a9d6a1b2b4232859b3e27b0848346
+#: ../../source/index.md:37 8590fb9f5b75482f9be5ce5e8d350355
 msgid "知识状态热力图"
 msgstr "Knowledge state heatmaps"
+

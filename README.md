@@ -38,7 +38,6 @@
 - **KT Models**: DKT, AKT, GKT, GIKT, HGIKT, SGKT, SQGKT, DyGKT, SimpleKT, DKVMN, DTransformer, HawkesKT, LBKT, QIKT, ReKT, RobustKT, UKT, ABKT, BDGKT, ClusterKT, and more
 - **Multi-Dataset Support**: ASSISTments (2009/2012/2017), EdNet-KT1
 - **Optuna Integration**: Automated hyperparameter search with parallel support
-- **Ablation Framework**: Built-in tools for component-wise analysis
 - **Experiment Tracking**: SwanLab integration for metrics visualization
 - **Modular Design**: Registry-based architecture for easy extension
 
@@ -180,12 +179,6 @@ python train.py -m GIKT -d assistments09 --fold 0
 python optuna_search.py -m GIKT -d assistments09 --n_trials 50
 ```
 
-### 4. Ablation Study
-
-```bash
-python ablation_study.py --config configs/ablation/hgikt_study.json -d assistments09
-```
-
 ## 📊 Supported Datasets
 
 | Dataset | Source |
@@ -207,7 +200,6 @@ Full documentation is available at **[UniKT](https://unikt.lionhao.top/)**.
 ```
 UniKT/
 ├── configs/           # Configuration files
-│   ├── ablation/      # Ablation configs
 │   └── optuna/        # Optuna search spaces
 ├── data/              # Processed datasets
 ├── docs/              # Documentation site
@@ -222,8 +214,7 @@ UniKT/
 ├── web/               # Web management panel
 ├── train.py           # Training entry point
 ├── data_process.py    # Data processing entry
-├── optuna_search.py   # Hyperparameter search
-└── ablation_study.py  # Ablation experiments
+└── optuna_search.py   # Hyperparameter search
 ```
 
 ## 🤝 Acknowledgments

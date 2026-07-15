@@ -1,26 +1,6 @@
 # 实验工具
 
-消融实验框架、Optuna 超参搜索、案例分析与可视化。
-
-```{eval-rst}
-.. automodule:: utils.ablation.runner
-   :members:
-```
-
-```{eval-rst}
-.. automodule:: utils.ablation.config
-   :members:
-```
-
-```{eval-rst}
-.. automodule:: utils.ablation.config_loader
-   :members:
-```
-
-```{eval-rst}
-.. automodule:: utils.ablation.result_formatter
-   :members:
-```
+Optuna 超参搜索、案例分析与可视化。
 
 ```{eval-rst}
 .. automodule:: utils.optuna_utils.tuner

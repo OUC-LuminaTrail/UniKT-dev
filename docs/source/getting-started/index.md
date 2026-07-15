@@ -13,7 +13,7 @@ UniKT 提供从数据到评估的完整流程：
 - **统一 API**：使用相同的 CLI 和训练器 API 训练任何模型
 - **35 个内置模型**：覆盖图神经网络（GKT、GIKT、SGKT、DyGKT、HDHKT）和序列/注意力架构（DKT、AKT、SimpleKT）等方向
 - **11 个支持的数据集**：ASSISTments（2009/2012/2015/2017）、Algebra（2005/2006）、Bridge2006、EdNet-KT1、Junyi、NIPS2020_T34、Slepemapy
-- **实验管理**：K 折交叉验证、超参数搜索（Optuna）、消融实验
+- **实验管理**：K 折交叉验证、超参数搜索（Optuna）
 
 ## 框架设计
 
@@ -24,7 +24,6 @@ graph TB
  subgraph Entry["入口"]
  E1[train.py]
  E2[optuna_search.py]
- E3[ablation_study.py]
  E4[case_analysis.py]
  end
 

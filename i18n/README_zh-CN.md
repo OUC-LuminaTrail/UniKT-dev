@@ -40,7 +40,6 @@
 - **KT 模型**：DKT、AKT、GKT、GIKT、HGIKT、SGKT、SQGKT、DyGKT、SimpleKT、DKVMN、DTransformer、HawkesKT、LBKT、QIKT、ReKT、RobustKT、UKT、ABKT、BDGKT、ClusterKT 等
 - **多数据集支持**：ASSISTments（2009/2012/2017）、EdNet-KT1
 - **Optuna 集成**：自动化超参数搜索，支持并行优化
-- **消融实验框架**：内置组件级分析工具
 - **实验追踪**：SwanLab 集成，实时可视化训练指标
 - **模块化设计**：注册表架构，易于扩展新模型
 
@@ -182,12 +181,6 @@ python train.py -m GIKT -d assistments09 --fold 0
 python optuna_search.py -m GIKT -d assistments09 --n_trials 50
 ```
 
-### 4. 消融实验
-
-```bash
-python ablation_study.py --config configs/ablation/hgikt_study.json -d assistments09
-```
-
 ## 📊 支持的数据集
 
 | 数据集 | 数据来源 |
@@ -208,7 +201,6 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 | [数据处理](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/data_processing.md) | 下载、清洗、K 折划分 |
 | [模型训练](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/training.md) | 训练流程、K 折验证、早停机制 |
 | [超参搜索](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/hyperparameter_search.md) | Optuna 配置与可视化 |
-| [消融实验](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/ablation_study.md) | 组件分析框架 |
 | [案例分析](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/case_analysis.md) | 推理、用户筛选、可视化 |
 | [架构设计](https://github.com/OUC-LuminaTrail/kt-exp-graph/blob/main/docs/architecture.md) | 框架设计与扩展指南 |
 
@@ -217,7 +209,6 @@ python ablation_study.py --config configs/ablation/hgikt_study.json -d assistmen
 ```
 kt-exp-graph/
 ├── configs/           # 配置文件
-│   ├── ablation/      # 消融实验配置
 │   └── optuna/        # Optuna 搜索空间
 ├── data/              # 处理后的数据集
 ├── docs/              # 项目文档
@@ -233,8 +224,7 @@ kt-exp-graph/
 │   └── data_process/  # 数据处理工具
 ├── train.py           # 训练入口
 ├── data_process.py    # 数据处理入口
-├── optuna_search.py   # 超参搜索
-└── ablation_study.py  # 消融实验
+└── optuna_search.py   # 超参搜索
 ```
 
 ## 🤝 致谢
