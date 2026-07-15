@@ -2,7 +2,6 @@
 
 import math
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -116,19 +115,27 @@ class TransformerLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
 
-    def forward(self, mask, query, key, values, apply_pos=True):
-        seqlen, _ = query.size(1), query.size(0)
-        nopeek_mask = np.triu(np.ones((1, 1, seqlen, seqlen)), k=mask).astype("uint8")
-        src_mask = (torch.from_numpy(nopeek_mask) == 0).to(query.device)
+        self.register_buffer("_causal_mask_k0", None, persistent=False)
+        self.register_buffer("_causal_mask_k1", None, persistent=False)
+        self._const_seqlen = 0
 
-        if mask == 0:
-            query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=True
-            )
-        else:
-            query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=False
-            )
+    def _build_constants(self, seqlen: int, device: torch.device) -> None:
+        ones = torch.ones(seqlen, seqlen, dtype=torch.bool, device=device)
+        self._causal_mask_k1 = ones.tril().view(1, 1, seqlen, seqlen)
+        self._causal_mask_k0 = ones.tril(diagonal=-1).view(1, 1, seqlen, seqlen)
+        self._const_seqlen = seqlen
+
+    def forward(self, mask, query, key, values, apply_pos=True):
+        seqlen = query.size(1)
+        src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
+        if (src_mask is None or seqlen != self._const_seqlen
+                or src_mask.device != query.device):
+            self._build_constants(seqlen, query.device)
+            src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
+
+        query2 = self.masked_attn_head(
+            query, key, values, mask=src_mask, zero_pad=mask == 0
+        )
 
         query = query + self.dropout1(query2)
         query = self.layer_norm1(query)
