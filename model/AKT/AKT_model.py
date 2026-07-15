@@ -5,14 +5,13 @@
 
 import math
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn.init import constant_, xavier_uniform_
 
 
-def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None):
+def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None, position_effect=None):
     """
     注意力计算函数
 
@@ -34,18 +33,12 @@ def attention(q, k, v, d_k, mask, dropout, zero_pad, gamma=None, pdiff=None):
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     bs, head, seqlen = scores.size(0), scores.size(1), scores.size(2)
 
-    x1 = torch.arange(seqlen).expand(seqlen, -1).to(device)
-    x2 = x1.transpose(0, 1).contiguous()
-
     with torch.no_grad():
         scores_ = scores.masked_fill(mask == 0, -1e32)
         scores_ = F.softmax(scores_, dim=-1)
-        scores_ = scores_ * mask.float().to(device)
+        scores_ = scores_ * mask.float()
         distcum_scores = torch.cumsum(scores_, dim=-1)
         disttotal_scores = torch.sum(scores_, dim=-1, keepdim=True)
-        position_effect = (
-            torch.abs(x1 - x2)[None, None, :, :].type(torch.FloatTensor).to(device)
-        )
         dist_scores = torch.clamp(
             (disttotal_scores - distcum_scores) * position_effect, min=0.0
         )
@@ -124,7 +117,7 @@ class MultiHeadAttention(nn.Module):
                 constant_(self.q_linear.bias, 0.0)
             constant_(self.out_proj.bias, 0.0)
 
-    def forward(self, q, k, v, mask, zero_pad, pdiff=None):
+    def forward(self, q, k, v, mask, zero_pad, pdiff=None, position_effect=None):
         bs = q.size(0)
 
         if self.emb_type.startswith("qid"):
@@ -143,7 +136,8 @@ class MultiHeadAttention(nn.Module):
             if self.emb_type.find("pdiff") == -1:
                 pdiff = None
             scores = attention(
-                q, k, v, self.d_k, mask, self.dropout, zero_pad, gammas, pdiff
+                q, k, v, self.d_k, mask, self.dropout, zero_pad, gammas, pdiff,
+                position_effect=position_effect,
             )
 
             concat = scores.transpose(1, 2).contiguous().view(bs, -1, self.d_model)
@@ -183,32 +177,36 @@ class TransformerLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
 
-        self._causal_mask_cache: dict[tuple[int, int], torch.Tensor] = {}
+        # Seqlen-dependent constant tensors owned by the layer. Registered as
+        # non-persistent buffers so they migrate with .to(device) yet stay out
+        # of state_dict (rebuilt on first forward).
+        self.register_buffer("_causal_mask_k0", None, persistent=False)
+        self.register_buffer("_causal_mask_k1", None, persistent=False)
+        self.register_buffer("_position_effect", None, persistent=False)
+        self._const_seqlen = 0
 
-    def _get_causal_mask(
-        self, seqlen: int, mask_k: int, device: torch.device
-    ) -> torch.Tensor:
-        key = (seqlen, mask_k)
-        cached = self._causal_mask_cache.get(key)
-        if cached is not None and cached.device == device:
-            return cached
-        arr = np.triu(np.ones((1, 1, seqlen, seqlen)), k=mask_k).astype("uint8")
-        src_mask = (torch.from_numpy(arr) == 0).to(device)
-        self._causal_mask_cache[key] = src_mask
-        return src_mask
+    def _build_constants(self, seqlen: int, device: torch.device) -> None:
+        ones = torch.ones(seqlen, seqlen, dtype=torch.bool, device=device)
+        self._causal_mask_k1 = ones.tril().view(1, 1, seqlen, seqlen)
+        self._causal_mask_k0 = ones.tril(diagonal=-1).view(1, 1, seqlen, seqlen)
+        idx = torch.arange(seqlen, device=device, dtype=torch.float32)
+        self._position_effect = torch.abs(
+            idx.view(seqlen, 1) - idx.view(1, seqlen)
+        ).view(1, 1, seqlen, seqlen)
+        self._const_seqlen = seqlen
 
     def forward(self, mask, query, key, values, apply_pos=True, pdiff=None):
         seqlen = query.size(1)
-        src_mask = self._get_causal_mask(seqlen, mask, query.device)
+        pe = self._position_effect
+        if pe is None or seqlen != self._const_seqlen or pe.device != query.device:
+            self._build_constants(seqlen, query.device)
+            pe = self._position_effect
+        src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
 
-        if mask == 0:
-            query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=True, pdiff=pdiff
-            )
-        else:
-            query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=False, pdiff=pdiff
-            )
+        query2 = self.masked_attn_head(
+            query, key, values, mask=src_mask, zero_pad=mask == 0, pdiff=pdiff,
+            position_effect=pe,
+        )
 
         query = query + self.dropout1(query2)
         query = self.layer_norm1(query)
