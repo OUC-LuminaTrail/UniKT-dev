@@ -11,6 +11,8 @@ Usage:
     python efficiency.py -m SAKT -d assistments09 --efficiency.general.weights runs/.../best_model.pth
     python efficiency.py --efficiency.general.run_dir runs/normal/GIKT_assist09_..._fold0_bs128
     python efficiency.py -m AKT -d assistments09 --efficiency.general.modes inference --efficiency.inference.iters 500
+    python efficiency.py -m SAKT -d assistments09 --efficiency.general.compile_modes off,default,reduce-overhead
+    python efficiency.py -m SAKT -d assistments09 --efficiency.general.batch_sizes 32,64 --efficiency.general.compile_modes off,default
 """
 
 import sys
@@ -41,7 +43,7 @@ def main() -> None:
         f"[Benchmark] model={rc.experiment.model_name} dataset={rc.data.dataset}"
     )
 
-    if eff_cfg.general.batch_sizes:
+    if eff_cfg.general.batch_sizes or eff_cfg.general.compile_modes:
         _run_sweep(rc, eff_cfg, weights_path)
     else:
         _run_single_efficiency(rc, eff_cfg, weights_path)

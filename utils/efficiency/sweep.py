@@ -98,6 +98,63 @@ def batch_size_sweep(sizes: list[int]) -> list[SweepPoint]:
     ]
 
 
+# ``off`` is an efficiency-framework sentinel (compile disabled, the baseline);
+# the rest are valid ``torch.compile`` modes (see CompileConfig.compile_mode).
+_VALID_COMPILE_MODES = [
+    "off",
+    "default",
+    "reduce-overhead",
+    "max-autotune",
+    "max-autotune-no-cudagraphs",
+]
+
+
+def compile_sweep(modes: list[str]) -> list[SweepPoint]:
+    """Build sweep points that vary ``rc.compile`` across the given states.
+
+    ``off`` disables compile (baseline); any other entry enables compile with
+    that ``compile_mode``. The remaining CompileConfig knobs (fullgraph /
+    dynamic / backend) pass through, so ``--compile.*`` still composes.
+    """
+    return [
+        SweepPoint(
+            f"cmp_{mode}",
+            lambda rc, _eff_cfg, m=mode: _apply_compile_state(rc.compile, m),
+        )
+        for mode in modes
+    ]
+
+
+def _apply_compile_state(cc, mode: str) -> None:
+    """Set ``cc`` to the swept compile state: off, or on with ``mode``."""
+    if mode == "off":
+        cc.compile = False
+    else:
+        cc.compile = True
+        cc.compile_mode = mode
+
+
+def cartesian_sweep(
+    axis_a: list[SweepPoint], axis_b: list[SweepPoint]
+) -> list[SweepPoint]:
+    """Combine two sweep axes into their Cartesian product.
+
+    Each product point applies both mutators (order-independent when they touch
+    disjoint config fields, as batch_size and compile do) and is labeled
+    ``<a>_<b>`` (e.g. ``bs32_cmp_off``).
+    """
+    product: list[SweepPoint] = []
+    for a in axis_a:
+        for b in axis_b:
+
+            def mutate(rc, eff_cfg, ma=a.mutate, mb=b.mutate):
+                ma(rc, eff_cfg)
+                mb(rc, eff_cfg)
+
+            product.append(SweepPoint(f"{a.label}_{b.label}", mutate))
+    return product
+
+
 class EfficiencySweep:
     """Run the efficiency benchmark across a set of :class:`SweepPoint` entries.
 
@@ -118,11 +175,7 @@ class EfficiencySweep:
         self.cfg = eff_cfg
         self.data_src = data_src
         self.weights_path = weights_path
-        self.points = (
-            points
-            if points is not None
-            else batch_size_sweep(_parse_batch_sizes(eff_cfg.general.batch_sizes))
-        )
+        self.points = self._resolve_points(points, eff_cfg)
         tags = [f"fold{rc.data.fold}"] if rc.data.fold is not None else []
         tags.append("sweep")
         self.parent_exp = ExperimentManager(
@@ -133,6 +186,26 @@ class EfficiencySweep:
             tags=tags,
         )
         self.sweep_dir = self.parent_exp.get_log_dir()
+
+    @staticmethod
+    def _resolve_points(points: list[SweepPoint] | None, eff_cfg) -> list[SweepPoint]:
+        """Resolve sweep points from the configured axes.
+
+        Explicit points win; otherwise ``batch_sizes`` and/or ``compile_modes``
+        (both set → their Cartesian product; one set → that single axis).
+        """
+        if points is not None:
+            return points
+        compile_modes = eff_cfg.general.compile_modes
+        batch_sizes = eff_cfg.general.batch_sizes
+        if compile_modes and batch_sizes:
+            return cartesian_sweep(
+                batch_size_sweep(_parse_batch_sizes(batch_sizes)),
+                compile_sweep(_parse_compile_modes(compile_modes)),
+            )
+        if compile_modes:
+            return compile_sweep(_parse_compile_modes(compile_modes))
+        return batch_size_sweep(_parse_batch_sizes(batch_sizes))
 
     def run(self) -> SweepReport:
         """Run every point (printing each report) and index the runs."""
@@ -239,4 +312,26 @@ def _parse_batch_sizes(s: str) -> list[int]:
     return list(dict.fromkeys(sizes))
 
 
-__all__ = ["EfficiencySweep", "SweepPoint", "SweepReport", "batch_size_sweep"]
+def _parse_compile_modes(s: str) -> list[str]:
+    """Parse comma-separated compile states: validate against the allow-list, de-duplicate preserving order."""
+    raw = [t.strip() for t in s.split(",") if t.strip()]
+    if not raw:
+        raise SystemExit("[Sweep] --efficiency.general.compile_modes is empty.")
+    modes: list[str] = []
+    for t in raw:
+        if t not in _VALID_COMPILE_MODES:
+            raise SystemExit(
+                f"[Sweep] invalid compile mode '{t}'. Valid: {_VALID_COMPILE_MODES}"
+            )
+        modes.append(t)
+    return list(dict.fromkeys(modes))
+
+
+__all__ = [
+    "EfficiencySweep",
+    "SweepPoint",
+    "SweepReport",
+    "batch_size_sweep",
+    "cartesian_sweep",
+    "compile_sweep",
+]

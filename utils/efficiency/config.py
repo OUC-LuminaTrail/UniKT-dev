@@ -22,6 +22,11 @@ class GeneralEfficiencyConfig:
         modes: Comma-separated stages to run (empty = all discovered stages).
         batch_sizes: Comma-separated batch sizes to sweep (empty = single run).
             Each size rebuilds a fresh trainer for a clean CUDA allocator.
+        compile_modes: Comma-separated compile states to sweep (empty = single
+            run). Each entry is ``off`` (compile disabled, baseline) or a valid
+            ``torch.compile`` mode (``default`` / ``reduce-overhead`` /
+            ``max-autotune`` / ``max-autotune-no-cudagraphs``). Combines with
+            ``batch_sizes`` into a Cartesian-product sweep.
         warmup_iters: Discarded iters before timing (cuDNN autotune / clock ramp);
             shared by the inference/train/trace stages.
         resource_sample_interval: Background resource sampling interval (s).
@@ -34,6 +39,7 @@ class GeneralEfficiencyConfig:
 
     modes: str = ""
     batch_sizes: str = ""
+    compile_modes: str = ""
     warmup_iters: int = 50
     resource_sample_interval: float = 0.05
     run_dir: str | None = None
