@@ -107,8 +107,14 @@ class DAGKTTrainer(BaseTrainer):
         self.loss_diff_weight = m.loss_diff_weight
         self.loss_attempt_weight = m.loss_attempt_weight
 
-        self.graph = self.graph.to(self.device_)
-        self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
+        dev = rc.general.device
+        device = (
+            torch.device(dev)
+            if dev
+            else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        )
+        self.graph = self.graph.to(device)
+        self.question_skill_matrix = self.question_skill_matrix.to(device)
 
         return RuntimeComponents(
             model=model,
