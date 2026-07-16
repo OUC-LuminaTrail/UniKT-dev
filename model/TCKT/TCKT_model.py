@@ -120,9 +120,13 @@ class TCKTNet(nn.Module):
 
         # 缓冲区
         # Q-matrix（题目-概念关联），加 q_gamma 平滑。
-        self.register_buffer("q_matrix", torch.zeros(num_questions, num_skills))
+        self.register_buffer(
+            "q_matrix", torch.zeros(num_questions, num_skills), persistent=False
+        )
         # 每题的贝叶斯难度（论文式 2）。
-        self.register_buffer("difficulty", torch.full((num_questions,), 0.5))
+        self.register_buffer(
+            "difficulty", torch.full((num_questions,), 0.5), persistent=False
+        )
         # 全局交互特征字典（K-Means 中心），在线更新。
         self.register_buffer("global_dict", torch.zeros(global_dict_size, d_k))
         # LSAT 的因果掩码（上三角为 True = 屏蔽未来）。

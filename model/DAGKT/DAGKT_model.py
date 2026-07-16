@@ -110,9 +110,13 @@ class DAGKT(nn.Module):
 
         # Question correct rates: registered as a buffer (tracked, not trained)
         if question_difficulty is not None:
-            self.register_buffer("difficulty_rates", question_difficulty.float())
+            self.register_buffer(
+                "difficulty_rates", question_difficulty.float(), persistent=False
+            )
         else:
-            self.register_buffer("difficulty_rates", torch.zeros(num_questions, 1))
+            self.register_buffer(
+                "difficulty_rates", torch.zeros(num_questions, 1), persistent=False
+            )
 
         self.question_embedding = nn.Embedding(
             num_embeddings=num_questions,

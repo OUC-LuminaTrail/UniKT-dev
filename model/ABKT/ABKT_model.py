@@ -78,9 +78,11 @@ class K_CMF(nn.Module):
 
         # Q_matrix 扩展用于知识增长计算 [item_num, skill_num, k_hidden_size]
         self.register_buffer(
-            "Q_matrix_m", q_matrix.unsqueeze(2).repeat(1, 1, k_hidden_size)
+            "Q_matrix_m",
+            q_matrix.unsqueeze(2).repeat(1, 1, k_hidden_size),
+            persistent=False,
         )
-        self.register_buffer("Q_matrix", q_matrix)
+        self.register_buffer("Q_matrix", q_matrix, persistent=False)
 
         # 学生初始知识状态 [user_num, skill_num]
         self.user_initial_k = nn.Parameter(torch.zeros((user_num, skill_num)) * 0.01)

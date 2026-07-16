@@ -63,8 +63,10 @@ class DIMKT(nn.Module):
         self.linear_6 = nn.Linear(4 * self.emb_size, self.emb_size)
 
         # 全局难度查表
-        self.register_buffer("skill_diff_table", skill_diff_table)
-        self.register_buffer("question_diff_table", question_diff_table)
+        self.register_buffer("skill_diff_table", skill_diff_table, persistent=False)
+        self.register_buffer(
+            "question_diff_table", question_diff_table, persistent=False
+        )
 
     def forward(self, skill, question, response, mask):
         c_full = (skill + 1).masked_fill(~mask, 0)

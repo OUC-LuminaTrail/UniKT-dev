@@ -52,7 +52,7 @@ class BDGKT(nn.Module):
         self.dynamic_fusion = nn.Linear(skill_num * 2, skill_num)
         self.qdiff_encoder = nn.Linear(hidden_size, skill_num)
 
-        self.register_buffer("Q_KC", Q_KC)
+        self.register_buffer("Q_KC", Q_KC, persistent=False)
         self.reset_parameters()
 
     def forward(

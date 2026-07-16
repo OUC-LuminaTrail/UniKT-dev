@@ -248,7 +248,9 @@ class DenoiseKT(nn.Module):
 
         embed_l = d_model
 
-        self.register_buffer("question_concepts", question_concepts.long())
+        self.register_buffer(
+            "question_concepts", question_concepts.long(), persistent=False
+        )
         self.register_buffer("question_graph", question_graph)
 
         # 相对位置 [L, L]，[i,j] = i-j（对角为 0），供 boost_focus 使用
