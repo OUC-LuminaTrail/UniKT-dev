@@ -203,7 +203,7 @@ class MultiTrainer(BaseTrainer):
         self.metric_logger = build_default_metric_loggers(
             log_dir=self.log_dir,
             log_batch_metrics=self.run_config.general.log_batch_metrics,
-            no_swanlab=self.run_config.general.no_swanlab,
+            swanlab=self.run_config.general.swanlab,
         )
 
         # 4. Save RunConfig archive (skip when reusing an existing run dir, so
@@ -373,7 +373,7 @@ class MultiTrainer(BaseTrainer):
         """Initialize the metric logging backend.
 
         Local CSV logging is always enabled; SwanLab is included unless
-        ``--no_swanlab`` was set.
+        ``--general.swanlab false`` was set.
         """
         from utils.config import config_to_dict
 

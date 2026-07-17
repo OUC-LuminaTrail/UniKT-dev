@@ -6,7 +6,7 @@ DATA_SOURCES / get_data_source).
 
 Backends:
 - LocalMetricLogger: Local CSV logging, always enabled.
-- SwanLabMetricLogger: SwanLab remote logging, enabled by default, disabled via ``--no_swanlab``.
+- SwanLabMetricLogger: SwanLab remote logging, enabled by default, disabled via ``--general.swanlab false``.
 """
 
 import atexit
@@ -668,20 +668,20 @@ def build_default_metric_loggers(
     *,
     log_dir: str,
     log_batch_metrics: bool,
-    no_swanlab: bool,
+    swanlab: bool,
     async_io: bool | None = None,
 ) -> MetricLogger:
     """Build the default metric logger composite.
 
     Local CSV logging is always enabled; SwanLab is included unless
-    ``no_swanlab`` is set. Each backend is wrapped in
+    ``swanlab`` is ``False``. Each backend is wrapped in
     :class:`AsyncMetricLoggerProxy` when async I/O is enabled (default), so a
     slow SwanLab upload cannot serialize the local CSV write.
 
     Args:
         log_dir: Directory for local CSV logs.
         log_batch_metrics: Whether to log per-batch loss.
-        no_swanlab: If True, skip SwanLab backend.
+        swanlab: If False, skip SwanLab backend.
         async_io: Override async I/O. ``None`` reads ``METRIC_LOGGING_ASYNC``
             (default enabled).
 
@@ -694,7 +694,7 @@ def build_default_metric_loggers(
     loggers: list[MetricLogger] = [
         get_metric_logger("local", log_dir=log_dir, log_batch_metrics=log_batch_metrics)
     ]
-    if not no_swanlab:
+    if swanlab:
         loggers.append(get_metric_logger("swanlab"))
 
     if async_io:
