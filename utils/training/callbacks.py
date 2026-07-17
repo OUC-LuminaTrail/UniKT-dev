@@ -416,6 +416,8 @@ class EarlyStoppingCallback(Callback):
         if value is None:
             if metrics.get("auc") is not None:
                 value = float(metrics["auc"])
+            elif metrics.get("auprc") is not None:
+                value = float(metrics["auprc"])
             elif metrics.get("acc") is not None:
                 value = float(metrics["acc"])
             elif metrics.get("rmse") is not None:
@@ -556,7 +558,7 @@ class CheckpointCallback(Callback):
     def _select_monitor_value(self, metrics: dict, val_loss: float | None) -> float:
         """Select the current monitored value from metrics or loss.
 
-        Falls back to auc → acc → rmse if the named metric is unavailable.
+        Falls back to auc → auprc → acc → rmse if the named metric is unavailable.
         """
         name = self._monitor_name()
         value = None
@@ -568,6 +570,8 @@ class CheckpointCallback(Callback):
         if value is None:
             if metrics.get("auc") is not None:
                 value = float(metrics["auc"])
+            elif metrics.get("auprc") is not None:
+                value = float(metrics["auprc"])
             elif metrics.get("acc") is not None:
                 value = float(metrics["acc"])
             elif metrics.get("rmse") is not None:

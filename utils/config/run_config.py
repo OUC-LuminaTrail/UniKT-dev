@@ -28,7 +28,7 @@ class EarlyStoppingConfig:
         min_delta: Minimum change to qualify as improvement.
     """
 
-    monitor: Literal["auc", "acc", "rmse", "loss"] = "auc"
+    monitor: Literal["auc", "acc", "rmse", "loss", "auprc"] = "auc"
     mode: str = "max"
     patience: int = 10
     min_delta: float = 0.0

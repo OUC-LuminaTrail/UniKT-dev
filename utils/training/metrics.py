@@ -7,11 +7,17 @@ Each model's forward_pass output must contain the following fields:
     y_predict : binary predictions (0/1), used for ACC
     y_score   : ranking scores (any real number), used for AUC
     y_prob    : predicted probabilities ([0,1]), used for RMSE
+    y_score   : ranking scores (any real number), also used for AUPRC
 """
 
 import numpy as np
 import torch
-from sklearn.metrics import accuracy_score, roc_auc_score, root_mean_squared_error
+from sklearn.metrics import (
+    accuracy_score,
+    average_precision_score,
+    roc_auc_score,
+    root_mean_squared_error,
+)
 
 
 def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
@@ -130,9 +136,9 @@ class MetricsAccumulator:
     def compute(self, phase: str) -> dict[str, float]:
         """Compute epoch-level metrics for the given phase.
 
-        For train/val phases, returns acc/auc/rmse.
+        For train/val phases, returns acc/auc/auprc/rmse.
         For test phase with group_id provided, returns per-fusion
-        metrics (``{fusion}_acc``, ``{fusion}_auc``, ``{fusion}_rmse``).
+        metrics (``{fusion}_acc``, ``{fusion}_auc``, ``{fusion}_auprc``, ``{fusion}_rmse``).
 
         Args:
             phase: Phase name, e.g. ``"train"``, ``"val"``, or ``"test"``.
@@ -185,6 +191,13 @@ class MetricsAccumulator:
                     )
                 except ValueError:
                     metrics[f"{fusion}_auc"] = 0.0
+
+                try:
+                    metrics[f"{fusion}_auprc"] = float(
+                        average_precision_score(group_label, group_score)
+                    )
+                except ValueError:
+                    metrics[f"{fusion}_auprc"] = 0.0
             return metrics
 
         y_label: np.ndarray = torch.cat(accum["y_label"]).numpy()
@@ -200,6 +213,11 @@ class MetricsAccumulator:
             metrics["auc"] = float(roc_auc_score(y_label, y_score))
         except ValueError:
             metrics["auc"] = 0.0
+
+        try:
+            metrics["auprc"] = float(average_precision_score(y_label, y_score))
+        except ValueError:
+            metrics["auprc"] = 0.0
 
         metrics["rmse"] = float(root_mean_squared_error(y_label, y_prob))
 
