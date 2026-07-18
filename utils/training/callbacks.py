@@ -457,6 +457,7 @@ class CheckpointCallback(Callback):
         last_filename: str = "last_checkpoint.pth",
         best_filename: str | None = "best_model.pth",
         keep_best_state: bool = True,
+        save_last_checkpoint: bool = True,
         monitor: str | None = None,
         mode: str | None = None,
     ):
@@ -469,6 +470,8 @@ class CheckpointCallback(Callback):
             best_filename: Filename for the best model (None to skip).
             keep_best_state: Whether to cache the best model state_dict
                 in memory (useful for multi-stage training).
+            save_last_checkpoint: Whether to save the full last checkpoint
+                at the end of every epoch.
             monitor: Metric name to monitor for best model selection.
                 Defaults to the early stopping monitor if set; overrides it
                 when explicitly provided to decouple checkpointing from
@@ -481,6 +484,7 @@ class CheckpointCallback(Callback):
         self.last_filename = last_filename
         self.best_filename = best_filename
         self.keep_best_state = keep_best_state
+        self.save_last_checkpoint = save_last_checkpoint
         self._monitor_override = monitor.lower() if monitor else None
         self._mode_override = mode.lower() if mode else None
 
@@ -535,6 +539,8 @@ class CheckpointCallback(Callback):
             val_loss: Validation loss for this epoch.
             **kwargs: Additional keyword arguments (e.g. trainer).
         """
+        if not self.save_last_checkpoint:
+            return
         trainer = kwargs.get("trainer")
         if trainer is None:
             return

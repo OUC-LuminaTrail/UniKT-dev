@@ -361,6 +361,7 @@ class MultiTrainer(BaseTrainer):
                     else None
                 ),
                 keep_best_state=True,
+                save_last_checkpoint=self.run_config.general.save_last_checkpoint,
                 monitor=setup.checkpoint_monitor,
                 mode=setup.checkpoint_mode,
             )

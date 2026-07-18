@@ -48,6 +48,8 @@ class GeneralConfig:
         log_batch_metrics: Log per-batch loss to batch_metrics_<phase>.csv.
         skip_test: Skip test-set evaluation after training.
         cache: Enable disk cache for model data preparation.
+        save_last_checkpoint: Save a full checkpoint (``last_checkpoint.pth``)
+            at the end of every epoch.
     """
 
     log_dir: str | None = None
@@ -59,6 +61,7 @@ class GeneralConfig:
     log_batch_metrics: bool = False
     skip_test: bool = False
     cache: bool = False
+    save_last_checkpoint: bool = True
 
 
 @dataclass

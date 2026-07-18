@@ -224,6 +224,7 @@ class BaseTrainer(ABC):
                 early_stopping=self.early_stopping,
                 last_filename="last_checkpoint.pth",
                 best_filename="best_model.pth",
+                save_last_checkpoint=self.run_config.general.save_last_checkpoint,
             )
         )
         if not self.run_config.general.skip_test:
