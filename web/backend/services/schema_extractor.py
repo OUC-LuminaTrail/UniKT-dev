@@ -172,3 +172,25 @@ class SchemaExtractor:
             for field_name in group.get("params", {}):
                 routes[field_name] = node
         return routes
+
+    def get_field_defaults(self, model_name: str) -> dict[str, object]:
+        """Return a {field_name: default_value} map for filtering unchanged params.
+
+        Args:
+            model_name: The model name to look up.
+
+        Returns:
+            A dict mapping each parameter field name to its default value.
+
+        Raises:
+            KeyError: If the model name is not found.
+        """
+        self._run_helper()
+        raw_groups = self._schemas.get(model_name)
+        if raw_groups is None:
+            raise KeyError(f"Model '{model_name}' not found")
+        defaults: dict[str, object] = {}
+        for group in raw_groups:
+            for field_name, cfg in group.get("params", {}).items():
+                defaults[field_name] = cfg.get("default")
+        return defaults

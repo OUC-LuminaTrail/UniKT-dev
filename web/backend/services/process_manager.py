@@ -377,9 +377,10 @@ class ProcessManager:
 
         Routes the flat ``params`` dict into dotted ``--node.field=value`` flags
         via the cached schema route map. Uses ``-m`` / ``-d`` short flags for
-        model and dataset.
+        model and dataset.  Parameters matching their schema default are omitted.
         """
         routes = self._schema_extractor.get_field_routes(model_name)
+        defaults = self._schema_extractor.get_field_defaults(model_name)
         args = ["train.py", "-m", model_name]
 
         dataset = params.get("dataset")
@@ -400,6 +401,8 @@ class ProcessManager:
                 continue
             if value is None:
                 continue
+            if self._is_default(value, defaults.get(field)):
+                continue
             if isinstance(value, bool):
                 args.append(f"--{node}.{field}={str(value).lower()}")
             elif isinstance(value, list):
@@ -407,6 +410,20 @@ class ProcessManager:
             else:
                 args.append(f"--{node}.{field}={value}")
         return args
+
+    @staticmethod
+    def _is_default(value: object, default: object) -> bool:
+        """Return True when *value* equals the schema default.
+
+        Treats ``False`` as equivalent to a ``None`` default to compensate for
+        the frontend's ``el-switch`` coercing ``null`` to ``false`` on optional
+        boolean fields like ``compile_dynamic``.
+        """
+        if isinstance(value, list) and isinstance(default, list):
+            return value == default
+        if default is None and value is False:
+            return True
+        return value == default
 
     def preview_command(self, model_name: str, params: dict) -> str:
         """Return the CLI invocation that would be executed for these params."""
