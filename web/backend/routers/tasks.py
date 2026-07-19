@@ -305,3 +305,35 @@ def reorder_queue(
     """
     pm.reorder_queue(body.task_ids)
     return {"ok": True}
+
+
+class CommandPreviewRequest(BaseModel):
+    """Request model for previewing a task's CLI invocation.
+
+    Attributes:
+        model_name: The model to train.
+        params: Flat parameter dict (field_name -> value).
+    """
+
+    model_name: str
+    params: dict
+
+
+class CommandPreviewResponse(BaseModel):
+    """Response model for command preview.
+
+    Attributes:
+        command: The full CLI invocation string.
+    """
+
+    command: str
+
+
+@router.post("/preview-command", response_model=CommandPreviewResponse)
+def preview_command(
+    body: CommandPreviewRequest,
+    pm: ProcessManager = Depends(get_process_manager),
+):
+    """Return the CLI command that would be executed for the given params."""
+    command = pm.preview_command(body.model_name, body.params)
+    return CommandPreviewResponse(command=command)
