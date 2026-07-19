@@ -75,10 +75,8 @@
     </div>
 
     <CommandPreview
+      :command="previewCommandText"
       :modelName="modelName"
-      :dataset="dataset"
-      :params="params"
-      :schemaDefaultParams="schemaDefaultParams"
     >
       <el-button
         v-if="step === 'select'"
@@ -125,7 +123,7 @@ import { useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft } from '@element-plus/icons-vue'
-import { createTask } from '@/api/tasks'
+import { createTask, previewCommand } from '@/api/tasks'
 import { getDatasetMetadata, listDatasets, type DatasetInfo } from '@/api/datasets'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
@@ -139,6 +137,7 @@ const queryClient = useQueryClient()
 const step = ref<'select' | 'params'>('select')
 const submitting = ref(false)
 const params = ref<Record<string, any>>({})
+const previewCommandText = ref('')
 
 const envId = ref('')
 const customPythonPath = ref('')
@@ -192,17 +191,6 @@ const modelParamsQuery = useQuery({
 
 const selectionSchema = computed<ModelSchema | null>(() => modelParamsQuery.data.value ?? null)
 
-const schemaDefaultParams = computed(() => {
-  if (!selectionSchema.value) return {}
-  const defaults: Record<string, any> = {}
-  for (const g of selectionSchema.value.param_groups) {
-    for (const [k, f] of Object.entries(g.params)) {
-      defaults[k] = f.default
-    }
-  }
-  return defaults
-})
-
 async function onModelChange(val: string) {
   modelName.value = val
   if (!val) return
@@ -235,6 +223,28 @@ watch(() => datasetMetaQuery.data.value, (meta) => {
   kfoldCount.value = kfold
   selectedFolds.value = kfold && kfold >= 2 ? [0] : []
 })
+
+let _previewTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(
+  () => [modelName.value, dataset.value, params.value] as const,
+  ([model, ds, p]) => {
+    clearTimeout(_previewTimer)
+    if (!model) return
+    _previewTimer = setTimeout(async () => {
+      try {
+        const { command } = await previewCommand({
+          model_name: model,
+          params: { ...p, dataset: ds },
+        })
+        previewCommandText.value = command
+      } catch {
+        previewCommandText.value = ''
+      }
+    }, 200)
+  },
+  { deep: true },
+)
 
 function buildTaskName(fold?: number) {
   return fold === undefined

@@ -61,3 +61,15 @@ export const getTaskLogs = (id: number, offset = 0, limit = 10000) =>
 
 export const resizeTerminal = (id: number, cols: number, rows: number) =>
   api.post(`/tasks/${id}/resize`, { cols, rows }).then(r => r.data)
+
+export interface CommandPreviewParams {
+  model_name: string
+  params: Record<string, any>
+}
+
+export interface CommandPreviewResult {
+  command: string
+}
+
+export const previewCommand = (data: CommandPreviewParams) =>
+  api.post<CommandPreviewResult>('/tasks/preview-command', data).then(r => r.data)
