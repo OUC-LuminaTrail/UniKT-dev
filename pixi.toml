@@ -24,7 +24,7 @@ pytest = ">=9.0.2,<10"
 seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
 [feature.base.pypi-dependencies]
-swanlab = ">=0.8,<0.9"
+swanlab = ">=0.9,<1.0"
 psutil = ">=7.2.0"
 nvidia-ml-py = "*"
 py-cpuinfo = ">=9.0.0"
