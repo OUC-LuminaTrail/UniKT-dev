@@ -50,7 +50,7 @@ class Xes3g5mData(DataSource):
         super().__init__(
             dataset="xes3g5m",
             data_base_path=args.data_base_path,
-            data_url="https://drive.google.com/file/d/1eFiIYyh5O2V90RA0brammGH6EpHvPDQe/view",
+            data_url="http://cdn.lionhao.top/KTDataset/xes3g5m.zip",
             seed=args.seed,
         )
         self.args = args
