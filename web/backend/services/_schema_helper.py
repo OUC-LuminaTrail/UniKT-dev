@@ -3,6 +3,8 @@ import sys
 import typing
 from dataclasses import MISSING, fields
 
+from docstring_parser import parse
+
 sys.path.insert(0, ".")
 
 import model  # noqa: F401
@@ -37,30 +39,58 @@ def _base_type(tp):
     return tp
 
 
-def _field_spec(f):
+def _field_spec(f, help_map: dict[str, str] | None = None):
     ftype = f.type
     meta = f.metadata
+
+    # Extract Literal choices from the type annotation when metadata is missing
+    # them (e.g. compile_mode: Literal["default", "reduce-overhead", ...]).
+    choices = meta.get("choices")
+    if choices is None:
+        origin = typing.get_origin(ftype)
+        if origin is typing.Literal:
+            choices = list(typing.get_args(ftype))
+
     if typing.get_origin(ftype) is list:
         type_str = "list"
     elif ftype is bool:
         type_str = "bool"
     else:
         scalar = _base_type(ftype)
-        type_str = {int: "int", float: "float", str: "str"}.get(scalar, "str")
+        type_str = {int: "int", float: "float", str: "str", bool: "bool"}.get(
+            scalar, "str"
+        )
     default = f.default_factory() if f.default_factory is not MISSING else f.default
+
+    # Prefer metadata-driven help; fall back to the class docstring Args: section.
+    help_text = meta.get("help", "")
+    if not help_text and help_map:
+        help_text = help_map.get(f.name, "")
+
     return {
         "type": type_str,
         "default": default,
-        "help": meta.get("help", ""),
+        "help": help_text,
         "required": False,
-        "choices": meta.get("choices"),
+        "choices": choices,
         "short": meta.get("short"),
         "nargs": meta.get("nargs"),
     }
 
 
+def _parse_docstring_helps(cls: type) -> dict[str, str]:
+    """Extract ``{field_name: help_text}`` from the class docstring Args: section.
+
+    Delegates to ``docstring_parser`` which handles Google, NumPy, and Sphinx
+    styles uniformly, including multi-line descriptions.
+    """
+    doc = parse(cls.__doc__ or "")
+    return {p.arg_name: p.description for p in doc.params if p.description}
+
+
 def _group(group_name, node, cls):
-    params = {f.name: _field_spec(f) for f in fields(cls)}
+    help_map = _parse_docstring_helps(cls)
+    params = {f.name: _field_spec(f, help_map) for f in fields(cls)}
     return {"group_name": group_name, "node": node, "params": params}
 
 
