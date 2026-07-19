@@ -64,7 +64,6 @@ class ProcessManager:
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
         self._recover_monitors: dict[int, threading.Thread] = {}
-        self._temp_configs: dict[int, str] = {}
         self._gpu_slots_capacity = 1
         self._lock = threading.RLock()
         self._wake = threading.Event()
@@ -121,7 +120,7 @@ class ProcessManager:
                 return
 
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
-            cmd = base_cmd + self._build_cli_args(task_id, model_name, params)
+            cmd = base_cmd + self._build_cli_args(model_name, params)
             env_type, env_name = env_id.split(":", 1)
 
             task.command = " ".join(cmd)
@@ -254,7 +253,7 @@ class ProcessManager:
             custom_python_path = task.python_path or None
             base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
             params = json.loads(task.extra_params or "{}")
-            cmd = base_cmd + self._build_cli_args(task_id, task.model_name, params)
+            cmd = base_cmd + self._build_cli_args(task.model_name, params)
             env_type = task.env_type
 
             try:
@@ -371,54 +370,47 @@ class ProcessManager:
 
     def _build_cli_args(
         self,
-        task_id: int,
         model_name: str,
         params: dict,
     ) -> list[str]:
-        """Build a ``train.py --config`` invocation from frontend form values.
+        """Build a ``train.py`` invocation directly from frontend form values.
 
-        Routes the flat ``params`` dict into RunConfig nodes via the cached
-        schema route map, writes the nested dict to a temp yaml, and returns
-        the CLI args. The yaml is registered for cleanup on task end; a previous
-        temp for this task is removed first if launch re-stamps it. Uses mkstemp
-        (not the deprecated mktemp).
-        """
-        import tempfile
-
-        import yaml
-
-        nested = self._route_params(model_name, params)
-
-        # Replace a previous temp config if this task is re-stamped.
-        old = self._temp_configs.pop(task_id, None)
-        if old:
-            with contextlib.suppress(OSError):
-                os.unlink(old)
-        fd, yaml_path = tempfile.mkstemp(suffix=".yaml", prefix=f"run_{model_name}_")
-        os.close(fd)
-        Path(yaml_path).write_text(
-            yaml.safe_dump(nested, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-        self._temp_configs[task_id] = yaml_path
-        return ["train.py", "--config", yaml_path]
-
-    def _route_params(self, model_name: str, params: dict) -> dict:
-        """Route flat params into a RunConfig nested dict ``{node: {field: value}}``.
-
-        Uses the cached schema route map (field -> node), extracted once when
-        the model's params page is loaded, so routing stays torch-free. The
-        experiment node is absent from the schema (model_name is set by the
-        backend from the chosen model, not user-editable), so it is stamped here.
+        Routes the flat ``params`` dict into dotted ``--node.field=value`` flags
+        via the cached schema route map. Uses ``-m`` / ``-d`` short flags for
+        model and dataset.
         """
         routes = self._schema_extractor.get_field_routes(model_name)
-        nested: dict = {}
+        args = ["train.py", "-m", model_name]
+
+        dataset = params.get("dataset")
+        if dataset:
+            args.extend(["-d", str(dataset)])
+
         for field, value in params.items():
+            if field == "dataset":
+                continue
             node = routes.get(field)
-            if node and value is not None:
-                nested.setdefault(node, {})[field] = value
-        nested.setdefault("experiment", {})["model_name"] = model_name
-        return nested
+            if node is None:
+                if value is not None:
+                    logger.warning(
+                        "dropping param '%s' — not in schema for model '%s'",
+                        field,
+                        model_name,
+                    )
+                continue
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                args.append(f"--{node}.{field}={str(value).lower()}")
+            elif isinstance(value, list):
+                args.append(f"--{node}.{field}=[{','.join(str(v) for v in value)}]")
+            else:
+                args.append(f"--{node}.{field}={value}")
+        return args
+
+    def preview_command(self, model_name: str, params: dict) -> str:
+        """Return the CLI invocation that would be executed for these params."""
+        return " ".join(self._build_cli_args(model_name, params))
 
     def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
         """Resize a running task's PTY; return True on success."""
@@ -460,10 +452,6 @@ class ProcessManager:
         return True
 
     def _cleanup(self, task_id: int) -> None:
-        temp_config = self._temp_configs.pop(task_id, None)
-        if temp_config:
-            with contextlib.suppress(OSError):
-                os.unlink(temp_config)
         master_fd = self._master_fds.pop(task_id, None)
         if master_fd is not None:
             with contextlib.suppress(OSError):
