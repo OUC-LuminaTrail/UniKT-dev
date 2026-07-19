@@ -162,3 +162,6 @@ lint = "ruff check ."
 fmt = "ruff format ."
 ckf = [{ task = "lint" }, { task = "fmt" }]
 clean-cache = "find . -name '__pycache__' -type d -print0 | xargs -0 rm -rf && find . -name '*.py[co]' -delete && rm -rf runs/* swanlog/*"
+
+[pypi-dependencies]
+docstring-parser = "==0.18.0"
