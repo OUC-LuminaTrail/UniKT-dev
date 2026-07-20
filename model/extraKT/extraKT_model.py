@@ -11,7 +11,6 @@
 
 import math
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -53,7 +52,7 @@ def attention(q, k, v, d_k, mask, dropout, zero_pad, alibi=None):
         k: Key张量 [BS, n_heads, seq_len, d_k]
         v: Value张量 [BS, n_heads, seq_len, d_k]
         d_k: 每个头的维度
-        mask: 掩码矩阵
+        mask: 因果掩码 (bool, True=可参与)
         dropout: Dropout层
         zero_pad: 是否对第一行进行零填充
         alibi: ALiBi偏置矩阵 [1, n_heads, maxpos, maxpos]
@@ -61,7 +60,6 @@ def attention(q, k, v, d_k, mask, dropout, zero_pad, alibi=None):
     Returns:
         output: 注意力输出 [BS, seq_len, d_model]
     """
-    device = q.device
     scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(d_k)
     bs, head, seqlen = scores.size(0), scores.size(1), scores.size(2)
 
@@ -70,11 +68,11 @@ def attention(q, k, v, d_k, mask, dropout, zero_pad, alibi=None):
         seq_len = scores.size(-1)
         scores = scores + alibi[:, :, :seq_len, :seq_len]
 
-    scores.masked_fill_(mask == 0, -1e32)
+    scores.masked_fill_(~mask, -1e32)
     scores = F.softmax(scores, dim=-1)
 
     if zero_pad:
-        pad_zero = torch.zeros(bs, head, 1, seqlen).to(device)
+        pad_zero = torch.zeros(bs, head, 1, seqlen, device=scores.device)
         scores = torch.cat([pad_zero, scores[:, :, 1:, :]], dim=2)
 
     scores = dropout(scores)
@@ -186,20 +184,26 @@ class TransformerLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(d_model)
         self.dropout2 = nn.Dropout(dropout)
 
-    def forward(self, mask, query, key, values, apply_pos=True):
-        device = query.device
-        seqlen = query.size(1)
-        nopeek_mask = np.triu(np.ones((1, 1, seqlen, seqlen)), k=mask).astype("uint8")
-        src_mask = (torch.from_numpy(nopeek_mask) == 0).to(device)
+        self.register_buffer("_causal_mask_k0", None, persistent=False)
+        self.register_buffer("_causal_mask_k1", None, persistent=False)
+        self._mask_seqlen = 0
 
-        if mask == 0:
-            query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=True
-            )
-        else:
-            query2 = self.masked_attn_head(
-                query, key, values, mask=src_mask, zero_pad=False
-            )
+    def _build_causal_masks(self, seqlen: int, device: torch.device) -> None:
+        ones = torch.ones(seqlen, seqlen, dtype=torch.bool, device=device)
+        self._causal_mask_k1 = ones.tril().view(1, 1, seqlen, seqlen)
+        self._causal_mask_k0 = ones.tril(diagonal=-1).view(1, 1, seqlen, seqlen)
+        self._mask_seqlen = seqlen
+
+    def forward(self, mask, query, key, values, apply_pos=True):
+        seqlen = query.size(1)
+        cm = self._causal_mask_k1
+        if cm is None or seqlen != self._mask_seqlen or cm.device != query.device:
+            self._build_causal_masks(seqlen, query.device)
+        src_mask = self._causal_mask_k1 if mask else self._causal_mask_k0
+
+        query2 = self.masked_attn_head(
+            query, key, values, mask=src_mask, zero_pad=not mask
+        )
 
         query = query + self.dropout1(query2)
         query = self.layer_norm1(query)
