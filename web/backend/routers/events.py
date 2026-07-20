@@ -26,19 +26,27 @@ async def events():
     """Server-sent events stream of status changes."""
 
     async def gen():
-        with SessionLocal() as session:
-            snapshot = [
-                {"type": "task_status", "id": t.id, "status": t.status, "pid": t.pid}
-                for t in session.query(Task).all()
-            ] + [
-                {"type": "preprocess_status", "id": p.id, "status": p.status}
-                for p in session.query(PreprocessTask).all()
-            ]
-        for event in snapshot:
-            yield f"data: {json.dumps(event)}\n\n"
-
+        # Subscribe before snapshotting: events published in between are queued
+        # rather than lost. Duplicate snapshots are harmless — clients overwrite
+        # by id; a missed terminal status is not.
         q = event_bus.subscribe()
         try:
+            with SessionLocal() as session:
+                snapshot = [
+                    {
+                        "type": "task_status",
+                        "id": t.id,
+                        "status": t.status,
+                        "pid": t.pid,
+                    }
+                    for t in session.query(Task).all()
+                ] + [
+                    {"type": "preprocess_status", "id": p.id, "status": p.status}
+                    for p in session.query(PreprocessTask).all()
+                ]
+            for event in snapshot:
+                yield f"data: {json.dumps(event)}\n\n"
+
             while True:
                 try:
                     event = await asyncio.wait_for(q.get(), timeout=KEEPALIVE_SECONDS)

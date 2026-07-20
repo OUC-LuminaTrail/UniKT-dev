@@ -63,9 +63,13 @@ def get_dataset_metadata(dataset_name: str):
         The parsed metadata dictionary.
 
     Raises:
-        HTTPException: 404 if the dataset metadata file does not exist,
-            500 if it cannot be read.
+        HTTPException: 404 if the dataset is unknown or its metadata file is
+            absent, 500 if it cannot be read.
     """
+    # Whitelist the path segment so a decoded "../../x" cannot traverse out of
+    # DATA_DIR.
+    if dataset_name not in get_supported_datasets():
+        raise HTTPException(404, f"Dataset '{dataset_name}' not found")
     meta_path = DATA_DIR / dataset_name / "metadata.json"
     if not meta_path.exists():
         raise HTTPException(404, f"Dataset '{dataset_name}' not found")

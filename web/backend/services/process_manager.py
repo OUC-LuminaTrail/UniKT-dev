@@ -41,6 +41,16 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
 
 
+def _pid_reused(proc: psutil.Process, started_at: datetime | None) -> bool:
+    """Return True when a live pid's process started long after the task did."""
+    try:
+        if started_at and proc.create_time() > started_at.timestamp() + 60:
+            return True
+    except (psutil.NoSuchProcess, OSError):
+        return True
+    return False
+
+
 class ProcessManager:
     """Manages experiment task subprocesses with a multi-GPU execution queue.
 
@@ -249,12 +259,24 @@ class ProcessManager:
             if not task:
                 return False
 
-            env_id = f"{task.env_type}:{task.env_name}"
-            custom_python_path = task.python_path or None
-            base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
-            params = json.loads(task.extra_params or "{}")
-            cmd = base_cmd + self._build_cli_args(task.model_name, params)
-            env_type = task.env_type
+            try:
+                env_id = f"{task.env_type}:{task.env_name}"
+                custom_python_path = task.python_path or None
+                base_cmd = self._env_manager.resolve_command(env_id, custom_python_path)
+                params = json.loads(task.extra_params or "{}")
+                cmd = base_cmd + self._build_cli_args(task.model_name, params)
+                env_type = task.env_type
+            except Exception:
+                logger.exception("command build failed for task %s", task_id)
+                transition(
+                    session,
+                    Task,
+                    task_id,
+                    "pending",
+                    "failed",
+                    finished_at=datetime.now(),
+                )
+                return False
 
             try:
                 master_fd, slave_fd = pty.openpty()
@@ -300,6 +322,13 @@ class ProcessManager:
                 )
                 return False
 
+            # Register the proc before the DB transition so a concurrent
+            # stop_task/kill_task sees and can terminate it instead of racing
+            # the transition and orphaning the subprocess.
+            with self._lock:
+                self._running[task_id] = proc
+                self._master_fds[task_id] = master_fd
+
             extra: dict = {}
             if env_type == "custom" and custom_python_path:
                 extra["python_path"] = custom_python_path
@@ -320,19 +349,15 @@ class ProcessManager:
                 with contextlib.suppress(Exception):
                     self._kill_process_group(proc.pid, signal.SIGKILL)
                     proc.wait(timeout=3)
-                os.close(master_fd)
+                self._cleanup(task_id)
                 return False
-
-        with self._lock:
-            self._running[task_id] = proc
-            self._master_fds[task_id] = master_fd
 
         reader = threading.Thread(
             target=self._read_pty, args=(task_id, master_fd), daemon=True
         )
-        reader.start()
         with self._lock:
             self._readers[task_id] = reader
+        reader.start()
         return True
 
     def _read_pty(self, task_id: int, master_fd: int) -> None:
@@ -353,16 +378,9 @@ class ProcessManager:
                         logger.warning("log write failed for task %s", task_id)
                         break
         except Exception:
+            # Don't transition — _reap owns the terminal transition and records
+            # the real exit code; transitioning here races it and loses the code.
             logger.exception("reader thread fatal error for task %s", task_id)
-            with SessionLocal() as session:
-                transition(
-                    session,
-                    Task,
-                    task_id,
-                    "running",
-                    "failed",
-                    finished_at=datetime.now(),
-                )
         with contextlib.suppress(OSError):
             os.close(master_fd)
         with self._lock:
@@ -465,17 +483,26 @@ class ProcessManager:
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=3)
 
+        if proc.poll() is None:
+            # Stuck in uninterruptible sleep; leave it tracked so _reap keeps
+            # polling instead of orphaning the Popen handle.
+            logger.warning(
+                "task %s did not die after SIGKILL; leaving tracked", task_id
+            )
+            return False
         self._cleanup(task_id)
         return True
 
     def _cleanup(self, task_id: int) -> None:
+        # Join the reader before closing master_fd so the PTY kernel buffer
+        # drains fully and the final log bytes are not lost.
+        reader = self._readers.pop(task_id, None)
+        if reader and reader.is_alive():
+            reader.join(timeout=5)
         master_fd = self._master_fds.pop(task_id, None)
         if master_fd is not None:
             with contextlib.suppress(OSError):
                 os.close(master_fd)
-        reader = self._readers.pop(task_id, None)
-        if reader and reader.is_alive():
-            reader.join(timeout=5)
         with self._lock:
             self._running.pop(task_id, None)
 
@@ -486,9 +513,8 @@ class ProcessManager:
             rc = proc.poll()
             if rc is None:
                 continue
-            self._cleanup(task_id)
+            to = "completed" if rc == 0 else "failed"
             with SessionLocal() as session:
-                to = "completed" if rc == 0 else "failed"
                 transition(
                     session,
                     Task,
@@ -499,6 +525,7 @@ class ProcessManager:
                     finished_at=datetime.now(),
                     pid=None,
                 )
+            self._cleanup(task_id)
 
     def stop_task(self, task_id: int) -> bool:
         """Gracefully stop a task (queue removal or SIGINT)."""
@@ -650,6 +677,21 @@ class ProcessManager:
 
         return False
 
+    def force_cleanup_interrupted(self, task_id: int) -> None:
+        """SIGKILL a lingering interrupted task's pid and drop its recover monitor.
+
+        Used by the delete endpoint to reclaim an interrupted task whose orphan
+        process and recover-monitor thread would otherwise outlive its row.
+        """
+        with SessionLocal() as session:
+            task = session.query(Task).get(task_id)
+            pid = task.pid if task else None
+        if pid:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+                os.kill(pid, signal.SIGKILL)
+        with self._lock:
+            self._recover_monitors.pop(task_id, None)
+
     def recover_tasks(self) -> None:
         """Reattach live orphans, re-queue dead in-flight tasks, then queue pending.
 
@@ -661,14 +703,15 @@ class ProcessManager:
         """
         with SessionLocal() as session:
             inflight = (
-                session.query(Task.id, Task.pid, Task.status)
+                session.query(Task.id, Task.pid, Task.status, Task.started_at)
                 .filter(Task.status.in_(["running", "stopping", "interrupted"]))
                 .all()
             )
-            for task_id, pid, prior_status in inflight:
+            for task_id, pid, prior_status, started_at in inflight:
                 if pid and psutil.pid_exists(pid):
                     try:
-                        if psutil.Process(pid).is_running():
+                        proc = psutil.Process(pid)
+                        if proc.is_running() and not _pid_reused(proc, started_at):
                             if prior_status != "interrupted":
                                 transition(
                                     session, Task, task_id, prior_status, "interrupted"

@@ -8,6 +8,7 @@ import contextlib
 import json
 import os
 import tempfile
+import threading
 
 from config import DATABASE_PATH
 
@@ -37,6 +38,7 @@ class SettingsManager:
                 the standard location next to the database file.
         """
         self._path = path or SETTINGS_PATH
+        self._lock = threading.Lock()
 
     def load(self) -> dict:
         """Load settings from the JSON file, merged with defaults.
@@ -62,18 +64,21 @@ class SettingsManager:
         Args:
             data: A dict of setting key-value pairs to persist.
         """
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        current = self.load()
-        merged = {**current, **data}
-        fd, tmp = tempfile.mkstemp(dir=str(self._path.parent))
-        try:
-            with os.fdopen(fd, "w") as f:
-                json.dump(merged, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, str(self._path))
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)
-            raise
+        # Hold the lock across load-merge-write so concurrent saves (threadpool
+        # endpoints) cannot overwrite each other's field changes.
+        with self._lock:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            current = self.load()
+            merged = {**current, **data}
+            fd, tmp = tempfile.mkstemp(dir=str(self._path.parent))
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(merged, f, indent=2, ensure_ascii=False)
+                os.replace(tmp, str(self._path))
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+                raise
 
     def get_default_env(self) -> str | None:
         """Return the default environment ID.

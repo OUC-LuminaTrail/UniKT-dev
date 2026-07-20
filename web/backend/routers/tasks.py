@@ -210,8 +210,8 @@ def resize_terminal(
     Returns:
         A dict with ``ok`` set to ``True``.
     """
-    pm.resize_pty(task_id, body.cols, body.rows)
-    return {"ok": True}
+    ok = pm.resize_pty(task_id, body.cols, body.rows)
+    return {"ok": ok}
 
 
 @router.delete("/{task_id}")
@@ -227,14 +227,18 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
 
     Raises:
         HTTPException: 404 if the task does not exist,
-            400 if the task is still running.
+            400 if the task is still active (running or stopping).
     """
     with SessionLocal() as session:
         task = session.query(Task).get(task_id)
         if not task:
             raise HTTPException(404, "Task not found")
-        if task.status == "running":
-            raise HTTPException(400, "Cannot delete running task")
+        if task.status in ("running", "stopping"):
+            raise HTTPException(400, "Cannot delete active task")
+        if task.status == "interrupted":
+            # Kill the orphan pid and drop the recover monitor before the row
+            # goes away, so neither outlives the delete.
+            pm.force_cleanup_interrupted(task_id)
         if task.status == "pending":
             pm.remove_from_queue(task_id)
         session.query(LogChunk).filter_by(source="task", source_id=task_id).delete()

@@ -5,6 +5,7 @@ pynvml and system resources via psutil, with configurable caching.
 """
 
 import contextlib
+import logging
 import os
 import threading
 import time
@@ -12,6 +13,8 @@ import time
 import psutil
 import pynvml
 from schemas import GpuInfo, GpuStatusResponse, SystemStatusResponse
+
+logger = logging.getLogger(__name__)
 
 
 class GpuMonitor:
@@ -39,8 +42,10 @@ class GpuMonitor:
             pynvml.nvmlInit()
             self._nvml_initialized = True
             self._device_count = pynvml.nvmlDeviceGetCount()
-        except (pynvml.NVMLError, Exception):
+        except pynvml.NVMLError:
             pass
+        except Exception:
+            logger.exception("Unexpected error initialising NVML")
 
     @property
     def device_count(self) -> int:
@@ -111,7 +116,10 @@ class GpuMonitor:
                     )
                 )
             return gpus
-        except (pynvml.NVMLError, Exception):
+        except pynvml.NVMLError:
+            return []
+        except Exception:
+            logger.exception("Unexpected error querying NVML")
             return []
 
     def get_system_status(self) -> SystemStatusResponse:

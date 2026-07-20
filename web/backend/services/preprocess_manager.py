@@ -54,6 +54,16 @@ def _snapshot(row: PreprocessTask) -> PreprocessTaskInfo:
     )
 
 
+def _pid_reused(proc: psutil.Process, started_at: datetime | None) -> bool:
+    """Return True when a live pid's process started long after the task did."""
+    try:
+        if started_at and proc.create_time() > started_at.timestamp() + 60:
+            return True
+    except (psutil.NoSuchProcess, OSError):
+        return True
+    return False
+
+
 class PreprocessManager:
     """Manages lifecycle of preprocess subprocesses."""
 
@@ -125,6 +135,11 @@ class PreprocessManager:
     def _spawn(self, task_id: int, command: list[str]) -> bool:
         try:
             master_fd, slave_fd = pty.openpty()
+        except OSError:
+            logger.exception("preprocess openpty failed for task %s", task_id)
+            return False
+
+        try:
             winsize = struct.pack("HHHH", 24, 80, 0, 0)
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
             env = os.environ.copy()
@@ -142,6 +157,10 @@ class PreprocessManager:
             os.close(slave_fd)
         except Exception:
             logger.exception("preprocess spawn failed for task %s", task_id)
+            with contextlib.suppress(OSError):
+                os.close(slave_fd)
+            with contextlib.suppress(OSError):
+                os.close(master_fd)
             return False
 
         with SessionLocal() as session:
@@ -183,16 +202,9 @@ class PreprocessManager:
                         logger.warning("log write failed for preprocess %s", task_id)
                         break
         except Exception:
+            # Don't transition — closing master_fd below SIGPIPEs the subprocess
+            # and _monitor records the real exit code via the normal path.
             logger.exception("reader thread fatal error for preprocess %s", task_id)
-            with SessionLocal() as session:
-                transition(
-                    session,
-                    PreprocessTask,
-                    task_id,
-                    "running",
-                    "failed",
-                    finished_at=datetime.now(),
-                )
         with contextlib.suppress(OSError):
             os.close(master_fd)
         with self._lock:
@@ -225,13 +237,15 @@ class PreprocessManager:
             )
 
     def _cleanup(self, task_id: int) -> None:
+        # Join the reader before closing master_fd so the PTY kernel buffer
+        # drains fully and the final log bytes are not lost.
+        reader = self._readers.pop(task_id, None)
+        if reader and reader.is_alive():
+            reader.join(timeout=5)
         master_fd = self._master_fds.pop(task_id, None)
         if master_fd is not None:
             with contextlib.suppress(OSError):
                 os.close(master_fd)
-        reader = self._readers.pop(task_id, None)
-        if reader and reader.is_alive():
-            reader.join(timeout=5)
         with self._lock:
             self._procs.pop(task_id, None)
             self._monitors.pop(task_id, None)
@@ -338,16 +352,19 @@ class PreprocessManager:
         with SessionLocal() as session:
             running = (
                 session.query(
-                    PreprocessTask.id, PreprocessTask.pid, PreprocessTask.status
+                    PreprocessTask.id,
+                    PreprocessTask.pid,
+                    PreprocessTask.status,
+                    PreprocessTask.started_at,
                 )
                 .filter(PreprocessTask.status.in_(["running", "stopping"]))
                 .all()
             )
-            for task_id, pid, prior_status in running:
+            for task_id, pid, prior_status, started_at in running:
                 if pid and psutil.pid_exists(pid):
                     try:
                         proc = psutil.Process(pid)
-                        if proc.is_running():
+                        if proc.is_running() and not _pid_reused(proc, started_at):
                             transition(
                                 session,
                                 PreprocessTask,

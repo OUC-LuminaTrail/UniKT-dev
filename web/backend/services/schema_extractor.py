@@ -62,8 +62,9 @@ class SchemaExtractor:
             env_manager: PythonEnvManager (or compatible) for command resolution.
         """
         self._env_manager = env_manager
-        self._models: list[str] | None = None
+        self._models: list[str] = []
         self._schemas: dict[str, list[dict]] = {}
+        self._loaded: bool = False
 
     def _resolve_base_cmd(self) -> list[str]:
         """Resolve the base Python command for the helper script.
@@ -83,7 +84,7 @@ class SchemaExtractor:
         Parses stdout lines into model lists and parameter schemas.
         Errors are recorded so errored models are excluded from the model list.
         """
-        if self._models is not None:
+        if self._loaded:
             return
         try:
             base = self._resolve_base_cmd()
@@ -92,13 +93,12 @@ class SchemaExtractor:
                 cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
             )
         except EnvironmentNotConfigured as e:
-            # No env configured (user skipped the setup wizard) — fail safe with
-            # an empty model list rather than crashing the schemas endpoint.
+            # No env configured (user skipped the setup wizard); leave _loaded
+            # False so the next call retries once the wizard sets one.
             logger.error("Schema extraction skipped — %s", e)
-            self._models = []
             return
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            self._models = []
+            # Transient failure; leave _loaded False so the next call retries.
             return
         all_models: list[str] = []
         errored: set[str] = set()
@@ -116,6 +116,7 @@ class SchemaExtractor:
             elif entry["type"] == "error":
                 errored.add(entry["model"])
         self._models = [m for m in all_models if m not in errored]
+        self._loaded = True
 
     def list_models(self) -> list[str]:
         """Return the list of available model names.

@@ -16,14 +16,24 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_engine(f"sqlite:///{DATABASE_PATH}", echo=False)
+# check_same_thread=False: the default QueuePool reuses connections across the
+# HTTP threadpool and the scheduler/reader/recover worker threads, which the
+# sqlite3 default (check_same_thread=True) rejects. WAL + busy_timeout make
+# concurrent writes wait rather than fail.
+engine = create_engine(
+    f"sqlite:///{DATABASE_PATH}",
+    echo=False,
+    connect_args={"check_same_thread": False},
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(bind=engine)
 
 
 def _on_connect(dbapi_connection, _connection_record):
-    """Configure WAL journal mode and NORMAL synchronous on connection."""
+    """Configure WAL, NORMAL synchronous, and a busy timeout on connection."""
     dbapi_connection.execute("PRAGMA journal_mode=WAL")
     dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+    dbapi_connection.execute("PRAGMA busy_timeout=5000")
 
 
 event.listen(engine, "connect", _on_connect)

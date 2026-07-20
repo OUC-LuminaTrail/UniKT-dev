@@ -14,13 +14,17 @@ router = APIRouter(tags=["logs"])
 
 
 @router.get("/api/tasks/{task_id}/logs")
-def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=100000)):
+def get_logs(
+    task_id: int,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
     """Fetch log content for a task from its log file.
 
     Args:
         task_id: The task identifier.
         offset: Byte offset to start reading from.
-        limit: Maximum number of 64KB chunks to return (1-100000).
+        limit: Maximum number of 64KB chunks to return (1-500).
 
     Returns:
         A dict with ``content`` (decoded text) and ``total_bytes``.
@@ -36,7 +40,9 @@ def get_logs(task_id: int, offset: int = 0, limit: int = Query(10000, ge=1, le=1
 
 
 @router.websocket("/api/tasks/{task_id}/logs/stream")
-async def stream_logs(websocket: WebSocket, task_id: int, from_offset: int = Query(0)):
+async def stream_logs(
+    websocket: WebSocket, task_id: int, from_offset: int = Query(0, ge=0)
+):
     """Stream task logs live over a WebSocket from the task's log file.
 
     Args:

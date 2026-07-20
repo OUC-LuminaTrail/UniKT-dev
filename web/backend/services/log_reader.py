@@ -12,6 +12,8 @@ from pathlib import Path
 from services.log_watcher import _find_safe_boundary
 
 CHUNK_SIZE = 65536
+# Hard cap on a single read so a huge limit cannot pull gigabytes into memory.
+MAX_READ_BYTES = 16 * 1024 * 1024
 
 
 def read_log_text(path: Path, offset: int = 0, limit: int = 10000) -> dict:
@@ -29,7 +31,7 @@ def read_log_text(path: Path, offset: int = 0, limit: int = 10000) -> dict:
     if not path.is_file():
         return {"content": "", "total_bytes": 0}
     size = path.stat().st_size
-    to_read = min(size - offset, CHUNK_SIZE * limit)
+    to_read = min(size - offset, CHUNK_SIZE * limit, MAX_READ_BYTES)
     if to_read <= 0:
         return {"content": "", "total_bytes": size}
     with open(path, "rb") as f:
