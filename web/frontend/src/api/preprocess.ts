@@ -1,4 +1,5 @@
 import api from './index'
+import type { ParamGroup } from './schemas'
 
 export interface PreprocessTaskInfo {
   id: number
@@ -28,3 +29,9 @@ export const getPreprocess = (id: number) =>
 
 export const stopPreprocess = (id: number) =>
   api.post(`/preprocess/${id}/stop`).then(r => r.data)
+
+export const getPreprocessSchema = (action: string) =>
+  api.get<ParamGroup[]>(`/schemas/preprocess/${action}`).then(r => r.data)
+
+export const previewPreprocess = (data: PreprocessStartRequest) =>
+  api.post<{ command: string }>('/preprocess/preview', data).then(r => r.data.command)

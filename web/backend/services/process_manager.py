@@ -31,6 +31,7 @@ from config import TASK_LOGS_DIR
 from database import SessionLocal
 from models import Task
 
+from services.cli_builder import build_param_flags
 from services.gpu_monitor import GpuMonitor
 from services.python_env import PythonEnvManager
 from services.schema_extractor import SchemaExtractor
@@ -393,9 +394,9 @@ class ProcessManager:
     ) -> list[str]:
         """Build a ``train.py`` invocation directly from frontend form values.
 
-        Routes the flat ``params`` dict into dotted ``--node.field=value`` flags
-        via the cached schema route map. Uses ``-m`` / ``-d`` short flags for
-        model and dataset.  Parameters matching their schema default are omitted.
+        Routes flat params into dotted ``--node.field=value`` flags via cached
+        schema routes; ``-m``/``-d`` short flags for model and dataset;
+        default-equal params are omitted.
         """
         routes = self._schema_extractor.get_field_routes(model_name)
         defaults = self._schema_extractor.get_field_defaults(model_name)
@@ -405,43 +406,9 @@ class ProcessManager:
         if dataset:
             args.extend(["-d", str(dataset)])
 
-        for field, value in params.items():
-            if field == "dataset":
-                continue
-            node = routes.get(field)
-            if node is None:
-                if value is not None:
-                    logger.warning(
-                        "dropping param '%s' — not in schema for model '%s'",
-                        field,
-                        model_name,
-                    )
-                continue
-            if value is None:
-                continue
-            if self._is_default(value, defaults.get(field)):
-                continue
-            if isinstance(value, bool):
-                args.append(f"--{node}.{field}={str(value).lower()}")
-            elif isinstance(value, list):
-                args.append(f"--{node}.{field}=[{','.join(str(v) for v in value)}]")
-            else:
-                args.append(f"--{node}.{field}={value}")
+        form_params = {k: v for k, v in params.items() if k != "dataset"}
+        args.extend(build_param_flags(form_params, routes, defaults))
         return args
-
-    @staticmethod
-    def _is_default(value: object, default: object) -> bool:
-        """Return True when *value* equals the schema default.
-
-        Treats ``False`` as equivalent to a ``None`` default to compensate for
-        the frontend's ``el-switch`` coercing ``null`` to ``false`` on optional
-        boolean fields like ``compile_dynamic``.
-        """
-        if isinstance(value, list) and isinstance(default, list):
-            return value == default
-        if default is None and value is False:
-            return True
-        return value == default
 
     def preview_command(self, model_name: str, params: dict) -> str:
         """Return the CLI invocation that would be executed for these params."""

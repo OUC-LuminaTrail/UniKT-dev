@@ -55,7 +55,7 @@ class GeneralConfig:
     log_dir: str | None = None
     checkpoint_path: str | None = None
     device: str | None = None
-    seed: int = 42
+    seed: int = field(default=42, metadata={"preprocess_ui": True})
     no_deterministic: bool = False
     swanlab: bool = True
     log_batch_metrics: bool = False
@@ -121,15 +121,49 @@ class RunDataConfig:
     dataset: str = ""
     data_base_path: str = "./data"
     fold: int = 0
-    kfold: int = 5
+    kfold: int = field(default=5, metadata={"preprocess_ui": True})
     test_ratio: float = 0.2
-    min_seq_len: int = 3
-    max_seq_len: int = 200
-    sample_size: int | None = None
-    sample_ratio: float | None = None
-    sample_strategy: Literal["random", "stratified", "time"] = "random"
-    sample_attempts_bins: list[int] = field(default_factory=lambda: [20, 100])
-    sample_correct_bins: list[float] = field(default_factory=lambda: [0.4, 0.8])
+    min_seq_len: int = field(default=3, metadata={"preprocess_ui": True})
+    max_seq_len: int = field(default=200, metadata={"preprocess_ui": True})
+    sample_size: int | None = field(default=None, metadata={"preprocess_ui": True})
+    sample_ratio: float | None = field(default=None, metadata={"preprocess_ui": True})
+    sample_strategy: Literal["random", "stratified", "time"] = field(
+        default="random", metadata={"preprocess_ui": True}
+    )
+    sample_attempts_bins: list[int] = field(
+        default_factory=lambda: [20, 100], metadata={"preprocess_ui": True}
+    )
+    sample_correct_bins: list[float] = field(
+        default_factory=lambda: [0.4, 0.8], metadata={"preprocess_ui": True}
+    )
+
+
+@dataclass
+class DownloadConfig:
+    """Options for the data_process.py download subcommand.
+
+    Args:
+        data_url: Override URL for downloading.
+        force: Force re-download even if the file exists.
+        max_retries: Maximum download retries.
+        num_threads: Parallel download threads.
+    """
+
+    data_url: str | None = None
+    force: bool = False
+    max_retries: int = 3
+    num_threads: int = 4
+
+
+@dataclass
+class ProcessConfig:
+    """Options for the data_process.py process subcommand.
+
+    Args:
+        extra: Extra processing steps (e.g. windowlate).
+    """
+
+    extra: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -222,10 +256,12 @@ def config_to_dict(config) -> dict:
 __all__ = [
     "_FRAMEWORK_NODES",
     "CompileConfig",
+    "DownloadConfig",
     "EarlyStoppingConfig",
     "ExperimentConfig",
     "GeneralConfig",
     "ModelConfig",
+    "ProcessConfig",
     "RunConfig",
     "RunDataConfig",
     "build_run_config_schema",

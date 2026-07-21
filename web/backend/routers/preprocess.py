@@ -83,12 +83,45 @@ def start_preprocess(
         )
     except EnvironmentNotConfigured as e:
         raise HTTPException(400, str(e))
+    except KeyError as e:
+        raise HTTPException(503, f"Preprocess schema unavailable: {e}")
     return {
         "id": task.id,
         "command": task.command,
         "status": task.status,
         "started_at": task.started_at.isoformat() if task.started_at else None,
     }
+
+
+@router.post("/preview")
+def preview_preprocess(
+    body: PreprocessStartRequest,
+    pm: PreprocessManager = Depends(get_preprocess_manager),
+):
+    """Preview the command for a preprocess config without launching.
+
+    Args:
+        body: The preprocess start request (action/dataset/params/env).
+        pm: Injected PreprocessManager singleton.
+
+    Returns:
+        A dict with the preview ``command`` string.
+
+    Raises:
+        HTTPException: 400 if action/dataset invalid or env not configured;
+            503 if the preprocess schema is unavailable.
+    """
+    if body.action not in ("download", "process"):
+        raise HTTPException(400, "action must be 'download' or 'process'")
+    if not body.dataset:
+        raise HTTPException(400, "dataset is required")
+    try:
+        command = pm.preview_command(body.action, body.dataset, body.params)
+    except EnvironmentNotConfigured as e:
+        raise HTTPException(400, str(e))
+    except KeyError as e:
+        raise HTTPException(503, f"Preprocess schema unavailable: {e}")
+    return {"command": command}
 
 
 @router.get("")

@@ -80,16 +80,10 @@
           </div>
         </div>
 
-        <PreprocessForm
-          ref="preprocessFormRef"
-          :action="action"
-          @update:download-opts="onDownloadOptsUpdate"
-          @update:process-opts="onProcessOptsUpdate"
-        />
-
+        <PreprocessForm :schema="schema" v-model="opts" />
       </div>
 
-      <CommandPreview :command="previewCommand">
+      <CommandPreview :command="preview">
         <el-button
           type="primary"
           size="large"
@@ -128,8 +122,9 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Coin, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
 import { listDatasets, getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
-import { startPreprocess, getPreprocess, stopPreprocess, listPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
+import { startPreprocess, getPreprocess, stopPreprocess, listPreprocess, getPreprocessSchema, previewPreprocess, type PreprocessTaskInfo } from '@/api/preprocess'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
+import type { ParamGroup } from '@/api/schemas'
 import CommandPreview from '@/components/task/CommandPreview.vue'
 import LogCard from '@/components/task/LogCard.vue'
 import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
@@ -149,50 +144,13 @@ const dataset = ref('')
 const selectedEnvId = ref<string | null>(null)
 const customPythonPath = ref('')
 
-const preprocessFormRef = ref<InstanceType<typeof PreprocessForm> | null>(null)
-
-const currentDownloadOpts = ref({
-  force: false,
-  max_retries: 3,
-  num_threads: 4,
-})
-
-const currentProcessOpts = ref({
-  min_seq_len: 10,
-  max_seq_len: 200,
-  kfold: 5,
-  seed: 42,
-  sample_size: null as number | null,
-  sample_ratio: null as number | null,
-  sample_strategy: '',
-  sample_attempts_bins: '',
-  sample_correct_bins: '',
-  extra: '',
-})
-
-const onDownloadOptsUpdate = (opts: typeof currentDownloadOpts.value) => {
-  currentDownloadOpts.value = opts
-}
-
-const onProcessOptsUpdate = (opts: typeof currentProcessOpts.value) => {
-  currentProcessOpts.value = opts
-}
-
-const taskId = ref(0)
-const taskInfo = ref<PreprocessTaskInfo | null>(null)
-
-const activeTasksQuery = useQuery({
-  queryKey: ['preprocess-active-tasks'],
-  queryFn: listPreprocess,
-})
-
+const activeTasksQuery = useQuery({ queryKey: ['preprocess-active-tasks'], queryFn: listPreprocess })
 const datasetsQuery = useQuery({ queryKey: ['datasets'], queryFn: listDatasets })
 const envsQuery = useQuery({ queryKey: ['environments'], queryFn: listEnvironments })
 
 const datasets = computed<DatasetInfo[]>(() => datasetsQuery.data.value ?? [])
 const environments = computed<EnvironmentInfo[]>(() => envsQuery.data.value ?? [])
-// Download offers every dataset; process only those with raw data or already
-// processed — empty ones have nothing to process.
+// Download offers every dataset; process only those with raw data or already processed.
 const visibleDatasets = computed<DatasetInfo[]>(() =>
   action.value === 'download'
     ? datasets.value
@@ -207,6 +165,34 @@ const loading = computed(() =>
   envsQuery.isPending.value
 )
 
+// Params/defaults/routes all come from backend reflection (same source as task launch).
+const schemaQuery = useQuery({
+  queryKey: computed(() => ['preprocess-schema', action.value]),
+  queryFn: () => getPreprocessSchema(action.value),
+})
+const schema = computed<ParamGroup[]>(() => schemaQuery.data.value ?? [])
+
+const defaults = computed<Record<string, any>>(() => {
+  const d: Record<string, any> = {}
+  for (const g of schema.value) {
+    for (const [k, f] of Object.entries(g.params)) d[k] = f.default
+  }
+  return d
+})
+const opts = ref<Record<string, any>>({})
+// Reset opts only on first load and action switch — NOT on schema refetch
+// (e.g. window refocus), so user edits survive background revalidation.
+const needReset = ref(true)
+watch(action, () => { needReset.value = true })
+watch(schema, (sch) => {
+  if (!sch.length || !needReset.value) return
+  opts.value = { ...defaults.value }
+  needReset.value = false
+}, { immediate: true })
+
+const taskId = ref(0)
+const taskInfo = ref<PreprocessTaskInfo | null>(null)
+
 const preprocessTaskQuery = useQuery({
   queryKey: computed(() => ['preprocess-task', taskId.value]),
   queryFn: () => getPreprocess(taskId.value),
@@ -220,8 +206,7 @@ const preprocessTaskQuery = useQuery({
 watch(() => preprocessTaskQuery.data.value, (data) => {
   if (!data) return
   taskInfo.value = data
-  // A finished download/process changes on-disk state — refresh dataset statuses
-  // so cards transition empty→downloaded→ready without a manual reload.
+  // A finished download/process changes on-disk state; refresh dataset statuses so cards update.
   if (data.status === 'completed') {
     queryClient.invalidateQueries({ queryKey: ['datasets'] })
   }
@@ -240,9 +225,9 @@ function onDatasetClick(name: string) {
   dataset.value = name
 }
 
-// 挂载时恢复正在运行的任务：immediate 处理 query 缓存被同步命中的情况
-// （重新挂载时 data.value 已有值，惰性 watch 不会触发）；
-// 在数据就绪后才手动停止，避免 once 在 tasks 为空时提前失效导致后续真实数据不再触发
+// Resume an in-flight task on mount: `immediate` handles the query cache being
+// hit synchronously (data.value already set on remount, so a lazy watch wouldn't
+// fire); stop manually once data is ready so `once` doesn't burn out on empty.
 const stopRecover = watch(() => activeTasksQuery.data.value, (tasks) => {
   if (!tasks) return
   const activeTask = tasks.find(t => t.status === 'running')
@@ -269,37 +254,34 @@ const statusLabel = computed(() => {
   return taskInfo.value ? map[taskInfo.value.status] || taskInfo.value.status : ''
 })
 
-const previewCommand = computed(() => {
-  let envPrefix = 'python'
-  if (selectedEnvId.value) {
-    const env = environments.value.find(e => e.id === selectedEnvId.value)
-    if (env) {
-      if (env.type === 'pixi') envPrefix = `pixi run --environment ${env.name} python`
-      else if (env.type === 'conda') envPrefix = `conda run -n ${env.name} --no-banner python`
-      else if (customPythonPath.value) envPrefix = customPythonPath.value
-    }
-  }
-  const parts = [envPrefix, 'data_process.py', action.value, '-d', dataset.value || '<dataset>']
-  if (action.value === 'download') {
-    const o = currentDownloadOpts.value
-    if (o.force) parts.push('--force')
-    if (o.max_retries !== 3) parts.push('--max_retries', String(o.max_retries))
-    if (o.num_threads !== 4) parts.push('--num_threads', String(o.num_threads))
-  } else {
-    const o = currentProcessOpts.value
-    if (o.min_seq_len !== 10) parts.push('--min_seq_len', String(o.min_seq_len))
-    if (o.max_seq_len !== 200) parts.push('--max_seq_len', String(o.max_seq_len))
-    if (o.kfold !== 5) parts.push('--kfold', String(o.kfold))
-    if (o.seed !== 42) parts.push('--seed', String(o.seed))
-    if (o.sample_size) parts.push('--sample_size', String(o.sample_size))
-    if (o.sample_ratio) parts.push('--sample_ratio', String(o.sample_ratio))
-    if (o.sample_strategy) parts.push('--sample_strategy', o.sample_strategy)
-    if (o.sample_attempts_bins) parts.push('--sample_attempts_bins', o.sample_attempts_bins)
-    if (o.sample_correct_bins) parts.push('--sample_correct_bins', o.sample_correct_bins)
-    if (o.extra) parts.push('--extra', o.extra)
-  }
-  return parts.join(' ')
-})
+// Command preview comes from the backend (single source of truth; no client
+// mirror). No env prefix — mirrors the task-launch preview (train.py ...).
+const baseCommand = () =>
+  ['data_process.py', action.value, '-d', dataset.value || '<dataset>'].join(' ')
+
+const preview = ref('')
+let previewTimer: ReturnType<typeof setTimeout> | null = null
+watch(
+  [action, dataset, opts, selectedEnvId, customPythonPath],
+  () => {
+    if (previewTimer) clearTimeout(previewTimer)
+    previewTimer = setTimeout(async () => {
+      if (!dataset.value) { preview.value = baseCommand(); return }
+      try {
+        preview.value = await previewPreprocess({
+          action: action.value,
+          dataset: dataset.value,
+          params: { ...opts.value },
+          env_id: selectedEnvId.value,
+          custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
+        })
+      } catch {
+        preview.value = baseCommand()
+      }
+    }, 200)
+  },
+  { deep: true, immediate: true }
+)
 
 const startMutation = useMutation({
   mutationFn: startPreprocess,
@@ -315,29 +297,11 @@ const onStart = async () => {
   if (!dataset.value) return
   submitting.value = true
   try {
-    const params: Record<string, any> = {}
-    if (action.value === 'download') {
-      const o = currentDownloadOpts.value
-      if (o.force) params.force = true
-      if (o.max_retries !== 3) params.max_retries = o.max_retries
-      if (o.num_threads !== 4) params.num_threads = o.num_threads
-    } else {
-      const o = currentProcessOpts.value
-      if (o.min_seq_len !== 10) params.min_seq_len = o.min_seq_len
-      if (o.max_seq_len !== 200) params.max_seq_len = o.max_seq_len
-      if (o.kfold !== 5) params.kfold = o.kfold
-      if (o.seed !== 42) params.seed = o.seed
-      if (o.sample_size) params.sample_size = o.sample_size
-      if (o.sample_ratio) params.sample_ratio = o.sample_ratio
-      if (o.sample_strategy) params.sample_strategy = o.sample_strategy
-      if (o.sample_attempts_bins) params.sample_attempts_bins = o.sample_attempts_bins
-      if (o.sample_correct_bins) params.sample_correct_bins = o.sample_correct_bins
-      if (o.extra) params.extra = o.extra
-    }
+    // Send the whole form; backend _build_command skips defaults/None.
     startMutation.mutate({
       action: action.value,
       dataset: dataset.value,
-      params,
+      params: { ...opts.value },
       env_id: selectedEnvId.value,
       custom_python_path: selectedEnvId.value === 'custom:0' ? customPythonPath.value || null : null,
     })

@@ -67,7 +67,10 @@ async def lifespan(app: FastAPI):
         deps.process_manager.recover_tasks()
         deps.preprocess_manager = __import__(
             "services.preprocess_manager", fromlist=["PreprocessManager"]
-        ).PreprocessManager(env_manager=deps.python_env_manager)
+        ).PreprocessManager(
+            env_manager=deps.python_env_manager,
+            schema_extractor=deps.schema_extractor,
+        )
         deps.preprocess_manager.recover_tasks()
         yield
         if deps.preprocess_manager:

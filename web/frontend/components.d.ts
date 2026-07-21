@@ -43,6 +43,7 @@ declare module 'vue' {
     LogCard: typeof import('./src/components/task/LogCard.vue')['default']
     LogTerminal: typeof import('./src/components/task/LogTerminal.vue')['default']
     ParamForm: typeof import('./src/components/task/ParamForm.vue')['default']
+    ParamGroups: typeof import('./src/components/task/ParamGroups.vue')['default']
     PreprocessForm: typeof import('./src/components/task/PreprocessForm.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

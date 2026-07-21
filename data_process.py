@@ -4,7 +4,7 @@ from dataclasses import fields as dataclass_fields
 
 from jsonargparse import ActionConfigFile, ArgumentParser
 
-from utils.config import GeneralConfig, RunDataConfig
+from utils.config import DownloadConfig, GeneralConfig, ProcessConfig, RunDataConfig
 from utils.core import get_logger, seed_everything
 from utils.data_process import get_data_source
 
@@ -25,30 +25,14 @@ def build_parser() -> ArgumentParser:
 
     download = ArgumentParser(prog="data_process.py download")
     _add_common_nodes(download)
-    download.add_argument(
-        "--data_url", type=str, default=None, help="Override data URL for downloading."
-    )
-    download.add_argument(
-        "--force",
-        action="store_true",
-        help="Force re-download even if the file exists.",
-    )
-    download.add_argument(
-        "--max_retries", type=int, default=3, help="Maximum download retries."
-    )
-    download.add_argument(
-        "--num_threads", type=int, default=4, help="Parallel download threads."
-    )
+    # Flat flags via dataclass: --data_url / --force / --max_retries / --num_threads
+    download.add_class_arguments(DownloadConfig)
     subs.add_subcommand("download", download)
 
     process = ArgumentParser(prog="data_process.py process")
     _add_common_nodes(process)
-    process.add_argument(
-        "--extra",
-        nargs="*",
-        default=[],
-        help="Extra processing steps (e.g. windowlate).",
-    )
+    # Flat flag via dataclass: --extra
+    process.add_class_arguments(ProcessConfig)
     subs.add_subcommand("process", process)
 
     return parser

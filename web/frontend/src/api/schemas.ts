@@ -12,6 +12,7 @@ export interface ParamField {
 
 export interface ParamGroup {
   group_name: string
+  node?: string | null
   params: Record<string, ParamField>
 }
 

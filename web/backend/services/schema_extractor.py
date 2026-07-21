@@ -64,6 +64,7 @@ class SchemaExtractor:
         self._env_manager = env_manager
         self._models: list[str] = []
         self._schemas: dict[str, list[dict]] = {}
+        self._preprocess_schemas: dict[str, list[dict] | None] = {}
         self._loaded: bool = False
 
     def _resolve_base_cmd(self) -> list[str]:
@@ -190,6 +191,86 @@ class SchemaExtractor:
         raw_groups = self._schemas.get(model_name)
         if raw_groups is None:
             raise KeyError(f"Model '{model_name}' not found")
+        defaults: dict[str, object] = {}
+        for group in raw_groups:
+            for field_name, cfg in group.get("params", {}).items():
+                defaults[field_name] = cfg.get("default")
+        return defaults
+
+    def _run_preprocess_helper(self, action: str) -> list[dict] | None:
+        """Run ``_schema_helper preprocess <action>`` once and cache raw groups.
+
+        Per-action and lazy (runs on first request for that action), unlike the
+        eager model helper. Returns None on missing env / subprocess failure so
+        callers can raise KeyError.
+        """
+        # Only a successful extraction is cached; a None result (missing env /
+        # subprocess failure) is not, so the next call retries instead of
+        # raising KeyError forever until restart.
+        cached = self._preprocess_schemas.get(action)
+        if cached is not None:
+            return cached
+        raw: list[dict] | None = None
+        try:
+            base = self._resolve_base_cmd()
+            cmd = [*base, HELPER_SCRIPT, "preprocess", action]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
+            )
+        except EnvironmentNotConfigured as e:
+            logger.error("Preprocess schema extraction skipped — %s", e)
+            return None
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            return None
+        for line in result.stdout.strip().split("\n"):
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                entry.get("type") == "preprocess_schema"
+                and entry.get("action") == action
+            ):
+                raw = entry["data"]
+                break
+        if raw is not None:
+            self._preprocess_schemas[action] = raw
+        return raw
+
+    def get_preprocess_schema(self, action: str) -> list[ParamGroup]:
+        """Return the parameter schema for a preprocess action (download/process).
+
+        Raises:
+            KeyError: If the action is unknown or extraction failed.
+        """
+        raw_groups = self._run_preprocess_helper(action)
+        if raw_groups is None:
+            raise KeyError(f"Preprocess action '{action}' not found")
+        return [_parse_group(g) for g in raw_groups]
+
+    def get_preprocess_field_routes(self, action: str) -> dict[str, str]:
+        """Return ``{field_name: node}`` for routing flat preprocess params.
+
+        ``node`` is ``""`` for flat flags (--force/--extra) and ``data``/``general``
+        for nested ones; the command builder treats a falsy node as flat.
+        """
+        raw_groups = self._run_preprocess_helper(action)
+        if raw_groups is None:
+            raise KeyError(f"Preprocess action '{action}' not found")
+        routes: dict[str, str] = {}
+        for group in raw_groups:
+            node = group.get("node") or ""
+            for field_name in group.get("params", {}):
+                routes[field_name] = node
+        return routes
+
+    def get_preprocess_field_defaults(self, action: str) -> dict[str, object]:
+        """Return ``{field_name: default}`` for filtering unchanged preprocess params."""
+        raw_groups = self._run_preprocess_helper(action)
+        if raw_groups is None:
+            raise KeyError(f"Preprocess action '{action}' not found")
         defaults: dict[str, object] = {}
         for group in raw_groups:
             for field_name, cfg in group.get("params", {}).items():

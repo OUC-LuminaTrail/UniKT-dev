@@ -25,7 +25,9 @@ from config import PREPROCESS_LOGS_DIR, PROJECT_ROOT
 from database import SessionLocal
 from models import LogChunk, PreprocessTask
 
+from services.cli_builder import build_param_flags
 from services.python_env import PythonEnvManager
+from services.schema_extractor import SchemaExtractor
 from services.task_state import transition
 
 logger = logging.getLogger(__name__)
@@ -67,9 +69,14 @@ def _pid_reused(proc: psutil.Process, started_at: datetime | None) -> bool:
 class PreprocessManager:
     """Manages lifecycle of preprocess subprocesses."""
 
-    def __init__(self, env_manager: PythonEnvManager):
+    def __init__(
+        self,
+        env_manager: PythonEnvManager,
+        schema_extractor: SchemaExtractor,
+    ):
         """Initialize the preprocess manager."""
         self._env_manager = env_manager
+        self._schema_extractor = schema_extractor
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
@@ -85,9 +92,10 @@ class PreprocessManager:
         custom_python_path: str | None = None,
     ) -> PreprocessTaskInfo:
         """Create a preprocess task row, spawn its subprocess, and return a snapshot."""
-        command = self._build_command(
-            action, dataset, params, env_id, custom_python_path
-        )
+        # env_id wins; when unset, resolve_command falls back to the
+        # wizard-configured default env (or raises EnvironmentNotConfigured).
+        base = self._env_manager.resolve_command(env_id, custom_python_path)
+        command = base + self._build_command(action, dataset, params)
 
         with SessionLocal() as session:
             row = PreprocessTask(
@@ -428,47 +436,30 @@ class PreprocessManager:
         action: str,
         dataset: str,
         params: dict,
-        env_id: str | None,
-        custom_python_path: str | None,
     ) -> list[str]:
-        # env_id wins; when unset, resolve_command falls back to the
-        # wizard-configured default env (or raises EnvironmentNotConfigured).
-        base = self._env_manager.resolve_command(env_id, custom_python_path)
-        cmd = [*base, "data_process.py", action, "-d", dataset]
-        if action == "download":
-            if params.get("force"):
-                cmd.append("--force")
-            if params.get("max_retries") is not None:
-                cmd.extend(["--max_retries", str(params["max_retries"])])
-            if params.get("num_threads") is not None:
-                cmd.extend(["--num_threads", str(params["num_threads"])])
-        elif action == "process":
-            # data_process.py registers RunDataConfig + GeneralConfig via
-            # register_config_group, so these are dot-path flags.
-            for key in (
-                "min_seq_len",
-                "max_seq_len",
-                "kfold",
-                "sample_size",
-                "sample_ratio",
-            ):
-                if params.get(key) is not None:
-                    cmd.extend([f"--data.{key}", str(params[key])])
-            # nargs "+" list fields: spread the list into multiple tokens.
-            for key in ("sample_attempts_bins", "sample_correct_bins"):
-                val = params.get(key)
-                if val is None:
-                    continue
-                vals = val if isinstance(val, list) else [val]
-                cmd.append(f"--data.{key}")
-                cmd.extend(str(v) for v in vals)
-            if params.get("sample_strategy"):
-                cmd.extend(["--data.sample_strategy", params["sample_strategy"]])
-            if params.get("seed") is not None:
-                cmd.extend(["--general.seed", str(params["seed"])])
-            if params.get("extra"):
-                cmd.extend(["--extra", str(params["extra"])])
+        # Env prefix is NOT included here — preview shows just data_process.py
+        # (mirrors train.py in the task-launch preview); start() prepends the
+        # resolved env command for the actual subprocess.
+        cmd = ["data_process.py", action, "-d", dataset]
+        # Routes/defaults come from the same schema reflection that drives the
+        # frontend form; allow_flat_node yields --force/--extra (node "").
+        routes = self._schema_extractor.get_preprocess_field_routes(action)
+        defaults = self._schema_extractor.get_preprocess_field_defaults(action)
+        cmd.extend(build_param_flags(params, routes, defaults, allow_flat_node=True))
         return cmd
+
+    def preview_command(
+        self,
+        action: str,
+        dataset: str,
+        params: dict,
+    ) -> str:
+        """Build the command string without launching (for UI preview).
+
+        Excludes the env prefix, mirroring ProcessManager.preview_command
+        (which returns ``train.py ...`` without the pixi/conda prefix).
+        """
+        return " ".join(self._build_command(action, dataset, params))
 
     def shutdown(self) -> None:
         """Terminate all running preprocess subprocesses."""
