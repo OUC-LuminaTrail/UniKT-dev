@@ -117,7 +117,7 @@ class MultiHeadAttention(nn.Module):
             torch.abs(relative_position).unsqueeze(0).expand(n_heads, -1, -1)
         )
         alibi = slopes.unsqueeze(1).unsqueeze(1) * relative_position
-        self.register_buffer("alibi", alibi.unsqueeze(0))
+        self.register_buffer("alibi", alibi.unsqueeze(0), persistent=False)
 
     def _reset_parameters(self):
         xavier_uniform_(self.k_linear.weight)

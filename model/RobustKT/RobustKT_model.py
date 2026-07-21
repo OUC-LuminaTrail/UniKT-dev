@@ -319,6 +319,7 @@ class Architecture(nn.Module):
         self.register_buffer(
             "_mask_incl_diag",
             torch.tril(torch.ones(1, 1, max_seq_len, max_seq_len, dtype=torch.bool)),
+            persistent=False,
         )
         self.register_buffer(
             "_mask_excl_diag",
@@ -326,12 +327,14 @@ class Architecture(nn.Module):
                 torch.ones(1, 1, max_seq_len, max_seq_len, dtype=torch.bool),
                 diagonal=-1,
             ),
+            persistent=False,
         )
         # Precompute |i-j| position distance matrix
         idx = torch.arange(max_seq_len)
         self.register_buffer(
             "_pos_effect",
             torch.abs(idx.unsqueeze(1) - idx.unsqueeze(0)).float()[None, None, :, :],
+            persistent=False,
         )
 
     def forward(

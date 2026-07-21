@@ -146,12 +146,16 @@ class GKT(nn.Module):
         self.graph = nn.Parameter(graph, requires_grad=False)
 
         # One-hot 特征矩阵
-        self.register_buffer("one_hot_feat", torch.eye(self.res_len * self.num_c))
+        self.register_buffer(
+            "one_hot_feat", torch.eye(self.res_len * self.num_c), persistent=False
+        )
 
         # One-hot 问题矩阵（包含填充行）
         one_hot_q = torch.eye(self.num_c)
         zero_padding = torch.zeros(1, self.num_c)
-        self.register_buffer("one_hot_q", torch.cat((one_hot_q, zero_padding), dim=0))
+        self.register_buffer(
+            "one_hot_q", torch.cat((one_hot_q, zero_padding), dim=0), persistent=False
+        )
 
         # 概念和交互嵌入
         self.interaction_emb = nn.Embedding(self.res_len * num_c, emb_size)

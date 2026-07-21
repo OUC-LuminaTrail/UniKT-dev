@@ -480,7 +480,9 @@ class Architecture(nn.Module):
             ]
         )
 
-        self.register_buffer("_position_effect", _compute_position_effect(seq_len))
+        self.register_buffer(
+            "_position_effect", _compute_position_effect(seq_len), persistent=False
+        )
         self._softplus = nn.Softplus()
 
     def forward(

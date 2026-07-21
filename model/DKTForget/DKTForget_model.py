@@ -25,9 +25,9 @@ class CIntegration(nn.Module):
 
     def __init__(self, num_rgap, num_sgap, num_pcount, emb_dim):
         super().__init__()
-        self.register_buffer("rgap_eye", torch.eye(num_rgap))
-        self.register_buffer("sgap_eye", torch.eye(num_sgap))
-        self.register_buffer("pcount_eye", torch.eye(num_pcount))
+        self.register_buffer("rgap_eye", torch.eye(num_rgap), persistent=False)
+        self.register_buffer("sgap_eye", torch.eye(num_sgap), persistent=False)
+        self.register_buffer("pcount_eye", torch.eye(num_pcount), persistent=False)
         ntotal = num_rgap + num_sgap + num_pcount
         self.cemb = nn.Linear(ntotal, emb_dim, bias=False)
 

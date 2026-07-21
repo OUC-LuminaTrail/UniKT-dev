@@ -215,7 +215,9 @@ class SinePositionalEncoding(nn.Module):
     def __init__(self, d_hid, n_position=200):
         super().__init__()
         self.register_buffer(
-            "pos_table", self._get_sinusoid_encoding_table(n_position, d_hid)
+            "pos_table",
+            self._get_sinusoid_encoding_table(n_position, d_hid),
+            persistent=False,
         )
 
     def _get_sinusoid_encoding_table(self, n_position, d_hid):
@@ -414,7 +416,7 @@ class MultiHeadAttention(nn.Module):
         slopes = torch.tensor(_get_slopes(n_heads)) * -1
         alibi = slopes.unsqueeze(1).unsqueeze(1) * relative_position
         alibi = alibi.unsqueeze(0)  # [1, n_heads, maxpos, maxpos]
-        self.register_buffer("alibi", alibi)
+        self.register_buffer("alibi", alibi, persistent=False)
 
     def _reset_parameters(self):
         xavier_uniform_(self.k_linear.weight)

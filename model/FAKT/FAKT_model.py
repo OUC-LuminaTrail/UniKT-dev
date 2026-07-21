@@ -878,11 +878,11 @@ class timeGap(nn.Module):
         self.num_rgap, self.num_sgap, self.num_pcount = num_rgap, num_sgap, num_pcount
 
         if num_rgap != 0:
-            self.register_buffer("rgap_eye", torch.eye(num_rgap))
+            self.register_buffer("rgap_eye", torch.eye(num_rgap), persistent=False)
         if num_sgap != 0:
-            self.register_buffer("sgap_eye", torch.eye(num_sgap))
+            self.register_buffer("sgap_eye", torch.eye(num_sgap), persistent=False)
         if num_pcount != 0:
-            self.register_buffer("pcount_eye", torch.eye(num_pcount))
+            self.register_buffer("pcount_eye", torch.eye(num_pcount), persistent=False)
 
         input_size = num_rgap + num_sgap + num_pcount
         self.time_emb = nn.Linear(input_size, emb_size, bias=False)

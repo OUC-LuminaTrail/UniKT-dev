@@ -203,15 +203,15 @@ class GMF(nn.Module):
 
         # 预计算多跳邻接矩阵
         if layer >= 1:
-            self.register_buffer("aj_norm_1", aj_norm)
+            self.register_buffer("aj_norm_1", aj_norm, persistent=False)
         if layer >= 2:
             with torch.no_grad():
                 aj_norm_2 = torch.sparse.mm(aj_norm, aj_norm).coalesce()
-            self.register_buffer("aj_norm_2", aj_norm_2)
+            self.register_buffer("aj_norm_2", aj_norm_2, persistent=False)
         if layer >= 3:
             with torch.no_grad():
                 aj_norm_3 = torch.sparse.mm(self.aj_norm_2, aj_norm).coalesce()
-            self.register_buffer("aj_norm_3", aj_norm_3)
+            self.register_buffer("aj_norm_3", aj_norm_3, persistent=False)
 
         # 可学习的邻接权重
         # 始终初始化这些属性，但仅在adj=True时创建可学习的参数

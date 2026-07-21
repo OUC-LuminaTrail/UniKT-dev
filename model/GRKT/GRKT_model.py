@@ -159,9 +159,11 @@ class GRKT(nn.Module):
         padded_pre = torch.zeros(NK, NK, dtype=torch.bool)
         padded_rel[:num_skills, :num_skills] = torch.BoolTensor(full_rel)
         padded_pre[:num_skills, :num_skills] = torch.BoolTensor(full_pre)
-        self.register_buffer("rel_map", padded_rel)
-        self.register_buffer("pre_map", padded_pre)
-        self.register_buffer("sub_map", self.pre_map.transpose(-1, -2))
+        self.register_buffer("rel_map", padded_rel, persistent=False)
+        self.register_buffer("pre_map", padded_pre, persistent=False)
+        self.register_buffer(
+            "sub_map", self.pre_map.transpose(-1, -2), persistent=False
+        )
 
         # Inter-step learning
         self.decision_mlp = nn.Sequential(
