@@ -120,7 +120,7 @@ def _util(pynvml, handle):
 
 
 def _mem(pynvml, handle):
-    return pynvml.nvmlDeviceGetUtilizationRates(handle).memory
+    return pynvml.nvmlDeviceGetMemoryInfo(handle).used / 1024**2
 
 
 def _power(pynvml, handle):
