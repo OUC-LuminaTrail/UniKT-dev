@@ -151,6 +151,14 @@ class UniversalRegistry:
         """
         return name in self._registry or name in self._index
 
+    def __iter__(self):
+        """Iterate over registered names (loaded and lazy-indexed, deduplicated).
+
+        Returns:
+            An iterator over all known registered names.
+        """
+        return iter(self.keys())
+
     def __repr__(self) -> str:
         """Return a string representation of the registry.
 
@@ -174,6 +182,7 @@ METRIC_LOGGERS = UniversalRegistry("metric_loggers")  # import-time only, not di
 EFFICIENCY_STAGES = UniversalRegistry(
     "efficiency_stages", decorator_name="register_efficiency_stage"
 )
+METRICS = UniversalRegistry("metrics", decorator_name="register_metric")
 
 
 # ============================================================================
@@ -263,3 +272,19 @@ def register_efficiency_stage(name: str | None = None):
         A decorator that registers the class with ``EFFICIENCY_STAGES``.
     """
     return EFFICIENCY_STAGES.register(name)
+
+
+def register_metric(name: str | None = None):
+    """Register a metric into ``METRICS``.
+
+    Drop a ``@register_metric("name")`` class under
+    :mod:`utils.training.metrics` and it is auto-discovered — no manual
+    registration elsewhere.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``METRICS``.
+    """
+    return METRICS.register(name)
