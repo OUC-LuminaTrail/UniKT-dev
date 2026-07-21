@@ -42,6 +42,7 @@ def main() -> None:
     logger.info(
         f"[Benchmark] model={rc.experiment.model_name} dataset={rc.data.dataset}"
     )
+    _apply_benchmark_overrides(rc, eff_cfg)
 
     if eff_cfg.general.batch_sizes or eff_cfg.general.compile_modes:
         _run_sweep(rc, eff_cfg, weights_path)
@@ -130,6 +131,30 @@ def _resolve_weights(eff_cfg) -> str | None:
     if not path.exists():
         raise SystemExit(f"[Benchmark] checkpoint not found: {path}")
     return str(path)
+
+
+def _apply_benchmark_overrides(rc, eff_cfg) -> None:
+    """Force a uniform batch_size / max_seq_len so throughput compares across models.
+
+    Throughput normalizes per interaction, but its wall-time denominator still
+    scales with GPU utilization (batch size) and padding cost (seq_len). Without
+    uniform inputs a bs=6 model and a bs=10000 model cannot be ranked by
+    interactions/s. Opt-in: None keeps the model/dataset default. Applied before
+    the sweep branch, so a batch-size sweep still wins on rc.model.batch_size
+    while seq_len stays uniform across sweep points.
+    """
+    bs = eff_cfg.general.benchmark_batch_size
+    seq = eff_cfg.general.benchmark_seq_len
+    if bs is None and seq is None:
+        return
+    if bs is not None:
+        rc.model.batch_size = bs
+    if seq is not None:
+        rc.data.max_seq_len = seq
+    logger.info(
+        "[Benchmark] uniform input override: "
+        f"batch_size={rc.model.batch_size} seq_len={rc.data.max_seq_len}"
+    )
 
 
 if __name__ == "__main__":

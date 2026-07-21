@@ -35,6 +35,12 @@ class GeneralEfficiencyConfig:
         checkpoint: Checkpoint filename inside ``run_dir``.
         weights: Standalone checkpoint to load after building the model.
         output_dir: Where to write efficiency_report.json; default = exp dir.
+        benchmark_batch_size: Override rc.model.batch_size so every model is
+            measured under one batch size; None keeps the model's default.
+            Throughput is per-interaction but its wall-time still scales with GPU
+            utilization, which depends on batch size — uniformize to compare.
+        benchmark_seq_len: Override rc.data.max_seq_len so every model pads to
+            one length; None keeps the dataset default.
     """
 
     modes: str = ""
@@ -46,6 +52,8 @@ class GeneralEfficiencyConfig:
     checkpoint: str = "best_model.pth"
     weights: str | None = None
     output_dir: str | None = None
+    benchmark_batch_size: int | None = None
+    benchmark_seq_len: int | None = None
 
 
 @dataclass
