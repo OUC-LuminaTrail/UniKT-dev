@@ -65,7 +65,7 @@ class KerpleLogBias(nn.Module):
     其中 p_h、a_h 为每个注意力头可学习的非负参数。
     """
 
-    def __init__(self, num_heads: int, eps: float = 1e-2):
+    def __init__(self, num_heads: int, max_seq_len: int, eps: float = 1e-2):
         super().__init__()
         self.num_heads = num_heads
         self.eps = eps
@@ -78,21 +78,14 @@ class KerpleLogBias(nn.Module):
             torch.rand(num_heads, dtype=torch.float32)[:, None, None] * 1.0
         )
 
-        # 相对位置差矩阵缓存
-        self.cached_diff: torch.Tensor | None = None
-        self.cached_seq_len: int | None = None
+        # Buffer, not a runtime cache: invariant to autograd/inference mode.
+        idx = torch.arange(max_seq_len, dtype=torch.float32)
+        rel_pos = torch.tril(idx.view(max_seq_len, 1) - idx.view(1, max_seq_len))
+        self.register_buffer("rel_pos", rel_pos, persistent=False)
 
     def forward(self, scores: torch.Tensor) -> torch.Tensor:
         seq_len_k = scores.shape[-1]
-
-        if self.cached_seq_len != seq_len_k:
-            row_idx = torch.arange(seq_len_k, device=scores.device).view(seq_len_k, 1)
-            col_idx = torch.arange(0, -seq_len_k, -1, device=scores.device)
-            diff = torch.tril(row_idx + col_idx).to(scores.dtype)
-            self.cached_seq_len = seq_len_k
-            self.cached_diff = diff
-        else:
-            diff = self.cached_diff
+        diff = self.rel_pos[:seq_len_k, :seq_len_k].to(scores.dtype)
 
         self.bias_p.data = self.bias_p.data.clamp(min=self.eps)
         self.bias_a.data = self.bias_a.data.clamp(min=self.eps)
@@ -105,7 +98,6 @@ def attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    head_dim: int,
     mask_out: torch.Tensor,
     zero_row_mask: torch.Tensor | None,
     dropout: nn.Dropout,
@@ -117,7 +109,6 @@ def attention(
 
     Args:
         query/key/value: [bs, heads, seq_len, head_dim]
-        head_dim: 每个头的维度 d_k
         mask_out: bool 掩码 [1, 1, seq_len, seq_len]，True 表示需要屏蔽
         zero_row_mask: 行掩码 [1, 1, seq_len, 1]，第 0 行为 0 其余为 1；
             非 None 时将第 0 行注意力权重置零（首题无历史交互）。None 表示不置零。
@@ -158,6 +149,7 @@ class MultiHeadAttention(nn.Module):
         kq_same: bool,
         r: float,
         gamma: float,
+        max_seq_len: int,
         bias: bool = True,
     ):
         super().__init__()
@@ -176,7 +168,7 @@ class MultiHeadAttention(nn.Module):
         self.r = r
         self.gamma = gamma
         self.sinh_r = torch.sinh(torch.tensor(r))
-        self.kernel_bias = KerpleLogBias(num_heads)
+        self.kernel_bias = KerpleLogBias(num_heads, max_seq_len)
         self._reset_parameters()
 
     def _reset_parameters(self):
@@ -217,7 +209,6 @@ class MultiHeadAttention(nn.Module):
             query,
             key,
             value,
-            self.head_dim,
             mask_out,
             zero_row_mask,
             self.dropout,
@@ -245,6 +236,7 @@ class TransformerLayer(nn.Module):
         kq_same: bool,
         r: float,
         gamma: float,
+        max_seq_len: int,
     ):
         super().__init__()
         self.attention = MultiHeadAttention(
@@ -255,6 +247,7 @@ class TransformerLayer(nn.Module):
             kq_same=kq_same,
             r=r,
             gamma=gamma,
+            max_seq_len=max_seq_len,
         )
 
         self.layer_norm1 = nn.LayerNorm(d_model)
@@ -320,6 +313,7 @@ class Architecture(nn.Module):
         kq_same: bool,
         r: float,
         gamma: float,
+        max_seq_len: int,
     ):
         super().__init__()
         head_dim = d_model // num_heads
@@ -334,17 +328,25 @@ class Architecture(nn.Module):
                     kq_same=kq_same,
                     r=r,
                     gamma=gamma,
+                    max_seq_len=max_seq_len,
                 )
                 for _ in range(num_blocks)
             ]
         )
-        # 因果掩码与首行置零掩码缓存
-        self._mask_cache: dict[tuple[int, str], tuple[torch.Tensor, torch.Tensor]] = {}
+        # Buffers, not a runtime cache: invariant to autograd/inference mode.
+        causal = (
+            torch.triu(torch.ones(max_seq_len, max_seq_len), diagonal=0)
+            .bool()
+            .view(1, 1, max_seq_len, max_seq_len)
+        )
+        zero_row = torch.ones(1, 1, max_seq_len, 1)
+        zero_row[0, 0, 0, 0] = 0.0
+        self.register_buffer("causal_mask", causal, persistent=False)
+        self.register_buffer("zero_row_mask", zero_row, persistent=False)
 
     def _get_masks(
         self,
         seq_len: int,
-        device: torch.device,
         dtype: torch.dtype,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """构建因果掩码与首行置零掩码。
@@ -352,22 +354,8 @@ class Architecture(nn.Module):
         - mask_out: bool [1, 1, seq, seq]，True 表示屏蔽（上三角含对角，即 j >= i）
         - zero_row_mask: dtype [1, 1, seq, 1]，第 0 行为 0、其余为 1
         """
-        key = (seq_len, str(device))
-        cached = self._mask_cache.get(key)
-        if cached is not None:
-            return cached
-
-        # 上三角含对角线
-        mask_out = (
-            torch.triu(torch.ones(seq_len, seq_len, device=device), diagonal=0)
-            .bool()
-            .view(1, 1, seq_len, seq_len)
-        )
-
-        zero_row_mask = torch.ones(1, 1, seq_len, 1, device=device, dtype=dtype)
-        zero_row_mask[0, 0, 0, 0] = 0.0
-
-        self._mask_cache[key] = (mask_out, zero_row_mask)
+        mask_out = self.causal_mask[..., :seq_len, :seq_len]
+        zero_row_mask = self.zero_row_mask[..., :seq_len, :].to(dtype)
         return mask_out, zero_row_mask
 
     def forward(
@@ -385,9 +373,7 @@ class Architecture(nn.Module):
             知识状态表示 [bs, seq, d_model]
         """
         seq_len = skill_embed.size(1)
-        mask_out, zero_row_mask = self._get_masks(
-            seq_len, skill_embed.device, skill_embed.dtype
-        )
+        mask_out, zero_row_mask = self._get_masks(seq_len, skill_embed.dtype)
 
         query = skill_embed
         values = interaction_embed
@@ -416,7 +402,7 @@ class CSKT(nn.Module):
         num_attn_heads: 注意力头数量
         r: cone attention 半径参数
         gamma: cone attention 温度参数
-        kq_same: Key 和 Query 是否共享线性变换（1=是）
+        kq_same: Key 和 Query 是否共享线性变换
         final_fc_dim: 输出层第一层全连接维度
         final_fc_dim2: 输出层第二层全连接维度
         separate_qa: 是否使用独立的交互嵌入
@@ -426,6 +412,7 @@ class CSKT(nn.Module):
     def __init__(
         self,
         num_c: int,
+        max_seq_len: int,
         n_pid: int = 0,
         d_model: int = 128,
         num_blocks: int = 2,
@@ -434,7 +421,7 @@ class CSKT(nn.Module):
         num_attn_heads: int = 4,
         r: float = 0.6,
         gamma: float = 1.0,
-        kq_same: int = 1,
+        kq_same: bool = True,
         final_fc_dim: int = 512,
         final_fc_dim2: int = 256,
         separate_qa: bool = False,
@@ -480,6 +467,7 @@ class CSKT(nn.Module):
             kq_same=self.kq_same,
             r=r,
             gamma=gamma,
+            max_seq_len=max_seq_len,
         )
 
         # 输出层

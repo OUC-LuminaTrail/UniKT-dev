@@ -85,6 +85,7 @@ class CSKTTrainer(BaseTrainer):
         m = rc.model
         model = CSKT(
             num_c=metadata["num_skills"],
+            max_seq_len=rc.data.max_seq_len,
             n_pid=n_pid,
             d_model=m.d_model,
             num_blocks=m.num_blocks,
@@ -93,7 +94,7 @@ class CSKTTrainer(BaseTrainer):
             num_attn_heads=m.num_attn_heads,
             r=m.r,
             gamma=m.gamma,
-            kq_same=m.kq_same,
+            kq_same=bool(m.kq_same),
             final_fc_dim=m.final_fc_dim,
             final_fc_dim2=m.final_fc_dim2,
             separate_qa=bool(m.separate_qa),
