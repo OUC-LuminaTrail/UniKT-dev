@@ -6,7 +6,7 @@ Each model's forward_pass output must contain the following fields:
     y_label   : ground-truth labels (0/1)
     y_predict : binary predictions (0/1), used for ACC
     y_score   : ranking scores (any real number), used for AUC
-    y_prob    : predicted probabilities ([0,1]), used for RMSE
+    y_prob    : predicted probabilities ([0,1]), used for RMSE and R²
     y_score   : ranking scores (any real number), also used for AUPRC
 """
 
@@ -74,6 +74,24 @@ def _group_scores(y_score, inverse, num_groups, fusion_type, threshold):
         np.float64
     )
     return numerator / np.maximum(denominator, 1.0)
+
+
+def _pearson_r2(y_true, y_pred):
+    """Squared Pearson correlation between truth and prediction.
+
+    R² here is the squared Pearson coefficient (per the paper's definition),
+    not the regression coefficient of determination. Returns 0.0 when either
+    input has zero variance (correlation is undefined).
+    """
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
+    dc_true = y_true - y_true.mean()
+    dc_pred = y_pred - y_pred.mean()
+    denom = np.sqrt((dc_true**2).sum() * (dc_pred**2).sum())
+    if denom == 0:
+        return 0.0
+    r = (dc_true * dc_pred).sum() / denom
+    return float(r * r)
 
 
 class MetricsAccumulator:
@@ -185,6 +203,7 @@ class MetricsAccumulator:
                 metrics[f"{fusion}_rmse"] = float(
                     root_mean_squared_error(group_label, group_score)
                 )
+                metrics[f"{fusion}_r2"] = _pearson_r2(group_label, group_score)
                 try:
                     metrics[f"{fusion}_auc"] = float(
                         roc_auc_score(group_label, group_score)
@@ -220,6 +239,7 @@ class MetricsAccumulator:
             metrics["auprc"] = 0.0
 
         metrics["rmse"] = float(root_mean_squared_error(y_label, y_prob))
+        metrics["r2"] = _pearson_r2(y_label, y_prob)
 
         return metrics
 
