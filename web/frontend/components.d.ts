@@ -38,6 +38,8 @@ declare module 'vue' {
     ElSwitch: typeof import('element-plus/es')['ElSwitch']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
+    ElTooltip: typeof import('element-plus/es')['ElTooltip']
+    EnvSelect: typeof import('./src/components/task/EnvSelect.vue')['default']
     LogCard: typeof import('./src/components/task/LogCard.vue')['default']
     LogTerminal: typeof import('./src/components/task/LogTerminal.vue')['default']
     ParamForm: typeof import('./src/components/task/ParamForm.vue')['default']

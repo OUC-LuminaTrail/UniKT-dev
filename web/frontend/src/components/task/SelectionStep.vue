@@ -2,44 +2,13 @@
   <div class="selection-step">
     <div class="section">
       <div class="section-label">运行环境</div>
-      <el-select
+      <EnvSelect
         :model-value="envId"
-        @update:model-value="emit('update:envId', $event)"
-        placeholder="选择运行环境"
-        class="env-select"
-      >
-        <el-option-group label="Pixi">
-          <el-option
-            v-for="env in pixiEnvs"
-            :key="env.id"
-            :label="env.display_name"
-            :value="env.id"
-          />
-        </el-option-group>
-        <el-option-group label="Conda" v-if="condaEnvs.length">
-          <el-option
-            v-for="env in condaEnvs"
-            :key="env.id"
-            :label="env.display_name"
-            :value="env.id"
-          />
-        </el-option-group>
-        <el-option-group label="Other" v-if="otherEnvs.length">
-          <el-option
-            v-for="env in otherEnvs"
-            :key="env.id"
-            :label="env.display_name"
-            :value="env.id"
-          />
-        </el-option-group>
-      </el-select>
-      <div v-if="envId === 'custom:0'" class="custom-path-row">
-        <el-input
-          :model-value="customPythonPath"
-          @update:model-value="emit('update:customPythonPath', $event)"
-          placeholder="/path/to/python"
-        />
-      </div>
+        @update:model-value="emit('update:envId', $event ?? '')"
+        :custom-path="customPythonPath"
+        @update:custom-path="emit('update:customPythonPath', $event)"
+        :environments="environments"
+      />
     </div>
 
     <div class="section" v-if="hasGpu && gpuCount > 0">
@@ -88,7 +57,12 @@
           :key="name"
           class="select-card"
           :class="{ active: modelName === name }"
+          role="button"
+          tabindex="0"
+          :aria-pressed="modelName === name"
           @click="emit('update:modelName', name)"
+          @keydown.enter.prevent="emit('update:modelName', name)"
+          @keydown.space.prevent="emit('update:modelName', name)"
         >
           <div class="card-icon" :style="{ background: getGradient(name) }">
             {{ name.charAt(0) }}
@@ -102,7 +76,12 @@
           :key="name"
           class="list-item"
           :class="{ active: modelName === name }"
+          role="button"
+          tabindex="0"
+          :aria-pressed="modelName === name"
           @click="emit('update:modelName', name)"
+          @keydown.enter.prevent="emit('update:modelName', name)"
+          @keydown.space.prevent="emit('update:modelName', name)"
         >
           <span class="list-badge" :style="{ background: getGradient(name) }">{{ name.charAt(0) }}</span>
           <span class="list-name" :title="name">{{ name }}</span>
@@ -119,7 +98,12 @@
             :key="ds.name"
             class="select-card"
             :class="{ active: dataset === ds.name }"
+            role="button"
+            tabindex="0"
+            :aria-pressed="dataset === ds.name"
             @click="onDatasetClick(ds.name)"
+            @keydown.enter.prevent="onDatasetClick(ds.name)"
+            @keydown.space.prevent="onDatasetClick(ds.name)"
           >
             <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
               <el-icon :size="18"><Coin /></el-icon>
@@ -133,7 +117,12 @@
             :key="ds.name"
             class="list-item"
             :class="{ active: dataset === ds.name }"
+            role="button"
+            tabindex="0"
+            :aria-pressed="dataset === ds.name"
             @click="onDatasetClick(ds.name)"
+            @keydown.enter.prevent="onDatasetClick(ds.name)"
+            @keydown.space.prevent="onDatasetClick(ds.name)"
           >
             <span class="list-badge icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
               <el-icon :size="14"><Coin /></el-icon>
@@ -163,6 +152,7 @@ import type { EnvironmentInfo } from '@/api/environments'
 import { getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
 import { getGpuStatus } from '@/api/gpu'
 import DatasetMetadataPanel from './DatasetMetadataPanel.vue'
+import EnvSelect from './EnvSelect.vue'
 import { getGradient } from '@/composables/useGradient'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
@@ -222,10 +212,6 @@ const metadata = ref<DatasetMetadata | null>(null)
 const metadataLoading = ref(false)
 const selectedInfo = computed(() => props.datasets.find(d => d.name === props.dataset))
 
-const pixiEnvs = computed(() => props.environments.filter(e => e.type === 'pixi'))
-const condaEnvs = computed(() => props.environments.filter(e => e.type === 'conda'))
-const otherEnvs = computed(() => props.environments.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
-
 const metadataCache = ref<Record<string, DatasetMetadata>>({})
 
 function onDatasetClick(name: string) {
@@ -271,6 +257,24 @@ defineExpose({ clearCache })
   display: flex;
   flex-direction: column;
   gap: 28px;
+  counter-reset: step;
+}
+
+.section > .section-label::before,
+.section-label-row .section-label::before {
+  counter-increment: step;
+  content: counter(step, decimal-leading-zero);
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  background: var(--soft-blue);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 8px;
+  letter-spacing: 0.5px;
+  vertical-align: 1px;
 }
 
 .section-label {
@@ -310,10 +314,6 @@ defineExpose({ clearCache })
   justify-content: center;
 }
 
-.env-select {
-  max-width: 400px;
-}
-
 .gpu-radio-group {
   display: flex;
   flex-wrap: wrap;
@@ -328,11 +328,6 @@ defineExpose({ clearCache })
   color: var(--text-tertiary);
   font-size: 12px;
   font-family: var(--font-mono);
-}
-
-.custom-path-row {
-  margin-top: 8px;
-  max-width: 400px;
 }
 
 .card-grid {
@@ -377,9 +372,8 @@ defineExpose({ clearCache })
 
 .select-card.active {
   border-color: var(--accent-blue);
-  border-width: 2px;
-  background: rgba(88, 166, 255, 0.06);
-  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.2);
+  background: var(--soft-blue);
+  box-shadow: 0 0 0 1px var(--accent-blue);
 }
 
 .card-icon {
@@ -446,8 +440,8 @@ defineExpose({ clearCache })
 }
 
 .list-item.active {
-  background: rgba(88, 166, 255, 0.1);
-  box-shadow: inset 0 0 0 1px rgba(88, 166, 255, 0.4);
+  background: var(--soft-blue);
+  box-shadow: inset 0 0 0 1px var(--accent-blue);
 }
 
 .list-badge {

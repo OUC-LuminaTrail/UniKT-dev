@@ -34,6 +34,9 @@ export default defineConfig(({ mode }) => {
             if (id.includes('@xterm/xterm') || id.includes('@xterm/addon-fit') || id.includes('@xterm/addon-web-links') || id.includes('@xterm/addon-search')) {
               return 'xterm'
             }
+            if (id.includes('node_modules/echarts/') || id.includes('node_modules/vue-echarts/') || id.includes('node_modules/zrender/')) {
+              return 'echarts'
+            }
             if (id.includes('node_modules/vue/') || id.includes('node_modules/vue-router/')) {
               return 'vue-vendor'
             }

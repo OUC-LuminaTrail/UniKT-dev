@@ -80,6 +80,10 @@
         <span class="meta-key">开始时间</span>
         <span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span>
       </div>
+      <div class="meta-cell" v-if="duration">
+        <span class="meta-key">运行时长</span>
+        <span class="meta-val mono">{{ duration }}</span>
+      </div>
       <div class="meta-cell">
         <span class="meta-key">退出码</span>
         <span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span>
@@ -101,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -164,6 +168,37 @@ const gpuDisplay = computed(() => {
   return `GPU ${val}`
 })
 
+const now = ref(Date.now())
+let clockTimer: ReturnType<typeof setInterval> | null = null
+// Tick only while the task is active; stop at a terminal state so a fixed
+// finished_at doesn't trigger a per-second recompute for the rest of the page's life.
+watch(() => task.value?.status, (status) => {
+  const active = status === 'running' || status === 'pending' || status === 'stopping'
+  if (active && !clockTimer) {
+    clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
+  } else if (!active && clockTimer) {
+    clearInterval(clockTimer)
+    clockTimer = null
+  }
+}, { immediate: true })
+onUnmounted(() => { if (clockTimer) clearInterval(clockTimer) })
+
+const duration = computed(() => {
+  const t = task.value
+  if (!t?.started_at) return ''
+  const start = new Date(t.started_at).getTime()
+  if (isNaN(start)) return ''
+  const end = t.finished_at ? new Date(t.finished_at).getTime() : now.value
+  if (isNaN(end)) return ''
+  const s = Math.max(0, Math.floor((end - start) / 1000))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) return `${h}h ${m}m ${sec}s`
+  if (m > 0) return `${m}m ${sec}s`
+  return `${sec}s`
+})
+
 const copyCommand = () => {
   if (task.value) navigator.clipboard.writeText(task.value.command)
 }
@@ -198,8 +233,8 @@ const handleKill = async () => {
   gap: 16px;
   max-width: 1200px;
   margin: 0 auto;
-  padding: 24px;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   color: var(--text-primary);
 }
 
@@ -435,10 +470,6 @@ const handleKill = async () => {
 @media (max-width: 600px) {
   .meta-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .task-detail {
-    padding: 12px;
   }
 }
 </style>

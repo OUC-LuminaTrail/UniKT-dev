@@ -1,10 +1,13 @@
 <template>
   <div class="gpu-monitor">
     <div class="page-header">
-      <h2 class="page-title">GPU 监控</h2>
+      <div class="page-title-group">
+        <h2 class="page-title">GPU 监控</h2>
+        <span class="page-sub">实时利用率与显存占用趋势 · 最近 3 分钟</span>
+      </div>
       <div class="live-badge">
         <span class="live-dot"></span>
-        <span class="live-text">实时</span>
+        <span class="live-text">实时 · 3s</span>
       </div>
     </div>
 
@@ -26,98 +29,184 @@
         </div>
       </template>
       <template #default>
-    <div class="gpu-grid" v-if="status && status.gpus.length > 0">
-      <div class="gpu-card" v-for="gpu in status.gpus" :key="gpu.index">
-        <div class="gpu-card-header">
-          <span class="gpu-index">GPU {{ gpu.index }}</span>
-          <span class="gpu-name">{{ gpu.name }}</span>
+        <div class="gpu-grid" v-if="status && status.gpus.length > 0">
+          <div class="gpu-card" v-for="gpu in status.gpus" :key="gpu.index">
+            <div class="gpu-card-header">
+              <span class="gpu-index">GPU {{ gpu.index }}</span>
+              <span class="gpu-name" :title="gpu.name">{{ gpu.name }}</span>
+            </div>
+
+            <div class="stats-grid">
+              <div class="stat-block">
+                <div class="stat-label">利用率</div>
+                <div class="progress-track">
+                  <div
+                    class="progress-fill"
+                    :style="{
+                      width: gpu.utilization_percent + '%',
+                      background: progressColor(gpu.utilization_percent),
+                    }"
+                  ></div>
+                </div>
+                <div class="stat-value">{{ gpu.utilization_percent.toFixed(0) }}%</div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">显存</div>
+                <div class="progress-track">
+                  <div
+                    class="progress-fill"
+                    :style="{
+                      width: (gpu.memory_total_mb > 0 ? (gpu.memory_used_mb / gpu.memory_total_mb * 100) : 0) + '%',
+                      background: progressColor(gpu.memory_used_mb / (gpu.memory_total_mb || 1) * 100),
+                    }"
+                  ></div>
+                </div>
+                <div class="stat-value">
+                  {{ gpu.memory_used_mb.toFixed(0) }} /
+                  {{ gpu.memory_total_mb.toFixed(0) }} MB
+                </div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">温度</div>
+                <div class="stat-row">
+                  <span
+                    class="temp-indicator"
+                    :style="{ background: tempColor(gpu.temperature_c) }"
+                  ></span>
+                  <span class="stat-value">{{ gpu.temperature_c }}°C</span>
+                </div>
+              </div>
+
+              <div class="stat-block">
+                <div class="stat-label">功耗</div>
+                <div class="stat-value">{{ gpu.power_usage_w.toFixed(1) }}W</div>
+              </div>
+            </div>
+
+            <div class="gpu-trend">
+              <VChart
+                v-if="trendReady(gpu.index)"
+                class="trend-chart"
+                :option="buildOption(gpu.index)"
+                :autoresize="true"
+                :update-options="{ notMerge: true }"
+              />
+              <div v-else class="trend-placeholder">趋势采集中…</div>
+            </div>
+
+            <div class="occupancy">
+              <div class="occupancy-label">占用任务</div>
+              <div v-if="gpu.processes.length === 0" class="occupancy-empty">空闲</div>
+              <div v-else class="occupancy-list">
+                <div v-for="p in gpu.processes" :key="p.id" class="occ-item">
+                  <span class="occ-dot" :class="`occ-${p.status}`"></span>
+                  <span class="occ-name" :title="p.name">{{ p.name }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div class="stats-grid">
-          <div class="stat-block">
-            <div class="stat-label">利用率</div>
-            <div class="progress-track">
-              <div
-                class="progress-fill"
-                :style="{
-                  width: gpu.utilization_percent + '%',
-                  background: progressColor(gpu.utilization_percent),
-                }"
-              ></div>
-            </div>
-            <div class="stat-value">{{ gpu.utilization_percent.toFixed(0) }}%</div>
-          </div>
-
-          <div class="stat-block">
-            <div class="stat-label">显存</div>
-            <div class="progress-track">
-              <div
-                class="progress-fill"
-                :style="{
-                  width: (gpu.memory_total_mb > 0 ? (gpu.memory_used_mb / gpu.memory_total_mb * 100) : 0) + '%',
-                  background: progressColor(gpu.memory_used_mb / (gpu.memory_total_mb || 1) * 100),
-                }"
-              ></div>
-            </div>
-            <div class="stat-value">
-              {{ gpu.memory_used_mb.toFixed(0) }} /
-              {{ gpu.memory_total_mb.toFixed(0) }} MB
-            </div>
-          </div>
-
-          <div class="stat-block">
-            <div class="stat-label">温度</div>
-            <div class="stat-row">
-              <span
-                class="temp-indicator"
-                :style="{ background: tempColor(gpu.temperature_c) }"
-              ></span>
-              <span class="stat-value">{{ gpu.temperature_c }}°C</span>
-            </div>
-          </div>
-
-          <div class="stat-block">
-            <div class="stat-label">功耗</div>
-            <div class="stat-value">{{ gpu.power_usage_w.toFixed(1) }}W</div>
-          </div>
+        <div class="empty-state" v-else>
+          <el-icon :size="40" class="empty-icon"><Monitor /></el-icon>
+          <div class="empty-text">未检测到 GPU</div>
+          <div class="empty-sub">请确保已安装 NVIDIA 驱动与 nvidia-smi</div>
         </div>
-
-        <div class="occupancy">
-          <div class="occupancy-label">占用任务</div>
-          <div v-if="gpu.processes.length === 0" class="occupancy-empty">空闲</div>
-          <div v-else class="occupancy-list">
-            <div v-for="p in gpu.processes" :key="p.id" class="occ-item">
-              <span class="occ-dot" :class="`occ-${p.status}`"></span>
-              <span class="occ-name" :title="p.name">{{ p.name }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="empty-state" v-else>
-      <div class="empty-icon">⬡</div>
-      <div class="empty-text">未检测到 GPU</div>
-      <div class="empty-sub">请确保已安装 NVIDIA 驱动和 nvidia-smi</div>
-    </div>
       </template>
     </el-skeleton>
 
     <div class="updated-at" v-if="status">
-      更新时间: {{ status.updated_at }}
+      更新于 {{ formatDateTime(status.updated_at) }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, reactive, watch } from 'vue'
+import { useDark } from '@vueuse/core'
 import { useQuery } from '@tanstack/vue-query'
-import { getGpuStatus, type GpuStatus } from '@/api/gpu'
+import { Monitor } from '@element-plus/icons-vue'
+import { VChart } from '@/plugins/echarts'
+import { getGpuStatus } from '@/api/gpu'
+import { formatDateTime } from '@/utils/date'
 
 const { data: status, isPending: loading } = useQuery({
   queryKey: ['gpu-status'],
   queryFn: getGpuStatus,
   refetchInterval: 3000,
 })
+
+const HISTORY = 60
+interface GpuHistory { util: number[]; vram: number[] }
+const history = reactive<Record<number, GpuHistory>>({})
+
+watch(status, (s) => {
+  if (!s) return
+  for (const gpu of s.gpus) {
+    if (!history[gpu.index]) history[gpu.index] = { util: [], vram: [] }
+    const h = history[gpu.index]
+    const vramPct = gpu.memory_total_mb > 0 ? (gpu.memory_used_mb / gpu.memory_total_mb) * 100 : 0
+    h.util.push(gpu.utilization_percent)
+    h.vram.push(vramPct)
+    while (h.util.length > HISTORY) h.util.shift()
+    while (h.vram.length > HISTORY) h.vram.shift()
+  }
+}, { immediate: true })
+
+const isDark = useDark()
+// Cache CSS tokens per theme; canvas can't resolve CSS variables, so re-read on theme switch.
+const tokens = computed(() => {
+  void isDark.value
+  const v = (n: string) => getComputedStyle(document.documentElement).getPropertyValue(n).trim()
+  return {
+    blue: v('--accent-blue'),
+    cyan: v('--accent-cyan'),
+    textTertiary: v('--text-tertiary'),
+    bgElevated: v('--bg-elevated'),
+    borderDefault: v('--border-default'),
+    textPrimary: v('--text-primary'),
+  }
+})
+
+const trendReady = (idx: number) => (history[idx]?.util.length ?? 0) > 1
+
+const buildOption = (gpuIndex: number) => {
+  const h = history[gpuIndex] ?? { util: [], vram: [] }
+  const t = tokens.value
+  return {
+    animation: false,
+    grid: { left: 0, right: 0, top: 16, bottom: 0 },
+    xAxis: { type: 'category', show: false, boundaryGap: false },
+    yAxis: { type: 'value', show: false, min: 0, max: 100 },
+    legend: {
+      show: true, right: 0, top: -2,
+      itemWidth: 10, itemHeight: 6, itemGap: 10, icon: 'roundRect',
+      textStyle: { color: t.textTertiary, fontSize: 10 },
+      data: ['利用率', '显存'],
+    },
+    tooltip: {
+      trigger: 'axis', confine: true,
+      backgroundColor: t.bgElevated,
+      borderColor: t.borderDefault, borderWidth: 1,
+      textStyle: { color: t.textPrimary, fontSize: 11 },
+      formatter: (params: { marker: string; seriesName: string; value: number }[]) =>
+        params.map((p) => `${p.marker}${p.seriesName} ${Number(p.value).toFixed(0)}%`).join('<br/>'),
+    },
+    series: [
+      {
+        name: '利用率', type: 'line', data: h.util, smooth: 0.3, symbol: 'none',
+        lineStyle: { width: 1.5, color: t.blue },
+        areaStyle: { opacity: 0.14, color: t.blue },
+      },
+      {
+        name: '显存', type: 'line', data: h.vram, smooth: 0.3, symbol: 'none',
+        lineStyle: { width: 1.5, color: t.cyan },
+      },
+    ],
+  }
+}
 
 const progressColor = (pct: number) => {
   if (pct > 90) return 'var(--accent-red)'
@@ -141,8 +230,15 @@ const tempColor = (temp: number) => {
 
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.page-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .page-title {
@@ -152,10 +248,16 @@ const tempColor = (temp: number) => {
   margin: 0;
 }
 
+.page-sub {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
 .live-badge {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .live-dot {
@@ -172,11 +274,12 @@ const tempColor = (temp: number) => {
 }
 
 .live-text {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--accent-green);
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  font-family: var(--font-mono);
 }
 
 .gpu-grid {
@@ -280,6 +383,27 @@ const tempColor = (temp: number) => {
   transition: width 0.6s ease, background 0.4s ease;
 }
 
+.gpu-trend {
+  height: 64px;
+}
+
+.trend-chart {
+  width: 100%;
+  height: 64px;
+}
+
+.trend-placeholder {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  background: var(--bg-overlay);
+  border-radius: var(--radius-sm);
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;
@@ -293,9 +417,7 @@ const tempColor = (temp: number) => {
 }
 
 .empty-icon {
-  font-size: 36px;
   color: var(--text-tertiary);
-  line-height: 1;
 }
 
 .empty-text {
@@ -377,5 +499,10 @@ const tempColor = (temp: number) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot { animation: none; }
+  .progress-fill { transition: none; }
 }
 </style>

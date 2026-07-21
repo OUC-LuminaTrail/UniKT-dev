@@ -11,6 +11,7 @@ import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { resizeTerminal } from '@/api/tasks'
 import api from '@/api/index'
+import type { ConnState } from './log-conn'
 
 const props = defineProps<{
   wsUrl: string
@@ -18,7 +19,10 @@ const props = defineProps<{
   taskId: number
   resizePrefix?: string
 }>()
-const emit = defineEmits<{ (e: 'ready', terminal: Terminal): void }>()
+const emit = defineEmits<{
+  (e: 'ready', terminal: Terminal): void
+  (e: 'state', state: ConnState): void
+}>()
 
 const terminalContainer = ref<HTMLElement>()
 let terminal: Terminal | null = null
@@ -71,7 +75,7 @@ const connect = () => {
 
   ws = new WebSocket(url)
 
-  ws.onopen = () => {}
+  ws.onopen = () => { emit('state', 'connected') }
 
   ws.onmessage = (event) => {
     const data = JSON.parse(event.data)
@@ -89,8 +93,11 @@ const connect = () => {
   }
 
   ws.onclose = () => {
-    if (streamEnded) return
-    if (!isTaskRunning()) return
+    if (streamEnded || !isTaskRunning()) {
+      emit('state', 'ended')
+      return
+    }
+    emit('state', 'reconnecting')
     reconnectTimer = setTimeout(connect, 2000)
   }
 
@@ -124,7 +131,7 @@ onMounted(() => {
       brightWhite: '#c0caf5',
     },
     fontSize: 13,
-    fontFamily: '"JetBrains Mono", Menlo, Monaco, "Courier New", monospace',
+    fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
     convertEol: false,
     scrollback: 50000,
     cursorBlink: false,

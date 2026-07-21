@@ -8,10 +8,12 @@
       </router-link>
     </div>
 
-    <div class="tab-bar">
+    <div class="tab-bar" role="tablist" aria-label="任务状态分组">
       <button
         v-for="tab in tabs"
         :key="tab.value"
+        role="tab"
+        :aria-selected="activeTab === tab.value"
         :class="['tab-item', { active: activeTab === tab.value }]"
         @click="switchTab(tab.value)"
       >
@@ -29,7 +31,8 @@
       </div>
 
       <template v-if="runningTasks.length > 0">
-        <div class="section-divider">
+        <div class="section-divider divider-running">
+          <span class="divider-pulse" aria-hidden="true"></span>
           <span class="divider-label">运行中</span>
           <span class="divider-count">{{ runningTasks.length }}</span>
         </div>
@@ -112,7 +115,8 @@
       </template>
 
       <template v-if="queueItems.length > 0">
-        <div class="section-divider">
+        <div class="section-divider divider-queued">
+          <el-icon :size="13" class="divider-icon" aria-hidden="true"><Clock /></el-icon>
           <span class="divider-label">排队中</span>
           <span class="divider-count">{{ queueItems.length }}</span>
         </div>
@@ -290,7 +294,7 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
-import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document } from '@element-plus/icons-vue'
+import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document, Clock } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/date'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
@@ -674,6 +678,25 @@ html.dark .btn-primary:hover {
   margin-top: 4px;
 }
 
+.divider-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  box-shadow: 0 0 0 0 var(--soft-blue);
+  animation: divider-pulse 2s infinite;
+}
+
+.divider-queued .divider-icon {
+  color: var(--text-tertiary);
+}
+
+@keyframes divider-pulse {
+  0% { box-shadow: 0 0 0 0 var(--soft-blue); }
+  70% { box-shadow: 0 0 0 5px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
 .divider-label {
   font-size: 13px;
   font-weight: 600;
@@ -772,12 +795,12 @@ html.dark .btn-primary:hover {
 .gpu-tag {
   display: inline-block;
   padding: 2px 8px;
-  background: rgba(63, 185, 80, 0.08);
+  background: var(--soft-green);
   border-radius: 20px;
   font-size: 11px;
   font-family: var(--font-mono);
   color: var(--accent-green);
-  border: 1px solid rgba(63, 185, 80, 0.2);
+  border: 1px solid var(--border-muted);
 }
 
 .status-cell {
@@ -855,12 +878,12 @@ html.dark .btn-primary:hover {
 
 .action-stop:hover {
   color: var(--accent-orange);
-  background: rgba(210, 153, 34, 0.12);
+  background: var(--soft-orange);
 }
 
 .action-delete:hover {
   color: var(--accent-red);
-  background: rgba(248, 81, 73, 0.12);
+  background: var(--soft-red);
 }
 
 .batch-bar {
@@ -885,9 +908,9 @@ html.dark .btn-primary:hover {
   align-items: center;
   gap: 5px;
   padding: 4px 14px;
-  background: rgba(248, 81, 73, 0.08);
+  background: var(--soft-red);
   color: var(--accent-red);
-  border: 1px solid rgba(248, 81, 73, 0.2);
+  border: 1px solid var(--border-muted);
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
@@ -897,8 +920,9 @@ html.dark .btn-primary:hover {
 }
 
 .batch-delete-btn:hover {
-  background: rgba(248, 81, 73, 0.15);
-  border-color: rgba(248, 81, 73, 0.4);
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+  color: #fff;
 }
 
 .batch-stop-btn {
@@ -906,9 +930,9 @@ html.dark .btn-primary:hover {
   align-items: center;
   gap: 5px;
   padding: 4px 14px;
-  background: rgba(210, 153, 34, 0.08);
+  background: var(--soft-orange);
   color: var(--accent-orange);
-  border: 1px solid rgba(210, 153, 34, 0.2);
+  border: 1px solid var(--border-muted);
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
@@ -918,8 +942,9 @@ html.dark .btn-primary:hover {
 }
 
 .batch-stop-btn:hover {
-  background: rgba(210, 153, 34, 0.15);
-  border-color: rgba(210, 153, 34, 0.4);
+  background: var(--accent-orange);
+  border-color: var(--accent-orange);
+  color: #fff;
 }
 
 .batch-cancel-btn {
@@ -927,9 +952,9 @@ html.dark .btn-primary:hover {
   align-items: center;
   gap: 5px;
   padding: 4px 14px;
-  background: rgba(248, 81, 73, 0.08);
+  background: var(--soft-red);
   color: var(--accent-red);
-  border: 1px solid rgba(248, 81, 73, 0.2);
+  border: 1px solid var(--border-muted);
   border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
@@ -939,8 +964,9 @@ html.dark .btn-primary:hover {
 }
 
 .batch-cancel-btn:hover {
-  background: rgba(248, 81, 73, 0.15);
-  border-color: rgba(248, 81, 73, 0.4);
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+  color: #fff;
 }
 
 .batch-clear-btn {
@@ -969,5 +995,9 @@ html.dark .btn-primary:hover {
 .batch-bar-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .divider-pulse { animation: none; }
 }
 </style>

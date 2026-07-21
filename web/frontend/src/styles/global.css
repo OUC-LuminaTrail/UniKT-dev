@@ -14,11 +14,18 @@
   --accent-red: #cf222e;
   --accent-purple: #8250df;
   --accent-cyan: #1b7c83;
-  --font-sans: 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'Fira Code', monospace;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
+
+  --soft-blue: rgba(9, 105, 218, 0.08);
+  --soft-green: rgba(26, 127, 55, 0.10);
+  --soft-red: rgba(207, 34, 46, 0.08);
+  --soft-orange: rgba(154, 103, 0, 0.10);
+
+  --term-bg: #1a1b26;
 
   --el-bg-color: var(--bg-elevated);
   --el-bg-color-page: var(--bg-base);
@@ -57,6 +64,11 @@ html.dark {
   --accent-red: #f85149;
   --accent-purple: #bc8cff;
   --accent-cyan: #39d2c0;
+
+  --soft-blue: rgba(56, 139, 253, 0.15);
+  --soft-green: rgba(63, 185, 80, 0.15);
+  --soft-red: rgba(248, 81, 73, 0.15);
+  --soft-orange: rgba(187, 128, 9, 0.18);
 
   --el-bg-color: var(--bg-surface);
   --el-bg-color-page: var(--bg-base);
@@ -112,6 +124,11 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
 .el-table {
   --el-table-bg-color: var(--bg-surface);
   --el-table-tr-bg-color: var(--bg-surface);
@@ -120,7 +137,7 @@ body {
   --el-table-border-color: var(--border-muted);
   --el-table-text-color: var(--text-primary);
   --el-table-header-text-color: var(--text-secondary);
-  --el-table-current-row-bg-color: rgba(88, 166, 255, 0.08);
+  --el-table-current-row-bg-color: var(--soft-blue);
 }
 
 .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
@@ -222,5 +239,3 @@ html.dark .el-button--success {
 .el-form-item__error {
   color: var(--accent-red);
 }
-
-

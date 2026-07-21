@@ -5,13 +5,19 @@
         <el-icon :size="16"><Tickets /></el-icon>
         <span>运行日志</span>
       </div>
-      <button class="scroll-btn" @click="scrollToBottom">
-        <el-icon :size="14"><Bottom /></el-icon>
-        跳到底部
-      </button>
+      <div class="header-right">
+        <span class="conn-indicator" :class="`conn-${connState}`" :title="connTitle">
+          <span class="conn-dot"></span>
+          <span class="conn-label">{{ connLabel }}</span>
+        </span>
+        <button class="scroll-btn" @click="scrollToBottom">
+          <el-icon :size="14"><Bottom /></el-icon>
+          跳到底部
+        </button>
+      </div>
     </div>
     <div class="terminal-wrapper">
-      <LogTerminal :ws-url="wsUrl" :task-status="taskStatus" :task-id="taskId" :resize-prefix="resizePrefix" @ready="onTerminalReady" />
+      <LogTerminal :ws-url="wsUrl" :task-status="taskStatus" :task-id="taskId" :resize-prefix="resizePrefix" @ready="onTerminalReady" @state="onState" />
     </div>
   </section>
 </template>
@@ -21,6 +27,7 @@ import { computed, ref } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { Tickets, Bottom } from '@element-plus/icons-vue'
 import LogTerminal from './LogTerminal.vue'
+import { CONN_MAP, type ConnState } from './log-conn'
 
 const props = defineProps<{
   wsUrl: string
@@ -36,6 +43,12 @@ const cardStyle = computed(() =>
   props.fill ? { flex: '1 1 0', margin: '0 20px 20px' } : {}
 )
 
+const connState = ref<ConnState>('connecting')
+const onState = (s: ConnState) => { connState.value = s }
+
+const connLabel = computed(() => CONN_MAP[connState.value].label)
+const connTitle = computed(() => CONN_MAP[connState.value].title)
+
 const onTerminalReady = (term: Terminal) => { terminal = term }
 
 const scrollToBottom = () => { terminal?.scrollToBottom() }
@@ -49,6 +62,8 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
   background: var(--bg-surface);
   display: flex;
   flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .log-card-header {
@@ -68,6 +83,62 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.conn-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  letter-spacing: 0.3px;
+}
+
+.conn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.conn-connecting .conn-dot {
+  background: var(--accent-orange);
+  animation: conn-pulse 1s infinite;
+}
+
+.conn-connected .conn-dot {
+  background: var(--accent-green);
+  box-shadow: 0 0 5px var(--accent-green);
+}
+
+.conn-connected .conn-label {
+  color: var(--accent-green);
+}
+
+.conn-reconnecting .conn-dot {
+  background: var(--accent-orange);
+  animation: conn-pulse 0.8s infinite;
+}
+
+.conn-reconnecting .conn-label {
+  color: var(--accent-orange);
+}
+
+.conn-ended .conn-dot {
+  background: var(--text-tertiary);
+}
+
+@keyframes conn-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .scroll-btn {
@@ -93,12 +164,11 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
 .terminal-wrapper {
   flex: 1 1 0;
   min-height: 0;
-  background: #1a1b26;
+  background: var(--term-bg);
 }
 
-.log-card:not([style*="flex: 1"]) .terminal-wrapper {
-  height: calc(100vh - 320px);
-  min-height: 500px;
-  flex: none;
+@media (prefers-reduced-motion: reduce) {
+  .conn-connecting .conn-dot,
+  .conn-reconnecting .conn-dot { animation: none; }
 }
 </style>

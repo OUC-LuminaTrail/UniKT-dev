@@ -26,43 +26,13 @@
 
         <div class="section" v-if="environments.length">
           <div class="section-label">运行环境</div>
-          <el-select
+          <EnvSelect
             v-model="selectedEnvId"
+            v-model:custom-path="customPythonPath"
+            :environments="environments"
             placeholder="使用默认环境"
             clearable
-            class="env-select"
-          >
-            <el-option-group label="Pixi">
-              <el-option
-                v-for="env in pixiEnvs"
-                :key="env.id"
-                :label="env.display_name"
-                :value="env.id"
-              />
-            </el-option-group>
-            <el-option-group label="Conda" v-if="condaEnvs.length">
-              <el-option
-                v-for="env in condaEnvs"
-                :key="env.id"
-                :label="env.display_name"
-                :value="env.id"
-              />
-            </el-option-group>
-            <el-option-group label="Other" v-if="otherEnvs.length">
-              <el-option
-                v-for="env in otherEnvs"
-                :key="env.id"
-                :label="env.display_name"
-                :value="env.id"
-              />
-            </el-option-group>
-          </el-select>
-          <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
-            <el-input
-              v-model="customPythonPath"
-              placeholder="/path/to/python"
-            />
-          </div>
+          />
         </div>
 
         <div class="section">
@@ -84,7 +54,12 @@
                     :key="ds.name"
                     class="select-card"
                     :class="{ active: dataset === ds.name }"
+                    role="button"
+                    tabindex="0"
+                    :aria-pressed="dataset === ds.name"
                     @click="onDatasetClick(ds.name)"
+                    @keydown.enter.prevent="onDatasetClick(ds.name)"
+                    @keydown.space.prevent="onDatasetClick(ds.name)"
                   >
                     <div class="card-icon icon-dataset" :style="{ background: getGradient('ds-' + ds.name) }">
                       <el-icon :size="18"><Coin /></el-icon>
@@ -159,6 +134,7 @@ import CommandPreview from '@/components/task/CommandPreview.vue'
 import LogCard from '@/components/task/LogCard.vue'
 import DatasetMetadataPanel from '@/components/task/DatasetMetadataPanel.vue'
 import PreprocessForm from '@/components/task/PreprocessForm.vue'
+import EnvSelect from '@/components/task/EnvSelect.vue'
 import { getGradient } from '@/composables/useGradient'
 
 type Phase = 'config' | 'running'
@@ -230,10 +206,6 @@ const loading = computed(() =>
   datasetsQuery.isPending.value ||
   envsQuery.isPending.value
 )
-
-const pixiEnvs = computed(() => environments.value.filter(e => e.type === 'pixi'))
-const condaEnvs = computed(() => environments.value.filter(e => e.type === 'conda'))
-const otherEnvs = computed(() => environments.value.filter(e => e.type !== 'pixi' && e.type !== 'conda'))
 
 const preprocessTaskQuery = useQuery({
   queryKey: computed(() => ['preprocess-task', taskId.value]),
@@ -458,13 +430,26 @@ const onBack = () => {
 }
 
 .radio-item input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .radio-item.active {
   border-color: var(--accent-blue);
   color: var(--accent-blue);
-  background: rgba(9, 105, 218, 0.06);
+  background: var(--soft-blue);
+}
+
+.radio-item:focus-within {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
 }
 
 .dataset-layout {
@@ -503,9 +488,8 @@ const onBack = () => {
 
 .select-card.active {
   border-color: var(--accent-blue);
-  border-width: 2px;
-  background: rgba(88, 166, 255, 0.06);
-  box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.2);
+  background: var(--soft-blue);
+  box-shadow: 0 0 0 1px var(--accent-blue);
 }
 
 .card-icon {
@@ -587,22 +571,22 @@ const onBack = () => {
 }
 
 .status-badge.status-running {
-  background: rgba(9, 105, 218, 0.1);
+  background: var(--soft-blue);
   color: var(--accent-blue);
 }
 
 .status-badge.status-completed {
-  background: rgba(26, 127, 55, 0.1);
+  background: var(--soft-green);
   color: var(--accent-green);
 }
 
 .status-badge.status-failed {
-  background: rgba(207, 34, 46, 0.1);
+  background: var(--soft-red);
   color: var(--accent-red);
 }
 
 .status-badge.status-stopped {
-  background: rgba(154, 103, 0, 0.1);
+  background: var(--soft-orange);
   color: var(--accent-orange);
 }
 
@@ -619,20 +603,11 @@ const onBack = () => {
 }
 
 .stop-btn:hover {
-  background: rgba(210, 153, 34, 0.08);
+  background: var(--soft-orange);
 }
 
 .stop-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.env-select {
-  max-width: 400px;
-}
-
-.custom-path-row {
-  margin-top: 8px;
-  max-width: 400px;
 }
 </style>
