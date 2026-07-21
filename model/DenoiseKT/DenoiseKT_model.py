@@ -251,7 +251,7 @@ class DenoiseKT(nn.Module):
         self.register_buffer(
             "question_concepts", question_concepts.long(), persistent=False
         )
-        self.register_buffer("question_graph", question_graph)
+        self.register_buffer("question_graph", question_graph, persistent=False)
 
         # 相对位置 [L, L]，[i,j] = i-j（对角为 0），供 boost_focus 使用
         idx = torch.arange(seq_len)
