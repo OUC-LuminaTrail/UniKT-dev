@@ -251,6 +251,13 @@ class CheckpointManager:
         # Restore optimizer state
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
             optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            # Move optimizer state tensors to the target device.
+            if device is not None:
+                target = torch.device(device)
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if torch.is_tensor(v):
+                            state[k] = v.to(target)
 
         # Restore scheduler state
         if scheduler is not None and "scheduler_state_dict" in checkpoint:
