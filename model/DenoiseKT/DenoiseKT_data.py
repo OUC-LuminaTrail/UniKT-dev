@@ -57,33 +57,44 @@ class DenoiseKTModelData(QuestionModelData):
         return torch.from_numpy(question_concepts)
 
     def build_question_graph(self) -> torch.Tensor:
-        """构建题目-概念邻接矩阵（行归一化），嵌入 ``[num_q, num_q]`` 供 GCN 使用。"""
-        num_q = self.data_src.get_metadata("num_questions")
-        num_c = self.data_src.get_metadata("num_skills")
-        if num_c > num_q:
-            raise ValueError(
-                f"DenoiseKT requires num_skills ({num_c}) <= num_questions ({num_q}) "
-                f"to embed the question-concept matrix into [num_q, num_q]."
-            )
+        """构建题目-题目共现邻接矩阵 ``[num_q, num_q]`` 供 GCN 使用。
 
-        qs_matrix = self.build_relationship_matrix(
+        ``A = R_norm @ R_norm.T``，再行归一化。
+        两题共享的概念越多，它们之间的边权重越大。
+        """
+        num_q = self.data_src.get_metadata("num_questions")
+
+        R = self.build_relationship_matrix(
             ("question", "has", "skill"), value_type="binary"
         ).astype(np.float32)  # [num_q, num_c]
 
-        # Nonzero positions (q, c): question q contains concept c.
-        q_idx, c_idx = np.nonzero(qs_matrix)
-        # Row-normalized: each nonzero entry = 1 / (concept count of that question).
-        row_sum = qs_matrix.sum(axis=1)
+        # Row-normalize R: each concept tested by question q gets weight 1/deg(q)
+        row_sum = R.sum(axis=1, keepdims=True)
         row_sum[row_sum == 0] = 1.0
-        values = 1.0 / row_sum[q_idx]
+        R_norm = R / row_sum  # [num_q, num_c]
 
-        indices = torch.from_numpy(np.stack([q_idx, c_idx])).long()
+        # Question-question co-occurrence: A = R_norm @ R_norm.T
+        # A[q_i, q_j] = Σ_c R_norm[q_i, c] · R_norm[q_j, c]
+        A_dense = R_norm @ R_norm.T  # [num_q, num_q]
+
+        # Remove self-loops (diagonal set to 0)
+        np.fill_diagonal(A_dense, 0.0)
+
+        # Row-normalize A so each question's neighbors sum to 1
+        a_row_sum = A_dense.sum(axis=1, keepdims=True)
+        a_row_sum[a_row_sum == 0] = 1.0
+        A_dense /= a_row_sum
+
+        # Convert to sparse COO
+        q_i, q_j = np.nonzero(A_dense)
+        values = A_dense[q_i, q_j]
+        indices = torch.from_numpy(np.stack([q_i, q_j])).long()
         sparse_adj = torch.sparse_coo_tensor(
             indices, torch.from_numpy(values).float(), size=(num_q, num_q)
         ).coalesce()
 
         logger.info(
-            f"DenoiseKT question-concept graph: {sparse_adj.shape[0]}x{sparse_adj.shape[1]}, "
+            f"DenoiseKT question-question graph: {sparse_adj.shape[0]}x{sparse_adj.shape[1]}, "
             f"nnz={sparse_adj._nnz()}"
         )
         return sparse_adj
