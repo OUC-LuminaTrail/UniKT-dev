@@ -156,7 +156,9 @@ def _emit_preprocess(action: str):
     elif action == "process":
         groups = [
             reflect_group("数据", "data", RunDataConfig, only=visible(RunDataConfig)),
-            reflect_group("通用", "general", GeneralConfig, only=visible(GeneralConfig)),
+            reflect_group(
+                "通用", "general", GeneralConfig, only=visible(GeneralConfig)
+            ),
             reflect_group("额外", "", ProcessConfig),
         ]
     else:
