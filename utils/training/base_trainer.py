@@ -129,6 +129,7 @@ class BaseTrainer(ABC):
         self.callback_manager = None
         self.metric_logger = None
         self._global_step = 0
+        self._resumed = False
 
         # Multi-stage context (None/0 for single-stage)
         self._current_stage: str | None = None
@@ -541,6 +542,18 @@ class BaseTrainer(ABC):
         if "epoch" in checkpoint:
             self.start_epoch = checkpoint["epoch"] + 1
 
+        # Restore best-model tracking on the checkpoint callback.
+        checkpoint_cb = self.callback_manager.get_callback(CheckpointCallback)
+        if checkpoint_cb is not None and self.early_stopping is not None:
+            checkpoint_cb.best_metric = self.early_stopping.best_score
+            checkpoint_cb.best_epoch = self.early_stopping.best_epoch
+            best_path = os.path.join(self.log_dir, checkpoint_cb.best_filename or "")
+            if os.path.isfile(best_path):
+                checkpoint_cb.best_model_state = (
+                    CheckpointManager.read_model_state_dict(best_path)
+                )
+
+        self._resumed = True
         logger.info(f"Resumed training from epoch {self.start_epoch}")
 
     def _init_metric_logger(self):

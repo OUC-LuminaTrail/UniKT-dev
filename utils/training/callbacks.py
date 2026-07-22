@@ -499,6 +499,9 @@ class CheckpointCallback(Callback):
             epochs: Total number of epochs.
             **kwargs: Additional keyword arguments.
         """
+        trainer = kwargs.get("trainer")
+        if trainer is not None and getattr(trainer, "_resumed", False):
+            return
         self.best_metric = None
         self.best_epoch = None
         self.best_model_state = None

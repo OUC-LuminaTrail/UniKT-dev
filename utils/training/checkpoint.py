@@ -5,9 +5,11 @@ Provides model checkpoint save and load functionality.
 
 import atexit
 import os
+import random
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import cast
 
+import numpy as np
 import torch
 
 from ..core import get_logger
@@ -36,6 +38,55 @@ def _detach_to_cpu(obj):
     if isinstance(obj, tuple):
         return tuple(_detach_to_cpu(v) for v in obj)
     return obj
+
+
+def _strip_compile_prefix_if_needed(state_dict, model):
+    # Strip the `_orig_mod.` prefix torch.compile adds when a checkpoint
+    # saved from a compiled model is loaded into a raw model.
+    model_prefixed = any(k.startswith("_orig_mod.") for k in model.state_dict())
+    state_prefixed = any(k.startswith("_orig_mod.") for k in state_dict)
+    if state_prefixed and not model_prefixed:
+        return {k[len("_orig_mod.") :]: v for k, v in state_dict.items()}
+    return state_dict
+
+
+def _capture_rng_states():
+    # numpy's get_state() holds a uint32 ndarray, which is not allowed under
+    # torch.load's default weights_only=True. Convert it to a list so the
+    # whole checkpoint stays weights-only-safe.
+    np_state = np.random.get_state()
+    np_state_safe = (
+        np_state[0],
+        np_state[1].tolist(),
+        np_state[2],
+        np_state[3],
+        np_state[4],
+    )
+    return {
+        "torch": torch.get_rng_state(),
+        "cuda": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+        "numpy": np_state_safe,
+        "python": random.getstate(),
+    }
+
+
+def _restore_rng_states(states):
+    if states.get("torch") is not None:
+        torch.set_rng_state(states["torch"])
+    if torch.cuda.is_available() and states.get("cuda") is not None:
+        torch.cuda.set_rng_state_all(states["cuda"])
+    if states.get("numpy") is not None:
+        np_state = states["numpy"]
+        np_state = (
+            np_state[0],
+            np.asarray(np_state[1], dtype=np.uint32),
+            np_state[2],
+            np_state[3],
+            np_state[4],
+        )
+        np.random.set_state(np_state)
+    if states.get("python") is not None:
+        random.setstate(states["python"])
 
 
 class CheckpointManager:
@@ -103,6 +154,8 @@ class CheckpointManager:
 
         if early_stopping_state is not None:
             state["early_stopping_state"] = early_stopping_state
+
+        state["rng_states"] = _capture_rng_states()
 
         if additional_state:
             state.update(additional_state)
@@ -201,15 +254,30 @@ class CheckpointManager:
         raw = torch.load(path, **map_kw)
 
         if isinstance(raw, dict) and "model_state_dict" in raw:
-            model.load_state_dict(raw["model_state_dict"])
+            model.load_state_dict(
+                _strip_compile_prefix_if_needed(raw["model_state_dict"], model)
+            )
             logger.info(
                 f"Loaded from full checkpoint (epoch {raw.get('epoch', 'unknown')})"
             )
             return raw
 
-        model.load_state_dict(raw)
+        model.load_state_dict(_strip_compile_prefix_if_needed(raw, model))
         logger.debug("Loaded from plain state_dict")
         return None
+
+    @staticmethod
+    def read_model_state_dict(path: str, device: torch.device | None = None) -> dict:
+        """Read a checkpoint file and return the model state_dict.
+
+        Does not load into a model. Handles both plain state_dict files and
+        full checkpoint dicts with a ``"model_state_dict"`` key.
+        """
+        map_kw = {"map_location": device} if device is not None else {}
+        raw = torch.load(path, **map_kw)
+        if isinstance(raw, dict) and "model_state_dict" in raw:
+            return raw["model_state_dict"]
+        return raw
 
     def load_checkpoint(
         self,
@@ -246,7 +314,9 @@ class CheckpointManager:
             checkpoint = torch.load(checkpoint_path)
 
         # Restore model state
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(
+            _strip_compile_prefix_if_needed(checkpoint["model_state_dict"], model)
+        )
 
         # Restore optimizer state
         if optimizer is not None and "optimizer_state_dict" in checkpoint:
@@ -270,6 +340,10 @@ class CheckpointManager:
             early_stopping.best_epoch = es_state.get("best_epoch")
             early_stopping.num_bad_epochs = es_state.get("num_bad_epochs", 0)
             early_stopping.best_metrics = es_state.get("best_metrics")
+
+        # Restore RNG states
+        if "rng_states" in checkpoint:
+            _restore_rng_states(checkpoint["rng_states"])
 
         logger.info("Checkpoint loaded successfully")
         return checkpoint
