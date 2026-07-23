@@ -6,6 +6,7 @@ platforms = [
   { name = "gpu", platform = "linux-64", cuda = "12.8", glibc = "2.38" },
   { name = "dhg-gpu", platform = "linux-64", cuda = "11.7", glibc = "2.38" },
 ]
+requires-pixi = "0.72*"
 
 [pypi-options]
 index-url = "https://pypi.org/simple"
