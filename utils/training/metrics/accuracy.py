@@ -1,28 +1,25 @@
 """Accuracy metric."""
 
-import numpy as np
 from sklearn.metrics import accuracy_score
 
 from utils.core import register_metric
 
-from .base import Metric, MetricContext
+from .base import Metric
 
 
 @register_metric("acc")
 class AccuracyMetric(Metric):
     """Classification accuracy.
 
-    Train/val: accuracy of the model's binary predictions (``y_pred``).
-    Test/group: accuracy of thresholding the fused group score at 0.5.
+    Train/val: model binary predictions (``y_pred``). Test/group: fused group
+    scores binarised at 0.5. Defined for a single class (1.0 when all
+    correct); omitted only on empty input.
     """
 
-    def compute(self, ctx: MetricContext) -> dict[str, float]:
-        """Accuracy; per-fusion in test/group mode."""
-        if ctx.groups:
-            return {
-                f"{fusion}_acc": float(
-                    accuracy_score(label, (score >= 0.5).astype(np.float64))
-                )
-                for fusion, (label, score) in ctx.groups.items()
-            }
-        return {"acc": float(accuracy_score(ctx.y_label, ctx.y_pred))}
+    name = "acc"
+    source = "y_pred"
+    threshold = 0.5
+
+    def score(self, y_true, y_value):
+        """Return classification accuracy."""
+        return float(accuracy_score(y_true, y_value))

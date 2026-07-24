@@ -2,7 +2,7 @@
 
 from utils.core import register_metric
 
-from .base import Metric, MetricContext
+from .base import Metric
 from .grouping import _pearson_r2
 
 
@@ -10,16 +10,14 @@ from .grouping import _pearson_r2
 class R2Metric(Metric):
     """Squared Pearson correlation between truth and prediction.
 
-    Train/val: computed on predicted probabilities (``y_prob``). Test/group:
-    computed on fused group scores. Returns 0.0 when either input has zero
-    variance (correlation undefined).
+    Train/val: predicted probabilities (``y_prob``). Test/group: fused group
+    scores. Returns 0.0 when either input has zero variance (correlation
+    undefined); omitted only on empty input.
     """
 
-    def compute(self, ctx: MetricContext) -> dict[str, float]:
-        """Squared Pearson r²; per-fusion in test/group mode."""
-        if ctx.groups:
-            return {
-                f"{fusion}_r2": _pearson_r2(label, score)
-                for fusion, (label, score) in ctx.groups.items()
-            }
-        return {"r2": _pearson_r2(ctx.y_label, ctx.y_prob)}
+    name = "r2"
+    source = "y_prob"
+
+    def score(self, y_true, y_value):
+        """Return squared Pearson correlation."""
+        return float(_pearson_r2(y_true, y_value))

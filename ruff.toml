@@ -20,6 +20,8 @@ ignore = [
 
 [lint.per-file-ignores]
 "model/**/*.py" = ["D", "RUF"]
+# Tests are self-documenting via descriptive test_/class names; no docstrings.
+"tests/**/*.py" = ["D"]
 # The backend carries user-facing Chinese messages (fullwidth punctuation is
 # correct Chinese typography, not an ambiguous copy of an ASCII symbol).
 "web/backend/**/*.py" = ["RUF001", "RUF002", "RUF003"]

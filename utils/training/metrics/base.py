@@ -1,13 +1,19 @@
 """Metric plug-in interface: ``Metric`` ABC + ``MetricContext``.
 
-Each metric is a class subclassing :class:`Metric`, registered via
-``@register_metric("name")`` and auto-discovered (see package ``__init__``).
-A metric decides for itself how to handle train/val mode (raw fields on
-``ctx``) versus test/group mode (``ctx.groups``).
+Each metric subclasses :class:`Metric`, registers via
+``@register_metric("name")`` and is auto-discovered (see package ``__init__``).
+A metric only declares its data requirements (``source`` /
+``requires_two_classes`` / ``threshold``) and implements the pure
+:meth:`Metric.score`; the base class handles train/val vs test/group
+branching, data-sufficiency gating, and key naming uniformly — so every
+metric gets identical, cannot-be-forgotten protection against undefined
+inputs (empty / single-class / non-finite → the key is omitted, never a
+fake 0.0 or nan).
 """
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -43,22 +49,74 @@ class MetricContext:
 
 
 class Metric(ABC):
-    """A pluggable evaluation metric.
+    """A pluggable evaluation metric (template-method style).
 
-    Subclasses register via ``@register_metric("name")`` and implement
-    :meth:`compute`, returning ``{metric_key: value}``. In test/group mode a
-    single metric typically emits one key per fusion (e.g. ``mean_acc``,
-    ``vote_acc``, ``all_acc``).
+    Subclasses declare their data needs as class attributes and implement
+    :meth:`score` — a pure function over already-validated data. The base
+    :meth:`compute` then uniformly handles:
+
+    - train/val vs test/group branching (``ctx.groups``),
+    - data-sufficiency gating: empty input, single-class ``y_label`` (when
+      ``requires_two_classes``), sklearn ``ValueError``, or a non-finite
+      result all cause the key to be **omitted** (never a fake 0.0 / nan),
+    - optional binarisation of the prediction via ``threshold``,
+    - key naming (``name`` in train/val, ``{fusion}_{name}`` in test/group).
+
+    Attributes:
+        name: Metric key in train/val mode (and suffix in test/group mode).
+        source: ``MetricContext`` field used as the prediction in train/val
+            mode (``"y_pred"`` / ``"y_score"`` / ``"y_prob"``).
+        requires_two_classes: Skip when ``y_label`` has <2 unique values
+            (ranking/agreement metrics are undefined on a single class).
+        threshold: If set, binarise the prediction as ``(pred >= threshold)``
+            before scoring (classification metrics).
     """
 
+    name: str
+    source: str
+    requires_two_classes: bool = False
+    threshold: float | None = None
+
     @abstractmethod
-    def compute(self, ctx: MetricContext) -> dict[str, float]:
-        """Compute and return metric values for the given context.
+    def score(self, y_true: np.ndarray, y_value: np.ndarray) -> float:
+        """Compute the metric over already-validated data.
 
         Args:
-            ctx: The computation context (see :class:`MetricContext`).
+            y_true: Ground-truth labels (non-empty; >=2 classes when required).
+            y_value: Prediction (``ctx.{source}`` in train/val, fused group
+                score in test/group; already binarised when ``threshold`` set).
 
         Returns:
-            A dict of metric values; may contain multiple keys in
-            test/group mode (one per fusion).
+            The metric value. Non-finite results are dropped by the base class.
         """
+
+    def compute(self, ctx: MetricContext) -> dict[str, float]:
+        """Compute metric values for the context (template method)."""
+        if ctx.groups:
+            return {
+                f"{fusion}_{self.name}": value
+                for fusion, (label, group_score) in ctx.groups.items()
+                if (value := self._eval(label, group_score)) is not None
+            }
+        value = self._eval(ctx.y_label, getattr(ctx, self.source))
+        return {self.name: value} if value is not None else {}
+
+    def _eval(self, y_true, y_value) -> float | None:
+        """Gate on data sufficiency, then delegate to :meth:`score`.
+
+        Returns None (-> key omitted) when the metric is undefined: empty
+        input, single-class labels (if required), sklearn ValueError, or a
+        non-finite result.
+        """
+        y_true = np.asarray(y_true)
+        if y_true.size == 0:
+            return None
+        if self.requires_two_classes and np.unique(y_true).size < 2:
+            return None
+        if self.threshold is not None:
+            y_value = (np.asarray(y_value) >= self.threshold).astype(np.float64)
+        try:
+            value = float(self.score(y_true, y_value))
+        except ValueError:
+            return None
+        return value if math.isfinite(value) else None
