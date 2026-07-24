@@ -119,9 +119,7 @@ class TestMetricValues:
         assert AUCMetric().compute(_ctx([1, 0], y_score=[0.1, 0.9])) == {"auc": 0.0}
 
     def test_auprc_perfect(self):
-        out = AUPRCMetric().compute(
-            _ctx([1, 0, 1, 0], y_score=[0.9, 0.1, 0.8, 0.2])
-        )
+        out = AUPRCMetric().compute(_ctx([1, 0, 1, 0], y_score=[0.9, 0.1, 0.8, 0.2]))
         assert out["auprc"] == 1.0
 
     def test_acc_partial(self):
@@ -185,7 +183,15 @@ class TestSingleClassAndEmpty:
 
     @pytest.mark.parametrize(
         "metric",
-        [AUCMetric, AUPRCMetric, AccuracyMetric, MAEMetric, RMSEMetric, KappaMetric, R2Metric],
+        [
+            AUCMetric,
+            AUPRCMetric,
+            AccuracyMetric,
+            MAEMetric,
+            RMSEMetric,
+            KappaMetric,
+            R2Metric,
+        ],
     )
     def test_empty_input_omits_key(self, metric):
         out = metric().compute(
@@ -254,7 +260,9 @@ class TestAccumulator:
         accum.reset("val")
         accum.update(
             "val",
-            _batch([1, 1, 1, 1], [1, 1, 0, 1], [0.6, 0.7, 0.4, 0.8], [0.6, 0.7, 0.4, 0.8]),
+            _batch(
+                [1, 1, 1, 1], [1, 1, 0, 1], [0.6, 0.7, 0.4, 0.8], [0.6, 0.7, 0.4, 0.8]
+            ),
         )
         m = accum.compute("val")
         assert "auc" not in m
@@ -267,7 +275,9 @@ class TestAccumulator:
         accum.reset("val")
         accum.update(
             "val",
-            _batch([1, 0, 1, 0], [1, 0, 0, 0], [0.9, 0.1, 0.8, 0.2], [0.9, 0.1, 0.8, 0.2]),
+            _batch(
+                [1, 0, 1, 0], [1, 0, 0, 0], [0.9, 0.1, 0.8, 0.2], [0.9, 0.1, 0.8, 0.2]
+            ),
         )
         m = accum.compute("val")
         assert {"acc", "auc", "auprc", "mae", "rmse", "r2", "kappa"} <= set(m)

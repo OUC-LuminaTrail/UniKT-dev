@@ -7,6 +7,7 @@ import atexit
 import os
 import random
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import suppress
 from typing import cast
 
 import numpy as np
@@ -118,7 +119,7 @@ class CheckpointManager:
         self._executor = ThreadPoolExecutor(
             max_workers=1, thread_name_prefix="ckpt-saver"
         )
-        self._save_futures: list[Future] = []
+        self._latest: dict[str, Future] = {}
         self._closed = False
         atexit.register(self.close)
 
@@ -181,7 +182,13 @@ class CheckpointManager:
     def _submit_save(self, obj, filepath: str) -> None:
         """Submit an atomic save to the background thread.
 
-        Falls back to synchronous write if the manager is already closed.
+        Coalesces with the previous save to ``filepath``: if it has not
+        started yet it is cancelled (its older data would be overwritten by
+        this one anyway); ``Future.cancel`` is a no-op on a running save, so
+        an in-flight write is never interrupted. Without coalescing, a slow
+        disk lets stale writes pile up in the single-worker queue and drain
+        serially — and slowly — at ``close()``, making a finished run look
+        stuck. Falls back to a synchronous write if the manager is closed.
 
         Args:
             obj: Data to save.
@@ -190,8 +197,21 @@ class CheckpointManager:
         if self._closed:
             self._write_atomic(obj, filepath)
             return
+        prev = self._latest.get(filepath)
+        if prev is not None and not prev.done():
+            prev.cancel()
         future = self._executor.submit(self._write_atomic, obj, filepath)
-        self._save_futures.append(future)
+        future.add_done_callback(self._log_failure)
+        self._latest[filepath] = future
+
+    @staticmethod
+    def _log_failure(future: Future) -> None:
+        """Log a finished save's exception, if any (skip cancelled saves)."""
+        if future.cancelled():
+            return
+        exc = future.exception()
+        if exc is not None:
+            logger.error("Async checkpoint save failed", exc_info=exc)
 
     @staticmethod
     def _write_atomic(obj, filepath: str) -> None:
@@ -202,14 +222,18 @@ class CheckpointManager:
         logger.info(f"Checkpoint saved to {filepath}")
 
     def flush(self) -> None:
-        """Wait for all pending saves to complete, logging any exceptions."""
-        futures = self._save_futures
-        self._save_futures = []
-        for future in futures:
-            try:
+        """Wait for the latest save per path to finish.
+
+        Exceptions are already surfaced by the done-callback, so they are
+        swallowed here. ``close`` follows this with ``shutdown(wait=True)``,
+        which also drains any older running save whose future was replaced.
+        """
+        for future in list(self._latest.values()):
+            if future.cancelled():
+                continue
+            with suppress(Exception):
                 future.result()
-            except Exception:
-                logger.exception("Async checkpoint save failed")
+        self._latest = {p: f for p, f in self._latest.items() if not f.done()}
 
     def close(self) -> None:
         """Drain the save queue and shut down the executor.
