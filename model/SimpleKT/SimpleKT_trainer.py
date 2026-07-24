@@ -21,6 +21,7 @@ class SimpleKTConfig(ModelConfig):
         d_ff: Dimension of feed-forward network.
         kq_same: Whether to share key and query weights (1 for yes, 0 for no).
         separate_qa: Whether to use separate interaction embedding (1 for yes, 0 for no).
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         final_fc_dim: First fully connected layer dimension in output.
         final_fc_dim2: Second fully connected layer dimension in output.
         epochs: Number of training epochs.
@@ -37,6 +38,7 @@ class SimpleKTConfig(ModelConfig):
     d_ff: int = 256
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
     epochs: int = 100
@@ -68,8 +70,13 @@ class SimpleKTTrainer(BaseTrainer):
 
         logger.info("Initializing SimpleKT model...")
         metadata = data_src.get_metadata()
-        n_pid = metadata["num_questions"]
-        logger.info(f"SimpleKT: Using Problem ID (Rasch model) with {n_pid} questions")
+        n_pid = metadata["num_questions"] if rc.model.use_rasch else 0
+        if n_pid > 0:
+            logger.info(
+                f"SimpleKT: Using Problem ID (Rasch model) with {n_pid} questions"
+            )
+        else:
+            logger.info("SimpleKT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = SimpleKT(
@@ -138,7 +145,8 @@ class SimpleKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask)
         question = self._move_tensor_to_device(question)
 
-        pid_data = self._build_pid_data(question, mask)
+        use_pid = self.model.n_pid > 0
+        pid_data = self._build_pid_data(question, mask) if use_pid else None
 
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
@@ -184,7 +192,8 @@ class SimpleKTTrainer(BaseTrainer):
         question = self._move_tensor_to_device(question)
 
         valid_mask = late_group_id >= 0
-        pid_data = self._build_pid_data(question, valid_mask)
+        use_pid = self.model.n_pid > 0
+        pid_data = self._build_pid_data(question, valid_mask) if use_pid else None
 
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
