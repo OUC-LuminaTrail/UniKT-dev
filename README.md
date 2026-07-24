@@ -222,3 +222,7 @@ UniKT/
 This framework builds upon the excellent work of:
 
 - **[pyKT](https://github.com/pykt-team/pykt-toolkit)** - Reference for AKT, SimpleKT, DKT, GKT
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
