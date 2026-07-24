@@ -128,6 +128,7 @@ import { getDatasetMetadata, listDatasets, type DatasetInfo } from '@/api/datase
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { listModels, getModelParams, type ModelSchema } from '@/api/schemas'
 import { getDefaultEnv } from '@/api/settings'
+import { refreshRegistry } from '@/api/system'
 import CommandPreview from '@/components/task/CommandPreview.vue'
 import SelectionStep from '@/components/task/SelectionStep.vue'
 import ParamForm from '@/components/task/ParamForm.vue'
@@ -343,6 +344,16 @@ async function refreshAll() {
   refreshing.value = true
   initDone.value = false
   selectionStepRef.value?.clearCache()
+
+  try {
+    await refreshRegistry()
+  } catch (err: any) {
+    if (!err?.response) {
+      ElMessage.error('刷新注册表失败')
+    }
+    refreshing.value = false
+    return
+  }
 
   await queryClient.refetchQueries({ queryKey: ['task-launch-init'] })
   await queryClient.refetchQueries({ queryKey: ['model-params'] })

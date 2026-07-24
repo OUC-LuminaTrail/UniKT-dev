@@ -90,6 +90,17 @@ class UniversalRegistry:
             )
         self._index.setdefault(name, module_path)
 
+    def clear(self) -> None:
+        """Drop all loaded entries and the lazy index.
+
+        Returns the registry to its empty state so the next
+        :func:`discover_registrations` rebuilds the index from the current
+        source tree — used by the web backend to pick up components added or
+        removed on disk after the process started.
+        """
+        self._registry.clear()
+        self._index.clear()
+
     def get(self, name: str) -> type:
         """Look up a class by name; lazy-import the module if necessary.
 

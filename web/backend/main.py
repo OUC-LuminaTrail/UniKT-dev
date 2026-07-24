@@ -21,6 +21,7 @@ from routers import (
     gpu,
     logs,
     preprocess,
+    registry,
     schemas_api,
     settings_api,
     tasks,
@@ -107,6 +108,7 @@ app.include_router(logs.router)
 app.include_router(events.router)
 app.include_router(environments.router)
 app.include_router(schemas_api.router)
+app.include_router(registry.router)
 app.include_router(gpu.router)
 app.include_router(preprocess.router)
 app.include_router(datasets.router)

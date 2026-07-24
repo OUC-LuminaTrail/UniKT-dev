@@ -8,6 +8,7 @@ import json
 
 from config import PROJECT_ROOT
 from fastapi import APIRouter, HTTPException
+from services.registry_sync import registry_lock
 
 from utils.core import get_supported_datasets
 from utils.dataset_status import dataset_status
@@ -26,7 +27,8 @@ def list_datasets():
         ``num_questions``, and ``num_skills`` from the dataset's
         ``metadata.json`` if available.
     """
-    supported = get_supported_datasets()
+    with registry_lock:
+        supported = get_supported_datasets()
     if not supported:
         raise HTTPException(500, "No datasets registered in DATA_SOURCES")
 
@@ -68,7 +70,9 @@ def get_dataset_metadata(dataset_name: str):
     """
     # Whitelist the path segment so a decoded "../../x" cannot traverse out of
     # DATA_DIR.
-    if dataset_name not in get_supported_datasets():
+    with registry_lock:
+        supported = get_supported_datasets()
+    if dataset_name not in supported:
         raise HTTPException(404, f"Dataset '{dataset_name}' not found")
     meta_path = DATA_DIR / dataset_name / "metadata.json"
     if not meta_path.exists():

@@ -8,6 +8,7 @@ import json
 import logging
 import subprocess
 import sys
+import threading
 
 from config import PROJECT_ROOT
 from schemas import ModelSchemaResponse, ParamField, ParamGroup
@@ -66,6 +67,8 @@ class SchemaExtractor:
         self._schemas: dict[str, list[dict]] = {}
         self._preprocess_schemas: dict[str, list[dict] | None] = {}
         self._loaded: bool = False
+        self._loading: bool = False
+        self._cond = threading.Condition()
 
     def _resolve_base_cmd(self) -> list[str]:
         """Resolve the base Python command for the helper script.
@@ -79,14 +82,12 @@ class SchemaExtractor:
             return self._env_manager.resolve_command()
         return [sys.executable]
 
-    def _run_helper(self) -> None:
-        """Run the schema helper subprocess and cache the results.
+    def _extract(self) -> tuple[list[str], dict[str, list[dict]]] | None:
+        """Run the helper subprocess once, returning (models, schemas) or None.
 
-        Parses stdout lines into model lists and parameter schemas.
-        Errors are recorded so errored models are excluded from the model list.
+        Pure of instance state so the caller can commit the result under the
+        lock. Errored models are excluded from the returned list.
         """
-        if self._loaded:
-            return
         try:
             base = self._resolve_base_cmd()
             cmd = [*base, HELPER_SCRIPT]
@@ -97,12 +98,13 @@ class SchemaExtractor:
             # No env configured (user skipped the setup wizard); leave _loaded
             # False so the next call retries once the wizard sets one.
             logger.error("Schema extraction skipped — %s", e)
-            return
+            return None
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             # Transient failure; leave _loaded False so the next call retries.
-            return
+            return None
         all_models: list[str] = []
         errored: set[str] = set()
+        schemas: dict[str, list[dict]] = {}
         for line in result.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -113,11 +115,48 @@ class SchemaExtractor:
             if entry["type"] == "models":
                 all_models = entry["data"]
             elif entry["type"] == "schema":
-                self._schemas[entry["model"]] = entry["data"]
+                schemas[entry["model"]] = entry["data"]
             elif entry["type"] == "error":
                 errored.add(entry["model"])
-        self._models = [m for m in all_models if m not in errored]
-        self._loaded = True
+        return [m for m in all_models if m not in errored], schemas
+
+    def _run_helper(self) -> None:
+        """Load model list/schemas via the helper subprocess (single-flight).
+
+        The import-heavy subprocess runs OUTSIDE the lock so concurrent readers
+        (task dispatch, schemas API) are not serialized behind it; later
+        callers wait for the in-flight load instead of spawning their own.
+        """
+        with self._cond:
+            if self._loaded:
+                return
+            if self._loading:
+                while self._loading:
+                    self._cond.wait()
+                return
+            self._loading = True
+        result = self._extract()
+        with self._cond:
+            if result is not None:
+                # Atomic replacement: readers always see a complete container.
+                self._models, self._schemas = result
+                self._loaded = True
+            self._loading = False
+            self._cond.notify_all()
+
+    def reset_cache(self) -> None:
+        """Mark caches stale so the next access re-extracts them.
+
+        Containers are left in place: until the next _run_helper atomically
+        replaces them, readers still get the last valid snapshot instead of an
+        empty one. Waits for any in-flight load first so its result can't
+        un-clear the cache after we reset.
+        """
+        with self._cond:
+            while self._loading:
+                self._cond.wait()
+            self._loaded = False
+            self._preprocess_schemas.clear()
 
     def list_models(self) -> list[str]:
         """Return the list of available model names.

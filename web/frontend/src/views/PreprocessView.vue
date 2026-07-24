@@ -183,7 +183,14 @@ const opts = ref<Record<string, any>>({})
 // Reset opts only on first load and action switch — NOT on schema refetch
 // (e.g. window refocus), so user edits survive background revalidation.
 const needReset = ref(true)
-watch(action, () => { needReset.value = true })
+watch(action, () => {
+  needReset.value = true
+  // Switching to a stricter view (e.g. download→process) may hide the current
+  // selection — clear it instead of letting it linger as an unprocessable target.
+  if (dataset.value && !visibleDatasets.value.some(d => d.name === dataset.value)) {
+    dataset.value = ''
+  }
+})
 watch(schema, (sch) => {
   if (!sch.length || !needReset.value) return
   opts.value = { ...defaults.value }
@@ -242,7 +249,9 @@ const stopRecover = watch(() => activeTasksQuery.data.value, (tasks) => {
 watch(() => datasetsQuery.data.value, (data) => {
   if (!data) return
   const q = route.query.dataset as string
-  if (q && data.some(d => d.name === q)) {
+  // Only restore visible selections: an empty dataset in the URL can't be
+  // processed, so don't preselect it in the process view.
+  if (q && visibleDatasets.value.some(d => d.name === q)) {
     dataset.value = q
   }
 }, { once: true })
