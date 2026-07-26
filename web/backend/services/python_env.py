@@ -6,6 +6,7 @@ availability).
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -178,8 +179,9 @@ class PythonEnvManager:
             )
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-            except asyncio.TimeoutExpired:
-                proc.kill()
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
                 await proc.wait()
                 error = "Python executable timed out"
             else:
@@ -204,7 +206,13 @@ class PythonEnvManager:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                try:
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                    await proc.wait()
+                    raise
                 python_version = stdout.decode(errors="replace").strip()
             except Exception:
                 pass
@@ -217,7 +225,13 @@ class PythonEnvManager:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                try:
+                    stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        proc.kill()
+                    await proc.wait()
+                    raise
                 if proc.returncode == 0:
                     torch_available = True
                     torch_version = stdout.decode(errors="replace").strip()

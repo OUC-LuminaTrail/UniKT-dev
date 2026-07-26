@@ -37,6 +37,9 @@ let lastRows = 0
 let resizeDebounce: ReturnType<typeof setTimeout> | null = null
 
 const isTaskRunning = () => props.taskStatus === 'running' || props.taskStatus === 'stopping'
+// A queued task has no PTY to resize yet, but its stream is still expected to
+// produce output, so a drop while pending must reconnect.
+const mayStillStream = () => isTaskRunning() || props.taskStatus === 'pending'
 
 const sendResize = (cols: number, rows: number) => {
   if (!isTaskRunning()) return
@@ -93,7 +96,7 @@ const connect = () => {
   }
 
   ws.onclose = () => {
-    if (streamEnded || !isTaskRunning()) {
+    if (streamEnded || !mayStillStream()) {
       emit('state', 'ended')
       return
     }

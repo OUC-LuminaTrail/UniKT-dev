@@ -104,7 +104,14 @@ class ProcessManager:
             by_id = dict(self._queue)
             front = set(task_ids)
             preserved = [(tid, req) for tid, req in self._queue if tid not in front]
-            valid = [(tid, by_id[tid]) for tid in task_ids if tid in by_id]
+            # Dedupe: task_ids is client-supplied, and a repeated id would put
+            # the same task in the queue twice and spawn a second trainer.
+            seen: set[int] = set()
+            valid = []
+            for tid in task_ids:
+                if tid in by_id and tid not in seen:
+                    seen.add(tid)
+                    valid.append((tid, by_id[tid]))
             self._queue = deque(valid + preserved)
 
     def remove_from_queue(self, task_id: int) -> bool:
@@ -299,6 +306,10 @@ class ProcessManager:
                 env["TERM"] = "xterm-256color"
                 env["FORCE_COLOR"] = "1"
                 if assigned_gpu is not None:
+                    # Lanes are NVML indices (PCI bus order); CUDA defaults to
+                    # FASTEST_FIRST, so without this the ordinal would select a
+                    # different physical card than the scheduler accounted for.
+                    env["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
                     env["CUDA_VISIBLE_DEVICES"] = str(assigned_gpu)
                 proc = subprocess.Popen(
                     cmd,
@@ -460,6 +471,26 @@ class ProcessManager:
         self._cleanup(task_id)
         return True
 
+    def _force_kill(self, task_id: int) -> None:
+        # Wait for the child before dropping its handle: an unreaped Popen
+        # leaves a zombie, and the row leaves _slot_usage as soon as it goes
+        # to "stopped", so the scheduler would dispatch onto a GPU the dying
+        # trainer still holds.
+        with self._lock:
+            proc = self._running.get(task_id)
+        if proc is None:
+            return
+
+        with contextlib.suppress(Exception):
+            self._kill_process_group(proc.pid, signal.SIGKILL)
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            proc.wait(timeout=10)
+        if proc.poll() is None:
+            logger.warning(
+                "task %s still alive after SIGKILL; freeing its slot anyway", task_id
+            )
+        self._cleanup(task_id)
+
     def _cleanup(self, task_id: int) -> None:
         # Join the reader before closing master_fd so the PTY kernel buffer
         # drains fully and the final log bytes are not lost.
@@ -609,12 +640,7 @@ class ProcessManager:
             if not claimed:
                 return True
 
-            with self._lock:
-                proc = self._running.get(task_id)
-            if proc is not None:
-                with contextlib.suppress(Exception):
-                    self._kill_process_group(proc.pid, signal.SIGKILL)
-            self._cleanup(task_id)
+            self._force_kill(task_id)
 
             with SessionLocal() as session:
                 transition(

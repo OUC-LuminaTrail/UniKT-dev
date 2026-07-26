@@ -3,6 +3,7 @@
 Configures the FastAPI app with CORS, error handling, pagination, and registers all API routers.
 """
 
+import logging
 from contextlib import asynccontextmanager
 
 from database import init_db
@@ -26,6 +27,8 @@ from routers import (
     settings_api,
     tasks,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -74,13 +77,19 @@ async def lifespan(app: FastAPI):
         )
         deps.preprocess_manager.recover_tasks()
         yield
-        if deps.preprocess_manager:
-            deps.preprocess_manager.shutdown()
-        if deps.process_manager:
-            deps.process_manager.shutdown()
-        if deps.gpu_monitor:
-            deps.gpu_monitor.shutdown()
     finally:
+        # Must run even when the lifespan task is cancelled or the server exits
+        # with an exception, or running subprocesses keep their GPUs forever.
+        for manager in (
+            deps.preprocess_manager,
+            deps.process_manager,
+            deps.gpu_monitor,
+        ):
+            if manager:
+                try:
+                    manager.shutdown()
+                except Exception:
+                    logger.exception("shutdown failed for %s", type(manager).__name__)
         app_lock.release()
 
 

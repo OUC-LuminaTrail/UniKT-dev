@@ -63,6 +63,10 @@ async def stream_logs(
             t = session.query(Task).get(task_id)
             if not t:
                 return False
+            # A queued task has no pid yet but its output is still to come;
+            # reporting it dead closes the stream before it ever starts.
+            if t.status == "pending":
+                return True
             return t.pid is not None and t.status in ("running", "stopping")
 
     try:

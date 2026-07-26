@@ -365,7 +365,9 @@ class PreprocessManager:
                     PreprocessTask.status,
                     PreprocessTask.started_at,
                 )
-                .filter(PreprocessTask.status.in_(["running", "stopping"]))
+                .filter(
+                    PreprocessTask.status.in_(["running", "stopping", "interrupted"])
+                )
                 .all()
             )
             for task_id, pid, prior_status, started_at in running:
@@ -373,13 +375,14 @@ class PreprocessManager:
                     try:
                         proc = psutil.Process(pid)
                         if proc.is_running() and not _pid_reused(proc, started_at):
-                            transition(
-                                session,
-                                PreprocessTask,
-                                task_id,
-                                prior_status,
-                                "interrupted",
-                            )
+                            if prior_status != "interrupted":
+                                transition(
+                                    session,
+                                    PreprocessTask,
+                                    task_id,
+                                    prior_status,
+                                    "interrupted",
+                                )
                             t = threading.Thread(
                                 target=self._recover_monitor,
                                 args=(task_id, pid),

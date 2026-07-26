@@ -102,7 +102,17 @@ class SchemaExtractor:
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             # Transient failure; leave _loaded False so the next call retries.
             return None
+        if result.returncode != 0:
+            # Without this an empty stdout would parse to ([], {}) and be cached
+            # as a successful load, so every later call short-circuits to it.
+            logger.error(
+                "Schema helper exited %d — %s",
+                result.returncode,
+                result.stderr.strip() or "(no stderr)",
+            )
+            return None
         all_models: list[str] = []
+        saw_models = False
         errored: set[str] = set()
         schemas: dict[str, list[dict]] = {}
         for line in result.stdout.strip().split("\n"):
@@ -114,10 +124,18 @@ class SchemaExtractor:
                 continue
             if entry["type"] == "models":
                 all_models = entry["data"]
+                saw_models = True
             elif entry["type"] == "schema":
                 schemas[entry["model"]] = entry["data"]
             elif entry["type"] == "error":
                 errored.add(entry["model"])
+        if not saw_models:
+            # Exit 0 but no models envelope: truncated or malformed output.
+            logger.error(
+                "Schema helper emitted no model list — %s",
+                result.stderr.strip() or "(no stderr)",
+            )
+            return None
         return [m for m in all_models if m not in errored], schemas
 
     def _run_helper(self) -> None:
