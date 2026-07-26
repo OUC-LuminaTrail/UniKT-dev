@@ -2,9 +2,11 @@
 
 Holds module-level references to ProcessManager, GpuMonitor,
 PythonEnvManager, SettingsManager, and PreprocessManager instances.
-Each getter function asserts the instance is initialized before
+Each getter raises if the instance is not initialized before
 returning it, allowing lifespan startup to set them up.
 """
+
+from typing import TypeVar
 
 from services.gpu_monitor import GpuMonitor
 from services.preprocess_manager import PreprocessManager
@@ -20,6 +22,19 @@ schema_extractor: SchemaExtractor | None = None
 settings_manager: SettingsManager | None = None
 preprocess_manager: PreprocessManager | None = None
 
+T = TypeVar("T")
+
+
+def _require(instance: T | None, name: str) -> T:
+    """Return *instance*, or raise if lifespan startup has not set it yet.
+
+    A plain ``assert`` would be stripped under ``python -O``, leaving the
+    getters to return None and fail later with an opaque AttributeError.
+    """
+    if instance is None:
+        raise RuntimeError(f"{name} is not initialized")
+    return instance
+
 
 def get_process_manager() -> ProcessManager:
     """Return the global ProcessManager singleton.
@@ -28,10 +43,9 @@ def get_process_manager() -> ProcessManager:
         The initialized ProcessManager instance.
 
     Raises:
-        AssertionError: If the manager has not been initialized.
+        RuntimeError: If the manager has not been initialized.
     """
-    assert process_manager is not None
-    return process_manager
+    return _require(process_manager, "ProcessManager")
 
 
 def get_gpu_monitor() -> GpuMonitor:
@@ -41,10 +55,9 @@ def get_gpu_monitor() -> GpuMonitor:
         The initialized GpuMonitor instance.
 
     Raises:
-        AssertionError: If the monitor has not been initialized.
+        RuntimeError: If the monitor has not been initialized.
     """
-    assert gpu_monitor is not None
-    return gpu_monitor
+    return _require(gpu_monitor, "GpuMonitor")
 
 
 def get_python_env_manager() -> PythonEnvManager:
@@ -54,10 +67,9 @@ def get_python_env_manager() -> PythonEnvManager:
         The initialized PythonEnvManager instance.
 
     Raises:
-        AssertionError: If the manager has not been initialized.
+        RuntimeError: If the manager has not been initialized.
     """
-    assert python_env_manager is not None
-    return python_env_manager
+    return _require(python_env_manager, "PythonEnvManager")
 
 
 def get_preprocess_manager() -> PreprocessManager:
@@ -67,10 +79,9 @@ def get_preprocess_manager() -> PreprocessManager:
         The initialized PreprocessManager instance.
 
     Raises:
-        AssertionError: If the manager has not been initialized.
+        RuntimeError: If the manager has not been initialized.
     """
-    assert preprocess_manager is not None
-    return preprocess_manager
+    return _require(preprocess_manager, "PreprocessManager")
 
 
 def get_settings_manager() -> SettingsManager:
@@ -80,10 +91,9 @@ def get_settings_manager() -> SettingsManager:
         The initialized SettingsManager instance.
 
     Raises:
-        AssertionError: If the manager has not been initialized.
+        RuntimeError: If the manager has not been initialized.
     """
-    assert settings_manager is not None
-    return settings_manager
+    return _require(settings_manager, "SettingsManager")
 
 
 def get_schema_extractor() -> SchemaExtractor:
@@ -96,7 +106,6 @@ def get_schema_extractor() -> SchemaExtractor:
         The initialized SchemaExtractor instance.
 
     Raises:
-        AssertionError: If the extractor has not been initialized.
+        RuntimeError: If the extractor has not been initialized.
     """
-    assert schema_extractor is not None
-    return schema_extractor
+    return _require(schema_extractor, "SchemaExtractor")

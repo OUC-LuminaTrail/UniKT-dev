@@ -26,6 +26,7 @@ from database import SessionLocal
 from models import LogChunk, PreprocessTask
 
 from services.cli_builder import build_param_flags
+from services.pid_utils import pid_reused
 from services.python_env import PythonEnvManager
 from services.schema_extractor import SchemaExtractor
 from services.task_state import transition
@@ -54,16 +55,6 @@ def _snapshot(row: PreprocessTask) -> PreprocessTaskInfo:
         started_at=row.started_at,
         finished_at=row.finished_at,
     )
-
-
-def _pid_reused(proc: psutil.Process, started_at: datetime | None) -> bool:
-    """Return True when a live pid's process started long after the task did."""
-    try:
-        if started_at and proc.create_time() > started_at.timestamp() + 60:
-            return True
-    except (psutil.NoSuchProcess, OSError):
-        return True
-    return False
 
 
 class PreprocessManager:
@@ -116,7 +107,7 @@ class PreprocessManager:
 
         launched = self._spawn(task_id, command)
         with SessionLocal() as session:
-            row = session.query(PreprocessTask).get(task_id)
+            row = session.get(PreprocessTask, task_id)
             if not launched and row and row.status == "running":
                 transition(
                     session,
@@ -126,7 +117,7 @@ class PreprocessManager:
                     "failed",
                     finished_at=datetime.now(),
                 )
-                row = session.query(PreprocessTask).get(task_id)
+                row = session.get(PreprocessTask, task_id)
             return (
                 _snapshot(row)
                 if row
@@ -172,7 +163,7 @@ class PreprocessManager:
             return False
 
         with SessionLocal() as session:
-            row = session.query(PreprocessTask).get(task_id)
+            row = session.get(PreprocessTask, task_id)
             if row:
                 row.pid = proc.pid
                 session.commit()
@@ -286,7 +277,7 @@ class PreprocessManager:
     def get(self, task_id: int) -> PreprocessTaskInfo | None:
         """Return a snapshot of a preprocess task, or None if missing."""
         with SessionLocal() as session:
-            row = session.query(PreprocessTask).get(task_id)
+            row = session.get(PreprocessTask, task_id)
             return _snapshot(row) if row else None
 
     def list_all(self) -> list[PreprocessTaskInfo]:
@@ -312,7 +303,7 @@ class PreprocessManager:
     def stop(self, task_id: int) -> bool:
         """Gracefully stop a running preprocess task via SIGINT."""
         with SessionLocal() as session:
-            row = session.query(PreprocessTask).get(task_id)
+            row = session.get(PreprocessTask, task_id)
             status = row.status if row else None
         if status != "running":
             return False
@@ -338,7 +329,7 @@ class PreprocessManager:
     def delete(self, task_id: int) -> bool:
         """Delete a finished preprocess task and its log file."""
         with SessionLocal() as session:
-            row = session.query(PreprocessTask).get(task_id)
+            row = session.get(PreprocessTask, task_id)
             if not row:
                 return False
             if row.status in ("running", "stopping"):
@@ -374,7 +365,7 @@ class PreprocessManager:
                 if pid and psutil.pid_exists(pid):
                     try:
                         proc = psutil.Process(pid)
-                        if proc.is_running() and not _pid_reused(proc, started_at):
+                        if proc.is_running() and not pid_reused(proc, started_at):
                             if prior_status != "interrupted":
                                 transition(
                                     session,
@@ -418,7 +409,7 @@ class PreprocessManager:
         ):
             pass
         with SessionLocal() as session:
-            row = session.query(PreprocessTask).get(task_id)
+            row = session.get(PreprocessTask, task_id)
             if row and row.status in ("running", "interrupted"):
                 to = "completed" if exit_code == 0 else "failed"
                 transition(

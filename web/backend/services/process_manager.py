@@ -24,32 +24,20 @@ import termios
 import threading
 from collections import deque
 from datetime import datetime
-from pathlib import Path
 
 import psutil
-from config import TASK_LOGS_DIR
+from config import PROJECT_ROOT, TASK_LOGS_DIR
 from database import SessionLocal
 from models import Task
 
 from services.cli_builder import build_param_flags
 from services.gpu_monitor import GpuMonitor
+from services.pid_utils import pid_reused
 from services.python_env import PythonEnvManager
 from services.schema_extractor import SchemaExtractor
 from services.task_state import transition
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent.parent)
-
-
-def _pid_reused(proc: psutil.Process, started_at: datetime | None) -> bool:
-    """Return True when a live pid's process started long after the task did."""
-    try:
-        if started_at and proc.create_time() > started_at.timestamp() + 60:
-            return True
-    except (psutil.NoSuchProcess, OSError):
-        return True
-    return False
 
 
 class ProcessManager:
@@ -133,7 +121,7 @@ class ProcessManager:
     ) -> None:
         """Stamp the task row with resolved command/env and enqueue it."""
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
+            task = session.get(Task, task_id)
             if not task:
                 return
 
@@ -263,7 +251,7 @@ class ProcessManager:
 
     def _do_launch(self, task_id: int, assigned_gpu: int | None) -> bool:
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
+            task = session.get(Task, task_id)
             if not task:
                 return False
 
@@ -316,7 +304,7 @@ class ProcessManager:
                     stdin=slave_fd,
                     stdout=slave_fd,
                     stderr=slave_fd,
-                    cwd=PROJECT_ROOT,
+                    cwd=str(PROJECT_ROOT),
                     start_new_session=True,
                     env=env,
                 )
@@ -541,7 +529,7 @@ class ProcessManager:
             return True
 
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
+            task = session.get(Task, task_id)
             status = task.status if task else None
             pid = task.pid if task else None
 
@@ -612,7 +600,7 @@ class ProcessManager:
             return True
 
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
+            task = session.get(Task, task_id)
             status = task.status if task else None
             pid = task.pid if task else None
 
@@ -677,7 +665,7 @@ class ProcessManager:
         process and recover-monitor thread would otherwise outlive its row.
         """
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
+            task = session.get(Task, task_id)
             pid = task.pid if task else None
         if pid:
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
@@ -704,7 +692,7 @@ class ProcessManager:
                 if pid and psutil.pid_exists(pid):
                     try:
                         proc = psutil.Process(pid)
-                        if proc.is_running() and not _pid_reused(proc, started_at):
+                        if proc.is_running() and not pid_reused(proc, started_at):
                             if prior_status != "interrupted":
                                 transition(
                                     session, Task, task_id, prior_status, "interrupted"
@@ -759,7 +747,7 @@ class ProcessManager:
             pass
 
         with SessionLocal() as session:
-            task = session.query(Task).get(task_id)
+            task = session.get(Task, task_id)
             if task and task.status in ("running", "interrupted"):
                 to = "completed" if exit_code == 0 else "failed"
                 transition(

@@ -93,7 +93,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         raise HTTPException(500, "Failed to launch task")
 
     with SessionLocal() as session:
-        task = session.query(Task).get(task_id)
+        task = session.get(Task, task_id)
         return task
 
 
@@ -140,7 +140,7 @@ def get_task(task_id: int):
         HTTPException: 404 if the task does not exist.
     """
     with SessionLocal() as session:
-        task = session.query(Task).get(task_id)
+        task = session.get(Task, task_id)
         if not task:
             raise HTTPException(404, "Task not found")
         return task
@@ -230,7 +230,7 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
             400 if the task is still active (running or stopping).
     """
     with SessionLocal() as session:
-        task = session.query(Task).get(task_id)
+        task = session.get(Task, task_id)
         if not task:
             raise HTTPException(404, "Task not found")
         if task.status in ("running", "stopping"):

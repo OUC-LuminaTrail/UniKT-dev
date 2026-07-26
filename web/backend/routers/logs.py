@@ -33,7 +33,7 @@ def get_logs(
         HTTPException: 404 if the task does not exist.
     """
     with SessionLocal() as session:
-        task = session.query(Task).get(task_id)
+        task = session.get(Task, task_id)
         if not task:
             raise HTTPException(404, "Task not found")
     return read_log_text(TASK_LOGS_DIR / f"{task_id}.log", offset, limit)
@@ -52,7 +52,7 @@ async def stream_logs(
     """
     await websocket.accept()
     with SessionLocal() as session:
-        task = session.query(Task).get(task_id)
+        task = session.get(Task, task_id)
         if not task:
             await websocket.send_json({"type": "error", "content": "Task not found"})
             await websocket.close()
@@ -60,7 +60,7 @@ async def stream_logs(
 
     def check_alive():
         with SessionLocal() as session:
-            t = session.query(Task).get(task_id)
+            t = session.get(Task, task_id)
             if not t:
                 return False
             # A queued task has no pid yet but its output is still to come;
