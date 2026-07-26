@@ -16,7 +16,7 @@ CHUNK_SIZE = 65536
 MAX_READ_BYTES = 16 * 1024 * 1024
 
 
-def read_log_text(path: Path, offset: int = 0, limit: int = 10000) -> dict:
+def read_log_text(path: Path, offset: int = 0, limit: int = 500) -> dict:
     """Read a log file from ``offset`` as decoded text.
 
     Args:
