@@ -31,8 +31,17 @@ class BenchmarkTarget(Protocol):
         """The training DataLoader (one representative batch is prefetched)."""
         ...
 
+    @property
+    def test_data(self) -> Any:
+        """The test DataLoader, or ``None`` when the target has no test split."""
+        ...
+
     def forward(self, batch) -> Any:
         """One forward pass in eval mode; the caller chooses the grad context."""
+        ...
+
+    def test_forward(self, batch) -> Any:
+        """One forward pass over a test batch (test-specific alignment)."""
         ...
 
     def compute_train_step(self, batch) -> tuple[dict, torch.Tensor]:
@@ -66,6 +75,11 @@ class TrainerBenchmarkAdapter:
         """The trainer's training DataLoader."""
         return self._t.train_data
 
+    @property
+    def test_data(self) -> Any:
+        """The trainer's test DataLoader (``None`` when not built)."""
+        return getattr(self._t, "test_data", None)
+
     def forward(self, batch) -> Any:
         """Run one forward pass in eval mode (caller wraps inference_mode if needed).
 
@@ -75,6 +89,11 @@ class TrainerBenchmarkAdapter:
         """
         self._t.model.eval()
         return self._t.forward_pass(batch)
+
+    def test_forward(self, batch) -> Any:
+        """Run one test forward pass via the trainer's ``test_forward_pass``."""
+        self._t.model.eval()
+        return self._t.test_forward_pass(batch)
 
     def compute_train_step(self, batch) -> tuple[dict, torch.Tensor]:
         """Run one training step via the shared ``compute_train_step`` path."""

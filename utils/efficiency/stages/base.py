@@ -44,6 +44,11 @@ class StageContext:
     cfg: Any
     environment: EnvironmentInfo
     output_dir: Path | None = None
+    # Populated only when a stage requiring the test split is enabled; the test
+    # loader is skipped otherwise so profile-only runs stay cheap.
+    test_batch: Any = None
+    test_batch_size: int = 0
+    test_valid_tokens: int = 0
 
     @property
     def general(self) -> Any:
@@ -65,6 +70,9 @@ class EfficiencyStage(ABC):
 
     name: ClassVar[str] = ""
     priority: ClassVar[int] = 100
+    # Opt in to have the session prefetch a test batch into the context; loading
+    # the test split is not free, so it stays off by default.
+    requires_test_data: ClassVar[bool] = False
 
     @abstractmethod
     def run(self, ctx: StageContext) -> Any:

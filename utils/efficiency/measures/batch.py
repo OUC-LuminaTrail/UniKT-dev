@@ -39,6 +39,21 @@ def count_valid_interactions(target, sample_batch) -> int:
     return n
 
 
+def count_test_predictions(target, sample_batch) -> int:
+    """Scored predictions per test forward pass.
+
+    Same contract as :func:`count_valid_interactions` but through
+    ``test_forward_pass``. For windowlate data this is far smaller than the
+    training count — each window scores only its final position — so the two
+    must never share a denominator.
+    """
+    with torch.inference_mode():
+        out = target.test_forward(sample_batch)
+        n = int(out["y_label"].numel())
+    synchronize(target.device)
+    return n
+
+
 def to_device(batch, device: torch.device):
     """Recursively move batch tensors to device (tuple/list/dict aware)."""
     if isinstance(batch, torch.Tensor):
