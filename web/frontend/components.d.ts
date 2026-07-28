@@ -41,7 +41,7 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     EnvSelect: typeof import('./src/components/task/EnvSelect.vue')['default']
     LogCard: typeof import('./src/components/task/LogCard.vue')['default']
-    LogTerminal: typeof import('./src/components/task/LogTerminal.vue')['default']
+    LogViewer: typeof import('./src/components/task/LogViewer.vue')['default']
     ParamForm: typeof import('./src/components/task/ParamForm.vue')['default']
     ParamGroups: typeof import('./src/components/task/ParamGroups.vue')['default']
     PreprocessForm: typeof import('./src/components/task/PreprocessForm.vue')['default']

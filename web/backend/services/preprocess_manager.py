@@ -23,9 +23,10 @@ from datetime import datetime
 import psutil
 from config import PREPROCESS_LOGS_DIR, PROJECT_ROOT
 from database import SessionLocal
-from models import LogChunk, PreprocessTask
+from models import PreprocessTask
 
 from services.cli_builder import build_param_flags
+from services.line_render import LineRenderCache
 from services.pid_utils import pid_reused
 from services.python_env import PythonEnvManager
 from services.schema_extractor import SchemaExtractor
@@ -64,10 +65,12 @@ class PreprocessManager:
         self,
         env_manager: PythonEnvManager,
         schema_extractor: SchemaExtractor,
+        line_cache: LineRenderCache,
     ):
         """Initialize the preprocess manager."""
         self._env_manager = env_manager
         self._schema_extractor = schema_extractor
+        self._line_cache = line_cache
         self._procs: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
         self._readers: dict[int, threading.Thread] = {}
@@ -139,7 +142,9 @@ class PreprocessManager:
             return False
 
         try:
-            winsize = struct.pack("HHHH", 24, 80, 0, 0)
+            # Matches the pyte emulator columns so rich wraps exactly as
+            # rendered downstream; the frontend no longer resizes the PTY.
+            winsize = struct.pack("HHHH", 24, 120, 0, 0)
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
             env = os.environ.copy()
             env["TERM"] = "xterm-256color"
@@ -197,6 +202,7 @@ class PreprocessManager:
                     try:
                         f.write(data)
                         f.flush()
+                        self._line_cache.feed(path)
                     except OSError:
                         logger.warning("log write failed for preprocess %s", task_id)
                         break
@@ -288,18 +294,6 @@ class PreprocessManager:
             )
             return [_snapshot(r) for r in rows]
 
-    def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
-        """Resize a running preprocess task's PTY; return True on success."""
-        master_fd = self._master_fds.get(task_id)
-        if master_fd is None:
-            return False
-        try:
-            winsize = struct.pack("HHHH", rows, cols, 0, 0)
-            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-            return True
-        except OSError:
-            return False
-
     def stop(self, task_id: int) -> bool:
         """Gracefully stop a running preprocess task via SIGINT."""
         with SessionLocal() as session:
@@ -334,9 +328,6 @@ class PreprocessManager:
                 return False
             if row.status in ("running", "stopping"):
                 return False
-            session.query(LogChunk).filter_by(
-                source="preprocess", source_id=task_id
-            ).delete()
             session.delete(row)
             session.commit()
 
@@ -344,6 +335,7 @@ class PreprocessManager:
         if log_path.is_file():
             with contextlib.suppress(OSError):
                 log_path.unlink()
+        self._line_cache.evict(log_path)
         return True
 
     def recover_tasks(self) -> None:

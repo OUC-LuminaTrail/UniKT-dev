@@ -56,13 +56,6 @@ export const killTask = (id: number) =>
 export const deleteTask = (id: number) =>
   api.delete(`/tasks/${id}`).then(r => r.data)
 
-// limit is chunk count, capped at 500 server-side (routers/logs.py).
-export const getTaskLogs = (id: number, offset = 0, limit = 500) =>
-  api.get(`/tasks/${id}/logs`, { params: { offset, limit } }).then(r => r.data)
-
-export const resizeTerminal = (id: number, cols: number, rows: number) =>
-  api.post(`/tasks/${id}/resize`, { cols, rows }).then(r => r.data)
-
 export interface CommandPreviewParams {
   model_name: string
   params: Record<string, any>

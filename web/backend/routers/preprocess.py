@@ -1,13 +1,13 @@
 """Preprocess router — data download/processing tasks.
 
 Provides CRUD endpoints for launching and managing preprocess tasks (download
-or process actions), including WebSocket log streaming and PTY resize.
+or process actions), including WebSocket log streaming.
 """
 
 import logging
 
 from config import PREPROCESS_LOGS_DIR
-from dependencies import get_preprocess_manager
+from dependencies import get_line_cache, get_preprocess_manager
 from fastapi import (
     APIRouter,
     Depends,
@@ -17,7 +17,8 @@ from fastapi import (
     WebSocketDisconnect,
 )
 from pydantic import BaseModel
-from services.log_reader import stream_log
+from services.line_render import LineRenderCache
+from services.log_reader import read_log_lines, stream_log_lines
 from services.preprocess_manager import PreprocessManager
 from services.python_env import EnvironmentNotConfigured
 
@@ -42,18 +43,6 @@ class PreprocessStartRequest(BaseModel):
     params: dict = {}
     env_id: str | None = None
     custom_python_path: str | None = None
-
-
-class ResizeRequest(BaseModel):
-    """Request model for resizing a PTY terminal.
-
-    Attributes:
-        cols: Number of terminal columns.
-        rows: Number of terminal rows.
-    """
-
-    cols: int
-    rows: int
 
 
 @router.post("", status_code=201)
@@ -204,7 +193,7 @@ def delete_preprocess(
     task_id: int,
     pm: PreprocessManager = Depends(get_preprocess_manager),
 ):
-    """Delete a preprocess task and its log chunks.
+    """Delete a preprocess task and its log.
 
     Args:
         task_id: The preprocess task identifier.
@@ -221,31 +210,33 @@ def delete_preprocess(
     return {"status": "deleted"}
 
 
-@router.post("/{task_id}/resize")
-def resize_preprocess(
+@router.get("/{task_id}/logs")
+def get_preprocess_logs(
     task_id: int,
-    body: ResizeRequest,
-    pm: PreprocessManager = Depends(get_preprocess_manager),
+    cache: LineRenderCache = Depends(get_line_cache),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(500, ge=1, le=5000),
 ):
-    """Resize the PTY terminal for a running preprocess task.
+    """Fetch rendered preprocess log lines.
 
     Args:
         task_id: The preprocess task identifier.
-        body: The resize request (cols, rows).
-        pm: Injected PreprocessManager singleton.
+        cache: Injected LineRenderCache singleton.
+        offset: Starting line index (0-based).
+        limit: Max number of lines to return (1-5000).
 
     Returns:
-        A dict with ``ok`` set to ``True``.
+        ``{"lines": [...], "total": int}``.
     """
-    pm.resize_pty(task_id, body.cols, body.rows)
-    return {"ok": True}
+    return read_log_lines(PREPROCESS_LOGS_DIR / f"{task_id}.log", cache, offset, limit)
 
 
 @router.websocket("/{task_id}/logs/stream")
 async def stream_preprocess_logs(
     websocket: WebSocket,
     task_id: int,
-    from_offset: int = Query(0),
+    cache: LineRenderCache = Depends(get_line_cache),
+    from_line: int = Query(0, ge=0),
     pm: PreprocessManager = Depends(get_preprocess_manager),
 ):
     """Stream preprocess task logs live over a WebSocket connection.
@@ -253,7 +244,8 @@ async def stream_preprocess_logs(
     Args:
         websocket: The WebSocket connection.
         task_id: The preprocess task identifier.
-        from_offset: Starting byte offset for the log stream.
+        cache: Injected LineRenderCache singleton.
+        from_line: Line index the client already has.
         pm: Injected PreprocessManager singleton.
     """
     await websocket.accept()
@@ -268,11 +260,12 @@ async def stream_preprocess_logs(
         return t is not None and t.status in ("running", "stopping")
 
     try:
-        await stream_log(
+        await stream_log_lines(
             PREPROCESS_LOGS_DIR / f"{task_id}.log",
             websocket,
+            cache,
             check_alive=check_alive,
-            from_offset=from_offset,
+            from_line=from_line,
         )
     except WebSocketDisconnect:
         pass

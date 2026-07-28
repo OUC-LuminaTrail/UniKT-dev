@@ -110,7 +110,7 @@
         </button>
       </div>
 
-      <LogCard :ws-url="`/api/preprocess/${taskId}/logs/stream`" :task-status="taskInfo.status" :task-id="taskId" resize-prefix="/preprocess" fill />
+      <LogCard :ws-url="`/api/preprocess/${taskId}/logs/stream`" :task-status="taskInfo.status" :task-id="taskId" api-base="/preprocess" fill />
     </template>
   </div>
 </template>

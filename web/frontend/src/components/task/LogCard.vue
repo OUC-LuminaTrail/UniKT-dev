@@ -15,27 +15,34 @@
       </div>
     </div>
     <div class="terminal-wrapper">
-      <LogTerminal :ws-url="wsUrl" :task-status="taskStatus" :task-id="taskId" :resize-prefix="resizePrefix" @ready="onTerminalReady" @state="onState" />
+      <LogViewer
+        ref="viewerRef"
+        :ws-url="wsUrl"
+        :task-status="taskStatus"
+        :task-id="taskId"
+        :api-base="apiBase"
+        @state="onState"
+      />
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Terminal } from '@xterm/xterm'
 import { Bottom } from '@element-plus/icons-vue'
-import LogTerminal from './LogTerminal.vue'
+import LogViewer from './LogViewer.vue'
+import type { LogApiBase } from '@/api/logs'
 import { CONN_MAP, type ConnState } from './log-conn'
 
 const props = defineProps<{
   wsUrl: string
   taskStatus: string
   taskId: number
-  resizePrefix?: string
+  apiBase?: LogApiBase
   fill?: boolean
 }>()
 
-let terminal: Terminal | null = null
+const viewerRef = ref<InstanceType<typeof LogViewer>>()
 
 const cardStyle = computed(() =>
   props.fill ? { flex: '1 1 0', margin: '0 20px 20px' } : {}
@@ -47,9 +54,7 @@ const onState = (s: ConnState) => { connState.value = s }
 const connLabel = computed(() => CONN_MAP[connState.value].label)
 const connTitle = computed(() => CONN_MAP[connState.value].title)
 
-const onTerminalReady = (term: Terminal) => { terminal = term }
-
-const scrollToBottom = () => { terminal?.scrollToBottom() }
+const scrollToBottom = () => { viewerRef.value?.scrollToBottom() }
 </script>
 
 <style scoped>

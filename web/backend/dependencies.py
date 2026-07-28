@@ -9,6 +9,7 @@ returning it, allowing lifespan startup to set them up.
 from typing import TypeVar
 
 from services.gpu_monitor import GpuMonitor
+from services.line_render import LineRenderCache
 from services.preprocess_manager import PreprocessManager
 from services.process_manager import ProcessManager
 from services.python_env import PythonEnvManager
@@ -21,6 +22,7 @@ python_env_manager: PythonEnvManager | None = None
 schema_extractor: SchemaExtractor | None = None
 settings_manager: SettingsManager | None = None
 preprocess_manager: PreprocessManager | None = None
+line_cache: LineRenderCache | None = None
 
 T = TypeVar("T")
 
@@ -94,6 +96,14 @@ def get_settings_manager() -> SettingsManager:
         RuntimeError: If the manager has not been initialized.
     """
     return _require(settings_manager, "SettingsManager")
+
+
+def get_line_cache() -> LineRenderCache:
+    """Return the global LineRenderCache singleton.
+
+    Shared by the log routers (HTTP/WS reads) and both task managers (PTY feeds).
+    """
+    return _require(line_cache, "LineRenderCache")
 
 
 def get_schema_extractor() -> SchemaExtractor:

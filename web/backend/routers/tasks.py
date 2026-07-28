@@ -11,12 +11,13 @@ from datetime import datetime
 
 from config import TASK_LOGS_DIR
 from database import SessionLocal
-from dependencies import get_process_manager
+from dependencies import get_line_cache, get_process_manager
 from fastapi import APIRouter, Depends, HTTPException
-from models import LogChunk, Task
+from models import Task
 from pagination import Page, Params
 from pydantic import BaseModel
 from schemas import TaskCreate, TaskResponse
+from services.line_render import LineRenderCache
 from services.process_manager import ProcessManager
 from services.python_env import EnvironmentNotConfigured
 from services.task_state import transition
@@ -184,43 +185,18 @@ def kill_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     return {"status": "killed"}
 
 
-class ResizeRequest(BaseModel):
-    """Request model for resizing a task terminal.
-
-    Attributes:
-        cols: Number of terminal columns.
-        rows: Number of terminal rows.
-    """
-
-    cols: int
-    rows: int
-
-
-@router.post("/{task_id}/resize")
-def resize_terminal(
-    task_id: int, body: ResizeRequest, pm: ProcessManager = Depends(get_process_manager)
-):
-    """Resize the PTY terminal for a running task.
-
-    Args:
-        task_id: The task identifier.
-        body: The resize dimensions.
-        pm: Injected ProcessManager singleton.
-
-    Returns:
-        A dict with ``ok`` set to ``True``.
-    """
-    ok = pm.resize_pty(task_id, body.cols, body.rows)
-    return {"ok": ok}
-
-
 @router.delete("/{task_id}")
-def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
+def delete_task(
+    task_id: int,
+    pm: ProcessManager = Depends(get_process_manager),
+    cache: LineRenderCache = Depends(get_line_cache),
+):
     """Delete a task and its associated logs.
 
     Args:
         task_id: The task identifier.
         pm: Injected ProcessManager singleton.
+        cache: Injected LineRenderCache singleton.
 
     Returns:
         A dict with ``status`` set to ``deleted``.
@@ -241,7 +217,6 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
             pm.force_cleanup_interrupted(task_id)
         if task.status == "pending":
             pm.remove_from_queue(task_id)
-        session.query(LogChunk).filter_by(source="task", source_id=task_id).delete()
         session.delete(task)
         session.commit()
 
@@ -249,6 +224,7 @@ def delete_task(task_id: int, pm: ProcessManager = Depends(get_process_manager))
     if log_path.is_file():
         with contextlib.suppress(OSError):
             log_path.unlink()
+    cache.evict(log_path)
     return {"status": "deleted"}
 
 
