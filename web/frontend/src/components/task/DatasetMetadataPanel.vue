@@ -129,10 +129,8 @@ function formatValue(val: any): string {
 .metadata-panel {
   width: 340px;
   flex-shrink: 0;
-  background: var(--bg-surface);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-lg);
   padding: 18px;
+  border-left: 1px solid var(--border-muted);
   display: flex;
   flex-direction: column;
   gap: 14px;

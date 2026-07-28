@@ -110,7 +110,7 @@
         </button>
       </div>
 
-      <LogCard :ws-url="`/api/preprocess/${taskId}/logs/stream`" :task-status="taskInfo.status" :task-id="taskId" resize-prefix="/preprocess" fill />
+      <LogCard :ws-url="`/api/preprocess/${taskId}/logs/stream`" :task-status="taskInfo.status" :task-id="taskId" api-base="/preprocess" fill />
     </template>
   </div>
 </template>
@@ -501,7 +501,6 @@ const onBack = () => {
   align-items: center;
   gap: 12px;
   padding: 12px 20px;
-  background: var(--bg-surface);
   border-bottom: 1px solid var(--border-muted);
   flex-shrink: 0;
 }

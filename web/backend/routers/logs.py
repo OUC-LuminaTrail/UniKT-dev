@@ -1,12 +1,21 @@
-"""Logs router — task log retrieval and WebSocket streaming (file-backed)."""
+"""Logs router — task log retrieval and WebSocket streaming (line-oriented)."""
 
 import logging
 
 from config import TASK_LOGS_DIR
 from database import SessionLocal
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from dependencies import get_line_cache
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from models import Task
-from services.log_reader import read_log_text, stream_log
+from services.line_render import LineRenderCache
+from services.log_reader import read_log_lines, stream_log_lines
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +25,20 @@ router = APIRouter(tags=["logs"])
 @router.get("/api/tasks/{task_id}/logs")
 def get_logs(
     task_id: int,
+    cache: LineRenderCache = Depends(get_line_cache),
     offset: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(500, ge=1, le=5000),
 ):
-    """Fetch log content for a task from its log file.
+    """Fetch rendered log lines for a task.
 
     Args:
         task_id: The task identifier.
-        offset: Byte offset to start reading from.
-        limit: Maximum number of 64KB chunks to return (1-500).
+        cache: Injected LineRenderCache singleton.
+        offset: Starting line index (0-based).
+        limit: Max number of lines to return (1-5000).
 
     Returns:
-        A dict with ``content`` (decoded text) and ``total_bytes``.
+        ``{"lines": [...], "total": int}``.
 
     Raises:
         HTTPException: 404 if the task does not exist.
@@ -36,19 +47,24 @@ def get_logs(
         task = session.get(Task, task_id)
         if not task:
             raise HTTPException(404, "Task not found")
-    return read_log_text(TASK_LOGS_DIR / f"{task_id}.log", offset, limit)
+    return read_log_lines(TASK_LOGS_DIR / f"{task_id}.log", cache, offset, limit)
 
 
 @router.websocket("/api/tasks/{task_id}/logs/stream")
 async def stream_logs(
-    websocket: WebSocket, task_id: int, from_offset: int = Query(0, ge=0)
+    websocket: WebSocket,
+    task_id: int,
+    cache: LineRenderCache = Depends(get_line_cache),
+    from_line: int = Query(0, ge=0),
 ):
-    """Stream task logs live over a WebSocket from the task's log file.
+    """Stream rendered task log lines live as incremental patches.
 
     Args:
         websocket: The WebSocket connection.
         task_id: The task identifier.
-        from_offset: Starting byte offset for the log stream.
+        cache: Injected LineRenderCache singleton.
+        from_line: Line index the client already has; the stream aligns from
+            here and then pushes only new/changed lines.
     """
     await websocket.accept()
     with SessionLocal() as session:
@@ -70,11 +86,12 @@ async def stream_logs(
             return t.pid is not None and t.status in ("running", "stopping")
 
     try:
-        await stream_log(
+        await stream_log_lines(
             TASK_LOGS_DIR / f"{task_id}.log",
             websocket,
+            cache,
             check_alive=check_alive,
-            from_offset=from_offset,
+            from_line=from_line,
         )
     except WebSocketDisconnect:
         pass

@@ -1,10 +1,8 @@
 <template>
   <section class="log-card" :style="cardStyle">
     <div class="log-card-header">
-      <div class="log-card-title">
-        <el-icon :size="16"><Tickets /></el-icon>
-        <span>运行日志</span>
-      </div>
+      <div class="log-card-title">运行日志</div>
+      <span class="header-rule"></span>
       <div class="header-right">
         <span class="conn-indicator" :class="`conn-${connState}`" :title="connTitle">
           <span class="conn-dot"></span>
@@ -17,27 +15,34 @@
       </div>
     </div>
     <div class="terminal-wrapper">
-      <LogTerminal :ws-url="wsUrl" :task-status="taskStatus" :task-id="taskId" :resize-prefix="resizePrefix" @ready="onTerminalReady" @state="onState" />
+      <LogViewer
+        ref="viewerRef"
+        :ws-url="wsUrl"
+        :task-status="taskStatus"
+        :task-id="taskId"
+        :api-base="apiBase"
+        @state="onState"
+      />
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Terminal } from '@xterm/xterm'
-import { Tickets, Bottom } from '@element-plus/icons-vue'
-import LogTerminal from './LogTerminal.vue'
+import { Bottom } from '@element-plus/icons-vue'
+import LogViewer from './LogViewer.vue'
+import type { LogApiBase } from '@/api/logs'
 import { CONN_MAP, type ConnState } from './log-conn'
 
 const props = defineProps<{
   wsUrl: string
   taskStatus: string
   taskId: number
-  resizePrefix?: string
+  apiBase?: LogApiBase
   fill?: boolean
 }>()
 
-let terminal: Terminal | null = null
+const viewerRef = ref<InstanceType<typeof LogViewer>>()
 
 const cardStyle = computed(() =>
   props.fill ? { flex: '1 1 0', margin: '0 20px 20px' } : {}
@@ -49,17 +54,11 @@ const onState = (s: ConnState) => { connState.value = s }
 const connLabel = computed(() => CONN_MAP[connState.value].label)
 const connTitle = computed(() => CONN_MAP[connState.value].title)
 
-const onTerminalReady = (term: Terminal) => { terminal = term }
-
-const scrollToBottom = () => { terminal?.scrollToBottom() }
+const scrollToBottom = () => { viewerRef.value?.scrollToBottom() }
 </script>
 
 <style scoped>
 .log-card {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--bg-surface);
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
@@ -69,20 +68,23 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
 .log-card-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 14px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-muted);
+  gap: 12px;
+  padding: 0 0 10px;
   flex-shrink: 0;
 }
 
 .log-card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.header-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-muted);
 }
 
 .header-right {
@@ -97,8 +99,8 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
   gap: 5px;
   font-size: 11px;
   color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  letter-spacing: 0.3px;
+  font-family: var(--font-sans);
+  letter-spacing: 0.05em;
 }
 
 .conn-dot {
@@ -144,13 +146,13 @@ const scrollToBottom = () => { terminal?.scrollToBottom() }
 .scroll-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  font-size: 12px;
+  gap: 4px;
+  font-size: 11px;
   color: var(--text-tertiary);
   background: none;
   border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
-  padding: 4px 10px;
+  padding: 2px 8px;
   cursor: pointer;
   font-family: var(--font-sans);
   transition: all 0.15s ease;

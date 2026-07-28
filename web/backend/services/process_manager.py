@@ -32,6 +32,7 @@ from models import Task
 
 from services.cli_builder import build_param_flags
 from services.gpu_monitor import GpuMonitor
+from services.line_render import LineRenderCache
 from services.pid_utils import pid_reused
 from services.python_env import PythonEnvManager
 from services.schema_extractor import SchemaExtractor
@@ -53,11 +54,13 @@ class ProcessManager:
         env_manager: PythonEnvManager,
         gpu_monitor: GpuMonitor,
         schema_extractor: SchemaExtractor,
+        line_cache: LineRenderCache,
     ):
         """Initialize the manager and start the background scheduler thread."""
         self._env_manager = env_manager
         self._gpu_monitor = gpu_monitor
         self._schema_extractor = schema_extractor
+        self._line_cache = line_cache
         self._queue: deque[tuple[int, int | None]] = deque()
         self._running: dict[int, subprocess.Popen] = {}
         self._master_fds: dict[int, int] = {}
@@ -288,6 +291,8 @@ class ProcessManager:
                 return False
 
             try:
+                # Matches the pyte emulator columns so rich wraps exactly as
+                # rendered downstream; the frontend no longer resizes the PTY.
                 winsize = struct.pack("HHHH", 24, 80, 0, 0)
                 fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
                 env = os.environ.copy()
@@ -374,6 +379,7 @@ class ProcessManager:
                     try:
                         f.write(data)
                         f.flush()
+                        self._line_cache.feed(path)
                     except OSError:
                         logger.warning("log write failed for task %s", task_id)
                         break
@@ -412,18 +418,6 @@ class ProcessManager:
     def preview_command(self, model_name: str, params: dict) -> str:
         """Return the CLI invocation that would be executed for these params."""
         return " ".join(self._build_cli_args(model_name, params))
-
-    def resize_pty(self, task_id: int, cols: int, rows: int) -> bool:
-        """Resize a running task's PTY; return True on success."""
-        master_fd = self._master_fds.get(task_id)
-        if master_fd is None:
-            return False
-        try:
-            winsize = struct.pack("HHHH", rows, cols, 0, 0)
-            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-            return True
-        except OSError:
-            return False
 
     def _kill_process_group(self, pid: int, sig: int) -> None:
         try:
@@ -499,6 +493,11 @@ class ProcessManager:
             rc = proc.poll()
             if rc is None:
                 continue
+            # Drain the reader before the status flip: the live WS stream keys
+            # check_alive off pid/status, so the final exit bytes must reach
+            # the cache while the task still reads as running (mirrors
+            # PreprocessManager._monitor).
+            self._cleanup(task_id)
             to = "completed" if rc == 0 else "failed"
             with SessionLocal() as session:
                 transition(
@@ -511,7 +510,6 @@ class ProcessManager:
                     finished_at=datetime.now(),
                     pid=None,
                 )
-            self._cleanup(task_id)
 
     def stop_task(self, task_id: int) -> bool:
         """Gracefully stop a task (queue removal or SIGINT)."""

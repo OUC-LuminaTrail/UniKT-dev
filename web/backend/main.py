@@ -47,6 +47,9 @@ async def lifespan(app: FastAPI):
     try:
         init_db()
         event_bus.set_loop(asyncio.get_running_loop())
+        deps.line_cache = __import__(
+            "services.line_render", fromlist=["LineRenderCache"]
+        ).LineRenderCache()
 
         deps.settings_manager = __import__(
             "services.settings_manager", fromlist=["SettingsManager"]
@@ -66,6 +69,7 @@ async def lifespan(app: FastAPI):
             env_manager=deps.python_env_manager,
             gpu_monitor=deps.gpu_monitor,
             schema_extractor=deps.schema_extractor,
+            line_cache=deps.line_cache,
         )
         deps.process_manager.gpu_slots = deps.settings_manager.get_gpu_slots()
         deps.process_manager.recover_tasks()
@@ -74,6 +78,7 @@ async def lifespan(app: FastAPI):
         ).PreprocessManager(
             env_manager=deps.python_env_manager,
             schema_extractor=deps.schema_extractor,
+            line_cache=deps.line_cache,
         )
         deps.preprocess_manager.recover_tasks()
         yield
