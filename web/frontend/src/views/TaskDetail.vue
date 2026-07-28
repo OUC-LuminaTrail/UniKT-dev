@@ -8,25 +8,38 @@
           <el-skeleton-item variant="rect" style="width:72px;height:24px;border-radius:20px" />
         </header>
 
-        <section class="meta-grid">
-          <div class="meta-cell" v-for="i in 6" :key="i">
-            <el-skeleton-item variant="text" style="width:40px;height:10px" />
-            <el-skeleton-item variant="text" style="width:70%;height:13px;margin-top:2px" />
+        <section class="detail-section">
+          <div class="section-head">
+            <h2 class="section-title">元信息</h2>
+            <span class="section-rule"></span>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-cell" v-for="i in 6" :key="i">
+              <el-skeleton-item variant="text" style="width:40px;height:10px" />
+              <el-skeleton-item variant="text" style="width:70%;height:13px;margin-top:2px" />
+            </div>
           </div>
         </section>
 
-        <div class="command-block">
-          <div class="command-bar">
-            <span class="command-label">命令</span>
+        <section class="detail-section">
+          <div class="section-head">
+            <h2 class="section-title">命令</h2>
+            <span class="section-rule"></span>
           </div>
-          <div style="padding:12px 14px">
+          <div style="padding:12px 0">
             <el-skeleton-item variant="text" style="width:90%;height:14px" />
           </div>
-        </div>
+        </section>
 
-        <div style="min-height:200px;border:1px solid var(--border-default);border-radius:var(--radius-md);background:var(--bg-surface)">
-          <el-skeleton-item variant="text" style="margin:16px;width:60%;height:14px" />
-        </div>
+        <section class="detail-section">
+          <div class="section-head">
+            <h2 class="section-title">运行日志</h2>
+            <span class="section-rule"></span>
+          </div>
+          <div style="min-height:200px;background:var(--term-bg)">
+            <el-skeleton-item variant="text" style="margin:16px;width:60%;height:14px" />
+          </div>
+        </section>
       </div>
     </template>
     <template #default>
@@ -55,48 +68,59 @@
       </div>
     </header>
 
-    <section class="meta-grid">
-      <div class="meta-cell">
-        <span class="meta-key">模型</span>
-        <span class="meta-val">{{ task.model_name }}</span>
+    <section class="detail-section">
+      <div class="section-head">
+        <h2 class="section-title">元信息</h2>
+        <span class="section-rule"></span>
       </div>
-      <div class="meta-cell">
-        <span class="meta-key">数据集</span>
-        <span class="meta-val">{{ task.dataset_name }}</span>
-      </div>
-      <div class="meta-cell">
-        <span class="meta-key">运行环境</span>
-        <span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span>
-      </div>
-      <div class="meta-cell" v-if="hasGpu">
-        <span class="meta-key">GPU</span>
-        <span class="meta-val">{{ gpuDisplay }}</span>
-      </div>
-      <div class="meta-cell">
-        <span class="meta-key">进程 ID</span>
-        <span class="meta-val mono">{{ task.pid || '—' }}</span>
-      </div>
-      <div class="meta-cell">
-        <span class="meta-key">开始时间</span>
-        <span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span>
-      </div>
-      <div class="meta-cell" v-if="duration">
-        <span class="meta-key">运行时长</span>
-        <span class="meta-val mono">{{ duration }}</span>
-      </div>
-      <div class="meta-cell">
-        <span class="meta-key">退出码</span>
-        <span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span>
+      <div class="meta-grid">
+        <div class="meta-cell">
+          <span class="meta-key">模型</span>
+          <span class="meta-val">{{ task.model_name }}</span>
+        </div>
+        <div class="meta-cell">
+          <span class="meta-key">数据集</span>
+          <span class="meta-val">{{ task.dataset_name }}</span>
+        </div>
+        <div class="meta-cell">
+          <span class="meta-key">运行环境</span>
+          <span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span>
+        </div>
+        <div class="meta-cell" v-if="hasGpu">
+          <span class="meta-key">GPU</span>
+          <span class="meta-val">{{ gpuDisplay }}</span>
+        </div>
+        <div class="meta-cell">
+          <span class="meta-key">进程 ID</span>
+          <span class="meta-val mono">{{ task.pid || '—' }}</span>
+        </div>
+        <div class="meta-cell">
+          <span class="meta-key">开始时间</span>
+          <span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span>
+        </div>
+        <div class="meta-cell" v-if="duration">
+          <span class="meta-key">运行时长</span>
+          <span class="meta-val mono">{{ duration }}</span>
+        </div>
+        <div class="meta-cell">
+          <span class="meta-key">退出码</span>
+          <span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span>
+        </div>
       </div>
     </section>
 
-    <div class="command-block">
-      <div class="command-bar">
-        <span class="command-label">命令</span>
+    <section class="detail-section">
+      <div class="section-head">
+        <h2 class="section-title">命令</h2>
+        <span class="section-rule"></span>
         <button class="copy-btn" @click="copyCommand">复制</button>
+        <button class="copy-btn" @click="commandExpanded = !commandExpanded">
+          <el-icon :size="12"><component :is="commandExpanded ? ArrowUp : ArrowDown" /></el-icon>
+          <span>{{ commandExpanded ? '收起' : '展开' }}</span>
+        </button>
       </div>
-      <pre class="command-text"><code>{{ task.command }}</code></pre>
-    </div>
+      <pre class="command-text" :class="{ expanded: commandExpanded }"><code>{{ task.command }}</code></pre>
+    </section>
 
     <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
   </div>
@@ -109,7 +133,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, SwitchButton, Bottom } from '@element-plus/icons-vue'
+import { ArrowLeft, SwitchButton, Bottom, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/date'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
@@ -198,6 +222,8 @@ const duration = computed(() => {
   if (m > 0) return `${m}m ${sec}s`
   return `${sec}s`
 })
+
+const commandExpanded = ref(false)
 
 const copyCommand = () => {
   if (task.value) navigator.clipboard.writeText(task.value.command)
@@ -361,19 +387,13 @@ const handleKill = async () => {
 .meta-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 1px;
-  background: var(--border-muted);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+  gap: 14px 24px;
 }
 
 .meta-cell {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px 14px;
-  background: var(--bg-surface);
 }
 
 .meta-key {
@@ -405,31 +425,37 @@ const handleKill = async () => {
   color: var(--accent-red);
 }
 
-.command-block {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--bg-surface);
+.detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.command-bar {
+.section-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 6px 12px;
-  background: var(--bg-elevated);
-  border-bottom: 1px solid var(--border-muted);
+  gap: 12px;
 }
 
-.command-label {
+.section-title {
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--text-tertiary);
-  text-transform: uppercase;
   letter-spacing: 0.05em;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.section-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-muted);
 }
 
 .copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   color: var(--text-tertiary);
   background: none;
@@ -448,7 +474,6 @@ const handleKill = async () => {
 
 .command-text {
   margin: 0;
-  padding: 12px 14px;
   overflow-x: auto;
 }
 
@@ -457,8 +482,12 @@ const handleKill = async () => {
   font-size: 12.5px;
   color: var(--accent-cyan);
   line-height: 1.6;
-  word-break: break-all;
+  white-space: nowrap;
+}
+
+.command-text.expanded code {
   white-space: pre-wrap;
+  word-break: break-all;
 }
 
 @media (max-width: 900px) {
