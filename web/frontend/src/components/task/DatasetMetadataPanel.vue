@@ -129,7 +129,7 @@ function formatValue(val: any): string {
 .metadata-panel {
   width: 340px;
   flex-shrink: 0;
-  padding: 0 0 0 20px;
+  padding: 18px;
   border-left: 1px solid var(--border-muted);
   display: flex;
   flex-direction: column;
