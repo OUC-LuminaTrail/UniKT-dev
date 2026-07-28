@@ -144,7 +144,7 @@ class PreprocessManager:
         try:
             # Matches the pyte emulator columns so rich wraps exactly as
             # rendered downstream; the frontend no longer resizes the PTY.
-            winsize = struct.pack("HHHH", 24, 120, 0, 0)
+            winsize = struct.pack("HHHH", 24, 80, 0, 0)
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
             env = os.environ.copy()
             env["TERM"] = "xterm-256color"

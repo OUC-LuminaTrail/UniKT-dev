@@ -19,8 +19,9 @@ import pyte
 
 # Virtual terminal geometry. The PTY winsize is fixed to match (see
 # process_manager / preprocess_manager) so rich wraps exactly as the subprocess
-# expected when it wrote.
-COLUMNS = 120
+# expected when it wrote. 80 keeps progress bars compact enough to fit a normal
+# viewport without wrapping; raise it if you want wider tables/bars.
+COLUMNS = 80
 LINES = 24
 
 # pyte keeps at most this many scrolled-off rows; anything older is rendered

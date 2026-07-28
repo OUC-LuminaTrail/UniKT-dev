@@ -256,7 +256,7 @@ defineExpose({ scrollToBottom })
 .log-viewer {
   width: 100%;
   height: 100%;
-  overflow: auto;
+  overflow-y: auto;
   background: var(--term-bg);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -274,16 +274,16 @@ defineExpose({ scrollToBottom })
   position: absolute;
   top: 0;
   left: 0;
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   padding: 0 8px;
   box-sizing: border-box;
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   min-height: 1.5em;
 }
 
 .log-seg {
-  white-space: pre;
+  white-space: pre-wrap;
 }
 
 .log-url {
