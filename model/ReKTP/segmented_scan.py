@@ -1,4 +1,4 @@
-"""Parallel segmented scans for KC-specific affine state transitions."""
+"""Parallel segmented scans for question- and KC-specific state transitions."""
 
 import torch
 
@@ -80,4 +80,70 @@ def segmented_affine_exclusive_scan(
     return torch.where(valid_3d, state, torch.zeros_like(state))
 
 
-__all__ = ["segmented_affine_exclusive_scan"]
+def segmented_normalized_evidence_exclusive_scan(
+    decay: torch.Tensor,
+    write_mass: torch.Tensor,
+    candidate: torch.Tensor,
+    segment_ids: torch.Tensor,
+    valid_mask: torch.Tensor,
+    prior_state: torch.Tensor,
+    prior_mass: float = 1.0,
+) -> torch.Tensor:
+    """Read a bounded state from parallel scans of evidence and evidence mass.
+
+    Each transition updates decayed evidence ``E`` and its non-negative mass ``M``::
+
+        E_after = decay * E_before + write_mass * candidate
+        M_after = decay * M_before + write_mass
+
+    The returned state is exclusive of the current write. Its current gap decay
+    is applied before combining historical evidence with a fixed prior::
+
+        state = (prior_mass * prior_state + decay * E_before)
+                / (prior_mass + decay * M_before)
+
+    Evidence and mass are concatenated so both recurrences share one segmented
+    affine scan. With bounded priors/candidates and non-negative masses, the
+    normalized state remains inside their elementwise convex hull.
+    """
+    if not (
+        decay.shape
+        == write_mass.shape
+        == candidate.shape
+        == prior_state.shape
+    ):
+        raise ValueError(
+            "decay, write_mass, candidate, and prior_state must have the same shape"
+        )
+    if prior_mass <= 0.0:
+        raise ValueError("prior_mass must be positive")
+
+    valid_3d = valid_mask.bool().unsqueeze(-1)
+    decay = torch.where(valid_3d, decay, torch.ones_like(decay))
+    write_mass = torch.where(valid_3d, write_mass, torch.zeros_like(write_mass))
+
+    transition_alpha = torch.cat([decay, decay], dim=-1)
+    transition_beta = torch.cat(
+        [write_mass * candidate, write_mass],
+        dim=-1,
+    )
+    pre_transition = segmented_affine_exclusive_scan(
+        transition_alpha,
+        transition_beta,
+        segment_ids,
+        valid_mask,
+        torch.zeros_like(transition_alpha),
+    )
+    evidence_before, mass_before = pre_transition.chunk(2, dim=-1)
+    evidence_for_read = decay * evidence_before
+    mass_for_read = decay * mass_before
+    state = (prior_mass * prior_state + evidence_for_read) / (
+        prior_mass + mass_for_read
+    )
+    return torch.where(valid_3d, state, torch.zeros_like(state))
+
+
+__all__ = [
+    "segmented_affine_exclusive_scan",
+    "segmented_normalized_evidence_exclusive_scan",
+]
