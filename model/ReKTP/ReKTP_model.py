@@ -5,9 +5,7 @@ import torch
 from mamba_ssm import Mamba
 from torch import nn
 
-from model.ReKTP.segmented_scan import (
-    segmented_normalized_evidence_exclusive_scan,
-)
+from model.ReKTP.segmented_scan import segmented_affine_exclusive_scan
 
 
 class GlobalMambaBlock(nn.Module):
@@ -201,23 +199,30 @@ class ReKTP(nn.Module):
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
         )
-        write_mass = torch.sigmoid(self.local_alpha(local_input))
-        candidate = torch.tanh(self.local_beta(local_input))
+        write_alpha = torch.exp(
+            -torch.nn.functional.softplus(self.local_alpha(local_input))
+        )
+        beta = (1.0 - write_alpha) * torch.tanh(self.local_beta(local_input))
         decay = torch.exp(
             -torch.nn.functional.softplus(
                 self.local_decay(self.gap_embed(gap_bucket))
             )
         )
-        prior_state = torch.tanh(self.local_init(skill_embedding))
+        valid_3d = packed_valid.unsqueeze(-1)
+        decay = torch.where(valid_3d, decay, torch.ones_like(decay))
+        alpha = decay * write_alpha
+        alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
+        beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
+        initial_state = torch.tanh(self.local_init(skill_embedding))
 
-        packed_state = segmented_normalized_evidence_exclusive_scan(
-            decay,
-            write_mass,
-            candidate,
+        packed_pre_decay = segmented_affine_exclusive_scan(
+            alpha,
+            beta,
             packed_skill,
             packed_valid,
-            prior_state,
+            initial_state,
         )
+        packed_state = decay * packed_pre_decay
         unpacked_state = torch.zeros_like(packed_state)
         scatter_index = order.unsqueeze(-1).expand_as(packed_state)
         unpacked_state.scatter_(1, scatter_index, packed_state)
@@ -269,25 +274,34 @@ class ReKTP(nn.Module):
             packed_event
             + self.answer_embed(packed_response)
         )
-        write_mass = torch.sigmoid(self.question_alpha(question_input))
-        candidate = torch.tanh(self.question_beta(question_input))
+        write_alpha = torch.exp(
+            -torch.nn.functional.softplus(self.question_alpha(question_input))
+        )
+        beta = (1.0 - write_alpha) * torch.tanh(
+            self.question_beta(question_input)
+        )
         decay = torch.exp(
             -torch.nn.functional.softplus(
                 self.question_decay(self.gap_embed(gap_bucket))
             )
         )
-        prior_state = torch.tanh(
+        valid_3d = packed_valid.unsqueeze(-1)
+        decay = torch.where(valid_3d, decay, torch.ones_like(decay))
+        alpha = decay * write_alpha
+        alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
+        beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
+        initial_state = torch.tanh(
             self.question_init(self.question_embed(packed_question))
         )
 
-        packed_state = segmented_normalized_evidence_exclusive_scan(
-            decay,
-            write_mass,
-            candidate,
+        packed_pre_decay = segmented_affine_exclusive_scan(
+            alpha,
+            beta,
             packed_question,
             packed_valid,
-            prior_state,
+            initial_state,
         )
+        packed_state = decay * packed_pre_decay
         question_state = torch.zeros_like(packed_state)
         question_state.scatter_(1, gather_index, packed_state)
         return question_state
