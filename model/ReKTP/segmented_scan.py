@@ -150,9 +150,31 @@ def _row_affine_identity(operator: torch.Tensor) -> torch.Tensor:
 
 def _compose_row_affine(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
     """Compose row-vector affine operators with ``left`` applied first."""
-    product = torch.matmul(left, right[..., :2, :])
-    bias = product[..., 2:3, :] + right[..., 2:3, :]
-    return torch.cat((product[..., :2, :], bias), dim=-2)
+    left_00 = left[..., 0, 0]
+    left_01 = left[..., 0, 1]
+    left_10 = left[..., 1, 0]
+    left_11 = left[..., 1, 1]
+    left_b0 = left[..., 2, 0]
+    left_b1 = left[..., 2, 1]
+
+    right_00 = right[..., 0, 0]
+    right_01 = right[..., 0, 1]
+    right_10 = right[..., 1, 0]
+    right_11 = right[..., 1, 1]
+    right_b0 = right[..., 2, 0]
+    right_b1 = right[..., 2, 1]
+
+    row00 = left_00 * right_00 + left_01 * right_10
+    row01 = left_00 * right_01 + left_01 * right_11
+    row10 = left_10 * right_00 + left_11 * right_10
+    row11 = left_10 * right_01 + left_11 * right_11
+    bias0 = left_b0 * right_00 + left_b1 * right_10 + right_b0
+    bias1 = left_b0 * right_01 + left_b1 * right_11 + right_b1
+
+    return torch.stack(
+        (row00, row01, row10, row11, bias0, bias1),
+        dim=-1,
+    ).reshape(*left.shape[:-2], 3, 2)
 
 
 def _combine_segmented(
