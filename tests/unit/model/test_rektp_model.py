@@ -90,6 +90,48 @@ def test_event_conditioned_residual_blocks_respect_scale():
     assert torch.all(block_norm < model.residual_scale)
 
 
+def test_local_readout_initializes_as_masked_mean():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    local_state = torch.randn(1, 2, 2, model.hidden_dim)
+    skill_ids = torch.tensor([[[0, 1], [0, 2]]])
+    readout_mask = torch.tensor([[[True, True], [True, False]]])
+    questions = torch.tensor([[2, 0]])
+
+    actual = model._question_conditioned_local_readout(
+        local_state,
+        skill_ids,
+        readout_mask,
+        questions,
+    )
+    expected = model._masked_mean(local_state, readout_mask)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_local_readout_can_weight_kcs_conditionally():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    local_state = torch.zeros(1, 1, 2, model.hidden_dim)
+    local_state[0, 0, 0, 0] = -1.0
+    local_state[0, 0, 1, 0] = 1.0
+    skill_ids = torch.tensor([[[0, 1]]])
+    readout_mask = torch.tensor([[[True, True]]])
+    questions = torch.tensor([[2]])
+
+    with torch.no_grad():
+        model.local_readout.weight.zero_()
+        model.local_readout.bias.zero_()
+        model.local_readout.weight[0, 0] = 8.0
+
+    actual = model._question_conditioned_local_readout(
+        local_state,
+        skill_ids,
+        readout_mask,
+        questions,
+    )
+
+    assert actual[0, 0, 0] > 0.9
+
+
 def test_other_kc_response_does_not_change_private_state():
     model = _build_model(torch.device("cpu"))
     questions = torch.tensor([[0, 1, 0, 1]])

@@ -88,6 +88,7 @@ class ReKTP(nn.Module):
         self.local_write = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
+        self.local_readout = nn.Linear(3 * hidden_dim, 1)
         self.question_residual = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.question_write = nn.Linear(hidden_dim, hidden_dim)
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
@@ -122,6 +123,7 @@ class ReKTP(nn.Module):
         for layer in (
             self.local_residual,
             self.local_write,
+            self.local_readout,
             self.question_residual,
             self.question_write,
         ):
@@ -137,6 +139,31 @@ class ReKTP(nn.Module):
         weights = mask.unsqueeze(-1).to(values.dtype)
         count = weights.sum(dim=-2).clamp_min(1.0)
         return (values * weights).sum(dim=-2) / count
+
+    def _question_conditioned_local_readout(
+        self,
+        local_state: torch.Tensor,
+        skill_ids: torch.Tensor,
+        readout_mask: torch.Tensor,
+        questions: torch.Tensor,
+    ) -> torch.Tensor:
+        """Read decoupled KC states with current-question dependent weights."""
+        skill_embedding = self.skill_embed(skill_ids)
+        question_embedding = self.question_embed(questions).unsqueeze(-2)
+        question_embedding = question_embedding.expand_as(local_state)
+        score_input = torch.cat(
+            (local_state, skill_embedding, question_embedding),
+            dim=-1,
+        )
+        scores = self.local_readout(score_input).squeeze(-1)
+        masked_scores = scores.masked_fill(
+            ~readout_mask,
+            torch.finfo(scores.dtype).min,
+        )
+        weights = torch.softmax(masked_scores, dim=-1)
+        weights = torch.where(readout_mask, weights, torch.zeros_like(weights))
+        weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+        return (local_state * weights.unsqueeze(-1)).sum(dim=-2)
 
     def _block_affine_transition(
         self,
@@ -279,7 +306,13 @@ class ReKTP(nn.Module):
         local_state = unpacked_state.view(
             batch_size, seq_len, max_skills, self.hidden_dim
         )
-        pooled_state = self._masked_mean(local_state, occurrence_mask)
+        skill_ids = self.question_skill_ids[questions]
+        pooled_state = self._question_conditioned_local_readout(
+            local_state,
+            skill_ids,
+            occurrence_mask,
+            questions,
+        )
         return pooled_state, local_state
 
     def _question_pre_states(
