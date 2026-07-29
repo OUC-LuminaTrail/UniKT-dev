@@ -138,7 +138,11 @@ const queryClient = useQueryClient()
 const phase = ref<Phase>('config')
 const submitting = ref(false)
 
-const action = ref<'download' | 'process'>('process')
+// Honor an `?action=download` deep link (e.g. from the empty-dataset prompt on
+// the train page); otherwise default to process.
+const action = ref<'download' | 'process'>(
+  route.query.action === 'download' ? 'download' : 'process',
+)
 const dataset = ref('')
 
 const selectedEnvId = ref<string | null>(null)
