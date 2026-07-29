@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 
+from errors import AppError
 from schemas import EnvironmentInfo
 
 from services.settings_manager import SettingsManager
@@ -47,7 +48,7 @@ def _find_conda() -> str | None:
     return shutil.which("conda")
 
 
-class EnvironmentNotConfigured(RuntimeError):
+class EnvironmentNotConfigured(AppError):
     """No Python environment is available for subprocess launch.
 
     Raised (never silently worked around) when neither an explicit ``env_id``
@@ -56,6 +57,10 @@ class EnvironmentNotConfigured(RuntimeError):
     ``python`` would just defer the failure into an opaque subprocess error —
     callers surface this to the user as a setup prompt instead.
     """
+
+    def __init__(self, code: str = "env_not_configured") -> None:
+        """Initialize with a stable i18n code (default env_not_configured)."""
+        super().__init__(code, status=400)
 
 
 class PythonEnvManager:
@@ -97,7 +102,7 @@ class PythonEnvManager:
                 id="custom:0",
                 type="custom",
                 name="custom",
-                display_name="自定义 Python 路径",
+                display_name="Custom Python path",
             )
         )
         return envs
@@ -126,7 +131,7 @@ class PythonEnvManager:
         if env_id is None:
             env_id = self._settings_manager.get_default_env()
             if env_id is None:
-                raise EnvironmentNotConfigured("未配置训练环境，请先在设置中完成初始化")
+                raise EnvironmentNotConfigured()
             custom_python_path = self._settings_manager.get_custom_python_path()
 
         parts = env_id.split(":", 1)
@@ -140,9 +145,7 @@ class PythonEnvManager:
             return [conda_bin, "run", "-n", env_name, "--no-banner", "python"]
         if env_type == "custom":
             if not custom_python_path:
-                raise EnvironmentNotConfigured(
-                    "自定义环境未配置 python 路径，请在设置中补全"
-                )
+                raise EnvironmentNotConfigured("custom_env_no_path")
             return [custom_python_path]
         raise ValueError(f"Unknown environment type: {env_type!r} (env_id={env_id})")
 

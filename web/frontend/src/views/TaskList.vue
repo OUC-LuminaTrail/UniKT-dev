@@ -1,14 +1,14 @@
 <template>
   <div class="task-list">
     <div class="page-header">
-      <h1 class="page-title">训练任务</h1>
+      <h1 class="page-title">{{ t('route.title.tasks') }}</h1>
       <router-link :to="{ name: 'task-new' }" class="btn-primary">
         <el-icon :size="14"><Plus /></el-icon>
-        新建任务
+        {{ t('task.list.newTask') }}
       </router-link>
     </div>
 
-    <div class="tab-bar" role="tablist" aria-label="任务状态分组">
+    <div class="tab-bar" role="tablist" :aria-label="t('task.list.tabGroupAria')">
       <button
         v-for="tab in tabs"
         :key="tab.value"
@@ -17,7 +17,7 @@
         :class="['tab-item', { active: activeTab === tab.value }]"
         @click="switchTab(tab.value)"
       >
-        {{ tab.label }}
+        {{ t(tab.label) }}
         <span v-if="tab.value === 'running' && activeCount > 0" class="tab-badge">{{ activeCount }}</span>
       </button>
     </div>
@@ -26,24 +26,24 @@
     <template v-if="activeTab === 'running'">
       <div v-if="runningTasks.length === 0 && queueItems.length === 0" class="empty-state">
         <el-icon :size="48"><Document /></el-icon>
-        <p>暂无活跃任务</p>
-        <span>新建的训练任务会显示在这里</span>
+        <p>{{ t('task.list.emptyActive') }}</p>
+        <span>{{ t('task.list.emptyActiveHint') }}</span>
       </div>
 
       <template v-if="runningTasks.length > 0">
         <div class="section-divider divider-running">
           <span class="divider-pulse" aria-hidden="true"></span>
-          <span class="divider-label">运行中</span>
+          <span class="divider-label">{{ t('common.status.running') }}</span>
           <span class="divider-count">{{ runningTasks.length }}</span>
         </div>
         <transition name="batch-bar">
           <div v-if="selectedRunningTasks.length > 0" class="batch-bar">
-            <span class="batch-info">已选择 <strong>{{ selectedRunningTasks.length }}</strong> 项</span>
+            <span class="batch-info">{{ t('task.list.selected') }} <strong>{{ selectedRunningTasks.length }}</strong> {{ t('task.list.itemsUnit') }}</span>
             <button class="batch-stop-btn" @click="handleBatchStop">
               <el-icon :size="14"><SwitchButton /></el-icon>
-              批量停止
+              {{ t('task.list.batchStop') }}
             </button>
-            <button class="batch-clear-btn" @click="clearRunningSelection">取消选择</button>
+            <button class="batch-clear-btn" @click="clearRunningSelection">{{ t('task.list.clearSelection') }}</button>
           </div>
         </transition>
         <el-table
@@ -58,14 +58,14 @@
         >
           <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column prop="id" label="ID" width="70" sortable />
-          <el-table-column label="名称" min-width="160">
+          <el-table-column :label="t('task.list.colName')" min-width="160">
             <template #default="{ row }">
               <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
             </template>
           </el-table-column>
-          <el-table-column prop="model_name" label="模型" width="110" sortable />
-          <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
-          <el-table-column prop="env_name" label="环境" width="100" sortable>
+          <el-table-column prop="model_name" :label="t('task.list.colModel')" width="110" sortable />
+          <el-table-column prop="dataset_name" :label="t('task.list.colDataset')" width="110" sortable />
+          <el-table-column prop="env_name" :label="t('task.list.colEnv')" width="100" sortable>
             <template #default="{ row }">
               <span class="env-tag">{{ row.env_name }}</span>
             </template>
@@ -75,31 +75,31 @@
               <span class="gpu-tag">{{ formatGpu(row.gpu_assigned) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="110">
+          <el-table-column :label="t('task.list.colStatus')" width="110">
             <template #default>
               <span class="status-cell">
                 <span class="status-dot status-running" />
-                <span class="status-text">运行中</span>
+                <span class="status-text">{{ t('common.status.running') }}</span>
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="170" sortable>
+          <el-table-column prop="created_at" :label="t('task.list.colCreatedAt')" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="started_at" label="开始时间" width="170" sortable>
+          <el-table-column prop="started_at" :label="t('task.list.colStartedAt')" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatDateTime(row.started_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="90" align="right">
+          <el-table-column :label="t('task.list.colActions')" width="90" align="right">
             <template #default="{ row }">
               <div class="action-group">
-                <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" title="查看详情">
+                <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" :title="t('task.list.viewDetail')">
                   <el-icon :size="15"><View /></el-icon>
                 </router-link>
-                <button class="action-btn action-stop" title="停止任务" @click="handleStop(row.id)">
+                <button class="action-btn action-stop" :title="t('task.list.stopTask')" @click="handleStop(row.id)">
                   <el-icon :size="14"><SwitchButton /></el-icon>
                 </button>
               </div>
@@ -123,15 +123,15 @@
       <template v-if="queueItems.length > 0">
         <div class="section-divider divider-queued">
           <el-icon :size="13" class="divider-icon" aria-hidden="true"><Clock /></el-icon>
-          <span class="divider-label">排队中</span>
+          <span class="divider-label">{{ t('task.list.queued') }}</span>
           <span class="divider-count">{{ queueItems.length }}</span>
         </div>
         <transition name="batch-bar">
           <div v-if="selectedQueueItems.length > 0" class="batch-bar">
-            <span class="batch-info">已选择 <strong>{{ selectedQueueItems.length }}</strong> 项</span>
+            <span class="batch-info">{{ t('task.list.selected') }} <strong>{{ selectedQueueItems.length }}</strong> {{ t('task.list.itemsUnit') }}</span>
             <button class="batch-cancel-btn" @click="handleBatchCancelQueue">
               <el-icon :size="14"><Delete /></el-icon>
-              批量取消
+              {{ t('task.list.batchCancel') }}
             </button>
           </div>
         </transition>
@@ -142,39 +142,39 @@
           size="small"
           class="task-table queue-table"
         >
-          <el-table-column label="位置" width="70">
+          <el-table-column :label="t('task.list.colPosition')" width="70">
             <template #default="{ $index }">
               <span class="pos-badge">#{{ (queuePage - 1) * queuePageSize + $index + 1 }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="id" label="ID" width="70" sortable />
-          <el-table-column label="名称" min-width="160">
+          <el-table-column :label="t('task.list.colName')" min-width="160">
             <template #default="{ row }">
               <span class="task-name-text">{{ row.name }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="model_name" label="模型" width="110" sortable />
-          <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
+          <el-table-column prop="model_name" :label="t('task.list.colModel')" width="110" sortable />
+          <el-table-column prop="dataset_name" :label="t('task.list.colDataset')" width="110" sortable />
           <el-table-column v-if="hasGpu" label="GPU" width="80">
             <template #default="{ row }">
               <span class="gpu-tag">{{ formatGpu(row.gpu_request) }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="170" sortable>
+          <el-table-column prop="created_at" :label="t('task.list.colCreatedAt')" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="110" align="right">
+          <el-table-column :label="t('task.list.colActions')" width="110" align="right">
             <template #default="{ row, $index }">
               <div class="action-group">
-                <button v-if="$index > 0" class="action-btn" title="上移" @click="moveUp($index)">
+                <button v-if="$index > 0" class="action-btn" :title="t('task.list.moveUp')" @click="moveUp($index)">
                   <el-icon :size="14"><ArrowUp /></el-icon>
                 </button>
-                <button v-if="$index < queueItems.length - 1" class="action-btn" title="下移" @click="moveDown($index)">
+                <button v-if="$index < queueItems.length - 1" class="action-btn" :title="t('task.list.moveDown')" @click="moveDown($index)">
                   <el-icon :size="14"><ArrowDown /></el-icon>
                 </button>
-                <button class="action-btn action-delete" title="取消任务" @click="handleCancelQueue(row.id)">
+                <button class="action-btn action-delete" :title="t('task.list.cancelTask')" @click="handleCancelQueue(row.id)">
                   <el-icon :size="15"><Delete /></el-icon>
                 </button>
               </div>
@@ -198,19 +198,19 @@
     <template v-else>
       <div v-if="tasks.length === 0" class="empty-state">
         <el-icon :size="48"><Document /></el-icon>
-        <p>暂无任务</p>
-        <span>开始训练后任务将显示在这里</span>
+        <p>{{ t('task.list.empty') }}</p>
+        <span>{{ t('task.list.emptyHint') }}</span>
       </div>
 
       <template v-else>
         <transition name="batch-bar">
           <div v-if="selectedTasks.length > 0" class="batch-bar">
-            <span class="batch-info">已选择 <strong>{{ selectedTasks.length }}</strong> 项</span>
+            <span class="batch-info">{{ t('task.list.selected') }} <strong>{{ selectedTasks.length }}</strong> {{ t('task.list.itemsUnit') }}</span>
             <button class="batch-delete-btn" @click="handleBatchDelete">
               <el-icon :size="14"><Delete /></el-icon>
-              批量删除
+              {{ t('task.list.batchDelete') }}
             </button>
-            <button class="batch-clear-btn" @click="clearSelection">取消选择</button>
+            <button class="batch-clear-btn" @click="clearSelection">{{ t('task.list.clearSelection') }}</button>
           </div>
         </transition>
 
@@ -228,51 +228,51 @@
         >
           <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column prop="id" label="ID" width="70" sortable />
-        <el-table-column label="名称" min-width="160">
+        <el-table-column :label="t('task.list.colName')" min-width="160">
           <template #default="{ row }">
             <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="model_name" label="模型" width="110" sortable />
-        <el-table-column prop="dataset_name" label="数据集" width="110" sortable />
-        <el-table-column prop="env_name" label="环境" width="100" sortable>
+        <el-table-column prop="model_name" :label="t('task.list.colModel')" width="110" sortable />
+        <el-table-column prop="dataset_name" :label="t('task.list.colDataset')" width="110" sortable />
+        <el-table-column prop="env_name" :label="t('task.list.colEnv')" width="100" sortable>
           <template #default="{ row }">
             <span class="env-tag">{{ row.env_name }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="110" sortable>
+        <el-table-column prop="status" :label="t('task.list.colStatus')" width="110" sortable>
           <template #default="{ row }">
             <span class="status-cell">
               <span :class="['status-dot', `status-${row.status}`]" />
-              <span class="status-text">{{ statusLabel(row.status) }}</span>
+              <span class="status-text">{{ t(statusLabel(row.status)) }}</span>
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170" sortable>
+        <el-table-column prop="created_at" :label="t('task.list.colCreatedAt')" width="170" sortable>
           <template #default="{ row }">
             <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="started_at" label="开始时间" width="170" sortable>
+        <el-table-column prop="started_at" :label="t('task.list.colStartedAt')" width="170" sortable>
           <template #default="{ row }">
             <span class="mono-time">{{ formatDateTime(row.started_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="finished_at" label="完成时间" width="170" sortable>
+        <el-table-column prop="finished_at" :label="t('task.list.colFinishedAt')" width="170" sortable>
           <template #default="{ row }">
             <span class="mono-time">{{ formatDateTime(row.finished_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="90" align="right">
+        <el-table-column :label="t('task.list.colActions')" width="90" align="right">
           <template #default="{ row }">
             <div class="action-group">
-              <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" title="查看详情">
+              <router-link :to="{ name: 'task-detail', params: { id: row.id } }" class="action-btn" :title="t('task.list.viewDetail')">
                 <el-icon :size="15"><View /></el-icon>
               </router-link>
               <button
                 v-if="row.status !== 'running'"
                 class="action-btn action-delete"
-                title="删除任务"
+                :title="t('task.list.deleteTask')"
                 @click="handleDelete(row.id)"
               >
                 <el-icon :size="15"><Delete /></el-icon>
@@ -302,6 +302,7 @@
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document, Clock } from '@element-plus/icons-vue'
@@ -311,6 +312,8 @@ import { formatDateTime } from '@/utils/date'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
+
+const { t } = useI18n()
 
 const { hasGpu } = useSystemCapabilities()
 
@@ -366,25 +369,25 @@ const runningTableRef = ref<InstanceType<typeof ElTable>>()
 const queueTableRef = ref<InstanceType<typeof ElTable>>()
 
 const tabs = [
-  { label: '全部', value: 'all' },
-  { label: '活跃', value: 'running' },
-  { label: '已完成', value: 'completed' },
-  { label: '已失败', value: 'failed' },
-  { label: '已停止', value: 'stopped' },
+  { label: 'task.list.tabAll', value: 'all' },
+  { label: 'task.list.tabActive', value: 'running' },
+  { label: 'common.status.completed', value: 'completed' },
+  { label: 'common.status.failed', value: 'failed' },
+  { label: 'common.status.stopped', value: 'stopped' },
 ]
 
 const statusLabels: Record<string, string> = {
-  running: '运行中',
-  completed: '已完成',
-  failed: '已失败',
-  stopped: '已停止',
-  pending: '等待中',
+  running: 'common.status.running',
+  completed: 'common.status.completed',
+  failed: 'common.status.failed',
+  stopped: 'common.status.stopped',
+  pending: 'common.status.pending',
 }
 
 const statusLabel = (s: string) => statusLabels[s] || s
 
 const formatGpu = (val: number | null) =>
-  val === null || val === undefined ? '自动' : `GPU ${val}`
+  val === null || val === undefined ? t('common.auto') : `GPU ${val}`
 
 interface TasksData {
   tasks: TaskInfo[]
@@ -504,7 +507,7 @@ const applyQueueOrder = async (next: QueueItem[], prev: QueueItem[]) => {
     invalidateTasks()
   } catch {
     setQueueItemsData(prev)
-    ElMessage.error('调整排队顺序失败，已恢复原顺序')
+    ElMessage.error(t('task.list.reorderFailedRestored'))
   }
 }
 
@@ -636,36 +639,36 @@ watch(
 onBeforeUnmount(teardownSortable)
 
 const handleStop = async (id: number) => {
-  await ElMessageBox.confirm('确定停止该任务？正在进行的训练进度将丢失。', '确认停止', {
-    confirmButtonText: '停止',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(t('task.list.stopConfirmMsg'), t('task.list.stopConfirmTitle'), {
+    confirmButtonText: t('common.stop'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
-  ElMessage.success('已发送停止信号')
+  ElMessage.success(t('task.detail.stopSignalSent'))
   await stopTask(id)
-  ElMessage.success('任务已停止')
+  ElMessage.success(t('task.list.stopped'))
   invalidateTasks()
 }
 
 const handleCancelQueue = async (id: number) => {
-  await ElMessageBox.confirm('确定取消该排队任务？', '确认取消', {
-    confirmButtonText: '取消任务',
-    cancelButtonText: '返回',
+  await ElMessageBox.confirm(t('task.list.cancelQueueConfirmMsg'), t('task.list.cancelQueueConfirmTitle'), {
+    confirmButtonText: t('task.list.cancelTask'),
+    cancelButtonText: t('common.back'),
     type: 'warning',
   })
   await stopTask(id)
-  ElMessage.success('已取消')
+  ElMessage.success(t('task.list.canceled'))
   invalidateTasks()
 }
 
 const handleDelete = async (id: number) => {
-  await ElMessageBox.confirm('确定删除该任务？此操作不可撤销。', '确认删除', {
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(t('task.list.deleteConfirmMsg'), t('task.list.deleteConfirmTitle'), {
+    confirmButtonText: t('common.delete'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
   await deleteTask(id)
-  ElMessage.success('已删除')
+  ElMessage.success(t('task.list.deleted'))
   invalidateTasks()
 }
 
@@ -679,18 +682,18 @@ const clearSelection = () => {
 
 const handleBatchDelete = async () => {
   const count = selectedTasks.value.length
-  const runningSelected = selectedTasks.value.filter(t => t.status === 'running')
+  const runningSelected = selectedTasks.value.filter(taskVal => taskVal.status === 'running')
   if (runningSelected.length > 0) {
-    ElMessage.warning(`选中项包含 ${runningSelected.length} 个运行中的任务，无法删除`)
+    ElMessage.warning(t('task.list.batchDeleteRunningBlocked', { n: runningSelected.length }))
     return
   }
-  await ElMessageBox.confirm(`确定删除选中的 ${count} 个任务？此操作不可撤销。`, '批量删除', {
-    confirmButtonText: '删除',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(t('task.list.batchDeleteConfirmMsg', { n: count }), t('task.list.batchDelete'), {
+    confirmButtonText: t('common.delete'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
-  await Promise.all(selectedTasks.value.map(t => deleteTask(t.id)))
-  ElMessage.success(`已删除 ${count} 个任务`)
+  await Promise.all(selectedTasks.value.map(taskVal => deleteTask(taskVal.id)))
+  ElMessage.success(t('task.list.deletedN', { n: count }))
   clearSelection()
   invalidateTasks()
 }
@@ -707,17 +710,17 @@ const clearRunningSelection = () => {
 const handleBatchStop = async () => {
   const count = selectedRunningTasks.value.length
   await ElMessageBox.confirm(
-    `确定停止选中的 ${count} 个运行中任务？正在进行的训练进度将丢失。`,
-    '批量停止',
+    t('task.list.batchStopConfirmMsg', { n: count }),
+    t('task.list.batchStop'),
     {
-      confirmButtonText: '停止',
-      cancelButtonText: '取消',
+      confirmButtonText: t('common.stop'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     }
   )
-  ElMessage.success('已发送停止信号')
-  await Promise.all(selectedRunningTasks.value.map(t => stopTask(t.id)))
-  ElMessage.success(`已停止 ${count} 个任务`)
+  ElMessage.success(t('task.detail.stopSignalSent'))
+  await Promise.all(selectedRunningTasks.value.map(taskVal => stopTask(taskVal.id)))
+  ElMessage.success(t('task.list.stoppedN', { n: count }))
   clearRunningSelection()
   invalidateTasks()
 }
@@ -726,16 +729,16 @@ const handleBatchStop = async () => {
 const handleBatchCancelQueue = async () => {
   const count = selectedQueueItems.value.length
   await ElMessageBox.confirm(
-    `确定取消选中的 ${count} 个排队任务？`,
-    '批量取消',
+    t('task.list.batchCancelConfirmMsg', { n: count }),
+    t('task.list.batchCancel'),
     {
-      confirmButtonText: '取消任务',
-      cancelButtonText: '返回',
+      confirmButtonText: t('task.list.cancelTask'),
+      cancelButtonText: t('common.back'),
       type: 'warning',
     }
   )
-  await Promise.all(selectedQueueItems.value.map(t => stopTask(t.id)))
-  ElMessage.success(`已取消 ${count} 个排队任务`)
+  await Promise.all(selectedQueueItems.value.map(taskVal => stopTask(taskVal.id)))
+  ElMessage.success(t('task.list.canceledN', { n: count }))
   selectedQueueItems.value = []
   invalidateTasks()
 }

@@ -4,39 +4,39 @@
     <template v-if="phase === 'config'">
       <div class="preprocess-body">
         <div class="page-header">
-          <h1 class="page-title">数据预处理</h1>
-          <p class="page-subtitle">配置并运行 data_process.py 进行数据集下载和处理</p>
+          <h1 class="page-title">{{ t('route.title.preprocess') }}</h1>
+          <p class="page-subtitle">{{ t('preprocess.subtitle') }}</p>
         </div>
 
         <div class="section">
-          <div class="section-label">操作类型</div>
+          <div class="section-label">{{ t('preprocess.actionType') }}</div>
           <div class="radio-group">
             <label class="radio-item" :class="{ active: action === 'download' }">
               <input type="radio" v-model="action" value="download" />
               <el-icon :size="14"><Download /></el-icon>
-              <span>下载</span>
+              <span>{{ t('preprocess.download') }}</span>
             </label>
             <label class="radio-item" :class="{ active: action === 'process' }">
               <input type="radio" v-model="action" value="process" />
               <el-icon :size="14"><Upload /></el-icon>
-              <span>处理</span>
+              <span>{{ t('preprocess.process') }}</span>
             </label>
           </div>
         </div>
 
         <div class="section" v-if="environments.length">
-          <div class="section-label">运行环境</div>
+          <div class="section-label">{{ t('selection.env') }}</div>
           <EnvSelect
             v-model="selectedEnvId"
             v-model:custom-path="customPythonPath"
             :environments="environments"
-            placeholder="使用默认环境"
+            :placeholder="t('preprocess.envDefaultPlaceholder')"
             clearable
           />
         </div>
 
         <div class="section">
-          <div class="section-label">数据集</div>
+          <div class="section-label">{{ t('selection.dataset') }}</div>
           <div class="dataset-layout">
             <el-skeleton :loading="loading" animated style="flex:1;min-width:0">
               <template #template>
@@ -91,7 +91,7 @@
           :loading="submitting"
           @click="onStart"
         >
-          {{ submitting ? '启动中...' : action === 'download' ? '开始下载' : '开始处理' }}
+          {{ submitting ? t('preprocess.starting') : action === 'download' ? t('preprocess.startDownload') : t('preprocess.startProcess') }}
         </el-button>
       </CommandPreview>
     </template>
@@ -101,12 +101,12 @@
       <div class="running-header">
         <button v-if="taskInfo.status !== 'running'" class="back-btn" @click="onBack">
           <el-icon :size="14"><ArrowLeft /></el-icon>
-          返回
+          {{ t('common.back') }}
         </button>
         <span class="running-command mono">{{ taskInfo.command }}</span>
         <span class="status-badge" :class="`status-${taskInfo.status}`">{{ statusLabel }}</span>
         <button v-if="taskInfo.status === 'running'" class="stop-btn" :disabled="stopping" @click="onStop">
-          {{ stopping ? '停止中...' : '停止' }}
+          {{ stopping ? t('common.status.stopping') : t('common.stop') }}
         </button>
       </div>
 
@@ -117,6 +117,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -135,6 +136,7 @@ import { getGradient } from '@/composables/useGradient'
 type Phase = 'config' | 'running'
 const route = useRoute()
 const queryClient = useQueryClient()
+const { t } = useI18n()
 const phase = ref<Phase>('config')
 const submitting = ref(false)
 
@@ -241,7 +243,7 @@ function onDatasetClick(name: string) {
 // fire); stop manually once data is ready so `once` doesn't burn out on empty.
 const stopRecover = watch(() => activeTasksQuery.data.value, (tasks) => {
   if (!tasks) return
-  const activeTask = tasks.find(t => t.status === 'running')
+  const activeTask = tasks.find(task => task.status === 'running')
   if (activeTask) {
     taskId.value = activeTask.id
     taskInfo.value = activeTask
@@ -262,7 +264,10 @@ watch(() => datasetsQuery.data.value, (data) => {
 
 const statusLabel = computed(() => {
   const map: Record<string, string> = {
-    running: '运行中', completed: '已完成', failed: '已失败', stopped: '已停止',
+    running: t('common.status.running'),
+    completed: t('common.status.completed'),
+    failed: t('common.status.failed'),
+    stopped: t('common.status.stopped'),
   }
   return taskInfo.value ? map[taskInfo.value.status] || taskInfo.value.status : ''
 })
@@ -326,7 +331,7 @@ const onStart = async () => {
 const stopMutation = useMutation({
   mutationFn: (id: number) => stopPreprocess(id),
   onSuccess: () => {
-    ElMessage.success('已发送停止信号')
+    ElMessage.success(t('preprocess.stopSignalSent'))
     queryClient.invalidateQueries({ queryKey: ['preprocess-task', taskId.value] })
   },
 })

@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { ElNotification } from 'element-plus'
 
+import i18n from '@/plugins/i18n'
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 120000,
@@ -25,7 +27,12 @@ api.interceptors.response.use(
   },
   (error) => {
     const d = error.response?.data
-    if (d?.type && d?.title) {
+    const code = d?.type
+    const translated =
+      code && i18n.global.te(`error.${code}`) ? i18n.global.t(`error.${code}`) : null
+    if (translated) {
+      ElNotification.error({ message: translated, duration: 5000 })
+    } else if (d?.type && d?.title) {
       ElNotification.error({
         title: d.title,
         message: typeof d.detail === 'string' ? d.detail : d.title,

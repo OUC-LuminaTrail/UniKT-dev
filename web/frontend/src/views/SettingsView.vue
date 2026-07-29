@@ -1,8 +1,8 @@
 <template>
   <div class="settings-view">
     <div class="page-header">
-      <h1 class="page-title">设置</h1>
-      <p class="page-subtitle">配置训练任务的全局参数</p>
+      <h1 class="page-title">{{ t('route.title.settings') }}</h1>
+      <p class="page-subtitle">{{ t('settings.pageSubtitle') }}</p>
     </div>
 
     <el-skeleton :loading="loading" animated>
@@ -33,7 +33,7 @@
             <span class="section-icon">
               <el-icon :size="16"><Monitor /></el-icon>
             </span>
-            <span class="section-title">任务队列</span>
+            <span class="section-title">{{ t('settings.queueTitle') }}</span>
           </div>
           <span class="section-desc">{{ concurrencyDesc }}</span>
         </div>
@@ -56,9 +56,9 @@
 
         <div class="card-footer">
           <el-button type="primary" :loading="saving" @click="onSave">
-            {{ saving ? '保存中...' : '保存设置' }}
+            {{ saving ? t('settings.saving') : t('settings.saveSettings') }}
           </el-button>
-          <span v-if="saved" class="saved-hint">已保存</span>
+          <span v-if="saved" class="saved-hint">{{ t('settings.saved') }}</span>
         </div>
       </div>
     </div>
@@ -72,20 +72,20 @@
             <span class="section-icon">
               <el-icon :size="16"><Cpu /></el-icon>
             </span>
-            <span class="section-title">训练环境</span>
+            <span class="section-title">{{ t('settings.envTitle') }}</span>
           </div>
-          <span class="section-desc">选择提交训练任务时使用的默认 Python 环境。环境列表由系统自动检测。</span>
+          <span class="section-desc">{{ t('settings.envDesc') }}</span>
         </div>
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-key">默认训练环境</span>
-            <span class="setting-help">训练任务将通过此环境执行</span>
+            <span class="setting-key">{{ t('settings.defaultEnvLabel') }}</span>
+            <span class="setting-help">{{ t('settings.defaultEnvHelp') }}</span>
           </div>
           <div class="setting-control">
             <el-select
               v-model="selectedEnvId"
-              placeholder="选择环境"
+              :placeholder="t('settings.envPlaceholder')"
               style="width: 220px"
               @change="onEnvChange"
             >
@@ -103,7 +103,7 @@
               @click="onHealthCheck"
               style="margin-left: 8px"
             >
-              {{ healthChecking ? '检测中...' : '检测环境' }}
+              {{ healthChecking ? t('settings.checking') : t('settings.checkEnv') }}
             </el-button>
           </div>
         </div>
@@ -112,11 +112,11 @@
             <span class="health-label">Python</span>
             <span v-if="healthResult.python_available" class="health-ok">
               <el-icon :size="12"><CircleCheck /></el-icon>
-              {{ healthResult.python_version || '可用' }}
+              {{ healthResult.python_version || t('settings.available') }}
             </span>
             <span v-else class="health-fail">
               <el-icon :size="12"><CircleClose /></el-icon>
-              {{ healthResult.error || '不可用' }}
+              {{ healthResult.error || t('settings.unavailable') }}
             </span>
           </div>
           <div class="health-item">
@@ -127,14 +127,14 @@
             </span>
             <span v-else class="health-fail">
               <el-icon :size="12"><CircleClose /></el-icon>
-              不可用
+              {{ t('settings.unavailable') }}
             </span>
           </div>
         </div>
         <div v-if="selectedEnvId === 'custom:0'" class="custom-path-row">
           <div class="setting-info">
-            <span class="setting-key">Python 路径</span>
-            <span class="setting-help">自定义 Python 解释器的完整路径</span>
+            <span class="setting-key">{{ t('settings.pythonPathLabel') }}</span>
+            <span class="setting-help">{{ t('settings.pythonPathHelp') }}</span>
           </div>
           <el-input
             v-model="customPythonPath"
@@ -146,8 +146,8 @@
 
         <div class="setting-row">
           <div class="setting-info">
-            <span class="setting-key">记住上次使用的环境</span>
-            <span class="setting-help">开启后，新建训练任务时默认使用上次选择的环境，而非此处的默认环境</span>
+            <span class="setting-key">{{ t('settings.rememberLastEnvLabel') }}</span>
+            <span class="setting-help">{{ t('settings.rememberLastEnvHelp') }}</span>
           </div>
           <div class="setting-control">
             <el-switch
@@ -163,6 +163,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage } from 'element-plus'
 import { Monitor, Cpu } from '@element-plus/icons-vue'
@@ -172,6 +173,7 @@ import { getSettings, updateSettings, getDefaultEnv, setDefaultEnv } from '@/api
 import { listEnvironments, healthCheckEnv, type EnvironmentInfo, type EnvHealthResult } from '@/api/environments'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
+const { t } = useI18n()
 const queryClient = useQueryClient()
 const cookies = new Cookies()
 const { hasGpu, gpuCount } = useSystemCapabilities()
@@ -186,17 +188,17 @@ const totalConcurrency = computed(
 )
 
 const concurrencyLabel = computed(() =>
-  hasGpu.value ? '每卡并发数' : '并发任务数',
+  hasGpu.value ? t('settings.concurrencyPerGpu') : t('settings.concurrencyTasks'),
 )
 const concurrencyHelp = computed(() =>
   hasGpu.value
-    ? `单张 GPU 同时运行的任务上限 · 共 ${gpuCount.value} 张 GPU，总并发 ${totalConcurrency.value}`
-    : '同时运行的训练任务上限',
+    ? t('settings.concurrencyHelpGpu', { gpuCount: gpuCount.value, total: totalConcurrency.value })
+    : t('settings.concurrencyHelpCpu'),
 )
 const concurrencyDesc = computed(() =>
   hasGpu.value
-    ? '控制每张 GPU 同时运行的任务数。修改后立即生效，空闲槽位会被自动填补。'
-    : '控制同时运行的训练任务数。修改后立即生效，队列中的等待任务会自动启动。',
+    ? t('settings.concurrencyDescGpu')
+    : t('settings.concurrencyDescCpu'),
 )
 
 const selectedEnvId = ref<string | null>(null)
@@ -244,7 +246,7 @@ const updateSettingsMutation = useMutation({
     cookies.set(COOKIE_KEY, { gpu_slots: gpuSlots.value }, { maxAge: 365 * 86400, path: '/' })
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
-    ElMessage.success('设置已保存')
+    ElMessage.success(t('settings.saveSuccessToast'))
   },
 })
 
@@ -267,7 +269,7 @@ const onEnvChange = (envId: string) => {
     env_id: envId,
     custom_python_path: envId === 'custom:0' ? customPythonPath.value || null : null,
   })
-  ElMessage.success('默认环境已更新')
+  ElMessage.success(t('settings.envUpdatedToast'))
 }
 
 const onCustomPathBlur = () => {

@@ -5,7 +5,8 @@ parameter schema (groups, fields, defaults) for a specific model.
 """
 
 from dependencies import get_schema_extractor
-from fastapi import APIRouter, HTTPException
+from errors import AppError
+from fastapi import APIRouter
 from schemas import ModelSchemaResponse, ParamGroup
 from services.schema_extractor import SchemaExtractor
 
@@ -42,12 +43,12 @@ def get_model_params(model_name: str):
         A ModelSchemaResponse with parameter groups and fields.
 
     Raises:
-        HTTPException: 404 if the model is not found.
+        AppError: 404 if the model is not found.
     """
     try:
         return _get_extractor().get_model_schema(model_name)
     except KeyError:
-        raise HTTPException(404, f"Model '{model_name}' not found")
+        raise AppError("model_not_found", 404)
 
 
 @router.get("/preprocess/{action}", response_model=list[ParamGroup])
@@ -61,9 +62,9 @@ def get_preprocess_params(action: str):
         A list of ParamGroup describing the action's parameters.
 
     Raises:
-        HTTPException: 404 if the action is unknown.
+        AppError: 404 if the action is unknown.
     """
     try:
         return _get_extractor().get_preprocess_schema(action)
     except KeyError:
-        raise HTTPException(404, f"Unknown preprocess action '{action}'")
+        raise AppError("preprocess_action_unknown", 404)

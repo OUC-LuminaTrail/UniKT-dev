@@ -2,12 +2,12 @@
   <div class="gpu-monitor">
     <div class="page-header">
       <div class="page-title-group">
-        <h2 class="page-title">GPU 监控</h2>
-        <span class="page-sub">实时利用率与显存占用趋势 · 最近 3 分钟</span>
+        <h2 class="page-title">{{ t('route.title.gpu') }}</h2>
+        <span class="page-sub">{{ t('gpu.pageSub') }}</span>
       </div>
       <div class="live-badge">
         <span class="live-dot"></span>
-        <span class="live-text">实时 · 3s</span>
+        <span class="live-text">{{ t('gpu.liveBadge') }}</span>
       </div>
     </div>
 
@@ -38,7 +38,7 @@
 
             <div class="stats-grid">
               <div class="stat-block">
-                <div class="stat-label">利用率</div>
+                <div class="stat-label">{{ t('gpu.utilization') }}</div>
                 <div class="progress-track">
                   <div
                     class="progress-fill"
@@ -52,7 +52,7 @@
               </div>
 
               <div class="stat-block">
-                <div class="stat-label">显存</div>
+                <div class="stat-label">{{ t('gpu.memory') }}</div>
                 <div class="progress-track">
                   <div
                     class="progress-fill"
@@ -69,7 +69,7 @@
               </div>
 
               <div class="stat-block">
-                <div class="stat-label">温度</div>
+                <div class="stat-label">{{ t('gpu.temperature') }}</div>
                 <div class="stat-row">
                   <span
                     class="temp-indicator"
@@ -80,7 +80,7 @@
               </div>
 
               <div class="stat-block">
-                <div class="stat-label">功耗</div>
+                <div class="stat-label">{{ t('gpu.power') }}</div>
                 <div class="stat-value">{{ gpu.power_usage_w.toFixed(1) }}W</div>
               </div>
             </div>
@@ -93,12 +93,12 @@
                 :autoresize="true"
                 :update-options="{ notMerge: true }"
               />
-              <div v-else class="trend-placeholder">趋势采集中…</div>
+              <div v-else class="trend-placeholder">{{ t('gpu.trendCollecting') }}</div>
             </div>
 
             <div class="occupancy">
-              <div class="occupancy-label">占用任务</div>
-              <div v-if="gpu.processes.length === 0" class="occupancy-empty">空闲</div>
+              <div class="occupancy-label">{{ t('gpu.occupancyTasks') }}</div>
+              <div v-if="gpu.processes.length === 0" class="occupancy-empty">{{ t('gpu.idle') }}</div>
               <div v-else class="occupancy-list">
                 <div v-for="p in gpu.processes" :key="p.id" class="occ-item">
                   <span class="occ-dot" :class="`occ-${p.status}`"></span>
@@ -111,26 +111,29 @@
 
         <div class="empty-state" v-else>
           <el-icon :size="40" class="empty-icon"><Monitor /></el-icon>
-          <div class="empty-text">未检测到 GPU</div>
-          <div class="empty-sub">请确保已安装 NVIDIA 驱动与 nvidia-smi</div>
+          <div class="empty-text">{{ t('gpu.notDetected') }}</div>
+          <div class="empty-sub">{{ t('gpu.emptyDriverHint') }}</div>
         </div>
       </template>
     </el-skeleton>
 
     <div class="updated-at" v-if="status">
-      更新于 {{ formatDateTime(status.updated_at) }}
+      {{ t('gpu.updatedAt', { time: formatDateTime(status.updated_at) }) }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useDark } from '@vueuse/core'
 import { useQuery } from '@tanstack/vue-query'
 import { Monitor } from '@element-plus/icons-vue'
 import { VChart } from '@/plugins/echarts'
 import { getGpuStatus } from '@/api/gpu'
 import { formatDateTime } from '@/utils/date'
+
+const { t } = useI18n()
 
 const { data: status, isPending: loading } = useQuery({
   queryKey: ['gpu-status'],
@@ -174,7 +177,7 @@ const trendReady = (idx: number) => (history[idx]?.util.length ?? 0) > 1
 
 const buildOption = (gpuIndex: number) => {
   const h = history[gpuIndex] ?? { util: [], vram: [] }
-  const t = tokens.value
+  const tk = tokens.value
   return {
     animation: false,
     grid: { left: 0, right: 0, top: 16, bottom: 0 },
@@ -183,26 +186,26 @@ const buildOption = (gpuIndex: number) => {
     legend: {
       show: true, right: 0, top: -2,
       itemWidth: 10, itemHeight: 6, itemGap: 10, icon: 'roundRect',
-      textStyle: { color: t.textTertiary, fontSize: 10 },
-      data: ['利用率', '显存'],
+      textStyle: { color: tk.textTertiary, fontSize: 10 },
+      data: [t('gpu.utilization'), t('gpu.memory')],
     },
     tooltip: {
       trigger: 'axis', confine: true,
-      backgroundColor: t.bgElevated,
-      borderColor: t.borderDefault, borderWidth: 1,
-      textStyle: { color: t.textPrimary, fontSize: 11 },
+      backgroundColor: tk.bgElevated,
+      borderColor: tk.borderDefault, borderWidth: 1,
+      textStyle: { color: tk.textPrimary, fontSize: 11 },
       formatter: (params: { marker: string; seriesName: string; value: number }[]) =>
         params.map((p) => `${p.marker}${p.seriesName} ${Number(p.value).toFixed(0)}%`).join('<br/>'),
     },
     series: [
       {
-        name: '利用率', type: 'line', data: h.util, smooth: 0.3, symbol: 'none',
-        lineStyle: { width: 1.5, color: t.blue },
-        areaStyle: { opacity: 0.14, color: t.blue },
+        name: t('gpu.utilization'), type: 'line', data: h.util, smooth: 0.3, symbol: 'none',
+        lineStyle: { width: 1.5, color: tk.blue },
+        areaStyle: { opacity: 0.14, color: tk.blue },
       },
       {
-        name: '显存', type: 'line', data: h.vram, smooth: 0.3, symbol: 'none',
-        lineStyle: { width: 1.5, color: t.cyan },
+        name: t('gpu.memory'), type: 'line', data: h.vram, smooth: 0.3, symbol: 'none',
+        lineStyle: { width: 1.5, color: tk.cyan },
       },
     ],
   }

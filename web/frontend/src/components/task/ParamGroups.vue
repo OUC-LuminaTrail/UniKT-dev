@@ -10,7 +10,7 @@
           <span class="group-chevron" :class="{ expanded: isExpanded(group.name) }">
             <el-icon :size="12"><ArrowRight /></el-icon>
           </span>
-          <span class="group-name">{{ group.name }}</span>
+          <span class="group-name">{{ groupTitle(group.name) }}</span>
           <span class="group-count">{{ group.fields.length }}</span>
         </div>
       </div>
@@ -93,6 +93,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ArrowRight } from '@element-plus/icons-vue'
 import type { ParamGroupDef } from './param-groups'
 
@@ -100,6 +101,12 @@ const props = defineProps<{
   groups: ParamGroupDef[]
   modelValue: Record<string, any>
 }>()
+
+const { t, te } = useI18n()
+const groupTitle = (name: string) => {
+  const key = `schema.group.${name}`
+  return te(key) ? t(key) : name
+}
 const emit = defineEmits<{ 'update:modelValue': [val: Record<string, any>] }>()
 
 const expandedGroups = ref<string[]>([])

@@ -2,8 +2,8 @@
   <div class="task-launch">
     <div ref="bodyRef" class="task-launch-body">
       <div class="page-header">
-        <h1 class="page-title">新建训练任务</h1>
-        <p class="page-subtitle">{{ step === 'select' ? '选择运行环境、模型和数据集' : '调整模型参数并开始训练' }}</p>
+        <h1 class="page-title">{{ t('task.launch.title') }}</h1>
+        <p class="page-subtitle">{{ step === 'select' ? t('task.launch.subtitleSelect') : t('task.launch.subtitleParams') }}</p>
       </div>
 
       <el-skeleton :loading="loading" animated>
@@ -59,7 +59,7 @@
             <div class="params-header">
               <el-button class="back-btn" @click="step = 'select'">
                 <el-icon :size="14" style="margin-right:4px"><ArrowLeft /></el-icon>
-                返回选择
+                {{ t('task.launch.backToSelect') }}
               </el-button>
             </div>
 
@@ -85,7 +85,7 @@
         :disabled="!canConfirm"
         @click="onSelectConfirm"
       >
-        确认选择
+        {{ t('task.launch.confirmSelection') }}
       </el-button>
       <el-select
         v-if="step === 'params' && showKfoldSelector"
@@ -93,7 +93,7 @@
         multiple
         collapse-tags
         collapse-tags-tooltip
-        placeholder="多折训练"
+        :placeholder="t('task.launch.kfoldPlaceholder')"
         class="kfold-select"
       >
         <el-option
@@ -110,8 +110,8 @@
         :loading="submitting"
         @click="onStartTraining"
       >
-        <span v-if="!submitting">开始训练</span>
-        <span v-else>创建任务...</span>
+        <span v-if="!submitting">{{ t('task.launch.startTraining') }}</span>
+        <span v-else>{{ t('task.launch.creating') }}</span>
       </el-button>
     </CommandPreview>
   </div>
@@ -119,6 +119,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, h, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -134,6 +135,7 @@ import SelectionStep from '@/components/task/SelectionStep.vue'
 import ParamForm from '@/components/task/ParamForm.vue'
 
 const router = useRouter()
+const { t } = useI18n()
 const queryClient = useQueryClient()
 const step = ref<'select' | 'params'>('select')
 const submitting = ref(false)
@@ -256,14 +258,14 @@ function buildTaskName(fold?: number) {
 async function confirmMultiFold(): Promise<void> {
   const folds = [...selectedFolds.value].sort((a, b) => a - b)
   const message = h('div', { style: 'line-height: 1.8' }, [
-    h('div', `模型：${modelName.value}`),
-    h('div', `数据集：${dataset.value}`),
-    h('div', `折号：${folds.join(', ')}`),
-    h('div', `任务数量：${folds.length}`),
+    h('div', t('task.launch.multiFoldModel', { name: modelName.value })),
+    h('div', t('task.launch.multiFoldDataset', { name: dataset.value })),
+    h('div', t('task.launch.multiFoldFolds', { folds: folds.join(', ') })),
+    h('div', t('task.launch.multiFoldCount', { n: folds.length })),
   ])
-  await ElMessageBox.confirm(message, '确认多折训练任务', {
-    confirmButtonText: '创建任务',
-    cancelButtonText: '取消',
+  await ElMessageBox.confirm(message, t('task.launch.multiFoldTitle'), {
+    confirmButtonText: t('task.launch.createButton'),
+    cancelButtonText: t('common.cancel'),
     type: 'warning',
   })
 }
@@ -287,7 +289,7 @@ async function onStartTraining() {
         })
         created += 1
       }
-      ElMessage.success(`已创建 ${created} 个任务`)
+      ElMessage.success(t('task.launch.createdN', { n: created }))
       router.replace({ name: 'tasks' })
       return
     }
@@ -303,10 +305,10 @@ async function onStartTraining() {
         gpu: gpu.value,
       })
       if (task.status === 'pending') {
-        ElMessage.success('任务已加入队列')
+        ElMessage.success(t('task.launch.queued'))
         router.replace({ name: 'tasks' })
       } else {
-        ElMessage.success('任务已创建')
+        ElMessage.success(t('task.launch.created'))
         router.replace({ name: 'task-detail', params: { id: task.id } })
       }
       return
@@ -321,15 +323,15 @@ async function onStartTraining() {
       gpu: gpu.value,
     })
     if (task.status === 'pending') {
-      ElMessage.success('任务已加入队列')
+      ElMessage.success(t('task.launch.queued'))
       router.replace({ name: 'tasks' })
     } else {
-      ElMessage.success('任务已创建')
+      ElMessage.success(t('task.launch.created'))
       router.replace({ name: 'task-detail', params: { id: task.id } })
     }
   } catch (err: any) {
     if (err?.message && err?.message !== 'cancel') {
-      ElMessage.error(`创建失败：${err.message}`)
+      ElMessage.error(t('task.launch.createFailed', { msg: err.message }))
     }
   } finally {
     submitting.value = false
@@ -349,7 +351,7 @@ async function refreshAll() {
     await refreshRegistry()
   } catch (err: any) {
     if (!err?.response) {
-      ElMessage.error('刷新注册表失败')
+      ElMessage.error(t('task.launch.refreshRegistryFailed'))
     }
     refreshing.value = false
     return
@@ -361,7 +363,7 @@ async function refreshAll() {
   await queryClient.refetchQueries({ queryKey: ['datasets'] })
 
   refreshing.value = false
-  ElMessage.success('已刷新模型和数据集')
+  ElMessage.success(t('task.launch.refreshed'))
 }
 
 watch(() => initDataQuery.data.value, (data) => {

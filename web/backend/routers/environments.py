@@ -5,9 +5,9 @@ availability) on a given environment.
 """
 
 from dependencies import get_python_env_manager
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from schemas import EnvHealthCheckRequest
-from services.python_env import EnvironmentNotConfigured, PythonEnvManager
+from services.python_env import PythonEnvManager
 
 router = APIRouter(prefix="/api/environments", tags=["environments"])
 
@@ -39,7 +39,4 @@ async def health_check(
     Returns:
         A dict with Python availability, version, Torch availability, and errors.
     """
-    try:
-        return await mgr.health_check(body.env_id, body.custom_python_path)
-    except EnvironmentNotConfigured as e:
-        raise HTTPException(400, str(e))
+    return await mgr.health_check(body.env_id, body.custom_python_path)

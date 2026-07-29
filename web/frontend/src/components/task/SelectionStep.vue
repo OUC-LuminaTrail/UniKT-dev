@@ -1,7 +1,7 @@
 <template>
   <div class="selection-step">
     <div class="section">
-      <div class="section-label">运行环境</div>
+      <div class="section-label">{{ t('selection.env') }}</div>
       <EnvSelect
         :model-value="envId"
         @update:model-value="emit('update:envId', $event ?? '')"
@@ -12,13 +12,13 @@
     </div>
 
     <div class="section" v-if="hasGpu && gpuCount > 0">
-      <div class="section-label">GPU 分配</div>
+      <div class="section-label">{{ t('selection.gpuAssign') }}</div>
       <el-radio-group
         :model-value="gpuChoice"
         @update:model-value="gpuChoice = $event"
         class="gpu-radio-group"
       >
-        <el-radio value="auto" class="gpu-radio">自动分配</el-radio>
+        <el-radio value="auto" class="gpu-radio">{{ t('selection.gpuAuto') }}</el-radio>
         <el-radio
           v-for="i in gpuCount"
           :key="i - 1"
@@ -27,7 +27,7 @@
         >
           GPU {{ i - 1 }}
           <span class="gpu-occ" v-if="gpuOccupancy[i - 1]">
-            · 占用 {{ gpuOccupancy[i - 1] }}
+            · {{ t('selection.gpuOccupied', { n: gpuOccupancy[i - 1] }) }}
           </span>
         </el-radio>
       </el-radio-group>
@@ -35,7 +35,7 @@
 
     <div class="section">
       <div class="section-label-row">
-        <div class="section-label">模型</div>
+        <div class="section-label">{{ t('selection.model') }}</div>
         <div class="section-actions">
           <el-radio-group v-model="viewMode" class="view-toggle">
             <el-radio-button value="grid"><el-icon><Grid /></el-icon></el-radio-button>
@@ -47,7 +47,7 @@
             @click="emit('refresh')"
           >
             <el-icon><Refresh /></el-icon>
-            刷新
+            {{ t('common.refresh') }}
           </el-button>
         </div>
       </div>
@@ -90,7 +90,7 @@
     </div>
 
     <div class="section">
-      <div class="section-label">数据集</div>
+      <div class="section-label">{{ t('selection.dataset') }}</div>
       <div class="dataset-layout" v-if="datasets.length">
         <div class="dataset-cards" v-if="viewMode === 'grid'">
           <div
@@ -143,11 +143,11 @@
 
       <div class="dataset-empty" v-else>
         <el-icon :size="40" class="empty-icon"><Coin /></el-icon>
-        <div class="empty-title">暂无可用数据集</div>
-        <div class="empty-desc">所有数据集尚未下载或处理。请先前往数据预处理页面下载数据集，处理完成后即可在此选择。</div>
+        <div class="empty-title">{{ t('selection.noDatasetTitle') }}</div>
+        <div class="empty-desc">{{ t('selection.noDatasetDesc') }}</div>
         <router-link :to="{ name: 'preprocess', query: { action: 'download' } }" class="empty-action">
           <el-icon :size="14"><Download /></el-icon>
-          去下载数据集
+          {{ t('selection.goDownload') }}
         </router-link>
       </div>
     </div>
@@ -156,6 +156,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery } from '@tanstack/vue-query'
 import { Coin, Download, Refresh, Grid, Menu } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
@@ -189,6 +190,7 @@ const emit = defineEmits<{
 }>()
 
 const { hasGpu, gpuCount } = useSystemCapabilities()
+const { t } = useI18n()
 
 const VIEW_MODE_KEY = 'kt-web:selection-view-mode'
 const viewMode = ref<'grid' | 'list'>(

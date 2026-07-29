@@ -17,7 +17,7 @@
       </el-main>
       <el-footer class="app-footer">
         <div class="status-bar">
-          <el-tooltip :content="`CPU 使用率 ${sys.cpu_percent.toFixed(0)}%`" placement="top" :show-after="400">
+          <el-tooltip :content="t('status.cpuUsage', { pct: sys.cpu_percent.toFixed(0) })" placement="top" :show-after="400">
             <div class="status-item" tabindex="0">
               <span class="status-dot" :style="{ background: progressColor(sys.cpu_percent) }"></span>
               <span class="status-label">CPU</span>
@@ -43,7 +43,7 @@
 
           <template v-if="hasGpu">
             <div class="status-sep"></div>
-            <el-tooltip content="GPU 平均计算利用率" placement="top" :show-after="400">
+            <el-tooltip :content="t('status.gpuUtil')" placement="top" :show-after="400">
               <div class="status-item" tabindex="0">
                 <span class="status-dot" :style="{ background: progressColor(sys.gpu_utilization) }"></span>
                 <span class="status-label">GPU</span>
@@ -55,7 +55,7 @@
             </el-tooltip>
 
             <div class="status-sep"></div>
-            <el-tooltip content="GPU 显存占用率" placement="top" :show-after="400">
+            <el-tooltip :content="t('status.gpuVram')" placement="top" :show-after="400">
               <div class="status-item" tabindex="0">
                 <span class="status-dot" :style="{ background: progressColor(sys.gpu_memory_percent) }"></span>
                 <span class="status-label">VRAM</span>
@@ -79,10 +79,10 @@
 
           <div class="status-spacer"></div>
 
-          <el-tooltip :content="live ? '遥测正常更新（每 5 秒）' : '无法连接服务端，数据已停止更新'" placement="top" :show-after="400">
+          <el-tooltip :content="live ? t('status.telemetryLive') : t('status.telemetryOffline')" placement="top" :show-after="400">
             <div class="status-freshness" tabindex="0">
               <span class="freshness-dot" :class="{ offline: !live }"></span>
-              <span class="freshness-text">{{ live ? '实时' : '离线' }}</span>
+              <span class="freshness-text">{{ live ? t('status.live') : t('status.offline') }}</span>
             </div>
           </el-tooltip>
         </div>
@@ -93,12 +93,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import Sidebar from './Sidebar.vue'
 import { getSystemStatus, type SystemStatus } from '@/api/gpu'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const route = useRoute()
+const { t } = useI18n()
 
 const isCollapsed = ref(false)
 const { hasGpu } = useSystemCapabilities()
@@ -106,7 +108,8 @@ const { hasGpu } = useSystemCapabilities()
 const flushContent = computed(() => !!route.meta?.flush)
 
 const currentTitle = computed(() => {
-  return (route.meta?.title as string) || 'KT Experiment Manager'
+  const key = route.meta?.title as string | undefined
+  return key ? t(key) : 'KT Experiment Manager'
 })
 
 const currentTime = ref('')
@@ -132,11 +135,19 @@ const progressColor = (pct: number) => {
 }
 
 const memTooltip = computed(() =>
-  `内存 ${sys.value.memory_used_gb.toFixed(1)} / ${sys.value.memory_total_gb.toFixed(0)} GB（${sys.value.memory_percent.toFixed(0)}%）`
+  t('status.mem', {
+    used: sys.value.memory_used_gb.toFixed(1),
+    total: sys.value.memory_total_gb.toFixed(0),
+    pct: sys.value.memory_percent.toFixed(0),
+  }),
 )
 
 const loadTooltip = computed(() =>
-  `系统平均负载（1 / 5 / 15 分钟）：${sys.value.load_1m.toFixed(2)} / ${sys.value.load_5m.toFixed(2)} / ${sys.value.load_15m.toFixed(2)}`
+  t('status.load', {
+    a: sys.value.load_1m.toFixed(2),
+    b: sys.value.load_5m.toFixed(2),
+    c: sys.value.load_15m.toFixed(2),
+  }),
 )
 
 // CPU/MEM/LOAD are system-level and available with or without a GPU, so poll unconditionally.
