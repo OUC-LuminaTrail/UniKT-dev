@@ -20,6 +20,7 @@ class ReKTPConfig(ModelConfig):
         d_conv: Mamba local convolution width.
         expand: Mamba internal expansion factor.
         max_gap_bins: Number of logarithmic same-KC gap buckets.
+        residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
@@ -33,6 +34,7 @@ class ReKTPConfig(ModelConfig):
     d_conv: int = 4
     expand: int = 2
     max_gap_bins: int = 16
+    residual_scale: float = 0.1
     dropout: float = 0.2
     epochs: int = 100
     learning_rate: float = 1e-3
@@ -63,6 +65,7 @@ class ReKTPTrainer(BaseTrainer):
             d_conv=m.d_conv,
             expand=m.expand,
             max_gap_bins=m.max_gap_bins,
+            residual_scale=m.residual_scale,
             dropout=m.dropout,
         )
         optimizer = torch.optim.Adam(

@@ -5,7 +5,7 @@ import torch
 from mamba_ssm import Mamba
 from torch import nn
 
-from model.ReKTP.segmented_scan import segmented_affine_exclusive_scan
+from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
 
 
 class GlobalMambaBlock(nn.Module):
@@ -47,13 +47,21 @@ class ReKTP(nn.Module):
         d_conv: int = 4,
         expand: int = 2,
         max_gap_bins: int = 16,
+        residual_scale: float = 0.1,
         dropout: float = 0.2,
     ):
         super().__init__()
+        if hidden_dim % 2 != 0:
+            raise ValueError("ReKTP hidden_dim must be divisible by 2")
+        if residual_scale <= 0.0:
+            raise ValueError("residual_scale must be positive")
         self.num_questions = int(data_metadata["num_questions"])
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
         self.max_gap_bins = max_gap_bins
+        self.state_block_size = 2
+        self.num_state_blocks = hidden_dim // self.state_block_size
+        self.residual_scale = residual_scale
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
         skill_mask = torch.as_tensor(question_skill_mask, dtype=torch.bool)
@@ -76,12 +84,12 @@ class ReKTP(nn.Module):
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
 
-        self.local_alpha = nn.Linear(hidden_dim, hidden_dim)
-        self.local_beta = nn.Linear(hidden_dim, hidden_dim)
+        self.local_residual = nn.Linear(hidden_dim, 2 * hidden_dim)
+        self.local_write = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
-        self.question_alpha = nn.Linear(hidden_dim, hidden_dim)
-        self.question_beta = nn.Linear(hidden_dim, hidden_dim)
+        self.question_residual = nn.Linear(hidden_dim, 2 * hidden_dim)
+        self.question_write = nn.Linear(hidden_dim, hidden_dim)
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
 
@@ -111,6 +119,14 @@ class ReKTP(nn.Module):
         )
 
         nn.init.zeros_(self.question_diff.weight)
+        for layer in (
+            self.local_residual,
+            self.local_write,
+            self.question_residual,
+            self.question_write,
+        ):
+            nn.init.zeros_(layer.weight)
+            nn.init.zeros_(layer.bias)
         nn.init.zeros_(self.local_decay.weight)
         nn.init.constant_(self.local_decay.bias, -4.0)
         nn.init.zeros_(self.question_decay.weight)
@@ -121,6 +137,35 @@ class ReKTP(nn.Module):
         weights = mask.unsqueeze(-1).to(values.dtype)
         count = weights.sum(dim=-2).clamp_min(1.0)
         return (values * weights).sum(dim=-2) / count
+
+    def _block_affine_transition(
+        self,
+        event_input: torch.Tensor,
+        residual_layer: nn.Linear,
+        write_layer: nn.Linear,
+        decay: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        leading_shape = event_input.shape[:-1]
+        block_shape = (*leading_shape, self.num_state_blocks)
+        raw_residual = residual_layer(event_input).reshape(
+            *block_shape, self.state_block_size, self.state_block_size
+        )
+        residual_norm = (
+            raw_residual.square().sum(dim=(-2, -1), keepdim=True).add(1e-12).sqrt()
+        )
+        residual = self.residual_scale * raw_residual / (1.0 + residual_norm)
+
+        identity = torch.eye(
+            self.state_block_size,
+            device=event_input.device,
+            dtype=event_input.dtype,
+        )
+        decay_blocks = decay.reshape(*block_shape, self.state_block_size)
+        transition = (identity + residual) * decay_blocks.unsqueeze(-2)
+        bias = torch.tanh(write_layer(event_input)).reshape(
+            *block_shape, self.state_block_size
+        )
+        return transition, bias
 
     def _pack_kc_occurrences(
         self,
@@ -199,29 +244,32 @@ class ReKTP(nn.Module):
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
         )
-        write_alpha = torch.exp(
-            -torch.nn.functional.softplus(self.local_alpha(local_input))
-        )
-        beta = (1.0 - write_alpha) * torch.tanh(self.local_beta(local_input))
         decay = torch.exp(
-            -torch.nn.functional.softplus(
-                self.local_decay(self.gap_embed(gap_bucket))
-            )
+            -torch.nn.functional.softplus(self.local_decay(self.gap_embed(gap_bucket)))
         )
         valid_3d = packed_valid.unsqueeze(-1)
         decay = torch.where(valid_3d, decay, torch.ones_like(decay))
-        alpha = decay * write_alpha
-        alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
-        beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
         initial_state = torch.tanh(self.local_init(skill_embedding))
+        transition, bias = self._block_affine_transition(
+            local_input,
+            self.local_residual,
+            self.local_write,
+            decay,
+        )
+        initial_blocks = initial_state.reshape(
+            *initial_state.shape[:-1],
+            self.num_state_blocks,
+            self.state_block_size,
+        )
 
-        packed_pre_decay = segmented_affine_exclusive_scan(
-            alpha,
-            beta,
+        packed_pre_decay_blocks = segmented_block_affine_exclusive_scan(
+            transition,
+            bias,
             packed_skill,
             packed_valid,
-            initial_state,
+            initial_blocks,
         )
+        packed_pre_decay = packed_pre_decay_blocks.flatten(-2)
         packed_state = decay * packed_pre_decay
         unpacked_state = torch.zeros_like(packed_state)
         scatter_index = order.unsqueeze(-1).expand_as(packed_state)
@@ -270,16 +318,7 @@ class ReKTP(nn.Module):
         gap_bucket = torch.floor(torch.log2(gap.clamp_min(1).float())).long()
         gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1)
 
-        question_input = (
-            packed_event
-            + self.answer_embed(packed_response)
-        )
-        write_alpha = torch.exp(
-            -torch.nn.functional.softplus(self.question_alpha(question_input))
-        )
-        beta = (1.0 - write_alpha) * torch.tanh(
-            self.question_beta(question_input)
-        )
+        question_input = packed_event + self.answer_embed(packed_response)
         decay = torch.exp(
             -torch.nn.functional.softplus(
                 self.question_decay(self.gap_embed(gap_bucket))
@@ -287,20 +326,29 @@ class ReKTP(nn.Module):
         )
         valid_3d = packed_valid.unsqueeze(-1)
         decay = torch.where(valid_3d, decay, torch.ones_like(decay))
-        alpha = decay * write_alpha
-        alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
-        beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
         initial_state = torch.tanh(
             self.question_init(self.question_embed(packed_question))
         )
+        transition, bias = self._block_affine_transition(
+            question_input,
+            self.question_residual,
+            self.question_write,
+            decay,
+        )
+        initial_blocks = initial_state.reshape(
+            *initial_state.shape[:-1],
+            self.num_state_blocks,
+            self.state_block_size,
+        )
 
-        packed_pre_decay = segmented_affine_exclusive_scan(
-            alpha,
-            beta,
+        packed_pre_decay_blocks = segmented_block_affine_exclusive_scan(
+            transition,
+            bias,
             packed_question,
             packed_valid,
-            initial_state,
+            initial_blocks,
         )
+        packed_pre_decay = packed_pre_decay_blocks.flatten(-2)
         packed_state = decay * packed_pre_decay
         question_state = torch.zeros_like(packed_state)
         question_state.scatter_(1, gather_index, packed_state)

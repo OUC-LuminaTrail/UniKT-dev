@@ -4,7 +4,7 @@ import torch
 ReKTP = pytest.importorskip("model.ReKTP.ReKTP_model").ReKTP
 
 
-def _build_model(device):
+def _build_model(device, *, activate_private_writes=True):
     # Skill id 2 is the padding sentinel.
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
@@ -24,7 +24,70 @@ def _build_model(device):
     # verifies the locked package API, while Identity avoids its CUDA kernel.
     for block in model.global_blocks:
         block.mamba = torch.nn.Identity()
+    if activate_private_writes:
+        with torch.no_grad():
+            model.answer_embed.weight[0].zero_()
+            model.answer_embed.weight[1].fill_(0.25)
+            identity = torch.eye(model.hidden_dim)
+            for write_layer in (model.local_write, model.question_write):
+                write_layer.weight.copy_(0.05 * identity)
+            for residual_layer in (
+                model.local_residual,
+                model.question_residual,
+            ):
+                residual_layer.weight[:, :].fill_(0.01)
     return model.to(device).eval()
+
+
+def test_model_requires_complete_2x2_state_blocks():
+    question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
+    question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
+
+    with pytest.raises(ValueError, match="divisible by 2"):
+        ReKTP(
+            data_metadata={"num_questions": 3, "num_skills": 2},
+            question_skill_ids=question_skill_ids,
+            question_skill_mask=question_skill_mask,
+            hidden_dim=15,
+            n_blocks=1,
+        )
+
+
+def test_residual_transitions_initialize_as_decay_only():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    event_input = torch.randn(2, 3, model.hidden_dim)
+    decay = torch.rand_like(event_input)
+
+    transition, bias = model._block_affine_transition(
+        event_input,
+        model.local_residual,
+        model.local_write,
+        decay,
+    )
+
+    expected = torch.diag_embed(
+        decay.reshape(2, 3, model.num_state_blocks, model.state_block_size)
+    )
+    torch.testing.assert_close(transition, expected)
+    torch.testing.assert_close(bias, torch.zeros_like(bias))
+
+
+def test_event_conditioned_residual_blocks_respect_scale():
+    model = _build_model(torch.device("cpu"))
+    event_input = torch.randn(2, 3, model.hidden_dim)
+    decay = torch.ones_like(event_input)
+
+    transition, _ = model._block_affine_transition(
+        event_input,
+        model.local_residual,
+        model.local_write,
+        decay,
+    )
+
+    identity = torch.eye(model.state_block_size)
+    residual = transition - identity
+    block_norm = torch.linalg.vector_norm(residual, dim=(-2, -1))
+    assert torch.all(block_norm < model.residual_scale)
 
 
 def test_other_kc_response_does_not_change_private_state():
@@ -50,9 +113,7 @@ def test_other_question_response_does_not_change_private_state():
     mask = torch.ones_like(questions, dtype=torch.bool)
     event_embeddings, _ = model._event_embeddings(questions)
 
-    baseline = model._question_pre_states(
-        questions, responses, mask, event_embeddings
-    )
+    baseline = model._question_pre_states(questions, responses, mask, event_embeddings)
     changed_responses = responses.clone()
     changed_responses[:, 0] = 0
     changed = model._question_pre_states(
