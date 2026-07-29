@@ -92,7 +92,7 @@
               <el-option
                 v-for="env in envList"
                 :key="env.id"
-                :label="env.display_name"
+                :label="env.type === 'custom' ? t('env.customPythonPath') : env.display_name"
                 :value="env.id"
               />
             </el-select>

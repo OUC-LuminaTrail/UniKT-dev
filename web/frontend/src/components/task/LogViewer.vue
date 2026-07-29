@@ -213,7 +213,7 @@ function connect() {
       applyPatch(data)
     } else if (data.type === 'done') {
       streamEnded = true
-      lines.value = [...lines.value, [{ t: '——— Process exited ———', fg: 'brightblack' }]]
+      lines.value = [...lines.value, [{ t: t('log.processExited'), fg: 'brightblack' }]]
       nextTick(scrollToBottom)
       emit('state', 'ended')
     } else if (data.type === 'error') {

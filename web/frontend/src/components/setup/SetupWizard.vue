@@ -21,7 +21,7 @@
           @click="selected = env.id"
         >
           <div class="env-type-badge">{{ env.type }}</div>
-          <div class="env-name">{{ env.display_name }}</div>
+          <div class="env-name">{{ env.type === 'custom' ? t('env.customPythonPath') : env.display_name }}</div>
         </div>
         <div v-if="selected === 'custom:0'" class="custom-path-row">
           <el-input

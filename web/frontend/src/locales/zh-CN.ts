@@ -29,7 +29,6 @@ export default {
     expandSidebar: '展开侧栏',
     collapseSidebar: '折叠侧栏',
     collapse: '折叠',
-    language: '语言',
   },
   route: {
     title: {
@@ -70,6 +69,7 @@ export default {
     title: '运行日志',
     scrollToBottom: '跳到底部',
     loadOlder: '加载更早日志…',
+    processExited: '——— 进程已退出 ———',
     conn: {
       connecting: '连接中',
       connectingTitle: '正在建立日志流连接',

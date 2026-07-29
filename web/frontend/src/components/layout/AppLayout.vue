@@ -92,7 +92,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import Sidebar from './Sidebar.vue'
@@ -111,6 +111,9 @@ const currentTitle = computed(() => {
   const key = route.meta?.title as string | undefined
   return key ? t(key) : 'KT Experiment Manager'
 })
+watch(currentTitle, (v) => {
+  if (v) document.title = v
+}, { immediate: true })
 
 const currentTime = ref('')
 let timeTimer: ReturnType<typeof setInterval> | null = null

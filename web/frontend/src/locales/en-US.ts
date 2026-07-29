@@ -29,7 +29,6 @@ export default {
     expandSidebar: 'Expand Sidebar',
     collapseSidebar: 'Collapse Sidebar',
     collapse: 'Collapse',
-    language: 'Language',
   },
   route: {
     title: {
@@ -70,6 +69,7 @@ export default {
     title: 'Logs',
     scrollToBottom: 'Jump to bottom',
     loadOlder: 'Loading older logs…',
+    processExited: '——— Process exited ———',
     conn: {
       connecting: 'Connecting',
       connectingTitle: 'Establishing log stream',
