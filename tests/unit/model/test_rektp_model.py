@@ -132,6 +132,33 @@ def test_local_readout_can_weight_kcs_conditionally():
     assert actual[0, 0, 0] > 0.9
 
 
+def test_global_film_initializes_as_identity_conditioning():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    local_input = torch.randn(2, 3, model.hidden_dim)
+    global_context = torch.randn_like(local_input)
+
+    actual = model._condition_local_input(local_input, global_context)
+
+    torch.testing.assert_close(actual, local_input)
+
+
+def test_global_film_can_condition_local_write_input():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    local_input = torch.ones(1, 2, model.hidden_dim)
+    global_context = torch.zeros_like(local_input)
+    global_context[:, :, 0] = torch.tensor([[1.0, -1.0]])
+
+    with torch.no_grad():
+        model.local_global_film.weight.zero_()
+        model.local_global_film.bias.zero_()
+        model.local_global_film.weight[model.hidden_dim, 0] = 0.5
+
+    actual = model._condition_local_input(local_input, global_context)
+
+    assert actual[0, 0, 0] > local_input[0, 0, 0]
+    assert actual[0, 1, 0] < local_input[0, 1, 0]
+
+
 def test_other_kc_response_does_not_change_private_state():
     model = _build_model(torch.device("cpu"))
     questions = torch.tensor([[0, 1, 0, 1]])
@@ -202,6 +229,10 @@ def test_current_gap_affects_question_and_kc_read_states():
 def test_target_answer_does_not_leak_into_its_prediction():
     device = torch.device("cpu")
     model = _build_model(device)
+    with torch.no_grad():
+        model.local_global_film.weight.zero_()
+        model.local_global_film.bias.zero_()
+        model.local_global_film.weight[model.hidden_dim :, :] = 0.05
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)

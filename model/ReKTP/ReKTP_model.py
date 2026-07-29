@@ -89,6 +89,7 @@ class ReKTP(nn.Module):
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
         self.local_readout = nn.Linear(3 * hidden_dim, 1)
+        self.local_global_film = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.question_residual = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.question_write = nn.Linear(hidden_dim, hidden_dim)
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
@@ -124,6 +125,7 @@ class ReKTP(nn.Module):
             self.local_residual,
             self.local_write,
             self.local_readout,
+            self.local_global_film,
             self.question_residual,
             self.question_write,
         ):
@@ -164,6 +166,14 @@ class ReKTP(nn.Module):
         weights = torch.where(readout_mask, weights, torch.zeros_like(weights))
         weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
         return (local_state * weights.unsqueeze(-1)).sum(dim=-2)
+
+    def _condition_local_input(
+        self,
+        local_input: torch.Tensor,
+        global_context: torch.Tensor,
+    ) -> torch.Tensor:
+        gamma, beta = self.local_global_film(global_context).chunk(2, dim=-1)
+        return local_input * (1.0 + gamma) + beta
 
     def _block_affine_transition(
         self,
@@ -240,6 +250,7 @@ class ReKTP(nn.Module):
         questions: torch.Tensor,
         responses: torch.Tensor,
         mask: torch.Tensor,
+        global_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch_size, seq_len = questions.shape
         (
@@ -271,6 +282,26 @@ class ReKTP(nn.Module):
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
         )
+        if global_context is None:
+            packed_global = torch.zeros_like(local_input)
+        else:
+            expected_context_shape = (*questions.shape, self.hidden_dim)
+            if global_context.shape != expected_context_shape:
+                raise ValueError(
+                    "global_context must have shape [batch_size, seq_len, hidden_dim]"
+                )
+            max_skills = occurrence_mask.size(-1)
+            flat_global = (
+                global_context.unsqueeze(-2)
+                .expand(batch_size, seq_len, max_skills, self.hidden_dim)
+                .flatten(1, 2)
+            )
+            packed_global = torch.gather(
+                flat_global,
+                1,
+                order.unsqueeze(-1).expand_as(local_input),
+            )
+        local_input = self._condition_local_input(local_input, packed_global)
         decay = torch.exp(
             -torch.nn.functional.softplus(self.local_decay(self.gap_embed(gap_bucket)))
         )
@@ -401,6 +432,18 @@ class ReKTP(nn.Module):
         )
         return event, skill_mask
 
+    def _global_history_states(
+        self,
+        event_embedding: torch.Tensor,
+        responses: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        global_state = event_embedding + self.answer_embed(responses)
+        global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
+        for block in self.global_blocks:
+            global_state = block(global_state)
+        return self.global_norm(global_state + self.global_ffn(global_state))
+
     def forward(
         self,
         questions: torch.Tensor,
@@ -410,16 +453,16 @@ class ReKTP(nn.Module):
         """Return next-item logits where output[t] predicts response[t+1]."""
         mask = mask.bool()
         event_embedding, _ = self._event_embeddings(questions)
-        local_pre_state, _ = self._local_pre_states(questions, responses, mask)
+        global_state = self._global_history_states(event_embedding, responses, mask)
+        local_pre_state, _ = self._local_pre_states(
+            questions,
+            responses,
+            mask,
+            global_state,
+        )
         question_pre_state = self._question_pre_states(
             questions, responses, mask, event_embedding
         )
-
-        global_state = event_embedding + self.answer_embed(responses)
-        global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
-        for block in self.global_blocks:
-            global_state = block(global_state)
-        global_state = self.global_norm(global_state + self.global_ffn(global_state))
 
         features = torch.cat(
             [
