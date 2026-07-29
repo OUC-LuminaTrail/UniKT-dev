@@ -31,19 +31,23 @@
       >
         <el-menu-item index="/settings">
           <el-icon><Setting /></el-icon>
-          <template #title>设置</template>
+          <template #title>{{ t('nav.settings') }}</template>
         </el-menu-item>
         <el-menu-item @click="toggleDark()">
           <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
-          <template #title>{{ isDark ? '亮色模式' : '暗色模式' }}</template>
+          <template #title>{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</template>
         </el-menu-item>
       </el-menu>
 
       <div class="sidebar-actions">
-        <button class="action-btn" @click="$emit('toggle-collapse')" :title="collapsed ? '展开侧栏' : '折叠侧栏'">
+        <button
+          class="action-btn"
+          @click="$emit('toggle-collapse')"
+          :title="collapsed ? t('nav.expandSidebar') : t('nav.collapseSidebar')"
+        >
           <el-icon :size="15"><Fold v-if="!collapsed" /><Expand v-else /></el-icon>
           <Transition name="fade">
-            <span v-show="!collapsed" class="action-label">折叠</span>
+            <span v-show="!collapsed" class="action-label">{{ t('nav.collapse') }}</span>
           </Transition>
         </button>
       </div>
@@ -53,6 +57,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useDark, useToggle } from '@vueuse/core'
 import { Upload, Monitor, Grid, Setting, Sunny, Moon, Expand, Fold } from '@element-plus/icons-vue'
@@ -71,15 +76,17 @@ const route = useRoute()
 const isDark = useDark()
 const toggleDark = useToggle(isDark)
 
+const { t } = useI18n()
+
 const { hasGpu } = useSystemCapabilities()
 
 const navItems = computed(() => {
   const items = [
-    { path: '/preprocess', label: '数据预处理', icon: Upload },
-    { path: '/tasks', label: '训练任务', icon: Monitor },
+    { path: '/preprocess', label: t('nav.preprocess'), icon: Upload },
+    { path: '/tasks', label: t('nav.tasks'), icon: Monitor },
   ]
   if (hasGpu.value) {
-    items.push({ path: '/gpu', label: 'GPU 监控', icon: Grid })
+    items.push({ path: '/gpu', label: t('nav.gpu'), icon: Grid })
   }
   return items
 })

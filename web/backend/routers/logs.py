@@ -5,10 +5,10 @@ import logging
 from config import TASK_LOGS_DIR
 from database import SessionLocal
 from dependencies import get_line_cache
+from errors import AppError
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Query,
     WebSocket,
     WebSocketDisconnect,
@@ -41,12 +41,12 @@ def get_logs(
         ``{"lines": [...], "total": int}``.
 
     Raises:
-        HTTPException: 404 if the task does not exist.
+        AppError: 404 if the task does not exist.
     """
     with SessionLocal() as session:
         task = session.get(Task, task_id)
         if not task:
-            raise HTTPException(404, "Task not found")
+            raise AppError("task_not_found", 404)
     return read_log_lines(TASK_LOGS_DIR / f"{task_id}.log", cache, offset, limit)
 
 
@@ -70,7 +70,7 @@ async def stream_logs(
     with SessionLocal() as session:
         task = session.get(Task, task_id)
         if not task:
-            await websocket.send_json({"type": "error", "content": "Task not found"})
+            await websocket.send_json({"type": "error", "content": "task_not_found"})
             await websocket.close()
             return
 

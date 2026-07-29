@@ -7,7 +7,8 @@ for a specific dataset by name.
 import json
 
 from config import PROJECT_ROOT
-from fastapi import APIRouter, HTTPException
+from errors import AppError
+from fastapi import APIRouter
 from services.registry_sync import registry_lock
 
 from utils.core import get_supported_datasets
@@ -30,7 +31,7 @@ def list_datasets():
     with registry_lock:
         supported = get_supported_datasets()
     if not supported:
-        raise HTTPException(500, "No datasets registered in DATA_SOURCES")
+        raise AppError("no_datasets_registered", 500)
 
     result = []
     for name in supported:
@@ -65,7 +66,7 @@ def get_dataset_metadata(dataset_name: str):
         The parsed metadata dictionary.
 
     Raises:
-        HTTPException: 404 if the dataset is unknown or its metadata file is
+        AppError: 404 if the dataset is unknown or its metadata file is
             absent, 500 if it cannot be read.
     """
     # Whitelist the path segment so a decoded "../../x" cannot traverse out of
@@ -73,11 +74,11 @@ def get_dataset_metadata(dataset_name: str):
     with registry_lock:
         supported = get_supported_datasets()
     if dataset_name not in supported:
-        raise HTTPException(404, f"Dataset '{dataset_name}' not found")
+        raise AppError("dataset_not_found", 404)
     meta_path = DATA_DIR / dataset_name / "metadata.json"
     if not meta_path.exists():
-        raise HTTPException(404, f"Dataset '{dataset_name}' not found")
+        raise AppError("dataset_not_found", 404)
     try:
         return json.loads(meta_path.read_text())
     except Exception:
-        raise HTTPException(500, "Failed to read metadata")
+        raise AppError("dataset_metadata_failed", 500)

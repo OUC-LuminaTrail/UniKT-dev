@@ -112,10 +112,10 @@ def _emit_models():
 
     # Fixed framework groups, in display order: (group_name, RunConfig node, dataclass).
     framework_groups = [
-        ("General", "general", GeneralConfig),
-        ("Compile", "compile", CompileConfig),
-        ("Early Stopping", "early_stopping", EarlyStoppingConfig),
-        ("Data", "data", RunDataConfig),
+        ("general", "general", GeneralConfig),
+        ("compile", "compile", CompileConfig),
+        ("early_stopping", "early_stopping", EarlyStoppingConfig),
+        ("data", "data", RunDataConfig),
     ]
 
     models = get_supported_models()
@@ -152,14 +152,16 @@ def _emit_preprocess(action: str):
 
     if action == "download":
         # data_url is resolved from dataset metadata; hide it from the UI.
-        groups = [reflect_group("下载选项", "", DownloadConfig, skip={"data_url"})]
+        groups = [
+            reflect_group("download_options", "", DownloadConfig, skip={"data_url"})
+        ]
     elif action == "process":
         groups = [
-            reflect_group("数据", "data", RunDataConfig, only=visible(RunDataConfig)),
+            reflect_group("data", "data", RunDataConfig, only=visible(RunDataConfig)),
             reflect_group(
-                "通用", "general", GeneralConfig, only=visible(GeneralConfig)
+                "general", "general", GeneralConfig, only=visible(GeneralConfig)
             ),
-            reflect_group("额外", "", ProcessConfig),
+            reflect_group("extras", "", ProcessConfig),
         ]
     else:
         print(

@@ -5,7 +5,7 @@
         <el-icon :size="14"><Coin /></el-icon>
       </div>
       <span class="metadata-title">{{ dataset }}</span>
-      <span v-if="metadata.sampled" class="sampled-badge">采样</span>
+      <span v-if="metadata.sampled" class="sampled-badge">{{ t('meta.panel.sampled') }}</span>
     </div>
 
     <div class="metadata-grid">
@@ -32,30 +32,31 @@
 
   <div class="metadata-panel metadata-no-data" v-else-if="status === 'downloaded'">
     <el-icon :size="32"><Coin /></el-icon>
-    <span class="no-data-text">已下载，尚未处理</span>
+    <span class="no-data-text">{{ t('meta.panel.downloadedNotProcessed') }}</span>
     <router-link v-if="showPreprocessLink" :to="{ name: 'preprocess', query: { dataset } }" class="preprocess-link">
       <el-icon :size="14"><Download /></el-icon>
-      去处理
+      {{ t('meta.panel.goProcess') }}
     </router-link>
   </div>
 
   <div class="metadata-panel metadata-no-data" v-else-if="status === 'empty'">
     <el-icon :size="32"><Coin /></el-icon>
-    <span class="no-data-text">尚未下载</span>
+    <span class="no-data-text">{{ t('meta.panel.notDownloaded') }}</span>
   </div>
 
   <div class="metadata-panel metadata-empty" v-else-if="dataset && loading">
-    <div class="empty-text">加载中...</div>
+    <div class="empty-text">{{ t('meta.panel.loading') }}</div>
   </div>
 
   <div class="metadata-panel metadata-placeholder" v-else>
     <el-icon :size="32"><Coin /></el-icon>
-    <span>选择数据集以查看详细信息</span>
+    <span>{{ t('meta.panel.selectHint') }}</span>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Coin, Download } from '@element-plus/icons-vue'
 import { type DatasetMetadata, type DatasetStatus } from '@/api/datasets'
 
@@ -66,32 +67,32 @@ const HIDDEN_KEYS = new Set([
 ])
 
 const KEY_LABELS: Record<string, string> = {
-  num_users: '用户数',
-  num_questions: '题目数',
-  num_skills: '技能数',
-  num_assignments: '作业数',
-  num_templates: '模板数',
-  num_split_question_users: '划分用户(题目)',
-  num_split_skill_users: '划分用户(技能)',
-  kfold_n_splits: 'K 折',
-  test_ratio: '测试比例',
-  min_seq_len: '最小序列长度',
-  max_seq_len: '最大序列长度',
-  random_seed: '随机种子',
-  sampled: '采样数据',
-  sampling_config: '采样配置',
-  sampling_stats: '采样统计',
-  n_samples_requested: '请求样本数',
-  n_samples_actual: '实际样本数',
-  sampling_ratio: '采样比例',
-  stratify: '分层采样',
-  attempts_bins: '尝试次数分箱',
-  correct_bins: '正确率分箱',
-  original_users: '原始用户',
-  sampled_users: '采样用户',
-  original_records: '原始记录',
-  sampled_records: '采样记录',
-  strata_distribution: '分层分布',
+  num_users: 'meta.num_users',
+  num_questions: 'meta.num_questions',
+  num_skills: 'meta.num_skills',
+  num_assignments: 'meta.num_assignments',
+  num_templates: 'meta.num_templates',
+  num_split_question_users: 'meta.num_split_question_users',
+  num_split_skill_users: 'meta.num_split_skill_users',
+  kfold_n_splits: 'meta.kfold_n_splits',
+  test_ratio: 'meta.test_ratio',
+  min_seq_len: 'meta.min_seq_len',
+  max_seq_len: 'meta.max_seq_len',
+  random_seed: 'meta.random_seed',
+  sampled: 'meta.sampled',
+  sampling_config: 'meta.sampling_config',
+  sampling_stats: 'meta.sampling_stats',
+  n_samples_requested: 'meta.n_samples_requested',
+  n_samples_actual: 'meta.n_samples_actual',
+  sampling_ratio: 'meta.sampling_ratio',
+  stratify: 'meta.stratify',
+  attempts_bins: 'meta.attempts_bins',
+  correct_bins: 'meta.correct_bins',
+  original_users: 'meta.original_users',
+  sampled_users: 'meta.sampled_users',
+  original_records: 'meta.original_records',
+  sampled_records: 'meta.sampled_records',
+  strata_distribution: 'meta.strata_distribution',
 }
 
 const props = defineProps<{
@@ -102,6 +103,8 @@ const props = defineProps<{
   iconGradient?: string
   showPreprocessLink?: boolean
 }>()
+
+const { t } = useI18n()
 
 const displayKeys = computed(() => {
   if (!props.metadata) return []
@@ -114,11 +117,12 @@ const nestedKeys = computed(() => {
 })
 
 function formatKey(key: string): string {
-  return KEY_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+  const mapped = KEY_LABELS[key]
+  return mapped ? t(mapped) : key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }
 
 function formatValue(val: any): string {
-  if (typeof val === 'boolean') return val ? '是' : '否'
+  if (typeof val === 'boolean') return val ? t('common.yes') : t('common.no')
   if (Array.isArray(val)) return val.map(String).join(', ')
   if (typeof val === 'number') return val.toLocaleString()
   return String(val)

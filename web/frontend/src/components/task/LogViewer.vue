@@ -1,6 +1,6 @@
 <template>
   <div ref="scrollEl" class="log-viewer" @scroll="onScroll">
-    <div v-if="loading" class="load-hint">加载更早日志…</div>
+    <div v-if="loading" class="load-hint">{{ t('log.loadOlder') }}</div>
     <div class="log-spacer" :style="{ height: totalSize + 'px' }">
       <div
         v-for="item in virtualItems"
@@ -33,6 +33,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { getLogLines, type LogApiBase, type RenderedLine } from '@/api/logs'
 import { segmentStyle } from './log-palette'
@@ -50,6 +51,8 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'state', state: ConnState): void
 }>()
+
+const { t, te } = useI18n()
 
 // Lines per page (initial tail + each upward load).
 const PAGE = 500
@@ -210,14 +213,18 @@ function connect() {
       applyPatch(data)
     } else if (data.type === 'done') {
       streamEnded = true
-      lines.value = [...lines.value, [{ t: '——— Process exited ———', fg: 'brightblack' }]]
+      lines.value = [...lines.value, [{ t: t('log.processExited'), fg: 'brightblack' }]]
       nextTick(scrollToBottom)
       emit('state', 'ended')
     } else if (data.type === 'error') {
       // A backend error is terminal (the socket closes right after) — stop
       // retrying so we don't flood handshakes until the status poll catches up.
       streamEnded = true
-      lines.value = [...lines.value, [{ t: data.content ?? '', fg: 'red' }]]
+      const c = data.content ?? ''
+      lines.value = [
+        ...lines.value,
+        [{ t: te(`error.${c}`) ? t(`error.${c}`) : c, fg: 'red' }],
+      ]
       nextTick(scrollToBottom)
       emit('state', 'ended')
     }

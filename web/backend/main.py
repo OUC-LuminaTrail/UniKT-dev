@@ -5,12 +5,15 @@ Configures the FastAPI app with CORS, error handling, pagination, and registers 
 
 import logging
 from contextlib import asynccontextmanager
+from http.client import responses
 
 from database import init_db
+from errors import AppError
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi_pagination import add_pagination
 from fastapi_pagination.api import set_page
+from fastapi_problem.error import Problem
 from fastapi_problem.handler import add_exception_handler, new_exception_handler
 from middleware import MessageMiddleware
 from pagination import Page
@@ -100,7 +103,16 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="KT Experiment Manager", lifespan=lifespan)
 
-eh = new_exception_handler()
+
+def app_error_handler(_eh, _request, exc: AppError) -> Problem:
+    """Map an AppError to a Problem with its code as the type."""
+    title = responses.get(exc.status, "Error")
+    return Problem(
+        title=title, type_=exc.code, status=exc.status, detail=exc.detail or exc.code
+    )
+
+
+eh = new_exception_handler(handlers={AppError: app_error_handler})
 add_exception_handler(app, eh)
 
 app.add_middleware(

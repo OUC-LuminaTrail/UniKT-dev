@@ -10,7 +10,7 @@
 
         <section class="detail-section">
           <div class="section-head">
-            <h2 class="section-title">元信息</h2>
+            <h2 class="section-title">{{ t('task.detail.sectionMeta') }}</h2>
             <span class="section-rule"></span>
           </div>
           <div class="meta-grid">
@@ -23,7 +23,7 @@
 
         <section class="detail-section">
           <div class="section-head">
-            <h2 class="section-title">命令</h2>
+            <h2 class="section-title">{{ t('task.detail.sectionCommand') }}</h2>
             <span class="section-rule"></span>
           </div>
           <div style="padding:12px 0">
@@ -33,7 +33,7 @@
 
         <section class="detail-section">
           <div class="section-head">
-            <h2 class="section-title">运行日志</h2>
+            <h2 class="section-title">{{ t('task.detail.sectionLog') }}</h2>
             <span class="section-rule"></span>
           </div>
           <div style="min-height:200px;background:var(--term-bg)">
@@ -53,37 +53,37 @@
 
       <span class="status-badge" :style="{ '--dot-color': statusMap[task.status]?.color }">
         <span class="status-dot" :class="{ pulse: task.status === 'running' }"></span>
-        <span class="status-label">{{ statusMap[task.status]?.label ?? task.status }}</span>
+        <span class="status-label">{{ statusMap[task.status] ? t(statusMap[task.status].label) : task.status }}</span>
       </span>
 
       <div class="header-actions" v-if="task.status === 'running'">
         <button class="action-btn stop" :disabled="stopping" @click="handleStop">
           <el-icon :size="14"><SwitchButton /></el-icon>
-          <span>{{ stopping ? '停止中…' : '停止' }}</span>
+          <span>{{ stopping ? t('task.detail.stopping') : t('task.detail.stop') }}</span>
         </button>
         <button class="action-btn kill" :disabled="killing" @click="handleKill">
           <el-icon :size="14"><Bottom /></el-icon>
-          <span>{{ killing ? '终止中…' : '强制终止' }}</span>
+          <span>{{ killing ? t('task.detail.killing') : t('task.detail.forceKill') }}</span>
         </button>
       </div>
     </header>
 
     <section class="detail-section">
       <div class="section-head">
-        <h2 class="section-title">元信息</h2>
+        <h2 class="section-title">{{ t('task.detail.sectionMeta') }}</h2>
         <span class="section-rule"></span>
       </div>
       <div class="meta-grid">
         <div class="meta-cell">
-          <span class="meta-key">模型</span>
+          <span class="meta-key">{{ t('task.detail.metaModel') }}</span>
           <span class="meta-val">{{ task.model_name }}</span>
         </div>
         <div class="meta-cell">
-          <span class="meta-key">数据集</span>
+          <span class="meta-key">{{ t('task.detail.metaDataset') }}</span>
           <span class="meta-val">{{ task.dataset_name }}</span>
         </div>
         <div class="meta-cell">
-          <span class="meta-key">运行环境</span>
+          <span class="meta-key">{{ t('task.detail.metaEnv') }}</span>
           <span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span>
         </div>
         <div class="meta-cell" v-if="hasGpu">
@@ -91,19 +91,19 @@
           <span class="meta-val">{{ gpuDisplay }}</span>
         </div>
         <div class="meta-cell">
-          <span class="meta-key">进程 ID</span>
+          <span class="meta-key">{{ t('task.detail.metaPid') }}</span>
           <span class="meta-val mono">{{ task.pid || '—' }}</span>
         </div>
         <div class="meta-cell">
-          <span class="meta-key">开始时间</span>
+          <span class="meta-key">{{ t('task.detail.metaStartedAt') }}</span>
           <span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span>
         </div>
         <div class="meta-cell" v-if="duration">
-          <span class="meta-key">运行时长</span>
+          <span class="meta-key">{{ t('task.detail.metaDuration') }}</span>
           <span class="meta-val mono">{{ duration }}</span>
         </div>
         <div class="meta-cell">
-          <span class="meta-key">退出码</span>
+          <span class="meta-key">{{ t('task.detail.metaExitCode') }}</span>
           <span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span>
         </div>
       </div>
@@ -111,12 +111,12 @@
 
     <section class="detail-section">
       <div class="section-head">
-        <h2 class="section-title">命令</h2>
+        <h2 class="section-title">{{ t('task.detail.sectionCommand') }}</h2>
         <span class="section-rule"></span>
-        <button class="copy-btn" @click="copyCommand">复制</button>
+        <button class="copy-btn" @click="copyCommand">{{ t('task.detail.copy') }}</button>
         <button class="copy-btn" @click="commandExpanded = !commandExpanded">
           <el-icon :size="12"><component :is="commandExpanded ? ArrowUp : ArrowDown" /></el-icon>
-          <span>{{ commandExpanded ? '收起' : '展开' }}</span>
+          <span>{{ commandExpanded ? t('task.detail.collapse') : t('task.detail.expand') }}</span>
         </button>
       </div>
       <pre class="command-text" :class="{ expanded: commandExpanded }"><code>{{ task.command }}</code></pre>
@@ -130,6 +130,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -140,6 +141,7 @@ import LogCard from '@/components/task/LogCard.vue'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const { hasGpu } = useSystemCapabilities()
+const { t } = useI18n()
 
 const route = useRoute()
 const router = useRouter()
@@ -169,12 +171,12 @@ const stopping = ref(false)
 const killing = ref(false)
 
 const statusMap: Record<string, { color: string; label: string }> = {
-  running: { color: 'var(--accent-blue)', label: '运行中' },
-  completed: { color: 'var(--accent-green)', label: '已完成' },
-  failed: { color: 'var(--accent-red)', label: '已失败' },
-  stopped: { color: 'var(--accent-orange)', label: '已停止' },
-  stopping: { color: 'var(--accent-orange)', label: '停止中' },
-  pending: { color: 'var(--text-tertiary)', label: '等待中' },
+  running: { color: 'var(--accent-blue)', label: 'common.status.running' },
+  completed: { color: 'var(--accent-green)', label: 'common.status.completed' },
+  failed: { color: 'var(--accent-red)', label: 'common.status.failed' },
+  stopped: { color: 'var(--accent-orange)', label: 'common.status.stopped' },
+  stopping: { color: 'var(--accent-orange)', label: 'common.status.stopping' },
+  pending: { color: 'var(--text-tertiary)', label: 'common.status.pending' },
 }
 
 const exitCodeClass = computed(() => {
@@ -183,11 +185,11 @@ const exitCodeClass = computed(() => {
 })
 
 const gpuDisplay = computed(() => {
-  const t = task.value
-  if (!t) return '—'
-  const val = t.gpu_assigned ?? t.gpu_request
+  const taskVal = task.value
+  if (!taskVal) return '—'
+  const val = taskVal.gpu_assigned ?? taskVal.gpu_request
   if (val === null || val === undefined) {
-    return t.status === 'pending' ? '自动' : '—'
+    return taskVal.status === 'pending' ? t('task.detail.gpuAuto') : '—'
   }
   return `GPU ${val}`
 })
@@ -231,23 +233,23 @@ const copyCommand = () => {
 
 const handleStop = async () => {
   try {
-    await ElMessageBox.confirm('确定要停止该任务吗？任务将收到 Ctrl+C 信号，SwanLab 会正确记录任务停止信息。', '停止任务', { confirmButtonText: '停止', cancelButtonText: '取消', type: 'warning' })
+    await ElMessageBox.confirm(t('task.detail.stopConfirm'), t('task.detail.stopTitle'), { confirmButtonText: t('task.detail.stop'), cancelButtonText: t('common.cancel'), type: 'warning' })
   } catch { return }
   stopping.value = true
   try {
     await stopTask(taskId)
-    ElMessage.success('已发送停止信号')
+    ElMessage.success(t('task.detail.stopSignalSent'))
   } finally { stopping.value = false }
 }
 
 const handleKill = async () => {
   try {
-    await ElMessageBox.confirm('确定要强制终止该任务吗？任务将收到 SIGKILL 信号并立即退出，可能导致数据丢失。', '强制终止任务', { confirmButtonText: '强制终止', cancelButtonText: '取消', type: 'error' })
+    await ElMessageBox.confirm(t('task.detail.killConfirm'), t('task.detail.killTitle'), { confirmButtonText: t('task.detail.killButton'), cancelButtonText: t('common.cancel'), type: 'error' })
   } catch { return }
   killing.value = true
   try {
     await killTask(taskId)
-    ElMessage.success('已强制终止')
+    ElMessage.success(t('task.detail.killed'))
   } finally { killing.value = false }
 }
 </script>

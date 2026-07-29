@@ -12,7 +12,8 @@ from datetime import datetime
 from config import TASK_LOGS_DIR
 from database import SessionLocal
 from dependencies import get_line_cache, get_process_manager
-from fastapi import APIRouter, Depends, HTTPException
+from errors import AppError
+from fastapi import APIRouter, Depends
 from models import Task
 from pagination import Page, Params
 from pydantic import BaseModel
@@ -40,7 +41,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         The created Task record.
 
     Raises:
-        HTTPException: 500 if the task failed to launch.
+        AppError: 500 if the task failed to launch.
     """
     with SessionLocal() as session:
         dataset_name = body.params.get("dataset", "")
@@ -69,7 +70,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
             env_id=body.env_id,
             custom_python_path=body.custom_python_path,
         )
-    except EnvironmentNotConfigured as e:
+    except EnvironmentNotConfigured:
         with SessionLocal() as session:
             transition(
                 session,
@@ -79,7 +80,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
                 "failed",
                 finished_at=datetime.now(),
             )
-        raise HTTPException(400, str(e))
+        raise
     except Exception:
         logger.exception("Failed to launch task %s (%s)", task_id, body.model_name)
         with SessionLocal() as session:
@@ -91,7 +92,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
                 "failed",
                 finished_at=datetime.now(),
             )
-        raise HTTPException(500, "Failed to launch task")
+        raise AppError("task_launch_failed", 500)
 
     with SessionLocal() as session:
         task = session.get(Task, task_id)
@@ -138,12 +139,12 @@ def get_task(task_id: int):
         The Task record.
 
     Raises:
-        HTTPException: 404 if the task does not exist.
+        AppError: 404 if the task does not exist.
     """
     with SessionLocal() as session:
         task = session.get(Task, task_id)
         if not task:
-            raise HTTPException(404, "Task not found")
+            raise AppError("task_not_found", 404)
         return task
 
 
@@ -159,10 +160,10 @@ def stop_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
         A dict with ``status`` set to ``stopping``.
 
     Raises:
-        HTTPException: 400 if the task cannot be stopped.
+        AppError: 400 if the task cannot be stopped.
     """
     if not pm.stop_task(task_id):
-        raise HTTPException(400, "Cannot stop task")
+        raise AppError("cannot_stop_task")
     return {"status": "stopping"}
 
 
@@ -178,10 +179,10 @@ def kill_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
         A dict with ``status`` set to ``killed``.
 
     Raises:
-        HTTPException: 400 if the task cannot be killed.
+        AppError: 400 if the task cannot be killed.
     """
     if not pm.kill_task(task_id):
-        raise HTTPException(400, "Cannot kill task")
+        raise AppError("cannot_kill_task")
     return {"status": "killed"}
 
 
@@ -202,15 +203,15 @@ def delete_task(
         A dict with ``status`` set to ``deleted``.
 
     Raises:
-        HTTPException: 404 if the task does not exist,
+        AppError: 404 if the task does not exist,
             400 if the task is still active (running or stopping).
     """
     with SessionLocal() as session:
         task = session.get(Task, task_id)
         if not task:
-            raise HTTPException(404, "Task not found")
+            raise AppError("task_not_found", 404)
         if task.status in ("running", "stopping"):
-            raise HTTPException(400, "Cannot delete active task")
+            raise AppError("cannot_delete_active_task")
         if task.status == "interrupted":
             # Kill the orphan pid and drop the recover monitor before the row
             # goes away, so neither outlives the delete.

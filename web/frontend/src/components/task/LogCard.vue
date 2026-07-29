@@ -1,7 +1,7 @@
 <template>
   <section class="log-card" :style="cardStyle">
     <div class="log-card-header">
-      <div class="log-card-title">运行日志</div>
+      <div class="log-card-title">{{ t('log.title') }}</div>
       <span class="header-rule"></span>
       <div class="header-right">
         <span class="conn-indicator" :class="`conn-${connState}`" :title="connTitle">
@@ -10,7 +10,7 @@
         </span>
         <button class="scroll-btn" @click="scrollToBottom">
           <el-icon :size="14"><Bottom /></el-icon>
-          跳到底部
+          {{ t('log.scrollToBottom') }}
         </button>
       </div>
     </div>
@@ -29,6 +29,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Bottom } from '@element-plus/icons-vue'
 import LogViewer from './LogViewer.vue'
 import type { LogApiBase } from '@/api/logs'
@@ -43,6 +44,7 @@ const props = defineProps<{
 }>()
 
 const viewerRef = ref<InstanceType<typeof LogViewer>>()
+const { t } = useI18n()
 
 const cardStyle = computed(() =>
   props.fill ? { flex: '1 1 0', margin: '0 20px 20px' } : {}
@@ -51,8 +53,8 @@ const cardStyle = computed(() =>
 const connState = ref<ConnState>('connecting')
 const onState = (s: ConnState) => { connState.value = s }
 
-const connLabel = computed(() => CONN_MAP[connState.value].label)
-const connTitle = computed(() => CONN_MAP[connState.value].title)
+const connLabel = computed(() => t(CONN_MAP[connState.value].label))
+const connTitle = computed(() => t(CONN_MAP[connState.value].title))
 
 const scrollToBottom = () => { viewerRef.value?.scrollToBottom() }
 </script>

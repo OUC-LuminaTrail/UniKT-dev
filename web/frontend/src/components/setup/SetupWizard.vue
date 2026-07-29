@@ -3,13 +3,13 @@
     <div class="wizard-card">
       <div class="wizard-header">
         <div class="wizard-icon">KT</div>
-        <h2 class="wizard-title">欢迎使用 KT 实验管理平台</h2>
-        <p class="wizard-desc">请选择默认的训练环境，后续可在设置中修改</p>
+        <h2 class="wizard-title">{{ t('wizard.title') }}</h2>
+        <p class="wizard-desc">{{ t('wizard.desc') }}</p>
       </div>
 
       <div class="wizard-loading" v-if="loading">
         <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-        <span>正在扫描可用环境...</span>
+        <span>{{ t('wizard.scanning') }}</span>
       </div>
 
       <div class="wizard-envs" v-else-if="envs.length > 0">
@@ -21,7 +21,7 @@
           @click="selected = env.id"
         >
           <div class="env-type-badge">{{ env.type }}</div>
-          <div class="env-name">{{ env.display_name }}</div>
+          <div class="env-name">{{ env.type === 'custom' ? t('env.customPythonPath') : env.display_name }}</div>
         </div>
         <div v-if="selected === 'custom:0'" class="custom-path-row">
           <el-input
@@ -32,19 +32,19 @@
       </div>
 
       <div class="wizard-empty" v-else>
-        <p>未检测到可用环境</p>
-        <p class="wizard-empty-sub">请确保已安装 pixi 或 conda</p>
+        <p>{{ t('wizard.empty') }}</p>
+        <p class="wizard-empty-sub">{{ t('wizard.emptySub') }}</p>
       </div>
 
       <div class="wizard-actions">
-        <el-button @click="emit('skip')">跳过</el-button>
+        <el-button @click="emit('skip')">{{ t('wizard.skip') }}</el-button>
         <el-button
           type="primary"
           :disabled="!selected"
           :loading="submitting"
           @click="onComplete"
         >
-          完成设置
+          {{ t('wizard.done') }}
         </el-button>
       </div>
     </div>
@@ -53,6 +53,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Loading } from '@element-plus/icons-vue'
 import { listEnvironments, type EnvironmentInfo } from '@/api/environments'
 import { setDefaultEnv } from '@/api/settings'
@@ -61,6 +62,8 @@ const emit = defineEmits<{
   skip: []
   done: []
 }>()
+
+const { t } = useI18n()
 
 const envs = ref<EnvironmentInfo[]>([])
 const selected = ref<string | null>(null)

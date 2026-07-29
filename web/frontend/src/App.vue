@@ -1,5 +1,5 @@
 <template>
-  <el-config-provider :locale="zhCn">
+  <el-config-provider :locale="epLocale">
     <SetupWizard
       v-if="showWizard"
       @skip="onSkipWizard"
@@ -13,13 +13,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import SetupWizard from '@/components/setup/SetupWizard.vue'
 import { getInitStatus } from '@/api/settings'
+import { useLocale } from '@/composables/useLocale'
 import { useTaskEvents } from '@/composables/useTaskEvents'
 
 useTaskEvents()
+const { epLocale } = useLocale()
 
 const showWizard = ref(false)
 

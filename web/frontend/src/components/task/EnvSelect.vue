@@ -2,7 +2,7 @@
   <el-select
     :model-value="modelValue"
     @update:model-value="$emit('update:modelValue', $event)"
-    :placeholder="placeholder"
+    :placeholder="placeholder || t('env.selectPlaceholder')"
     :clearable="clearable"
     class="env-select"
   >
@@ -10,7 +10,7 @@
       <el-option
         v-for="env in pixiEnvs"
         :key="env.id"
-        :label="env.display_name"
+        :label="envLabel(env)"
         :value="env.id"
       />
     </el-option-group>
@@ -18,7 +18,7 @@
       <el-option
         v-for="env in condaEnvs"
         :key="env.id"
-        :label="env.display_name"
+        :label="envLabel(env)"
         :value="env.id"
       />
     </el-option-group>
@@ -26,7 +26,7 @@
       <el-option
         v-for="env in otherEnvs"
         :key="env.id"
-        :label="env.display_name"
+        :label="envLabel(env)"
         :value="env.id"
       />
     </el-option-group>
@@ -42,7 +42,10 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { EnvironmentInfo } from '@/api/environments'
+
+const { t } = useI18n()
 
 const props = withDefaults(defineProps<{
   modelValue: string | null
@@ -51,7 +54,6 @@ const props = withDefaults(defineProps<{
   placeholder?: string
   clearable?: boolean
 }>(), {
-  placeholder: '选择运行环境',
   clearable: false,
 })
 
@@ -59,6 +61,9 @@ defineEmits<{
   (e: 'update:modelValue', val: string | null): void
   (e: 'update:customPath', val: string): void
 }>()
+
+const envLabel = (env: EnvironmentInfo) =>
+  env.type === 'custom' ? t('env.customPythonPath') : env.display_name
 
 const pixiEnvs = computed(() => props.environments.filter(e => e.type === 'pixi'))
 const condaEnvs = computed(() => props.environments.filter(e => e.type === 'conda'))
