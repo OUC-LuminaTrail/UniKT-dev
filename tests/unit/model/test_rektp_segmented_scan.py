@@ -154,3 +154,40 @@ def test_block_scan_supports_pure_additive_write_without_erasure():
 
     torch.testing.assert_close(actual, expected)
     torch.testing.assert_close(actual[:, 1], initial[:, 1] + bias[:, 0])
+
+
+def test_block_scan_gradients_match_serial_reference():
+    matrix, bias, segment_ids, valid_mask, initial = _block_example()
+    weights = torch.randn_like(bias)
+
+    parallel_matrix = matrix.clone().requires_grad_()
+    parallel_bias = bias.clone().requires_grad_()
+    parallel = segmented_block_affine_exclusive_scan(
+        parallel_matrix,
+        parallel_bias,
+        segment_ids,
+        valid_mask,
+        initial,
+    )
+    parallel_gradients = torch.autograd.grad(
+        (parallel * weights).sum(), (parallel_matrix, parallel_bias)
+    )
+
+    serial_matrix = matrix.clone().requires_grad_()
+    serial_bias = bias.clone().requires_grad_()
+    serial = _serial_block_scan(
+        serial_matrix,
+        serial_bias,
+        segment_ids,
+        valid_mask,
+        initial,
+    )
+    serial_gradients = torch.autograd.grad(
+        (serial * weights).sum(), (serial_matrix, serial_bias)
+    )
+
+    torch.testing.assert_close(parallel, serial)
+    for parallel_gradient, serial_gradient in zip(
+        parallel_gradients, serial_gradients, strict=True
+    ):
+        torch.testing.assert_close(parallel_gradient, serial_gradient)

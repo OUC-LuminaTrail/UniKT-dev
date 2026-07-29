@@ -3,10 +3,6 @@
 import torch
 
 
-def _block_matvec(matrix: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
-    return torch.matmul(matrix, vector.unsqueeze(-1)).squeeze(-1)
-
-
 def segmented_affine_exclusive_scan(
     alpha: torch.Tensor,
     beta: torch.Tensor,
@@ -94,22 +90,22 @@ def segmented_block_affine_exclusive_scan(
     """Apply an exclusive block-affine scan inside contiguous segments.
 
     Each valid position represents ``h_after = matrix @ h_before + bias``.
-    ``matrix`` may contain any square block size; ReKTP uses 2x2 blocks.
+    ReKTP uses fixed 2x2 feature blocks.
     Feature blocks are independent, while their affine transitions compose in
-    logarithmic sequential depth with a Hillis-Steele doubling schedule.
+    logarithmic sequential depth with a work-efficient recursive pair scan.
 
     Args:
-        matrix: Block matrices with shape ``[B, N, H, P, P]``.
-        bias: Block biases with shape ``[B, N, H, P]``.
+        matrix: Block matrices with shape ``[B, N, H, 2, 2]``.
+        bias: Block biases with shape ``[B, N, H, 2]``.
         segment_ids: Segment identifier per position, shape ``[B, N]``.
         valid_mask: Valid occurrence mask, shape ``[B, N]``.
-        initial_state: Initial block states with shape ``[B, N, H, P]``.
+        initial_state: Initial block states with shape ``[B, N, H, 2]``.
 
     Returns:
-        State immediately before each transition, shape ``[B, N, H, P]``.
+        State immediately before each transition, shape ``[B, N, H, 2]``.
     """
-    if matrix.ndim != 5 or matrix.size(-1) != matrix.size(-2):
-        raise ValueError("matrix must have shape [B, N, H, P, P]")
+    if matrix.ndim != 5 or matrix.shape[-2:] != (2, 2):
+        raise ValueError("matrix must have shape [B, N, H, 2, 2]")
     expected_vector_shape = matrix.shape[:-1]
     if bias.shape != expected_vector_shape:
         raise ValueError("bias must match matrix shape without its last dimension")
@@ -121,60 +117,94 @@ def segmented_block_affine_exclusive_scan(
         raise ValueError(
             "segment_ids and valid_mask must match matrix's first dimensions"
         )
+    if matrix.size(1) == 0:
+        return torch.zeros_like(initial_state)
 
     valid_mask = valid_mask.bool()
-    valid_matrix = valid_mask[:, :, None, None, None]
-    valid_vector = valid_mask[:, :, None, None]
-    block_size = matrix.size(-1)
-    identity = torch.eye(block_size, device=matrix.device, dtype=matrix.dtype)
-    identity = identity.view(1, 1, 1, block_size, block_size)
-    identity = identity.expand_as(matrix)
-
-    prefix_matrix = torch.where(valid_matrix, matrix, identity)
-    prefix_bias = torch.where(valid_vector, bias, torch.zeros_like(bias))
-
-    length = matrix.size(1)
-    offset = 1
-    while offset < length:
-        current_matrix = prefix_matrix
-        current_bias = prefix_bias
-
-        previous_matrix = identity.clone()
-        previous_bias = torch.zeros_like(current_bias)
-        previous_matrix[:, offset:] = current_matrix[:, :-offset]
-        previous_bias[:, offset:] = current_bias[:, :-offset]
-
-        same_segment = torch.zeros_like(valid_mask)
-        same_segment[:, offset:] = (
-            valid_mask[:, offset:]
-            & valid_mask[:, :-offset]
-            & (segment_ids[:, offset:] == segment_ids[:, :-offset])
-        )
-        combine_matrix = same_segment[:, :, None, None, None]
-        combine_vector = same_segment[:, :, None, None]
-
-        composed_matrix = torch.matmul(current_matrix, previous_matrix)
-        composed_bias = _block_matvec(current_matrix, previous_bias) + current_bias
-        prefix_matrix = torch.where(combine_matrix, composed_matrix, current_matrix)
-        prefix_bias = torch.where(combine_vector, composed_bias, current_bias)
-        offset *= 2
-
-    previous_prefix_matrix = identity.clone()
-    previous_prefix_bias = torch.zeros_like(prefix_bias)
-    previous_prefix_matrix[:, 1:] = prefix_matrix[:, :-1]
-    previous_prefix_bias[:, 1:] = prefix_bias[:, :-1]
-
-    has_predecessor = torch.zeros_like(valid_mask)
-    has_predecessor[:, 1:] = (
-        valid_mask[:, 1:]
-        & valid_mask[:, :-1]
-        & (segment_ids[:, 1:] == segment_ids[:, :-1])
+    head_mask = torch.zeros_like(valid_mask)
+    head_mask[:, 0] = valid_mask[:, 0]
+    head_mask[:, 1:] = valid_mask[:, 1:] & (
+        ~valid_mask[:, :-1] | (segment_ids[:, 1:] != segment_ids[:, :-1])
     )
+
+    # A column-vector transform h' = A h + b is stored in row-vector form as
+    # [[A.T], [b.T]]. This lets one 3x2 @ 2x2 product compose both A and b.
+    operator = torch.cat((matrix.transpose(-1, -2), bias.unsqueeze(-2)), dim=-2)
+    identity = _row_affine_identity(operator)
+    operator = torch.where(valid_mask[:, :, None, None, None], operator, identity)
+    prefix, _ = _work_efficient_segmented_exclusive_scan(operator, head_mask)
+
     scanned_state = (
-        _block_matvec(previous_prefix_matrix, initial_state) + previous_prefix_bias
+        torch.matmul(initial_state.unsqueeze(-2), prefix[..., :2, :]).squeeze(-2)
+        + prefix[..., 2, :]
     )
+    has_predecessor = valid_mask & ~head_mask
     state = torch.where(has_predecessor[:, :, None, None], scanned_state, initial_state)
-    return torch.where(valid_vector, state, torch.zeros_like(state))
+    return torch.where(valid_mask[:, :, None, None], state, torch.zeros_like(state))
+
+
+def _row_affine_identity(operator: torch.Tensor) -> torch.Tensor:
+    identity = operator.new_tensor([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]])
+    return identity.view(1, 1, 1, 3, 2).expand_as(operator)
+
+
+def _compose_row_affine(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    """Compose row-vector affine operators with ``left`` applied first."""
+    product = torch.matmul(left, right[..., :2, :])
+    bias = product[..., 2:3, :] + right[..., 2:3, :]
+    return torch.cat((product[..., :2, :], bias), dim=-2)
+
+
+def _combine_segmented(
+    left_operator: torch.Tensor,
+    left_head: torch.Tensor,
+    right_operator: torch.Tensor,
+    right_head: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    composed = _compose_row_affine(left_operator, right_operator)
+    operator = torch.where(right_head[:, :, None, None, None], right_operator, composed)
+    return operator, left_head | right_head
+
+
+def _work_efficient_segmented_exclusive_scan(
+    operator: torch.Tensor,
+    head_mask: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return exclusive prefixes with O(N) work and O(log N) depth."""
+    length = operator.size(1)
+    if length == 1:
+        return _row_affine_identity(operator), torch.zeros_like(head_mask)
+
+    paired_length = length // 2
+    paired_operator, paired_head = _combine_segmented(
+        operator[:, : 2 * paired_length : 2],
+        head_mask[:, : 2 * paired_length : 2],
+        operator[:, 1 : 2 * paired_length : 2],
+        head_mask[:, 1 : 2 * paired_length : 2],
+    )
+    pair_prefix, pair_prefix_head = _work_efficient_segmented_exclusive_scan(
+        paired_operator, paired_head
+    )
+
+    odd_prefix, odd_prefix_head = _combine_segmented(
+        pair_prefix,
+        pair_prefix_head,
+        operator[:, : 2 * paired_length : 2],
+        head_mask[:, : 2 * paired_length : 2],
+    )
+    prefix = torch.stack((pair_prefix, odd_prefix), dim=2).flatten(1, 2)
+    prefix_head = torch.stack((pair_prefix_head, odd_prefix_head), dim=2).flatten(1, 2)
+
+    if length % 2:
+        final_prefix, final_prefix_head = _combine_segmented(
+            pair_prefix[:, -1:],
+            pair_prefix_head[:, -1:],
+            paired_operator[:, -1:],
+            paired_head[:, -1:],
+        )
+        prefix = torch.cat((prefix, final_prefix), dim=1)
+        prefix_head = torch.cat((prefix_head, final_prefix_head), dim=1)
+    return prefix, prefix_head
 
 
 __all__ = [
