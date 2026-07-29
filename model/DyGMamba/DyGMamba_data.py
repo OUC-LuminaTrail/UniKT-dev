@@ -134,7 +134,9 @@ class DyGMambaModelData(QuestionModelData):
             seq_sorted = sorted(seq_list, key=lambda x: x[1])
             running_indices: list[int] = []
             running_times: list[int] = []
-            running_entries: list[tuple[int, int, int]] = []  # (global_idx, timestamp, user)
+            running_entries: list[
+                tuple[int, int, int]
+            ] = []  # (global_idx, timestamp, user)
             i = 0
             seq_len = len(seq_sorted)
 
@@ -184,7 +186,11 @@ class DyGMambaModelData(QuestionModelData):
                     if idx_to_user is not None:
                         running_entries.append((idx, t, idx_to_user[idx]))
 
-                if idx_to_user is None and max_len > 0 and len(running_indices) > max_len:
+                if (
+                    idx_to_user is None
+                    and max_len > 0
+                    and len(running_indices) > max_len
+                ):
                     running_indices = running_indices[-max_len:]
                     running_times = running_times[-max_len:]
 

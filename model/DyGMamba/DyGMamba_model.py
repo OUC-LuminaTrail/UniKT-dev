@@ -199,15 +199,15 @@ class SkillPairCrossEffect(nn.Module):
         )  # [B, S, D_skill+1]
 
         # α: 双线性分解 P(history) · Q(target)
-        h_alpha = self.P_alpha(hist_input)           # [B, S, D_emb]
-        t_alpha = self.Q_alpha(target_skill_feat)    # [B, D_emb]
+        h_alpha = self.P_alpha(hist_input)  # [B, S, D_emb]
+        t_alpha = self.Q_alpha(target_skill_feat)  # [B, D_emb]
         alpha_hidden = h_alpha * t_alpha.unsqueeze(1)  # [B, S, D_emb]
         alpha_weights = torch.sigmoid(self.alpha_out(alpha_hidden))  # [B, S, 1]
 
         # β: 双线性分解 (独立参数)
-        h_beta = self.P_beta(hist_input)             # [B, S, D_emb]
-        t_beta = self.Q_beta(target_skill_feat)      # [B, D_emb]
-        beta_hidden = h_beta * t_beta.unsqueeze(1)   # [B, S, D_emb]
+        h_beta = self.P_beta(hist_input)  # [B, S, D_emb]
+        t_beta = self.Q_beta(target_skill_feat)  # [B, D_emb]
+        beta_hidden = h_beta * t_beta.unsqueeze(1)  # [B, S, D_emb]
         beta_rates = torch.sigmoid(self.beta_out(beta_hidden))  # [B, S, 1]
 
         # padding 位置: α=1 (不改变), β=0 (不额外衰减)
@@ -215,6 +215,7 @@ class SkillPairCrossEffect(nn.Module):
         beta_rates = beta_rates * padding_mask
 
         return alpha_weights, beta_rates
+
 
 class MLPPredictor(nn.Module):
     """MLP 预测头。
@@ -638,8 +639,12 @@ class DyGMamba(nn.Module):
             ]  # [B, D_skill]
 
             # 历史位置 pos 1..K 的 skill 特征和正确性
-            src_hist_skill = src_padded_nodes_neighbor_node_raw_features[:, 1:]  # [B, S, D_skill]
-            src_hist_correct = src_padded_nodes_edge_raw_features[:, 1:].squeeze(-1)  # [B, S]
+            src_hist_skill = src_padded_nodes_neighbor_node_raw_features[
+                :, 1:
+            ]  # [B, S, D_skill]
+            src_hist_correct = src_padded_nodes_edge_raw_features[:, 1:].squeeze(
+                -1
+            )  # [B, S]
 
             # padding mask: 有效位置=1, padding=0
             src_hist_mask = (
@@ -651,10 +656,13 @@ class DyGMamba(nn.Module):
             )
 
             # α 乘到 time channel: 交叉效应强的技能对保留更多时间信息
-            src_padded_nodes_neighbor_time_features = torch.cat([
-                src_padded_nodes_neighbor_time_features[:, :1],
-                src_padded_nodes_neighbor_time_features[:, 1:] * src_alpha,
-            ], dim=1)
+            src_padded_nodes_neighbor_time_features = torch.cat(
+                [
+                    src_padded_nodes_neighbor_time_features[:, :1],
+                    src_padded_nodes_neighbor_time_features[:, 1:] * src_alpha,
+                ],
+                dim=1,
+            )
 
         (
             dst_padded_nodes_neighbor_node_raw_features,
@@ -680,10 +688,13 @@ class DyGMamba(nn.Module):
         # ─── Hawkes 风格技能对交叉效应 (β: 自适应衰减) ───
         # β 大 → dt 被放大 → Mamba Δ 增大 → 该位置遗忘加快
         if self.hawkes_cross_dim > 0:
-            src_padded_dt_features = torch.cat([
-                src_padded_dt_features[:, :1],
-                src_padded_dt_features[:, 1:] * (1.0 + src_beta),
-            ], dim=1)
+            src_padded_dt_features = torch.cat(
+                [
+                    src_padded_dt_features[:, :1],
+                    src_padded_dt_features[:, 1:] * (1.0 + src_beta),
+                ],
+                dim=1,
+            )
         dst_padded_dt_features = self.get_dt_features(
             padded_nodes_neighbor_times=dst_padded_nodes_neighbor_times,
             padded_nodes_neighbor_ids=dst_padded_nodes_neighbor_ids,

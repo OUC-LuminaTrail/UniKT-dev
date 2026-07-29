@@ -74,7 +74,9 @@ class DyGMambaConfig(ModelConfig):
     epochs: int = 50
     learning_rate: float = field(
         default=5e-4,
-        metadata={"optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}},
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
     )
     lr_decay: float | None = None
     weight_decay: float = field(
@@ -85,7 +87,9 @@ class DyGMambaConfig(ModelConfig):
     )
     batch_size: int = field(
         default=2000,
-        metadata={"optuna": {"type": "categorical", "choices": [512, 1024, 2000, 4096]}},
+        metadata={
+            "optuna": {"type": "categorical", "choices": [512, 1024, 2000, 4096]}
+        },
     )
 
 
