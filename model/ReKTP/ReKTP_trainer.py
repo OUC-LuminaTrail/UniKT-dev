@@ -22,6 +22,8 @@ class ReKTPConfig(ModelConfig):
         max_gap_bins: Number of logarithmic same-KC gap buckets.
         residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
+        local_credit_scale: Maximum centered scalar credit modulation for local
+            write bias; 0 disables the gate.
         local_aux_weight: Weight for the local residual auxiliary objective.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
@@ -37,6 +39,7 @@ class ReKTPConfig(ModelConfig):
     max_gap_bins: int = 16
     residual_scale: float = 0.1
     dropout: float = 0.2
+    local_credit_scale: float = 0.0
     local_aux_weight: float = 0.0
     epochs: int = 100
     learning_rate: float = 1e-3
@@ -69,6 +72,7 @@ class ReKTPTrainer(BaseTrainer):
             max_gap_bins=m.max_gap_bins,
             residual_scale=m.residual_scale,
             dropout=m.dropout,
+            local_credit_scale=m.local_credit_scale,
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

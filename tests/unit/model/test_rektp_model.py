@@ -159,6 +159,35 @@ def test_global_film_can_condition_local_write_input():
     assert actual[0, 1, 0] < local_input[0, 1, 0]
 
 
+def test_local_credit_gate_initializes_as_identity():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    model.local_credit_scale = 1.0
+    bias = torch.randn(2, 3, model.num_state_blocks, model.state_block_size)
+    local_input = torch.randn(2, 3, model.hidden_dim)
+
+    actual = model._apply_local_credit(bias, local_input)
+
+    torch.testing.assert_close(actual, bias)
+
+
+def test_local_credit_gate_can_modulate_write_bias():
+    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    model.local_credit_scale = 1.0
+    bias = torch.ones(1, 2, model.num_state_blocks, model.state_block_size)
+    local_input = torch.zeros(1, 2, model.hidden_dim)
+    local_input[:, :, 0] = torch.tensor([[1.0, -1.0]])
+
+    with torch.no_grad():
+        model.local_credit.weight.zero_()
+        model.local_credit.bias.zero_()
+        model.local_credit.weight[0, 0] = 1.0
+
+    actual = model._apply_local_credit(bias, local_input)
+
+    assert actual[0, 0, 0, 0] > bias[0, 0, 0, 0]
+    assert actual[0, 1, 0, 0] < bias[0, 1, 0, 0]
+
+
 def test_other_kc_response_does_not_change_private_state():
     model = _build_model(torch.device("cpu"))
     questions = torch.tensor([[0, 1, 0, 1]])
