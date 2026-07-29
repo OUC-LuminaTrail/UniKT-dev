@@ -91,8 +91,8 @@
 
     <div class="section">
       <div class="section-label">数据集</div>
-      <div class="dataset-layout">
-        <div class="dataset-cards" v-if="datasets.length && viewMode === 'grid'">
+      <div class="dataset-layout" v-if="datasets.length">
+        <div class="dataset-cards" v-if="viewMode === 'grid'">
           <div
             v-for="ds in datasets"
             :key="ds.name"
@@ -111,7 +111,7 @@
             <div class="card-name" :title="ds.name">{{ ds.name }}</div>
           </div>
         </div>
-        <div class="select-list" v-else-if="datasets.length">
+        <div class="select-list" v-else>
           <div
             v-for="ds in datasets"
             :key="ds.name"
@@ -140,6 +140,16 @@
           show-preprocess-link
         />
       </div>
+
+      <div class="dataset-empty" v-else>
+        <el-icon :size="40" class="empty-icon"><Coin /></el-icon>
+        <div class="empty-title">暂无可用数据集</div>
+        <div class="empty-desc">所有数据集尚未下载或处理。请先前往数据预处理页面下载数据集，处理完成后即可在此选择。</div>
+        <router-link :to="{ name: 'preprocess', query: { action: 'download' } }" class="empty-action">
+          <el-icon :size="14"><Download /></el-icon>
+          去下载数据集
+        </router-link>
+      </div>
     </div>
   </div>
 </template>
@@ -147,7 +157,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { Coin, Refresh, Grid, Menu } from '@element-plus/icons-vue'
+import { Coin, Download, Refresh, Grid, Menu } from '@element-plus/icons-vue'
 import type { EnvironmentInfo } from '@/api/environments'
 import { getDatasetMetadata, type DatasetInfo, type DatasetMetadata } from '@/api/datasets'
 import { getGpuStatus } from '@/api/gpu'
@@ -340,6 +350,57 @@ defineExpose({ clearCache })
   display: flex;
   gap: 20px;
   min-height: 200px;
+}
+
+.dataset-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 24px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  text-align: center;
+}
+
+.dataset-empty .empty-icon {
+  color: var(--text-tertiary);
+}
+
+.empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.empty-desc {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  max-width: 360px;
+  line-height: 1.6;
+}
+
+.empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--accent-blue);
+  background: rgba(9, 105, 218, 0.08);
+  border: 1px solid rgba(9, 105, 218, 0.2);
+  transition: all 0.15s ease;
+}
+
+.empty-action:hover {
+  background: rgba(9, 105, 218, 0.14);
+  border-color: var(--accent-blue);
 }
 
 .dataset-cards {
