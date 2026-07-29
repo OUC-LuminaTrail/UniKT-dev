@@ -52,7 +52,8 @@
           row-key="id"
           size="small"
           class="task-table"
-          :default-sort="{ prop: 'id', order: 'ascending' }"
+          :default-sort="currentSort"
+          @sort-change="onSortChange"
           @selection-change="handleRunningSelectionChange"
         >
           <el-table-column type="selection" width="45" reserve-selection />
@@ -85,6 +86,11 @@
           <el-table-column prop="created_at" label="创建时间" width="170" sortable>
             <template #default="{ row }">
               <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="started_at" label="开始时间" width="170" sortable>
+            <template #default="{ row }">
+              <span class="mono-time">{{ formatDateTime(row.started_at) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="90" align="right">
@@ -127,7 +133,6 @@
               <el-icon :size="14"><Delete /></el-icon>
               批量取消
             </button>
-            <button class="batch-clear-btn" @click="clearQueueSelection">取消选择</button>
           </div>
         </transition>
         <el-table
@@ -135,10 +140,8 @@
           :data="paginatedQueueItems"
           row-key="id"
           size="small"
-          class="task-table"
-          @selection-change="handleQueueSelectionChange"
+          class="task-table queue-table"
         >
-          <el-table-column type="selection" width="45" reserve-selection />
           <el-table-column label="位置" width="70">
             <template #default="{ $index }">
               <span class="pos-badge">#{{ (queuePage - 1) * queuePageSize + $index + 1 }}</span>
@@ -213,12 +216,14 @@
 
         <el-table
           ref="otherTableRef"
+          :key="activeTab"
           :data="tasks"
           row-key="id"
           size="small"
           class="task-table"
           v-loading="loading"
-          :default-sort="{ prop: 'id', order: 'ascending' }"
+          :default-sort="currentSort"
+          @sort-change="onSortChange"
           @selection-change="handleSelectionChange"
         >
           <el-table-column type="selection" width="45" reserve-selection />
@@ -246,6 +251,11 @@
         <el-table-column prop="created_at" label="创建时间" width="170" sortable>
           <template #default="{ row }">
             <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="started_at" label="开始时间" width="170" sortable>
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatDateTime(row.started_at) }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="finished_at" label="完成时间" width="170" sortable>
@@ -289,12 +299,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
 import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document, Clock } from '@element-plus/icons-vue'
+import Sortable from '@/utils/sortable'
+import type { SortableEvent } from 'sortablejs'
 import { formatDateTime } from '@/utils/date'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
@@ -307,6 +319,37 @@ const router = useRouter()
 const queryClient = useQueryClient()
 
 const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('taskListTab') || 'running')
+
+type SortOrder = 'ascending' | 'descending'
+interface SortState {
+  prop: string
+  order: SortOrder
+}
+
+// Default sort per tab. Finished-task tabs default to newest-finished-first;
+// the running tab has no finished_at column so it keeps id order.
+const DEFAULT_SORT: Record<string, SortState> = {
+  running: { prop: 'id', order: 'ascending' },
+  all: { prop: 'finished_at', order: 'descending' },
+  completed: { prop: 'finished_at', order: 'descending' },
+  failed: { prop: 'finished_at', order: 'descending' },
+  stopped: { prop: 'finished_at', order: 'descending' },
+}
+
+// Per-tab sort overrides, persisted across tab switches.
+const tabSortOverrides = ref<Record<string, SortState>>({})
+
+const currentSort = computed<SortState>(
+  () => tabSortOverrides.value[activeTab.value] ?? DEFAULT_SORT[activeTab.value] ?? DEFAULT_SORT.all
+)
+
+const onSortChange = ({ prop, order }: { prop: string | null; order: SortOrder | null }) => {
+  if (prop && order) {
+    tabSortOverrides.value[activeTab.value] = { prop, order }
+  } else {
+    delete tabSortOverrides.value[activeTab.value]
+  }
+}
 
 const page = ref(1)
 const pageSize = ref(20)
@@ -437,25 +480,160 @@ const handleRunningPageSizeChange = (s: number) => {
   runningPage.value = 1
 }
 
+// --- Queue reordering (drag-and-drop + up/down buttons) ---
+let sortableInstance: Sortable | undefined
+let dragSnapshot: Element[] | undefined
+
+const pageOffset = () => (queuePage.value - 1) * queuePageSize.value
+
+const setQueueItemsData = (items: QueueItem[]) =>
+  queryClient.setQueriesData(
+    { queryKey: ['tasks-list'] },
+    (old: TasksData | undefined): TasksData | undefined => (old ? { ...old, queueItems: items } : old),
+  )
+
+// Optimistic write to the cache, then persist; roll back on failure.
+const applyQueueOrder = async (next: QueueItem[], prev: QueueItem[]) => {
+  const nextIds = next.map(q => q.id)
+  const prevIds = prev.map(q => q.id)
+  if (nextIds.length === prevIds.length && nextIds.every((id, i) => id === prevIds[i])) return
+  await queryClient.cancelQueries({ queryKey: ['tasks-list'] })
+  setQueueItemsData(next)
+  try {
+    await reorderQueue(nextIds)
+    invalidateTasks()
+  } catch {
+    setQueueItemsData(prev)
+    ElMessage.error('调整排队顺序失败，已恢复原顺序')
+  }
+}
+
 const moveUp = async (idx: number) => {
-  const actualIdx = (queuePage.value - 1) * queuePageSize.value + idx
+  const actualIdx = pageOffset() + idx
+  if (actualIdx <= 0) return
   const items = [...queueItems.value]
-  const tmp = items[actualIdx]
-  items[actualIdx] = items[actualIdx - 1]
-  items[actualIdx - 1] = tmp
-  await reorderQueue(items.map(t => t.id))
-  invalidateTasks()
+  ;[items[actualIdx - 1], items[actualIdx]] = [items[actualIdx], items[actualIdx - 1]]
+  await applyQueueOrder(items, queueItems.value)
 }
 
 const moveDown = async (idx: number) => {
-  const actualIdx = (queuePage.value - 1) * queuePageSize.value + idx
+  const actualIdx = pageOffset() + idx
+  if (actualIdx >= queueItems.value.length - 1) return
   const items = [...queueItems.value]
-  const tmp = items[actualIdx]
-  items[actualIdx] = items[actualIdx + 1]
-  items[actualIdx + 1] = tmp
-  await reorderQueue(items.map(t => t.id))
-  invalidateTasks()
+  ;[items[actualIdx + 1], items[actualIdx]] = [items[actualIdx], items[actualIdx + 1]]
+  await applyQueueOrder(items, queueItems.value)
 }
+
+const getQueueTbody = (): HTMLElement | null =>
+  (queueTableRef.value?.$el as HTMLElement | undefined)?.querySelector('.el-table__body-wrapper tbody') ?? null
+
+// Reflect MultiDrag's selection (rows carrying selectedClass) into reactive state,
+// so the batch-cancel bar and count stay in sync after clicks.
+const syncSelectionFromDom = () => {
+  const tbody = getQueueTbody()
+  if (!tbody) {
+    selectedQueueItems.value = []
+    return
+  }
+  const selected: QueueItem[] = []
+  Array.from(tbody.querySelectorAll('tr')).forEach((tr, i) => {
+    if (tr.classList.contains('queue-row-selected')) {
+      const item = paginatedQueueItems.value[i]
+      if (item) selected.push(item)
+    }
+  })
+  selectedQueueItems.value = selected
+}
+
+const onQueueClick = () => {
+  void nextTick(syncSelectionFromDom)
+}
+
+const onDragStart = (evt: SortableEvent) => {
+  const tbody = evt.item.parentNode as HTMLElement | null
+  if (!tbody) return
+  dragSnapshot = Array.from(tbody.children)
+  // Stamp each row's id so the post-drag order can be read straight from the DOM.
+  Array.from(tbody.querySelectorAll('tr')).forEach((tr, i) => {
+    const item = paginatedQueueItems.value[i]
+    if (item) (tr as HTMLElement).dataset.queueId = String(item.id)
+  })
+}
+
+const onDragEnd = (evt: SortableEvent) => {
+  const tbody = evt.item.parentNode as HTMLElement | null
+  // MultiDrag has already rearranged the rows; read the new page order from the
+  // DOM before restoring the pre-drag order (so Vue owns the final render).
+  let next: QueueItem[] | null = null
+  if (tbody) {
+    const map = new Map(paginatedQueueItems.value.map(q => [q.id, q]))
+    const newPageItems: QueueItem[] = []
+    for (const tr of Array.from(tbody.querySelectorAll('tr'))) {
+      const item = map.get(Number((tr as HTMLElement).dataset.queueId))
+      if (item) newPageItems.push(item)
+    }
+    if (newPageItems.length === paginatedQueueItems.value.length && newPageItems.length > 0) {
+      const start = pageOffset()
+      next = [
+        ...queueItems.value.slice(0, start),
+        ...newPageItems,
+        ...queueItems.value.slice(start + newPageItems.length),
+      ]
+    }
+  }
+
+  if (dragSnapshot && tbody) dragSnapshot.forEach(node => tbody.appendChild(node))
+  dragSnapshot = undefined
+
+  if (next) void applyQueueOrder(next, queueItems.value)
+}
+
+const initSortable = () => {
+  if (sortableInstance) return
+  const tbody = getQueueTbody()
+  if (!tbody || tbody.children.length === 0) return
+  tbody.addEventListener('click', onQueueClick)
+  sortableInstance = Sortable.create(tbody, {
+    multiDrag: true,
+    selectedClass: 'queue-row-selected',
+    animation: 150,
+    ghostClass: 'queue-drag-ghost',
+    chosenClass: 'queue-drag-chosen',
+    dragClass: 'queue-drag-drag',
+    filter: '.action-group',
+    preventOnFilter: false,
+    onStart: onDragStart,
+    onEnd: onDragEnd,
+  })
+}
+
+const teardownSortable = () => {
+  if (sortableInstance) {
+    sortableInstance.el.removeEventListener('click', onQueueClick)
+    sortableInstance.destroy()
+  }
+  sortableInstance = undefined
+}
+
+// Re-init only when the <tbody> node is replaced (tab switch / page-size change),
+// not on every 30s refetch (same node → no-op), so an in-flight drag is never interrupted.
+watch(
+  () => [activeTab.value, queuePage.value, queuePageSize.value, queueItems.value] as const,
+  async () => {
+    if (activeTab.value !== 'running' || paginatedQueueItems.value.length === 0) {
+      teardownSortable()
+      return
+    }
+    await nextTick()
+    const tbody = getQueueTbody()
+    if (tbody && sortableInstance?.el === tbody) return
+    teardownSortable()
+    initSortable()
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(teardownSortable)
 
 const handleStop = async (id: number) => {
   await ElMessageBox.confirm('确定停止该任务？正在进行的训练进度将丢失。', '确认停止', {
@@ -544,15 +722,7 @@ const handleBatchStop = async () => {
   invalidateTasks()
 }
 
-// --- Queue multi-select ---
-const handleQueueSelectionChange = (rows: QueueItem[]) => {
-  selectedQueueItems.value = rows
-}
-
-const clearQueueSelection = () => {
-  queueTableRef.value?.clearSelection()
-}
-
+// --- Queue batch cancel (selection is driven by MultiDrag clicks) ---
 const handleBatchCancelQueue = async () => {
   const count = selectedQueueItems.value.length
   await ElMessageBox.confirm(
@@ -566,7 +736,7 @@ const handleBatchCancelQueue = async () => {
   )
   await Promise.all(selectedQueueItems.value.map(t => stopTask(t.id)))
   ElMessage.success(`已取消 ${count} 个排队任务`)
-  clearQueueSelection()
+  selectedQueueItems.value = []
   invalidateTasks()
 }
 </script>
@@ -999,5 +1169,39 @@ html.dark .btn-primary:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .divider-pulse { animation: none; }
+  .queue-drag-ghost, .queue-drag-chosen, .queue-drag-drag, .queue-row-selected { transition: none; }
+}
+
+/* Queue row states: default / hover / selected / selected-hover, day & dark.
+   Backgrounds are applied to the cell (td) — el-table paints row bg on td,
+   which would otherwise cover a tr-level background and the selected tint. */
+.queue-table {
+  --el-table-row-hover-bg-color: #eaeef2;
+  --queue-selected-bg: rgba(9, 105, 218, 0.12);
+  --queue-selected-hover-bg: rgba(9, 105, 218, 0.20);
+}
+
+html.dark .queue-table {
+  --el-table-row-hover-bg-color: #222a3a;
+  --queue-selected-bg: rgba(56, 139, 253, 0.18);
+  --queue-selected-hover-bg: rgba(56, 139, 253, 0.28);
+}
+
+:deep(.queue-row-selected .el-table__cell),
+:deep(.queue-drag-chosen .el-table__cell) {
+  background-color: var(--queue-selected-bg) !important;
+}
+
+:deep(.queue-row-selected:hover .el-table__cell) {
+  background-color: var(--queue-selected-hover-bg) !important;
+}
+
+:deep(.queue-drag-ghost) {
+  opacity: 0.4;
+}
+
+:deep(.queue-drag-drag) {
+  opacity: 0.95;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
 }
 </style>
