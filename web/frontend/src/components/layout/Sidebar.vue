@@ -37,10 +37,6 @@
           <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
           <template #title>{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</template>
         </el-menu-item>
-        <el-menu-item @click="toggleLocale">
-          <el-icon><span class="locale-badge">{{ isZh ? 'EN' : '中' }}</span></el-icon>
-          <template #title>{{ isZh ? 'English' : '中文' }}</template>
-        </el-menu-item>
       </el-menu>
 
       <div class="sidebar-actions">
@@ -65,7 +61,6 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useDark, useToggle } from '@vueuse/core'
 import { Upload, Monitor, Grid, Setting, Sunny, Moon, Expand, Fold } from '@element-plus/icons-vue'
-import { useLocale } from '@/composables/useLocale'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 defineProps<{
@@ -82,9 +77,6 @@ const isDark = useDark()
 const toggleDark = useToggle(isDark)
 
 const { t } = useI18n()
-const { locale, setLocale } = useLocale()
-const isZh = computed(() => locale.value === 'zh')
-const toggleLocale = () => setLocale(isZh.value ? 'en' : 'zh')
 
 const { hasGpu } = useSystemCapabilities()
 
@@ -256,13 +248,6 @@ const activeIndex = computed(() => {
 .action-label {
   font-weight: 450;
   letter-spacing: -0.01em;
-}
-
-.locale-badge {
-  font-size: 11px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  color: var(--text-tertiary);
 }
 
 .fade-enter-active,

@@ -158,6 +158,31 @@
         </div>
       </div>
     </div>
+
+    <div class="settings-card" v-if="!loading">
+      <div class="card-section">
+        <div class="section-header">
+          <div class="section-title-row">
+            <span class="section-icon">
+              <el-icon :size="16"><Setting /></el-icon>
+            </span>
+            <span class="section-title">{{ t('settings.generalTitle') }}</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <span class="setting-key">{{ t('settings.languageLabel') }}</span>
+            <span class="setting-help">{{ t('settings.languageHelp') }}</span>
+          </div>
+          <div class="setting-control">
+            <el-select v-model="langModel" style="width: 220px">
+              <el-option :label="t('settings.langZh')" value="zh" />
+              <el-option :label="t('settings.langEn')" value="en" />
+            </el-select>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -166,14 +191,20 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage } from 'element-plus'
-import { Monitor, Cpu } from '@element-plus/icons-vue'
+import { Monitor, Cpu, Setting } from '@element-plus/icons-vue'
 import { CircleCheck, CircleClose } from '@element-plus/icons-vue'
 import Cookies from 'universal-cookie'
 import { getSettings, updateSettings, getDefaultEnv, setDefaultEnv } from '@/api/settings'
 import { listEnvironments, healthCheckEnv, type EnvironmentInfo, type EnvHealthResult } from '@/api/environments'
+import { useLocale, type Locale } from '@/composables/useLocale'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const { t } = useI18n()
+const { locale, setLocale } = useLocale()
+const langModel = computed({
+  get: () => locale.value,
+  set: (v) => setLocale(v as Locale),
+})
 const queryClient = useQueryClient()
 const cookies = new Cookies()
 const { hasGpu, gpuCount } = useSystemCapabilities()

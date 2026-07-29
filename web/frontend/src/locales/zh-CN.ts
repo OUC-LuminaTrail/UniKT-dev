@@ -265,6 +265,11 @@ export default {
     concurrencyDescCpu: '控制同时运行的训练任务数。修改后立即生效，队列中的等待任务会自动启动。',
     saveSuccessToast: '设置已保存',
     envUpdatedToast: '默认环境已更新',
+    generalTitle: '通用',
+    languageLabel: '界面语言',
+    languageHelp: '选择管理界面的显示语言',
+    langZh: '中文',
+    langEn: 'English',
   },
   preprocess: {
     subtitle: '配置并运行 data_process.py 进行数据集下载和处理',

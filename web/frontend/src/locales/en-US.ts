@@ -265,6 +265,11 @@ export default {
     concurrencyDescCpu: 'Controls how many training tasks run concurrently. Changes take effect immediately; queued tasks start automatically.',
     saveSuccessToast: 'Settings saved.',
     envUpdatedToast: 'Default environment updated.',
+    generalTitle: 'General',
+    languageLabel: 'Interface language',
+    languageHelp: 'Choose the display language of the management UI',
+    langZh: '中文',
+    langEn: 'English',
   },
   preprocess: {
     subtitle: 'Configure and run data_process.py to download and process datasets',
