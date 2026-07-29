@@ -38,7 +38,6 @@ class MambaTimeDelta(nn.Module):
         layer_idx=None,
         device=None,
         dtype=None,
-        same_delta_t=False,
         time_mamba=False,
         no_selective=False,
         plain_mamba=False,
@@ -80,7 +79,6 @@ class MambaTimeDelta(nn.Module):
         self.dt_proj = nn.Linear(
             self.dt_rank, self.d_inner, bias=True, **factory_kwargs
         )
-        self.same_delta_t = same_delta_t
         self.no_selective = no_selective
         self.time_mamba = time_mamba
         self.plain_mamba = plain_mamba

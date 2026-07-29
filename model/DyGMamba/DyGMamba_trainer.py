@@ -27,7 +27,6 @@ class DyGMambaConfig(ModelConfig):
         d_state: Mamba SSM state dimension.
         d_conv: Mamba conv1d kernel size.
         expand: Mamba hidden state expansion factor.
-        same_delta_t: Use uniform delta-t for SSM.
         time_mamba: B/C computed from dts (time-mamba mode).
         no_selective: Disable selective SSM mechanism.
         remove_time_channel: Remove time channel from node features.
@@ -62,7 +61,6 @@ class DyGMambaConfig(ModelConfig):
     expand: int = field(
         default=2, metadata={"optuna": {"type": "int", "low": 1, "high": 4}}
     )
-    same_delta_t: bool = False
     time_mamba: bool = False
     no_selective: bool = False
     remove_time_channel: bool = False
@@ -129,7 +127,6 @@ class DyGMambaTrainer(BaseTrainer):
             d_state=m.d_state,
             d_conv=m.d_conv,
             expand=m.expand,
-            same_delta_t=m.same_delta_t,
             time_mamba=m.time_mamba,
             no_selective=m.no_selective,
             plain_mamba=m.plain_mamba,
