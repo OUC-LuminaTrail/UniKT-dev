@@ -64,6 +64,38 @@ def test_other_question_response_does_not_change_private_state():
     assert not torch.allclose(changed[:, 2], baseline[:, 2])
 
 
+def test_current_gap_affects_question_and_kc_read_states():
+    model = _build_model(torch.device("cpu"))
+    with torch.no_grad():
+        model.gap_embed.weight.zero_()
+        model.gap_embed.weight[2, 0] = 2.0
+        for decay_layer in (model.local_decay, model.question_decay):
+            decay_layer.weight.zero_()
+            decay_layer.bias.zero_()
+            decay_layer.weight[:, 0] = 1.0
+
+    short_questions = torch.tensor([[0, 1, 0, 1, 1]])
+    long_questions = torch.tensor([[0, 1, 1, 1, 0]])
+    short_responses = torch.tensor([[1, 0, 1, 0, 0]])
+    long_responses = torch.tensor([[1, 0, 0, 0, 1]])
+    mask = torch.ones_like(short_responses, dtype=torch.bool)
+
+    short_local, _ = model._local_pre_states(short_questions, short_responses, mask)
+    long_local, _ = model._local_pre_states(long_questions, long_responses, mask)
+    short_event, _ = model._event_embeddings(short_questions)
+    long_event, _ = model._event_embeddings(long_questions)
+    short_question = model._question_pre_states(
+        short_questions, short_responses, mask, short_event
+    )
+    long_question = model._question_pre_states(
+        long_questions, long_responses, mask, long_event
+    )
+
+    # KC/question 0 has the same first event but a gap of 2 versus 4.
+    assert not torch.allclose(short_local[:, 2], long_local[:, 4])
+    assert not torch.allclose(short_question[:, 2], long_question[:, 4])
+
+
 def test_target_answer_does_not_leak_into_its_prediction():
     device = torch.device("cpu")
     model = _build_model(device)

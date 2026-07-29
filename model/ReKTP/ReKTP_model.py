@@ -79,9 +79,11 @@ class ReKTP(nn.Module):
         self.local_alpha = nn.Linear(hidden_dim, hidden_dim)
         self.local_beta = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
+        self.local_decay = nn.Linear(hidden_dim, hidden_dim)
         self.question_alpha = nn.Linear(hidden_dim, hidden_dim)
         self.question_beta = nn.Linear(hidden_dim, hidden_dim)
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
+        self.question_decay = nn.Linear(hidden_dim, hidden_dim)
 
         self.global_blocks = nn.ModuleList(
             GlobalMambaBlock(
@@ -109,6 +111,10 @@ class ReKTP(nn.Module):
         )
 
         nn.init.zeros_(self.question_diff.weight)
+        nn.init.zeros_(self.local_decay.weight)
+        nn.init.constant_(self.local_decay.bias, -4.0)
+        nn.init.zeros_(self.question_decay.weight)
+        nn.init.constant_(self.question_decay.bias, -4.0)
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -192,22 +198,31 @@ class ReKTP(nn.Module):
             + skill_embedding
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
-            + self.gap_embed(gap_bucket)
         )
-        alpha = torch.exp(-torch.nn.functional.softplus(self.local_alpha(local_input)))
-        beta = (1.0 - alpha) * torch.tanh(self.local_beta(local_input))
+        write_alpha = torch.exp(
+            -torch.nn.functional.softplus(self.local_alpha(local_input))
+        )
+        beta = (1.0 - write_alpha) * torch.tanh(self.local_beta(local_input))
+        decay = torch.exp(
+            -torch.nn.functional.softplus(
+                self.local_decay(self.gap_embed(gap_bucket))
+            )
+        )
         valid_3d = packed_valid.unsqueeze(-1)
+        decay = torch.where(valid_3d, decay, torch.ones_like(decay))
+        alpha = decay * write_alpha
         alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
         beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
         initial_state = torch.tanh(self.local_init(skill_embedding))
 
-        packed_state = segmented_affine_exclusive_scan(
+        packed_pre_decay = segmented_affine_exclusive_scan(
             alpha,
             beta,
             packed_skill,
             packed_valid,
             initial_state,
         )
+        packed_state = decay * packed_pre_decay
         unpacked_state = torch.zeros_like(packed_state)
         scatter_index = order.unsqueeze(-1).expand_as(packed_state)
         unpacked_state.scatter_(1, scatter_index, packed_state)
@@ -258,26 +273,35 @@ class ReKTP(nn.Module):
         question_input = (
             packed_event
             + self.answer_embed(packed_response)
-            + self.gap_embed(gap_bucket)
         )
-        alpha = torch.exp(
+        write_alpha = torch.exp(
             -torch.nn.functional.softplus(self.question_alpha(question_input))
         )
-        beta = (1.0 - alpha) * torch.tanh(self.question_beta(question_input))
+        beta = (1.0 - write_alpha) * torch.tanh(
+            self.question_beta(question_input)
+        )
+        decay = torch.exp(
+            -torch.nn.functional.softplus(
+                self.question_decay(self.gap_embed(gap_bucket))
+            )
+        )
         valid_3d = packed_valid.unsqueeze(-1)
+        decay = torch.where(valid_3d, decay, torch.ones_like(decay))
+        alpha = decay * write_alpha
         alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
         beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
         initial_state = torch.tanh(
             self.question_init(self.question_embed(packed_question))
         )
 
-        packed_state = segmented_affine_exclusive_scan(
+        packed_pre_decay = segmented_affine_exclusive_scan(
             alpha,
             beta,
             packed_question,
             packed_valid,
             initial_state,
         )
+        packed_state = decay * packed_pre_decay
         question_state = torch.zeros_like(packed_state)
         question_state.scatter_(1, gather_index, packed_state)
         return question_state
