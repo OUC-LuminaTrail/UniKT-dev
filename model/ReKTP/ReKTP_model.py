@@ -1,4 +1,4 @@
-"""ReKTP: private segmented KC states with a global Mamba history encoder."""
+"""ReKTP: private question/KC scans with a global Mamba history encoder."""
 
 import numpy as np
 import torch
@@ -79,6 +79,9 @@ class ReKTP(nn.Module):
         self.local_alpha = nn.Linear(hidden_dim, hidden_dim)
         self.local_beta = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
+        self.question_alpha = nn.Linear(hidden_dim, hidden_dim)
+        self.question_beta = nn.Linear(hidden_dim, hidden_dim)
+        self.question_init = nn.Linear(hidden_dim, hidden_dim)
 
         self.global_blocks = nn.ModuleList(
             GlobalMambaBlock(
@@ -99,7 +102,7 @@ class ReKTP(nn.Module):
         )
         self.global_norm = nn.LayerNorm(hidden_dim)
         self.out = nn.Sequential(
-            nn.Linear(3 * hidden_dim, hidden_dim),
+            nn.Linear(4 * hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
@@ -216,6 +219,69 @@ class ReKTP(nn.Module):
         pooled_state = self._masked_mean(local_state, occurrence_mask)
         return pooled_state, local_state
 
+    def _question_pre_states(
+        self,
+        questions: torch.Tensor,
+        responses: torch.Tensor,
+        mask: torch.Tensor,
+        event_embeddings: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return the exclusive state of each question at every raw position."""
+        _, seq_len = questions.shape
+        times = torch.arange(seq_len, device=questions.device).unsqueeze(0)
+        times = times.expand_as(questions)
+
+        invalid_key = (self.num_questions + 1) * (seq_len + 1)
+        sort_key = questions * (seq_len + 1) + times
+        sort_key = torch.where(mask, sort_key, invalid_key + times)
+        order = torch.argsort(sort_key, dim=1, stable=True)
+
+        packed_question = torch.gather(questions, 1, order)
+        packed_time = torch.gather(times, 1, order)
+        packed_response = torch.gather(responses, 1, order)
+        packed_valid = torch.gather(mask, 1, order)
+        gather_index = order.unsqueeze(-1).expand_as(event_embeddings)
+        packed_event = torch.gather(event_embeddings, 1, gather_index)
+
+        previous_time = torch.zeros_like(packed_time)
+        previous_time[:, 1:] = packed_time[:, :-1]
+        same_segment = torch.zeros_like(packed_valid)
+        same_segment[:, 1:] = (
+            packed_valid[:, 1:]
+            & packed_valid[:, :-1]
+            & (packed_question[:, 1:] == packed_question[:, :-1])
+        )
+        gap = torch.where(same_segment, packed_time - previous_time, packed_time + 1)
+        gap_bucket = torch.floor(torch.log2(gap.clamp_min(1).float())).long()
+        gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1)
+
+        question_input = (
+            packed_event
+            + self.answer_embed(packed_response)
+            + self.gap_embed(gap_bucket)
+        )
+        alpha = torch.exp(
+            -torch.nn.functional.softplus(self.question_alpha(question_input))
+        )
+        beta = (1.0 - alpha) * torch.tanh(self.question_beta(question_input))
+        valid_3d = packed_valid.unsqueeze(-1)
+        alpha = torch.where(valid_3d, alpha, torch.ones_like(alpha))
+        beta = torch.where(valid_3d, beta, torch.zeros_like(beta))
+        initial_state = torch.tanh(
+            self.question_init(self.question_embed(packed_question))
+        )
+
+        packed_state = segmented_affine_exclusive_scan(
+            alpha,
+            beta,
+            packed_question,
+            packed_valid,
+            initial_state,
+        )
+        question_state = torch.zeros_like(packed_state)
+        question_state.scatter_(1, gather_index, packed_state)
+        return question_state
+
     def _event_embeddings(
         self, questions: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -240,6 +306,9 @@ class ReKTP(nn.Module):
         mask = mask.bool()
         event_embedding, _ = self._event_embeddings(questions)
         local_pre_state, _ = self._local_pre_states(questions, responses, mask)
+        question_pre_state = self._question_pre_states(
+            questions, responses, mask, event_embedding
+        )
 
         global_state = event_embedding + self.answer_embed(responses)
         global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
@@ -248,7 +317,12 @@ class ReKTP(nn.Module):
         global_state = self.global_norm(global_state + self.global_ffn(global_state))
 
         features = torch.cat(
-            [global_state[:, :-1], local_pre_state[:, 1:], event_embedding[:, 1:]],
+            [
+                global_state[:, :-1],
+                question_pre_state[:, 1:],
+                local_pre_state[:, 1:],
+                event_embedding[:, 1:],
+            ],
             dim=-1,
         )
         logits = self.out(features).squeeze(-1)

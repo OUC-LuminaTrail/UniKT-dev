@@ -43,6 +43,27 @@ def test_other_kc_response_does_not_change_private_state():
     assert not torch.allclose(changed[:, 2], baseline[:, 2])
 
 
+def test_other_question_response_does_not_change_private_state():
+    model = _build_model(torch.device("cpu"))
+    questions = torch.tensor([[0, 1, 0, 1]])
+    responses = torch.tensor([[1, 0, 1, 0]])
+    mask = torch.ones_like(questions, dtype=torch.bool)
+    event_embeddings, _ = model._event_embeddings(questions)
+
+    baseline = model._question_pre_states(
+        questions, responses, mask, event_embeddings
+    )
+    changed_responses = responses.clone()
+    changed_responses[:, 0] = 0
+    changed = model._question_pre_states(
+        questions, changed_responses, mask, event_embeddings
+    )
+
+    # Question 1 has an independent segment, while question 0 retrieves its update.
+    torch.testing.assert_close(changed[:, 3], baseline[:, 3])
+    assert not torch.allclose(changed[:, 2], baseline[:, 2])
+
+
 def test_target_answer_does_not_leak_into_its_prediction():
     device = torch.device("cpu")
     model = _build_model(device)
