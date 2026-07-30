@@ -1,11 +1,18 @@
-"""ReKTP: private question/KC scans with a global Mamba history encoder."""
+"""ReKTP: private question/KC scans with a swappable global history encoder.
+
+The global encoder is selected by ``encoder_type`` (``mamba`` / ``lstm`` /
+``transformer``) so the Mamba block can be ablated against LSTM or causal
+self-attention while keeping the rest of the model fixed.
+"""
 
 import numpy as np
 import torch
-from mamba_ssm import Mamba
 from torch import nn
 
 from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
+
+# 支持的全局序列编码器类型，用于消融对比 Mamba。
+GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer")
 
 
 class GlobalMambaBlock(nn.Module):
@@ -20,6 +27,9 @@ class GlobalMambaBlock(nn.Module):
         dropout: float,
     ):
         super().__init__()
+        # 延迟导入：LSTM/Transformer 消融变体可在未安装 mamba_ssm 的环境中运行。
+        from mamba_ssm import Mamba
+
         self.mamba = Mamba(
             d_model=d_model,
             d_state=d_state,
@@ -29,8 +39,84 @@ class GlobalMambaBlock(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         return self.norm(x + self.dropout(self.mamba(x)))
+
+
+class GlobalLSTMBlock(nn.Module):
+    """LSTM ablation block with the same residual shell as the Mamba block."""
+
+    def __init__(self, d_model: int, dropout: float):
+        super().__init__()
+        # 单向 LSTM 天然因果，等价于 Mamba 的因果序列建模角色。
+        self.lstm = nn.LSTM(d_model, d_model, batch_first=True)
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        # 输入 padding 已在外部置零，单向因果使末尾 padding 不影响前置有效输出。
+        out, _ = self.lstm(x)
+        return self.norm(x + self.dropout(out))
+
+
+class GlobalTransformerBlock(nn.Module):
+    """Causal self-attention ablation block with the same residual shell."""
+
+    def __init__(self, d_model: int, n_heads: int, dropout: float):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(
+            d_model, n_heads, dropout=dropout, batch_first=True
+        )
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        seq_len = x.size(1)
+        # 因果掩码：屏蔽未来位置，避免预测 t+1 时泄漏其答案。
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device),
+            diagonal=1,
+        )
+        # 同时屏蔽 padding key；有效 query 至少可见自身，故不会产生 NaN。
+        key_padding_mask = None if mask is None else ~mask.bool()
+        out, _ = self.attn(
+            x, x, x, attn_mask=causal_mask, key_padding_mask=key_padding_mask
+        )
+        return self.norm(x + self.dropout(out))
+
+
+def build_global_block(
+    encoder_type: str,
+    d_model: int,
+    dropout: float,
+    *,
+    d_state: int = 16,
+    d_conv: int = 4,
+    expand: int = 2,
+    n_heads: int = 8,
+) -> nn.Module:
+    """Construct one global sequence-mixing block for the requested encoder type."""
+    if encoder_type == "mamba":
+        return GlobalMambaBlock(
+            d_model=d_model,
+            d_state=d_state,
+            d_conv=d_conv,
+            expand=expand,
+            dropout=dropout,
+        )
+    if encoder_type == "lstm":
+        return GlobalLSTMBlock(d_model=d_model, dropout=dropout)
+    if encoder_type == "transformer":
+        return GlobalTransformerBlock(d_model=d_model, n_heads=n_heads, dropout=dropout)
+    raise ValueError(
+        f"encoder_type must be one of {GLOBAL_ENCODER_TYPES}, got {encoder_type!r}"
+    )
 
 
 class ReKTP(nn.Module):
@@ -50,14 +136,28 @@ class ReKTP(nn.Module):
         residual_scale: float = 0.1,
         dropout: float = 0.2,
         local_credit_scale: float = 0.0,
+        encoder_type: str = "mamba",
+        n_heads: int = 8,
     ):
         super().__init__()
+        if encoder_type not in GLOBAL_ENCODER_TYPES:
+            raise ValueError(
+                f"encoder_type must be one of {GLOBAL_ENCODER_TYPES}, "
+                f"got {encoder_type!r}"
+            )
         if hidden_dim % 2 != 0:
             raise ValueError("ReKTP hidden_dim must be divisible by 2")
+        if encoder_type == "transformer" and hidden_dim % n_heads != 0:
+            raise ValueError(
+                f"hidden_dim ({hidden_dim}) must be divisible by n_heads ({n_heads}) "
+                "for the transformer encoder"
+            )
         if residual_scale <= 0.0:
             raise ValueError("residual_scale must be positive")
         if local_credit_scale < 0.0:
             raise ValueError("local_credit_scale must be non-negative")
+        self.encoder_type = encoder_type
+        self.n_heads = n_heads
         self.num_questions = int(data_metadata["num_questions"])
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
@@ -101,12 +201,14 @@ class ReKTP(nn.Module):
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
 
         self.global_blocks = nn.ModuleList(
-            GlobalMambaBlock(
+            build_global_block(
+                encoder_type,
                 d_model=hidden_dim,
+                dropout=dropout,
                 d_state=d_state,
                 d_conv=d_conv,
                 expand=expand,
-                dropout=dropout,
+                n_heads=n_heads,
             )
             for _ in range(n_blocks)
         )
@@ -466,7 +568,7 @@ class ReKTP(nn.Module):
         global_state = event_embedding + self.answer_embed(responses)
         global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
         for block in self.global_blocks:
-            global_state = block(global_state)
+            global_state = block(global_state, mask)
         return self.global_norm(global_state + self.global_ffn(global_state))
 
     def forward(

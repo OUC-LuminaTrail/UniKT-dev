@@ -120,6 +120,8 @@ class ReKTPTrainer(BaseTrainer):
             residual_scale=m.residual_scale,
             dropout=m.dropout,
             local_credit_scale=m.local_credit_scale,
+            encoder_type=m.encoder_type,
+            n_heads=m.n_heads,
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

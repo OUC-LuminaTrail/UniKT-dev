@@ -1,10 +1,17 @@
+import importlib.util
+
 import pytest
 import torch
 
 ReKTP = pytest.importorskip("model.ReKTP.ReKTP_model").ReKTP
 
+# LSTM/Transformer variants do not need mamba_ssm; the mamba variant is skipped when uninstalled.
+HAS_MAMBA = importlib.util.find_spec("mamba_ssm") is not None
 
-def _build_model(device, *, activate_private_writes=True):
+
+def _build_model(device, *, activate_private_writes=True, encoder_type="mamba"):
+    if encoder_type == "mamba" and not HAS_MAMBA:
+        pytest.skip("mamba_ssm required for the mamba encoder")
     # Skill id 2 is the padding sentinel.
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
@@ -19,11 +26,14 @@ def _build_model(device, *, activate_private_writes=True):
         expand=1,
         max_gap_bins=4,
         dropout=0.0,
+        encoder_type=encoder_type,
+        n_heads=4,
     )
-    # Logic tests run without a GPU; the real Mamba constructor above still
-    # verifies the locked package API, while Identity avoids its CUDA kernel.
-    for block in model.global_blocks:
-        block.mamba = torch.nn.Identity()
+    if encoder_type == "mamba":
+        # Logic tests run without a GPU; the real Mamba constructor above still
+        # verifies the locked package API, while Identity avoids its CUDA kernel.
+        for block in model.global_blocks:
+            block.mamba = torch.nn.Identity()
     if activate_private_writes:
         with torch.no_grad():
             model.answer_embed.weight[0].zero_()
@@ -304,3 +314,82 @@ def test_forward_backward_has_finite_gradients():
     ]
     assert gradients
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
+
+
+@pytest.mark.parametrize("encoder_type", ["lstm", "transformer"])
+def test_encoder_variant_forward_shape_and_finite(encoder_type):
+    device = torch.device("cpu")
+    model = _build_model(device, encoder_type=encoder_type)
+    questions = torch.tensor([[0, 1, 0, 2]], device=device)
+    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    mask = torch.ones_like(questions, dtype=torch.bool)
+
+    logits = model(questions, responses, mask)
+
+    assert logits.shape == questions.shape
+    assert torch.isfinite(logits).all()
+
+
+@pytest.mark.parametrize("encoder_type", ["lstm", "transformer"])
+def test_encoder_variant_forward_handles_padding(encoder_type):
+    # Trailing padding must not introduce NaN/Inf, nor move valid predictions out of range.
+    device = torch.device("cpu")
+    model = _build_model(device, encoder_type=encoder_type)
+    questions = torch.tensor([[0, 1, 0, 2]], device=device)
+    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    mask = torch.tensor([[True, True, False, False]], device=device)
+
+    logits = model(questions, responses, mask)
+
+    assert logits.shape == questions.shape
+    assert torch.isfinite(logits).all()
+
+
+@pytest.mark.parametrize("encoder_type", ["lstm", "transformer"])
+def test_encoder_variant_aux_logits_match_shape(encoder_type):
+    device = torch.device("cpu")
+    model = _build_model(device, encoder_type=encoder_type)
+    questions = torch.tensor([[0, 1, 0, 2]], device=device)
+    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    mask = torch.ones_like(questions, dtype=torch.bool)
+
+    logits, aux_logits = model(questions, responses, mask, return_aux=True)
+
+    assert logits.shape == aux_logits.shape == questions.shape
+    assert torch.isfinite(logits).all()
+    assert torch.isfinite(aux_logits).all()
+
+
+@pytest.mark.parametrize("encoder_type", ["lstm", "transformer"])
+def test_encoder_variant_backward_has_finite_gradients(encoder_type):
+    device = torch.device("cpu")
+    model = _build_model(device, encoder_type=encoder_type).train()
+    questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
+    responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
+    mask = torch.ones_like(questions, dtype=torch.bool)
+
+    loss = model(questions, responses, mask)[:, :-1].square().mean()
+    loss.backward()
+
+    gradients = [
+        parameter.grad for parameter in model.parameters() if parameter.grad is not None
+    ]
+    assert gradients
+    assert all(torch.isfinite(gradient).all() for gradient in gradients)
+
+
+@pytest.mark.parametrize("encoder_type", ["lstm", "transformer"])
+def test_encoder_variant_does_not_leak_future_response(encoder_type):
+    # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
+    device = torch.device("cpu")
+    model = _build_model(device, encoder_type=encoder_type)
+    questions = torch.tensor([[0, 1, 0, 2]], device=device)
+    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    mask = torch.ones_like(questions, dtype=torch.bool)
+
+    baseline = model(questions, responses, mask)
+    changed_responses = responses.clone()
+    changed_responses[:, 2] = 0
+    changed = model(questions, changed_responses, mask)
+
+    torch.testing.assert_close(changed[:, :2], baseline[:, :2])
