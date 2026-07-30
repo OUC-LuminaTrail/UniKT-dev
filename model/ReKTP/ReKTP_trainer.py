@@ -1,5 +1,7 @@
 """Trainer and configuration for ReKTP."""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -14,11 +16,14 @@ class ReKTPConfig(ModelConfig):
     """ReKTP configuration.
 
     Args:
-        hidden_dim: Shared event, local-state, and Mamba dimension.
-        n_blocks: Number of global Mamba blocks.
-        d_state: Mamba SSM state dimension.
-        d_conv: Mamba local convolution width.
-        expand: Mamba internal expansion factor.
+        hidden_dim: Shared event, local-state, and encoder dimension.
+        n_blocks: Number of global encoder blocks.
+        d_state: Mamba SSM state dimension (only used when encoder_type='mamba').
+        d_conv: Mamba local convolution width (only used when encoder_type='mamba').
+        expand: Mamba internal expansion factor (only used when encoder_type='mamba').
+        encoder_type: Global history encoder to ablate: 'mamba', 'lstm', or
+            'transformer'. The rest of the model is identical across choices.
+        n_heads: Number of attention heads (only used when encoder_type='transformer').
         max_gap_bins: Number of logarithmic same-KC gap buckets.
         residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
@@ -31,20 +36,62 @@ class ReKTPConfig(ModelConfig):
         batch_size: Training batch size.
     """
 
-    hidden_dim: int = 128
-    n_blocks: int = 2
-    d_state: int = 16
-    d_conv: int = 4
-    expand: int = 2
-    max_gap_bins: int = 16
-    residual_scale: float = 0.1
-    dropout: float = 0.2
+    hidden_dim: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
+    n_blocks: int = field(
+        default=2, metadata={"optuna": {"type": "int", "low": 1, "high": 4}}
+    )
+    d_state: int = field(
+        default=16, metadata={"optuna": {"type": "int", "low": 8, "high": 32}}
+    )
+    d_conv: int = field(
+        default=4,
+        metadata={"optuna": {"type": "categorical", "choices": [2, 4]}},
+    )
+    expand: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
+    )
+    encoder_type: str = field(
+        default="mamba",
+        metadata={
+            "optuna": {
+                "type": "categorical",
+                "choices": ["mamba", "lstm", "transformer"],
+            }
+        },
+    )
+    n_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8]}},
+    )
+    max_gap_bins: int = field(
+        default=16, metadata={"optuna": {"type": "int", "low": 8, "high": 32}}
+    )
+    residual_scale: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.02, "high": 0.3, "log": True}},
+    )
+    dropout: float = field(
+        default=0.2, metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}}
+    )
     local_credit_scale: float = 0.0
     local_aux_weight: float = 0.0
     epochs: int = 100
-    learning_rate: float = 1e-3
-    weight_decay: float = 1e-5
-    batch_size: int = 80
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 5e-3, "log": True}},
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=80,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 80, 128]}},
+    )
 
 
 @register_trainer("ReKTP")
