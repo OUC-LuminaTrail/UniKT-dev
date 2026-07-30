@@ -91,8 +91,9 @@ def segmented_block_affine_exclusive_scan(
 
     Each valid position represents ``h_after = matrix @ h_before + bias``.
     ReKTP uses fixed 2x2 feature blocks.
-    Feature blocks are independent, while their affine transitions compose in
-    logarithmic sequential depth with a work-efficient recursive pair scan.
+
+    On CUDA the scan runs a fused, differentiable Triton kernel; on CPU it uses
+    the original PyTorch work-efficient recursive pair scan (logarithmic depth).
 
     Args:
         matrix: Block matrices with shape ``[B, N, H, 2, 2]``.
@@ -120,6 +121,31 @@ def segmented_block_affine_exclusive_scan(
     if matrix.size(1) == 0:
         return torch.zeros_like(initial_state)
 
+    # CUDA 路径走 fused Triton kernel（含可微分反向），CPU 路径保持 PyTorch 实现。
+    if matrix.is_cuda:
+        try:
+            from model.ReKTP.triton_scan import (
+                triton_segmented_block_affine_exclusive_scan,
+            )
+
+            return triton_segmented_block_affine_exclusive_scan(
+                matrix, bias, segment_ids, valid_mask, initial_state
+            )
+        except ImportError:
+            pass  # triton 不可用时回退到 PyTorch 实现。
+    return _segmented_block_affine_exclusive_scan_py(
+        matrix, bias, segment_ids, valid_mask, initial_state
+    )
+
+
+def _segmented_block_affine_exclusive_scan_py(
+    matrix: torch.Tensor,
+    bias: torch.Tensor,
+    segment_ids: torch.Tensor,
+    valid_mask: torch.Tensor,
+    initial_state: torch.Tensor,
+) -> torch.Tensor:
+    """PyTorch reference implementation (work-efficient recursive pair scan)."""
     valid_mask = valid_mask.bool()
     head_mask = torch.zeros_like(valid_mask)
     head_mask[:, 0] = valid_mask[:, 0]
