@@ -54,33 +54,6 @@ def _build_model(device, *, activate_private_writes=True, encoder_type="lstm"):
     return model.to(device).eval()
 
 
-def test_interaction_residual_initializes_as_original_answer_embedding():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
-    event = torch.randn(2, 3, model.hidden_dim)
-    responses = torch.tensor([[0, 1, 0], [1, 0, 1]])
-
-    actual = model._interaction_embedding(event, responses)
-    expected = event + model.answer_embed(responses)
-
-    torch.testing.assert_close(actual, expected)
-
-
-def test_interaction_residual_learns_answer_specific_corrections():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
-    event = torch.ones(1, 2, model.hidden_dim)
-    responses = torch.tensor([[0, 1]])
-
-    with torch.no_grad():
-        model.answer_embed.weight.zero_()
-        model.correct_interaction_residual.weight.copy_(torch.eye(model.hidden_dim))
-        model.incorrect_interaction_residual.weight.zero_()
-
-    actual = model._interaction_embedding(event, responses)
-
-    torch.testing.assert_close(actual[:, 0], event[:, 0])
-    torch.testing.assert_close(actual[:, 1], 2.0 * event[:, 1])
-
-
 def test_model_requires_complete_2x2_state_blocks():
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
@@ -408,8 +381,6 @@ def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     ]
     assert gradients
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
-    assert model.correct_interaction_residual.weight.grad is not None
-    assert model.incorrect_interaction_residual.weight.grad is not None
 
 
 @pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])

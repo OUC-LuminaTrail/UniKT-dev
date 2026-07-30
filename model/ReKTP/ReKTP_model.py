@@ -182,8 +182,6 @@ class ReKTP(nn.Module):
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
         self.answer_embed = nn.Embedding(2, hidden_dim)
-        self.correct_interaction_residual = nn.Linear(hidden_dim, hidden_dim)
-        self.incorrect_interaction_residual = nn.Linear(hidden_dim, hidden_dim)
         self.gap_embed = nn.Embedding(max_gap_bins, hidden_dim)
         self.question_diff = nn.Embedding(self.num_questions, 1)
         self.skill_change = nn.Embedding(
@@ -236,12 +234,6 @@ class ReKTP(nn.Module):
         )
 
         nn.init.zeros_(self.question_diff.weight)
-        for layer in (
-            self.correct_interaction_residual,
-            self.incorrect_interaction_residual,
-        ):
-            nn.init.zeros_(layer.weight)
-            nn.init.zeros_(layer.bias)
         for layer in (
             self.local_residual,
             self.local_write,
@@ -296,21 +288,6 @@ class ReKTP(nn.Module):
     ) -> torch.Tensor:
         gamma, beta = self.local_global_film(global_context).chunk(2, dim=-1)
         return local_input * (1.0 + gamma) + beta
-
-    def _interaction_embedding(
-        self,
-        event_embedding: torch.Tensor,
-        responses: torch.Tensor,
-    ) -> torch.Tensor:
-        """Add shared answer evidence and an answer-conditioned residual."""
-        correct_residual = self.correct_interaction_residual(event_embedding)
-        incorrect_residual = self.incorrect_interaction_residual(event_embedding)
-        residual = torch.where(
-            responses.bool().unsqueeze(-1),
-            correct_residual,
-            incorrect_residual,
-        )
-        return event_embedding + self.answer_embed(responses) + residual
 
     def _apply_local_credit(
         self,
@@ -425,12 +402,12 @@ class ReKTP(nn.Module):
         gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1)
 
         skill_embedding = self.skill_embed(packed_skill)
-        local_event = (
+        local_input = (
             self.question_embed(packed_question)
             + skill_embedding
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
+            + self.answer_embed(packed_response)
         )
-        local_input = self._interaction_embedding(local_event, packed_response)
         if global_context is None:
             packed_global = torch.zeros_like(local_input)
         else:
@@ -532,7 +509,7 @@ class ReKTP(nn.Module):
         gap_bucket = torch.floor(torch.log2(gap.clamp_min(1).float())).long()
         gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1)
 
-        question_input = self._interaction_embedding(packed_event, packed_response)
+        question_input = packed_event + self.answer_embed(packed_response)
         decay = torch.exp(
             -torch.nn.functional.softplus(
                 self.question_decay(self.gap_embed(gap_bucket))
@@ -588,7 +565,7 @@ class ReKTP(nn.Module):
         responses: torch.Tensor,
         mask: torch.Tensor,
     ) -> torch.Tensor:
-        global_state = self._interaction_embedding(event_embedding, responses)
+        global_state = event_embedding + self.answer_embed(responses)
         global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
         for block in self.global_blocks:
             global_state = block(global_state, mask)
