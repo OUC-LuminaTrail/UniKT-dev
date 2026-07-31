@@ -181,8 +181,6 @@ class ReKTP(nn.Module):
             raise ValueError("residual_scale must be positive")
         if local_credit_scale < 0.0:
             raise ValueError("local_credit_scale must be non-negative")
-        self.encoder_type = encoder_type
-        self.n_heads = n_heads
         self.num_questions = int(data_metadata["num_questions"])
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
@@ -448,7 +446,7 @@ class ReKTP(nn.Module):
         times: torch.Tensor,
         mask: torch.Tensor,
         global_context: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         batch_size, seq_len = questions.shape
         (
             packed_skill,
@@ -536,13 +534,12 @@ class ReKTP(nn.Module):
             batch_size, seq_len, max_skills, self.hidden_dim
         )
         skill_ids = self.question_skill_ids[questions]
-        pooled_state = self._question_conditioned_local_readout(
+        return self._question_conditioned_local_readout(
             local_state,
             skill_ids,
             occurrence_mask,
             questions,
         )
-        return pooled_state, local_state
 
     def _question_static_states(
         self,
@@ -569,19 +566,16 @@ class ReKTP(nn.Module):
         state = decay * static_state
         return state.masked_fill(~mask.unsqueeze(-1), 0.0)
 
-    def _event_embeddings(
-        self, questions: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    def _event_embeddings(self, questions: torch.Tensor) -> torch.Tensor:
         skill_ids = self.question_skill_ids[questions]
         skill_mask = self.question_skill_mask[questions]
         pooled_skill = self._masked_mean(self.skill_embed(skill_ids), skill_mask)
         pooled_change = self._masked_mean(self.skill_change(skill_ids), skill_mask)
-        event = (
+        return (
             self._question_vector(questions)
             + pooled_skill
             + self.question_diff(questions) * pooled_change
         )
-        return event, skill_mask
 
     def _global_history_states(
         self,
@@ -629,9 +623,9 @@ class ReKTP(nn.Module):
         first_time = times.masked_fill(~mask, torch.inf).min(dim=1, keepdim=True).values
         times = times - first_time
         times = times.masked_fill(~mask, 0.0)
-        event_embedding, _ = self._event_embeddings(questions)
+        event_embedding = self._event_embeddings(questions)
         global_state = self._global_history_states(event_embedding, responses, mask)
-        local_pre_state, _ = self._local_pre_states(
+        local_pre_state = self._local_pre_states(
             questions,
             responses,
             times,

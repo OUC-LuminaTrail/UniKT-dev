@@ -318,10 +318,10 @@ def test_other_kc_response_does_not_change_private_state():
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
-    baseline, _ = model._local_pre_states(questions, responses, times, mask)
+    baseline = model._local_pre_states(questions, responses, times, mask)
     changed_responses = responses.clone()
     changed_responses[:, 0] = 0
-    changed, _ = model._local_pre_states(questions, changed_responses, times, mask)
+    changed = model._local_pre_states(questions, changed_responses, times, mask)
 
     # Position 3 addresses KC 1, so changing KC 0 at position 0 cannot alter it.
     torch.testing.assert_close(changed[:, 3], baseline[:, 3])
@@ -397,10 +397,8 @@ def test_current_gap_affects_kc_read_states():
     mask = torch.ones_like(short_responses, dtype=torch.bool)
     times = _position_times(short_questions)
 
-    short_local, _ = model._local_pre_states(
-        short_questions, short_responses, times, mask
-    )
-    long_local, _ = model._local_pre_states(long_questions, long_responses, times, mask)
+    short_local = model._local_pre_states(short_questions, short_responses, times, mask)
+    long_local = model._local_pre_states(long_questions, long_responses, times, mask)
 
     # KC 0 has the same first event but a gap of 2 versus 4.
     assert not torch.allclose(short_local[:, 2], long_local[:, 4])
@@ -421,8 +419,8 @@ def test_real_time_gap_affects_kc_read_states():
     # the two KC-0 occurrences differ (2s vs 16s -> gap buckets 1 vs 3).
     short_times = torch.tensor([[0.0, 1.0, 2.0]])
     long_times = torch.tensor([[0.0, 1.0, 16.0]])
-    short_local, _ = model._local_pre_states(questions, responses, short_times, mask)
-    long_local, _ = model._local_pre_states(questions, responses, long_times, mask)
+    short_local = model._local_pre_states(questions, responses, short_times, mask)
+    long_local = model._local_pre_states(questions, responses, long_times, mask)
     assert not torch.allclose(short_local[:, 2], long_local[:, 2])
 
 
@@ -574,7 +572,7 @@ def test_global_encoder_state_is_truncation_invariant(encoder_type):
     questions = torch.tensor([[0, 1, 2]], device=device)
     responses = torch.tensor([[1, 0, 1]], device=device)
 
-    event, _ = model._event_embeddings(questions)
+    event = model._event_embeddings(questions)
     short = model._global_history_states(
         event, responses, torch.ones_like(questions, dtype=torch.bool)
     )
@@ -582,7 +580,7 @@ def test_global_encoder_state_is_truncation_invariant(encoder_type):
     padded_questions = torch.tensor([[0, 1, 2, 1, 0]], device=device)
     padded_responses = torch.tensor([[1, 0, 1, 1, 0]], device=device)
     padded_mask = torch.tensor([[True, True, True, False, False]], device=device)
-    padded_event, _ = model._event_embeddings(padded_questions)
+    padded_event = model._event_embeddings(padded_questions)
     padded = model._global_history_states(padded_event, padded_responses, padded_mask)
 
     assert short.abs().max() > 1e-6
