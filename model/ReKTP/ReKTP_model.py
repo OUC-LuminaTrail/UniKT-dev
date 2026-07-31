@@ -202,7 +202,6 @@ class ReKTP(nn.Module):
             question_embed_dim = hidden_dim
         if question_embed_dim < 0:
             raise ValueError("question_embed_dim must be non-negative")
-        self.question_embed_dim = question_embed_dim
         if question_embed_dim == 0:
             self.question_embed = None
             self.question_embed_proj = None
@@ -427,7 +426,7 @@ class ReKTP(nn.Module):
         responses: torch.Tensor,
         times: torch.Tensor,
         mask: torch.Tensor,
-        global_context: torch.Tensor | None = None,
+        global_context: torch.Tensor,
     ) -> torch.Tensor:
         batch_size, seq_len = questions.shape
         (
@@ -459,25 +458,22 @@ class ReKTP(nn.Module):
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
         )
-        if global_context is None:
-            packed_global = torch.zeros_like(local_input)
-        else:
-            expected_context_shape = (*questions.shape, self.hidden_dim)
-            if global_context.shape != expected_context_shape:
-                raise ValueError(
-                    "global_context must have shape [batch_size, seq_len, hidden_dim]"
-                )
-            max_skills = occurrence_mask.size(-1)
-            flat_global = (
-                global_context.unsqueeze(-2)
-                .expand(batch_size, seq_len, max_skills, self.hidden_dim)
-                .flatten(1, 2)
+        expected_context_shape = (*questions.shape, self.hidden_dim)
+        if global_context.shape != expected_context_shape:
+            raise ValueError(
+                "global_context must have shape [batch_size, seq_len, hidden_dim]"
             )
-            packed_global = torch.gather(
-                flat_global,
-                1,
-                order.unsqueeze(-1).expand_as(local_input),
-            )
+        max_skills = occurrence_mask.size(-1)
+        flat_global = (
+            global_context.unsqueeze(-2)
+            .expand(batch_size, seq_len, max_skills, self.hidden_dim)
+            .flatten(1, 2)
+        )
+        packed_global = torch.gather(
+            flat_global,
+            1,
+            order.unsqueeze(-1).expand_as(local_input),
+        )
         local_input = self._condition_local_input(local_input, packed_global)
         decay = torch.exp(
             -torch.nn.functional.softplus(self.local_decay(self.gap_embed(gap_bucket)))

@@ -86,10 +86,16 @@ def _position_times(questions: torch.Tensor) -> torch.Tensor:
     )
 
 
+def _zero_global_context(model, questions: torch.Tensor) -> torch.Tensor:
+    """Zero global context; the film layer then leaves the input unchanged."""
+    return torch.zeros(
+        *questions.shape, model.hidden_dim, device=questions.device
+    )
+
+
 def test_default_question_embed_dim_matches_hidden_dim():
     model = ReKTP(**_dim_kwargs())
 
-    assert model.question_embed_dim == model.hidden_dim
     # At full width the shared projection is skipped entirely.
     assert model.question_embed_proj is None
     assert model.question_embed.weight.shape == (3, 16)
@@ -289,10 +295,14 @@ def test_other_kc_response_does_not_change_private_state():
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
-    baseline = model._local_pre_states(questions, responses, times, mask)
+    baseline = model._local_pre_states(
+        questions, responses, times, mask, _zero_global_context(model, questions)
+    )
     changed_responses = responses.clone()
     changed_responses[:, 0] = 0
-    changed = model._local_pre_states(questions, changed_responses, times, mask)
+    changed = model._local_pre_states(
+        questions, changed_responses, times, mask, _zero_global_context(model, questions)
+    )
 
     # Position 3 addresses KC 1, so changing KC 0 at position 0 cannot alter it.
     torch.testing.assert_close(changed[:, 3], baseline[:, 3])
@@ -368,8 +378,20 @@ def test_current_gap_affects_kc_read_states():
     mask = torch.ones_like(short_responses, dtype=torch.bool)
     times = _position_times(short_questions)
 
-    short_local = model._local_pre_states(short_questions, short_responses, times, mask)
-    long_local = model._local_pre_states(long_questions, long_responses, times, mask)
+    short_local = model._local_pre_states(
+        short_questions,
+        short_responses,
+        times,
+        mask,
+        _zero_global_context(model, short_questions),
+    )
+    long_local = model._local_pre_states(
+        long_questions,
+        long_responses,
+        times,
+        mask,
+        _zero_global_context(model, long_questions),
+    )
 
     # KC 0 has the same first event but a gap of 2 versus 4.
     assert not torch.allclose(short_local[:, 2], long_local[:, 4])
@@ -390,8 +412,12 @@ def test_real_time_gap_affects_kc_read_states():
     # the two KC-0 occurrences differ (2s vs 16s -> gap buckets 1 vs 3).
     short_times = torch.tensor([[0.0, 1.0, 2.0]])
     long_times = torch.tensor([[0.0, 1.0, 16.0]])
-    short_local = model._local_pre_states(questions, responses, short_times, mask)
-    long_local = model._local_pre_states(questions, responses, long_times, mask)
+    short_local = model._local_pre_states(
+        questions, responses, short_times, mask, _zero_global_context(model, questions)
+    )
+    long_local = model._local_pre_states(
+        questions, responses, long_times, mask, _zero_global_context(model, questions)
+    )
     assert not torch.allclose(short_local[:, 2], long_local[:, 2])
 
 
