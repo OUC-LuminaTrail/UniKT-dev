@@ -243,12 +243,16 @@ class ReKTP(nn.Module):
             nn.Dropout(dropout),
         )
         self.global_norm = nn.LayerNorm(hidden_dim)
-        self.out = nn.Sequential(
-            nn.Linear(4 * hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
-        )
+        # IRT prediction head: logit = a·(θ−β), where θ is read from the
+        # 4-way readout features by ``ability_head`` and β is the shared
+        # ``question_diff`` of the predicted (next) question. Zero-initialized
+        # so the model starts at chance (logit 0); the head is a pure
+        # 2PL-style IRT decomposition, interpretable as ability minus
+        # difficulty scaled by the learned discrimination ``a``.
+        self.ability_head = nn.Linear(4 * hidden_dim, 1)
+        nn.init.zeros_(self.ability_head.weight)
+        nn.init.zeros_(self.ability_head.bias)
+        self.irt_disc = nn.Parameter(torch.tensor(1.0))
         self.local_residual_head = nn.Sequential(
             nn.Linear(2 * hidden_dim, hidden_dim),
             nn.ReLU(),
@@ -564,6 +568,18 @@ class ReKTP(nn.Module):
             global_state = block(global_state, mask)
         return self.global_norm(global_state + self.global_ffn(global_state))
 
+    def _irt_term(
+        self, features: torch.Tensor, next_questions: torch.Tensor
+    ) -> torch.Tensor:
+        """IRT logit term ``a·(θ−β)`` — the sole prediction head.
+
+        ``θ`` comes from ``ability_head`` over the readout features and ``β``
+        from the shared ``question_diff`` embedding of the predicted question.
+        """
+        theta = self.ability_head(features).squeeze(-1)
+        beta = self.question_diff(next_questions).squeeze(-1)
+        return self.irt_disc * (theta - beta)
+
     def forward(
         self,
         questions: torch.Tensor,
@@ -592,7 +608,8 @@ class ReKTP(nn.Module):
             ],
             dim=-1,
         )
-        logits = self.out(features).squeeze(-1)
+        next_questions = questions[:, 1:]
+        logits = self._irt_term(features, next_questions)
         logits = logits.masked_fill(~mask[:, 1:], 0.0)
         logits_full = torch.cat([logits, logits.new_zeros(logits.size(0), 1)], dim=1)
         if not return_aux:
@@ -608,7 +625,7 @@ class ReKTP(nn.Module):
             ],
             dim=-1,
         )
-        base_logits = self.out(base_features).squeeze(-1).detach()
+        base_logits = self._irt_term(base_features, next_questions).detach()
         local_residual_logits = self.local_residual_head(
             torch.cat([local_pre_state[:, 1:], event_embedding[:, 1:]], dim=-1)
         ).squeeze(-1)
