@@ -64,6 +64,19 @@ def _dim_kwargs(hidden_dim=16):
     }
 
 
+def _activate_head(model):
+    """Make the zero-initialized IRT head emit non-constant logits.
+
+    ability_head and question_diff start at zero, so a freshly built model
+    returns identically-zero logits and any output comparison passes trivially.
+    """
+    with torch.no_grad():
+        torch.manual_seed(0)
+        model.ability_head.weight.normal_(0.0, 0.2)
+        model.question_diff.weight.normal_(0.0, 0.2)
+    return model
+
+
 def _position_times(questions: torch.Tensor) -> torch.Tensor:
     """Position-index times reproducing the pre-real-time gap semantics."""
     return (
@@ -535,9 +548,9 @@ def test_encoder_variant_backward_has_finite_gradients(encoder_type):
 def test_encoder_variant_does_not_leak_future_response(encoder_type):
     # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
     device = _device_for_encoder(encoder_type)
-    model = _build_model(device, encoder_type=encoder_type)
+    model = _activate_head(_build_model(device, encoder_type=encoder_type))
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    responses = torch.tensor([[1, 0, 1, 1]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -546,4 +559,6 @@ def test_encoder_variant_does_not_leak_future_response(encoder_type):
     changed_responses[:, 2] = 0
     changed = model(questions, changed_responses, times, mask)
 
+    # Guard against a vacuous comparison of identically-zero logits.
+    assert baseline[:, :2].abs().max() > 1e-6
     torch.testing.assert_close(changed[:, :2], baseline[:, :2])
