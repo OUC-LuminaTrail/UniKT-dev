@@ -1,8 +1,19 @@
-"""ReKTP: private question/KC scans with a swappable global history encoder.
+"""ReKTP: private KC scans with a swappable global history encoder.
 
 The global encoder is selected by ``encoder_type`` (``mamba`` / ``lstm`` /
 ``transformer``) so the Mamba block can be ablated against LSTM or causal
 self-attention while keeping the rest of the model fixed.
+
+历史上这里还有一条按题目分段的私有状态扫描。在题目粒度数据集上，同一题在单条
+子序列内几乎不复现（assistments09 实测 0.79%），故该扫描在 99.21% 的位置退化为
+闭式解 ``decay(b_t) ⊙ tanh(W·E_q)``（``b_t = floor(log2(t+1))``），与作答历史严格
+独立 —— 即一个由位置调制的静态题目特征，而非状态记忆。训练后的权重印证了这一点：
+``question_residual`` 范数仅 0.033（同类 ``local_residual`` 为 0.601），说明状态转移
+未被学到，而 ``question_init`` 范数达 4.482，是该分支中最大者。
+
+因此这里保留其实际功能、去掉失效机制：``_question_static_states`` 直接计算上述闭式
+解，省去 argsort + 分段扫描 + scatter，仅放弃 0.79% 复现位置上的作答信息（oracle
+上界 +0.0032）。
 """
 
 import numpy as np
@@ -120,7 +131,11 @@ def build_global_block(
 
 
 class ReKTP(nn.Module):
-    """Question-level KT with decoupled per-KC storage and global interaction."""
+    """Question-level KT with decoupled per-KC storage and global interaction.
+
+    Readout concatenates ``[global_state, question_static_state,
+    local_pre_state, event_embedding]``.
+    """
 
     def __init__(
         self,
@@ -132,7 +147,7 @@ class ReKTP(nn.Module):
         d_state: int = 16,
         d_conv: int = 4,
         expand: int = 2,
-        max_gap_bins: int = 16,
+        max_gap_bins: int = 8,
         residual_scale: float = 0.1,
         dropout: float = 0.2,
         local_credit_scale: float = 0.0,
@@ -152,6 +167,8 @@ class ReKTP(nn.Module):
                 f"hidden_dim ({hidden_dim}) must be divisible by n_heads ({n_heads}) "
                 "for the transformer encoder"
             )
+        if max_gap_bins < 1:
+            raise ValueError("max_gap_bins must be at least 1")
         if residual_scale <= 0.0:
             raise ValueError("residual_scale must be positive")
         if local_credit_scale < 0.0:
@@ -195,11 +212,9 @@ class ReKTP(nn.Module):
         self.local_readout = nn.Linear(3 * hidden_dim, 1)
         self.local_global_film = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.local_credit = nn.Linear(hidden_dim, 1)
-        self.question_residual = nn.Linear(hidden_dim, 2 * hidden_dim)
-        self.question_write = nn.Linear(hidden_dim, hidden_dim)
+        # 题目静态特征通路：等价于原题目扫描在无前驱位置的闭式解。
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
-
         self.global_blocks = nn.ModuleList(
             build_global_block(
                 encoder_type,
@@ -240,8 +255,6 @@ class ReKTP(nn.Module):
             self.local_readout,
             self.local_global_film,
             self.local_credit,
-            self.question_residual,
-            self.question_write,
         ):
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
@@ -473,77 +486,35 @@ class ReKTP(nn.Module):
         )
         return pooled_state, local_state
 
-    def _question_pre_states(
+    def _question_static_states(
         self,
         questions: torch.Tensor,
-        responses: torch.Tensor,
         mask: torch.Tensor,
-        event_embeddings: torch.Tensor,
     ) -> torch.Tensor:
-        """Return the exclusive state of each question at every raw position."""
+        """Return the position-modulated static question feature.
+
+        这是原按题目分段扫描在"无前驱"位置的闭式解：
+
+        ``s_t = exp(-softplus(W_d · e_gap[b_t])) ⊙ tanh(W_init · E_q)``
+
+        其中 ``b_t = floor(log2(t + 1))``。原扫描在 assistments09 上有 99.21% 的
+        位置落入该情形，故此处与其数学等价；差异仅限同题复现位置（0.79%），那些
+        位置原本会叠加作答信息。
+        """
         _, seq_len = questions.shape
         times = torch.arange(seq_len, device=questions.device).unsqueeze(0)
-        times = times.expand_as(questions)
+        # gap 沿用原实现：首次出现记为 t + 1（自序列开头起算）。
+        gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
+        gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1).expand_as(questions)
 
-        invalid_key = (self.num_questions + 1) * (seq_len + 1)
-        sort_key = questions * (seq_len + 1) + times
-        sort_key = torch.where(mask, sort_key, invalid_key + times)
-        order = torch.argsort(sort_key, dim=1, stable=True)
-
-        packed_question = torch.gather(questions, 1, order)
-        packed_time = torch.gather(times, 1, order)
-        packed_response = torch.gather(responses, 1, order)
-        packed_valid = torch.gather(mask, 1, order)
-        gather_index = order.unsqueeze(-1).expand_as(event_embeddings)
-        packed_event = torch.gather(event_embeddings, 1, gather_index)
-
-        previous_time = torch.zeros_like(packed_time)
-        previous_time[:, 1:] = packed_time[:, :-1]
-        same_segment = torch.zeros_like(packed_valid)
-        same_segment[:, 1:] = (
-            packed_valid[:, 1:]
-            & packed_valid[:, :-1]
-            & (packed_question[:, 1:] == packed_question[:, :-1])
-        )
-        gap = torch.where(same_segment, packed_time - previous_time, packed_time + 1)
-        gap_bucket = torch.floor(torch.log2(gap.clamp_min(1).float())).long()
-        gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1)
-
-        question_input = packed_event + self.answer_embed(packed_response)
         decay = torch.exp(
             -torch.nn.functional.softplus(
                 self.question_decay(self.gap_embed(gap_bucket))
             )
         )
-        valid_3d = packed_valid.unsqueeze(-1)
-        decay = torch.where(valid_3d, decay, torch.ones_like(decay))
-        initial_state = torch.tanh(
-            self.question_init(self.question_embed(packed_question))
-        )
-        transition, bias = self._block_affine_transition(
-            question_input,
-            self.question_residual,
-            self.question_write,
-            decay,
-        )
-        initial_blocks = initial_state.reshape(
-            *initial_state.shape[:-1],
-            self.num_state_blocks,
-            self.state_block_size,
-        )
-
-        packed_pre_decay_blocks = segmented_block_affine_exclusive_scan(
-            transition,
-            bias,
-            packed_question,
-            packed_valid,
-            initial_blocks,
-        )
-        packed_pre_decay = packed_pre_decay_blocks.flatten(-2)
-        packed_state = decay * packed_pre_decay
-        question_state = torch.zeros_like(packed_state)
-        question_state.scatter_(1, gather_index, packed_state)
-        return question_state
+        static_state = torch.tanh(self.question_init(self.question_embed(questions)))
+        state = decay * static_state
+        return state.masked_fill(~mask.unsqueeze(-1), 0.0)
 
     def _event_embeddings(
         self, questions: torch.Tensor
@@ -588,14 +559,12 @@ class ReKTP(nn.Module):
             mask,
             global_state,
         )
-        question_pre_state = self._question_pre_states(
-            questions, responses, mask, event_embedding
-        )
+        question_static_state = self._question_static_states(questions, mask)
 
         features = torch.cat(
             [
                 global_state[:, :-1],
-                question_pre_state[:, 1:],
+                question_static_state[:, 1:],
                 local_pre_state[:, 1:],
                 event_embedding[:, 1:],
             ],
@@ -611,7 +580,7 @@ class ReKTP(nn.Module):
         base_features = torch.cat(
             [
                 global_state[:, :-1],
-                question_pre_state[:, 1:],
+                question_static_state[:, 1:],
                 zero_local,
                 event_embedding[:, 1:],
             ],

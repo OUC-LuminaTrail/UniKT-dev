@@ -24,7 +24,6 @@ class ReKTPConfig(ModelConfig):
         encoder_type: Global history encoder to ablate: 'mamba', 'lstm', or
             'transformer'. The rest of the model is identical across choices.
         n_heads: Number of attention heads (only used when encoder_type='transformer').
-        max_gap_bins: Number of logarithmic same-KC gap buckets.
         residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
         local_credit_scale: Maximum centered scalar credit modulation for local
@@ -67,9 +66,6 @@ class ReKTPConfig(ModelConfig):
         default=8,
         metadata={"optuna": {"type": "categorical", "choices": [4, 8]}},
     )
-    max_gap_bins: int = field(
-        default=28, metadata={"optuna": {"type": "int", "low": 8, "high": 32}}
-    )
     residual_scale: float = field(
         default=0.04,
         metadata={"optuna": {"type": "float", "low": 0.02, "high": 0.3, "log": True}},
@@ -106,6 +102,13 @@ class ReKTPTrainer(BaseTrainer):
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
+        # gap 以序列位置为单位，最大为 max_seq_len，桶号为 floor(log2(gap))，
+        # 故可达桶数恰为 floor(log2(max_seq_len)) + 1；更多行永远拿不到梯度。
+        max_seq_len = int(data_src.get_metadata("max_seq_len"))
+        max_gap_bins = max(1, max_seq_len.bit_length())
+        logger.info(
+            "Derived max_gap_bins=%d from max_seq_len=%d", max_gap_bins, max_seq_len
+        )
         logger.info("Initializing ReKTP model...")
         model = ReKTP(
             data_metadata=data_src.get_metadata(),
@@ -116,7 +119,7 @@ class ReKTPTrainer(BaseTrainer):
             d_state=m.d_state,
             d_conv=m.d_conv,
             expand=m.expand,
-            max_gap_bins=m.max_gap_bins,
+            max_gap_bins=max_gap_bins,
             residual_scale=m.residual_scale,
             dropout=m.dropout,
             local_credit_scale=m.local_credit_scale,

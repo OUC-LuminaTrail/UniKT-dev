@@ -44,13 +44,8 @@ def _build_model(device, *, activate_private_writes=True, encoder_type="lstm"):
             model.answer_embed.weight[0].zero_()
             model.answer_embed.weight[1].fill_(0.25)
             identity = torch.eye(model.hidden_dim)
-            for write_layer in (model.local_write, model.question_write):
-                write_layer.weight.copy_(0.05 * identity)
-            for residual_layer in (
-                model.local_residual,
-                model.question_residual,
-            ):
-                residual_layer.weight[:, :].fill_(0.01)
+            model.local_write.weight.copy_(0.05 * identity)
+            model.local_residual.weight[:, :].fill_(0.01)
     return model.to(device).eval()
 
 
@@ -219,34 +214,65 @@ def test_other_kc_response_does_not_change_private_state():
     assert not torch.allclose(changed[:, 2], baseline[:, 2])
 
 
-def test_other_question_response_does_not_change_private_state():
+def test_question_static_state_is_a_pure_function_of_question_and_position():
     model = _build_model(torch.device("cpu"))
-    questions = torch.tensor([[0, 1, 0, 1]])
-    responses = torch.tensor([[1, 0, 1, 0]])
+    with torch.no_grad():
+        # question_decay is zero-initialised, which makes decay gap-independent;
+        # activate it so the position modulation is observable.
+        model.gap_embed.weight.zero_()
+        model.gap_embed.weight[1, 0] = 2.0
+        model.question_decay.weight.zero_()
+        model.question_decay.weight[:, 0] = 1.0
+    mask = torch.ones(1, 4, dtype=torch.bool)
+
+    state = model._question_static_states(torch.tensor([[0, 1, 2, 0]]), mask)
+    repeated = model._question_static_states(torch.tensor([[0, 0, 0, 0]]), mask)
+
+    # Position 0 carries question 0 in both sequences, so the outputs agree.
+    torch.testing.assert_close(state[:, 0], repeated[:, 0])
+    # The same question at gap buckets 0 and 1 is modulated differently.
+    assert not torch.allclose(repeated[:, 0], repeated[:, 1])
+
+
+def test_question_static_state_matches_removed_scan_without_repeats():
+    # The pathway is the closed form the original per-question scan collapsed to
+    # at positions with no predecessor: decay(floor(log2(t+1))) * tanh(W E_q).
+    model = _build_model(torch.device("cpu"))
+    questions = torch.tensor([[0, 1, 2, 1]])
     mask = torch.ones_like(questions, dtype=torch.bool)
-    event_embeddings, _ = model._event_embeddings(questions)
 
-    baseline = model._question_pre_states(questions, responses, mask, event_embeddings)
-    changed_responses = responses.clone()
-    changed_responses[:, 0] = 0
-    changed = model._question_pre_states(
-        questions, changed_responses, mask, event_embeddings
+    times = torch.arange(questions.size(1)).unsqueeze(0)
+    gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
+    gap_bucket = gap_bucket.clamp_max(model.max_gap_bins - 1).expand_as(questions)
+    decay = torch.exp(
+        -torch.nn.functional.softplus(model.question_decay(model.gap_embed(gap_bucket)))
     )
+    expected = decay * torch.tanh(model.question_init(model.question_embed(questions)))
 
-    # Question 1 has an independent segment, while question 0 retrieves its update.
-    torch.testing.assert_close(changed[:, 3], baseline[:, 3])
-    assert not torch.allclose(changed[:, 2], baseline[:, 2])
+    actual = model._question_static_states(questions, mask)
+
+    torch.testing.assert_close(actual, expected)
 
 
-def test_current_gap_affects_question_and_kc_read_states():
+def test_question_static_state_zeroes_padding():
+    model = _build_model(torch.device("cpu"))
+    questions = torch.tensor([[0, 1, 2, 0]])
+    mask = torch.tensor([[True, True, False, False]])
+
+    state = model._question_static_states(questions, mask)
+
+    assert torch.all(state[:, 2:] == 0.0)
+    assert not torch.all(state[:, :2] == 0.0)
+
+
+def test_current_gap_affects_kc_read_states():
     model = _build_model(torch.device("cpu"))
     with torch.no_grad():
         model.gap_embed.weight.zero_()
         model.gap_embed.weight[2, 0] = 2.0
-        for decay_layer in (model.local_decay, model.question_decay):
-            decay_layer.weight.zero_()
-            decay_layer.bias.zero_()
-            decay_layer.weight[:, 0] = 1.0
+        model.local_decay.weight.zero_()
+        model.local_decay.bias.zero_()
+        model.local_decay.weight[:, 0] = 1.0
 
     short_questions = torch.tensor([[0, 1, 0, 1, 1]])
     long_questions = torch.tensor([[0, 1, 1, 1, 0]])
@@ -256,18 +282,9 @@ def test_current_gap_affects_question_and_kc_read_states():
 
     short_local, _ = model._local_pre_states(short_questions, short_responses, mask)
     long_local, _ = model._local_pre_states(long_questions, long_responses, mask)
-    short_event, _ = model._event_embeddings(short_questions)
-    long_event, _ = model._event_embeddings(long_questions)
-    short_question = model._question_pre_states(
-        short_questions, short_responses, mask, short_event
-    )
-    long_question = model._question_pre_states(
-        long_questions, long_responses, mask, long_event
-    )
 
-    # KC/question 0 has the same first event but a gap of 2 versus 4.
+    # KC 0 has the same first event but a gap of 2 versus 4.
     assert not torch.allclose(short_local[:, 2], long_local[:, 4])
-    assert not torch.allclose(short_question[:, 2], long_question[:, 4])
 
 
 def test_target_answer_does_not_leak_into_its_prediction():
