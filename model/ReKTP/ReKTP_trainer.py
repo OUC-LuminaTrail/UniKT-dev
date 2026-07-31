@@ -33,7 +33,6 @@ class ReKTPConfig(ModelConfig):
         dropout: Dropout probability.
         local_credit_scale: Maximum centered scalar credit modulation for local
             write bias; 0 disables the gate.
-        local_aux_weight: Weight for the local residual auxiliary objective.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
         weight_decay: Adam weight decay.
@@ -79,7 +78,6 @@ class ReKTPConfig(ModelConfig):
         default=0.4, metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}}
     )
     local_credit_scale: float = 0.0
-    local_aux_weight: float = 0.0
     question_embed_dim: int = field(
         default=-1,
         metadata={
@@ -162,44 +160,19 @@ class ReKTPTrainer(BaseTrainer):
         responses = self._move_tensor_to_device(responses)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        use_local_aux = self.run_config.model.local_aux_weight > 0.0
-        if use_local_aux:
-            logits_full, aux_logits_full = self.model(
-                questions,
-                responses,
-                mask,
-                return_aux=True,
-            )
-        else:
-            logits_full = self.model(questions, responses, mask)
-            aux_logits_full = None
+        logits_full = self.model(questions, responses, mask)
         logits, labels, _ = self._extract_valid_predictions(
             logits_full, responses, mask, same_position=False
         )
         logits, labels = self._handle_empty_batch(logits, labels)
         probabilities = torch.sigmoid(logits)
-        output = {
+        return {
             "y_hat": logits,
             "y_label": labels,
             "y_predict": self._generate_binary_predictions(logits, threshold=0.0),
             "y_score": logits,
             "y_prob": probabilities,
         }
-        if aux_logits_full is not None:
-            aux_logits, _, _ = self._extract_valid_predictions(
-                aux_logits_full, responses, mask, same_position=False
-            )
-            aux_logits, _ = self._handle_empty_batch(aux_logits, labels)
-            output["local_aux_y_hat"] = aux_logits
-        return output
-
-    def _compute_loss(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
-        loss = super()._compute_loss(outputs)
-        aux_weight = self.run_config.model.local_aux_weight
-        if aux_weight <= 0.0 or "local_aux_y_hat" not in outputs:
-            return loss
-        aux_loss = self.loss(outputs["local_aux_y_hat"], outputs["y_label"])
-        return loss + aux_weight * aux_loss
 
 
 __all__ = ["ReKTPConfig", "ReKTPTrainer"]

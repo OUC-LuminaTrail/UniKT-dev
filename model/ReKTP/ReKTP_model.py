@@ -253,12 +253,6 @@ class ReKTP(nn.Module):
         nn.init.zeros_(self.ability_head.weight)
         nn.init.zeros_(self.ability_head.bias)
         self.irt_disc = nn.Parameter(torch.tensor(1.0))
-        self.local_residual_head = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1),
-        )
 
         nn.init.zeros_(self.question_diff.weight)
         for layer in (
@@ -585,8 +579,7 @@ class ReKTP(nn.Module):
         questions: torch.Tensor,
         responses: torch.Tensor,
         mask: torch.Tensor,
-        return_aux: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    ) -> torch.Tensor:
         """Return next-item logits where output[t] predicts response[t+1]."""
         mask = mask.bool()
         event_embedding, _ = self._event_embeddings(questions)
@@ -611,31 +604,7 @@ class ReKTP(nn.Module):
         next_questions = questions[:, 1:]
         logits = self._irt_term(features, next_questions)
         logits = logits.masked_fill(~mask[:, 1:], 0.0)
-        logits_full = torch.cat([logits, logits.new_zeros(logits.size(0), 1)], dim=1)
-        if not return_aux:
-            return logits_full
-
-        zero_local = torch.zeros_like(local_pre_state[:, 1:])
-        base_features = torch.cat(
-            [
-                global_state[:, :-1],
-                question_static_state[:, 1:],
-                zero_local,
-                event_embedding[:, 1:],
-            ],
-            dim=-1,
-        )
-        base_logits = self._irt_term(base_features, next_questions).detach()
-        local_residual_logits = self.local_residual_head(
-            torch.cat([local_pre_state[:, 1:], event_embedding[:, 1:]], dim=-1)
-        ).squeeze(-1)
-        aux_logits = base_logits + local_residual_logits
-        aux_logits = aux_logits.masked_fill(~mask[:, 1:], 0.0)
-        aux_logits_full = torch.cat(
-            [aux_logits, aux_logits.new_zeros(aux_logits.size(0), 1)],
-            dim=1,
-        )
-        return logits_full, aux_logits_full
+        return torch.cat([logits, logits.new_zeros(logits.size(0), 1)], dim=1)
 
 
 __all__ = ["ReKTP"]

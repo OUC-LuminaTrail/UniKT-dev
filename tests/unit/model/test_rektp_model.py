@@ -397,20 +397,6 @@ def test_target_answer_does_not_leak_into_its_prediction():
     torch.testing.assert_close(changed[:, 1], baseline[:, 1])
 
 
-def test_forward_with_auxiliary_logits_matches_main_shape():
-    device = torch.device("cpu")
-    model = _build_model(device)
-    questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0]], device=device)
-    mask = torch.ones_like(questions, dtype=torch.bool)
-
-    logits, aux_logits = model(questions, responses, mask, return_aux=True)
-
-    assert logits.shape == aux_logits.shape == questions.shape
-    assert torch.isfinite(logits).all()
-    assert torch.isfinite(aux_logits).all()
-
-
 def test_forward_backward_has_finite_gradients():
     device = torch.device("cpu")
     model = _build_model(device).train()
@@ -455,21 +441,6 @@ def test_encoder_variant_forward_handles_padding(encoder_type):
 
     assert logits.shape == questions.shape
     assert torch.isfinite(logits).all()
-
-
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
-def test_encoder_variant_aux_logits_match_shape(encoder_type):
-    device = _device_for_encoder(encoder_type)
-    model = _build_model(device, encoder_type=encoder_type)
-    questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0]], device=device)
-    mask = torch.ones_like(questions, dtype=torch.bool)
-
-    logits, aux_logits = model(questions, responses, mask, return_aux=True)
-
-    assert logits.shape == aux_logits.shape == questions.shape
-    assert torch.isfinite(logits).all()
-    assert torch.isfinite(aux_logits).all()
 
 
 @pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
