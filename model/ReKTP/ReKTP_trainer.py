@@ -111,21 +111,7 @@ class ReKTPTrainer(BaseTrainer):
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
-        max_gap_bins = extra.get("max_gap_bins")
-        if max_gap_bins is None:
-            max_seq_len = int(data_src.get_metadata("max_seq_len"))
-            max_gap_bins = max(1, max_seq_len.bit_length())
-            logger.info(
-                "Falling back to max_gap_bins=%d from max_seq_len=%d",
-                max_gap_bins,
-                max_seq_len,
-            )
-        else:
-            max_gap_bins = int(max_gap_bins)
-            logger.info(
-                "Derived max_gap_bins=%d from the largest intra-sequence time span",
-                max_gap_bins,
-            )
+        max_gap_bins = int(extra["max_gap_bins"])
         logger.info("Initializing ReKTP model...")
         model = ReKTP(
             data_metadata=data_src.get_metadata(),
