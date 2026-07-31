@@ -31,10 +31,6 @@ class ReKTPConfig(ModelConfig):
             cutting per-question parameters to ``num_questions * dim``.
         residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
-        use_skill_cross_effect: Enable the linear-time Hawkes-style skill branch.
-        cross_effect_rank: Low-rank width per cross-effect timescale.
-        cross_effect_num_scales: Number of fixed exponential timescales, including
-            one persistent component.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
         weight_decay: Adam weight decay.
@@ -78,15 +74,6 @@ class ReKTPConfig(ModelConfig):
     )
     dropout: float = field(
         default=0.4, metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}}
-    )
-    use_skill_cross_effect: bool = False
-    cross_effect_rank: int = field(
-        default=16,
-        metadata={"optuna": {"type": "categorical", "choices": [8, 16, 32]}},
-    )
-    cross_effect_num_scales: int = field(
-        default=4,
-        metadata={"optuna": {"type": "categorical", "choices": [2, 4, 8]}},
     )
     question_embed_dim: int = field(
         default=-1,
@@ -140,9 +127,6 @@ class ReKTPTrainer(BaseTrainer):
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),
-            use_skill_cross_effect=m.use_skill_cross_effect,
-            cross_effect_rank=m.cross_effect_rank,
-            cross_effect_num_scales=m.cross_effect_num_scales,
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

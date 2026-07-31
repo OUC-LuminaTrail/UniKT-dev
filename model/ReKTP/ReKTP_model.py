@@ -9,7 +9,6 @@ import torch
 from torch import nn
 
 from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
-from model.ReKTP.skill_cross_effect import SkillCrossEffect
 
 # Global sequence-encoder types selectable via ``encoder_type``.
 GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer")
@@ -161,9 +160,6 @@ class ReKTP(nn.Module):
         encoder_type: str = "mamba",
         n_heads: int = 8,
         question_embed_dim: int | None = None,
-        use_skill_cross_effect: bool = False,
-        cross_effect_rank: int = 16,
-        cross_effect_num_scales: int = 4,
     ):
         super().__init__()
         if encoder_type not in GLOBAL_ENCODER_TYPES:
@@ -189,7 +185,6 @@ class ReKTP(nn.Module):
         self.state_block_size = 2
         self.num_state_blocks = hidden_dim // self.state_block_size
         self.residual_scale = residual_scale
-        self.use_skill_cross_effect = use_skill_cross_effect
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
         skill_mask = torch.as_tensor(question_skill_mask, dtype=torch.bool)
@@ -259,16 +254,6 @@ class ReKTP(nn.Module):
             nn.Dropout(dropout),
         )
         self.global_norm = nn.LayerNorm(hidden_dim)
-        self.skill_cross_effect = (
-            SkillCrossEffect(
-                num_skills=self.num_skills,
-                rank=cross_effect_rank,
-                num_scales=cross_effect_num_scales,
-                max_gap_bins=max_gap_bins,
-            )
-            if use_skill_cross_effect
-            else None
-        )
         # IRT prediction head: logit = a·(θ−β), where θ is read from the
         # 4-way readout features by ``ability_head`` and β is the shared
         # ``question_diff`` of the predicted (next) question. Zero-initialized
@@ -629,18 +614,6 @@ class ReKTP(nn.Module):
             global_state,
         )
         question_static_state = self._question_static_states(questions, times, mask)
-        if self.skill_cross_effect is None:
-            cross_effect = None
-        else:
-            skill_ids = self.question_skill_ids[questions]
-            skill_mask = self.question_skill_mask[questions]
-            cross_effect = self.skill_cross_effect(
-                skill_ids,
-                skill_mask,
-                responses,
-                times,
-                mask,
-            )
 
         features = torch.cat(
             [
@@ -653,8 +626,6 @@ class ReKTP(nn.Module):
         )
         next_questions = questions[:, 1:]
         logits = self._irt_term(features, next_questions)
-        if cross_effect is not None:
-            logits = logits + cross_effect[:, 1:]
         logits = logits.masked_fill(~mask[:, 1:], 0.0)
         return torch.cat([logits, logits.new_zeros(logits.size(0), 1)], dim=1)
 
