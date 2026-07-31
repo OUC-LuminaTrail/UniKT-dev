@@ -35,6 +35,7 @@ class ReKTPConfig(ModelConfig):
         learning_rate: Adam learning rate.
         weight_decay: Adam weight decay.
         batch_size: Training batch size.
+        max_clip_grad_norm: Maximum gradient clipping norm.
     """
 
     hidden_dim: int = field(
@@ -55,19 +56,8 @@ class ReKTPConfig(ModelConfig):
         default=4,
         metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
     )
-    encoder_type: str = field(
-        default="mamba",
-        metadata={
-            "optuna": {
-                "type": "categorical",
-                "choices": ["mamba", "lstm", "transformer"],
-            }
-        },
-    )
-    n_heads: int = field(
-        default=8,
-        metadata={"optuna": {"type": "categorical", "choices": [4, 8]}},
-    )
+    encoder_type: str = field(default="mamba")
+    n_heads: int = field(default=8)
     residual_scale: float = field(
         default=0.04,
         metadata={"optuna": {"type": "float", "low": 0.02, "high": 0.3, "log": True}},
@@ -93,6 +83,10 @@ class ReKTPConfig(ModelConfig):
     batch_size: int = field(
         default=32,
         metadata={"optuna": {"type": "categorical", "choices": [32, 64, 80, 128]}},
+    )
+    max_clip_grad_norm: float = field(
+        default=15.0,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 20, "log": True}},
     )
 
 
@@ -136,7 +130,7 @@ class ReKTPTrainer(BaseTrainer):
             optimizer=optimizer,
             loss_fn=torch.nn.BCEWithLogitsLoss(),
             lr_scheduler=None,
-            max_clip_grad_norm=15.0,
+            max_clip_grad_norm=m.max_clip_grad_norm,
             train_data=train_data,
             val_data=val_data,
             test_data=test_data,

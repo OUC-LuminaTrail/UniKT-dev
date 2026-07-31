@@ -88,9 +88,7 @@ def _position_times(questions: torch.Tensor) -> torch.Tensor:
 
 def _zero_global_context(model, questions: torch.Tensor) -> torch.Tensor:
     """Zero global context; the film layer then leaves the input unchanged."""
-    return torch.zeros(
-        *questions.shape, model.hidden_dim, device=questions.device
-    )
+    return torch.zeros(*questions.shape, model.hidden_dim, device=questions.device)
 
 
 def test_default_question_embed_dim_matches_hidden_dim():
@@ -301,7 +299,11 @@ def test_other_kc_response_does_not_change_private_state():
     changed_responses = responses.clone()
     changed_responses[:, 0] = 0
     changed = model._local_pre_states(
-        questions, changed_responses, times, mask, _zero_global_context(model, questions)
+        questions,
+        changed_responses,
+        times,
+        mask,
+        _zero_global_context(model, questions),
     )
 
     # Position 3 addresses KC 1, so changing KC 0 at position 0 cannot alter it.
