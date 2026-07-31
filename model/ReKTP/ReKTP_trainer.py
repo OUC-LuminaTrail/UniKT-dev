@@ -31,8 +31,6 @@ class ReKTPConfig(ModelConfig):
             cutting per-question parameters to ``num_questions * dim``.
         residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
-        local_credit_scale: Maximum centered scalar credit modulation for local
-            write bias; 0 disables the gate.
         use_skill_cross_effect: Enable the linear-time Hawkes-style skill branch.
         cross_effect_rank: Low-rank width per cross-effect timescale.
         cross_effect_num_scales: Number of fixed exponential timescales, including
@@ -81,7 +79,6 @@ class ReKTPConfig(ModelConfig):
     dropout: float = field(
         default=0.4, metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}}
     )
-    local_credit_scale: float = 0.0
     use_skill_cross_effect: bool = False
     cross_effect_rank: int = field(
         default=16,
@@ -138,7 +135,6 @@ class ReKTPTrainer(BaseTrainer):
             max_gap_bins=max_gap_bins,
             residual_scale=m.residual_scale,
             dropout=m.dropout,
-            local_credit_scale=m.local_credit_scale,
             encoder_type=m.encoder_type,
             n_heads=m.n_heads,
             question_embed_dim=(

@@ -158,7 +158,6 @@ class ReKTP(nn.Module):
         max_gap_bins: int = 8,
         residual_scale: float = 0.1,
         dropout: float = 0.2,
-        local_credit_scale: float = 0.0,
         encoder_type: str = "mamba",
         n_heads: int = 8,
         question_embed_dim: int | None = None,
@@ -183,8 +182,6 @@ class ReKTP(nn.Module):
             raise ValueError("max_gap_bins must be at least 1")
         if residual_scale <= 0.0:
             raise ValueError("residual_scale must be positive")
-        if local_credit_scale < 0.0:
-            raise ValueError("local_credit_scale must be non-negative")
         self.num_questions = int(data_metadata["num_questions"])
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
@@ -192,7 +189,6 @@ class ReKTP(nn.Module):
         self.state_block_size = 2
         self.num_state_blocks = hidden_dim // self.state_block_size
         self.residual_scale = residual_scale
-        self.local_credit_scale = local_credit_scale
         self.use_skill_cross_effect = use_skill_cross_effect
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
@@ -240,7 +236,6 @@ class ReKTP(nn.Module):
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
         self.local_readout = nn.Linear(3 * hidden_dim, 1)
         self.local_global_film = nn.Linear(hidden_dim, 2 * hidden_dim)
-        self.local_credit = nn.Linear(hidden_dim, 1)
         # Static question-feature pathway, modulated by sequence position.
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
@@ -291,7 +286,6 @@ class ReKTP(nn.Module):
             self.local_write,
             self.local_readout,
             self.local_global_film,
-            self.local_credit,
         ):
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
@@ -357,18 +351,6 @@ class ReKTP(nn.Module):
     ) -> torch.Tensor:
         gamma, beta = self.local_global_film(global_context).chunk(2, dim=-1)
         return local_input * (1.0 + gamma) + beta
-
-    def _apply_local_credit(
-        self,
-        bias: torch.Tensor,
-        local_input: torch.Tensor,
-    ) -> torch.Tensor:
-        if self.local_credit_scale <= 0.0:
-            return bias
-        credit = 1.0 + self.local_credit_scale * torch.tanh(
-            self.local_credit(local_input)
-        )
-        return bias * credit.unsqueeze(-1)
 
     def _block_affine_transition(
         self,
@@ -524,7 +506,6 @@ class ReKTP(nn.Module):
             self.local_write,
             decay,
         )
-        bias = self._apply_local_credit(bias, local_input)
         initial_blocks = initial_state.reshape(
             *initial_state.shape[:-1],
             self.num_state_blocks,
