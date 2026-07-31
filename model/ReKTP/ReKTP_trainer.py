@@ -107,7 +107,7 @@ class ReKTPTrainer(BaseTrainer):
         from model.ReKTP.ReKTP_data import ReKTPModelData
         from model.ReKTP.ReKTP_model import ReKTP
 
-        model_data = ReKTPModelData(data_src, cache=rc.general.cache)
+        model_data = ReKTPModelData(data_src)
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
