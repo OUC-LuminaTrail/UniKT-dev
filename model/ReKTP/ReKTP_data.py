@@ -77,6 +77,7 @@ def derive_max_gap_bins(time_seqs: np.ndarray) -> int:
 
 class ReKTPModelData(QuestionModelData):
     """Prepare original question sequences and a separate question-KC view."""
+
     @override
     def prepare_data(self, rc: Any):
         fold_idx = rc.data.fold if rc.data.fold >= 0 else None
