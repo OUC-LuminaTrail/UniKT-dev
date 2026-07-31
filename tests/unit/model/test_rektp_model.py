@@ -562,3 +562,28 @@ def test_encoder_variant_does_not_leak_future_response(encoder_type):
     # Guard against a vacuous comparison of identically-zero logits.
     assert baseline[:, :2].abs().max() > 1e-6
     torch.testing.assert_close(changed[:, :2], baseline[:, :2])
+
+
+@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
+def test_global_encoder_state_is_truncation_invariant(encoder_type):
+    # The blocks carry no key-padding mask: they rely on padding being trailing,
+    # so a valid position's state must not depend on how much padding follows.
+    # Breaking this (left padding, or a non-causal block) invalidates the design.
+    device = _device_for_encoder(encoder_type)
+    model = _build_model(device, encoder_type=encoder_type)
+    questions = torch.tensor([[0, 1, 2]], device=device)
+    responses = torch.tensor([[1, 0, 1]], device=device)
+
+    event, _ = model._event_embeddings(questions)
+    short = model._global_history_states(
+        event, responses, torch.ones_like(questions, dtype=torch.bool)
+    )
+
+    padded_questions = torch.tensor([[0, 1, 2, 1, 0]], device=device)
+    padded_responses = torch.tensor([[1, 0, 1, 1, 0]], device=device)
+    padded_mask = torch.tensor([[True, True, True, False, False]], device=device)
+    padded_event, _ = model._event_embeddings(padded_questions)
+    padded = model._global_history_states(padded_event, padded_responses, padded_mask)
+
+    assert short.abs().max() > 1e-6
+    torch.testing.assert_close(padded[:, :3], short)

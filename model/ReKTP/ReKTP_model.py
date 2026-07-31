@@ -63,31 +63,49 @@ class GlobalLSTMBlock(nn.Module):
 
 
 class GlobalTransformerBlock(nn.Module):
-    """Causal self-attention block with the same residual shell."""
+    """Causal self-attention block with the same residual shell.
+
+    Requires trailing (right-side) padding, which the sequence builder
+    guarantees. ``mask`` is accepted for interface parity but unused: under
+    right padding the causal mask alone already hides every padding key from
+    every valid query.
+    """
 
     def __init__(self, d_model: int, n_heads: int, dropout: float):
         super().__init__()
         self.attn = nn.MultiheadAttention(
             d_model, n_heads, dropout=dropout, batch_first=True
         )
+        self.n_heads = n_heads
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
     def forward(
         self, x: torch.Tensor, mask: torch.Tensor | None = None
     ) -> torch.Tensor:
-        seq_len = x.size(1)
-        # Causal mask: hide future positions so predicting t+1 cannot see it.
-        causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device),
-            diagonal=1,
+        # Projections come from ``self.attn`` so parameter names and their
+        # initialization are unchanged; only the attention call is fused.
+        # No key-padding mask: padding is trailing, so every padding key sits at
+        # an index above any valid query and the causal mask already hides it.
+        batch_size, seq_len, d_model = x.shape
+        head_dim = d_model // self.n_heads
+        projected = torch.nn.functional.linear(
+            x, self.attn.in_proj_weight, self.attn.in_proj_bias
         )
-        # Also mask padding keys. Valid queries always see themselves, so no
-        # row becomes fully masked and produces NaN.
-        key_padding_mask = None if mask is None else ~mask.bool()
-        out, _ = self.attn(
-            x, x, x, attn_mask=causal_mask, key_padding_mask=key_padding_mask
+        query, key, value = projected.chunk(3, dim=-1)
+        head_shape = (batch_size, seq_len, self.n_heads, head_dim)
+        query, key, value = (
+            tensor.view(head_shape).transpose(1, 2) for tensor in (query, key, value)
         )
+        attended = torch.nn.functional.scaled_dot_product_attention(
+            query,
+            key,
+            value,
+            dropout_p=self.attn.dropout if self.training else 0.0,
+            is_causal=True,
+        )
+        attended = attended.transpose(1, 2).reshape(batch_size, seq_len, d_model)
+        out = self.attn.out_proj(attended)
         return self.norm(x + self.dropout(out))
 
 
