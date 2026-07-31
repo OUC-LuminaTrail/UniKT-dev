@@ -49,6 +49,96 @@ def _build_model(device, *, activate_private_writes=True, encoder_type="lstm"):
     return model.to(device).eval()
 
 
+def _dim_kwargs(hidden_dim=16):
+    return {
+        "data_metadata": {"num_questions": 3, "num_skills": 2},
+        "question_skill_ids": torch.tensor([[0, 2], [1, 2], [0, 1]]),
+        "question_skill_mask": torch.tensor(
+            [[True, False], [True, False], [True, True]]
+        ),
+        "hidden_dim": hidden_dim,
+        "n_blocks": 1,
+        "encoder_type": "lstm",
+        "max_gap_bins": 4,
+        "dropout": 0.0,
+    }
+
+
+def test_default_question_embed_dim_matches_hidden_dim():
+    model = ReKTP(**_dim_kwargs())
+
+    assert model.question_embed_dim == model.hidden_dim
+    # At full width the shared projection is skipped entirely.
+    assert model.question_embed_proj is None
+    assert model.question_embed.weight.shape == (3, 16)
+
+
+@pytest.mark.parametrize("dim", [4, 8])
+def test_low_dim_question_embed_shrinks_per_question_parameters(dim):
+    full = ReKTP(**_dim_kwargs())
+    reduced = ReKTP(**_dim_kwargs(), question_embed_dim=dim)
+
+    assert reduced.question_embed.weight.shape == (3, dim)
+    assert reduced.question_embed_proj is not None
+    # Per-question rows shrink; the shared projection is independent of them.
+    assert reduced.question_embed.weight.numel() < full.question_embed.weight.numel()
+
+
+@pytest.mark.parametrize("dim", [4, 16])
+def test_question_vector_is_always_hidden_dim_wide(dim):
+    model = ReKTP(**_dim_kwargs(), question_embed_dim=dim).eval()
+
+    with torch.no_grad():
+        vector = model._question_vector(torch.tensor([[0, 1, 2]]))
+
+    assert vector.shape == (1, 3, 16)
+    assert torch.isfinite(vector).all()
+
+
+def test_zero_dim_removes_the_question_pathway():
+    model = ReKTP(**_dim_kwargs(), question_embed_dim=0)
+
+    assert model.question_embed is None
+    assert model.question_embed_proj is None
+    vector = model._question_vector(torch.tensor([[0, 1, 2]]))
+    assert vector.shape == (1, 3, 16)
+    assert torch.all(vector == 0.0)
+
+
+def test_zero_dim_drops_exactly_the_question_rows():
+    full = ReKTP(**_dim_kwargs())
+    ablated = ReKTP(**_dim_kwargs(), question_embed_dim=0)
+
+    dropped = sum(p.numel() for p in full.parameters()) - sum(
+        p.numel() for p in ablated.parameters()
+    )
+    assert dropped == 3 * 16
+
+
+def test_zero_dim_still_runs_and_keeps_the_difficulty_scalar():
+    model = ReKTP(**_dim_kwargs(), question_embed_dim=0).eval()
+    with torch.no_grad():
+        # question_diff is zero-initialised, so activate it to expose the scalar.
+        model.question_diff.weight.normal_(0.0, 0.5)
+    questions = torch.tensor([[0, 1, 2, 0]])
+    responses = torch.tensor([[1, 0, 1, 0]])
+    mask = torch.ones_like(questions, dtype=torch.bool)
+
+    with torch.no_grad():
+        logits = model(questions, responses, mask)
+        shifted = model(questions.roll(1, dims=1), responses, mask)
+
+    assert logits.shape == questions.shape
+    assert torch.isfinite(logits).all()
+    # Question identity still reaches the output through question_diff and KCs.
+    assert not torch.allclose(logits, shifted)
+
+
+def test_negative_question_embed_dim_is_rejected():
+    with pytest.raises(ValueError, match="question_embed_dim must be non-negative"):
+        ReKTP(**_dim_kwargs(), question_embed_dim=-2)
+
+
 def test_model_requires_complete_2x2_state_blocks():
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])

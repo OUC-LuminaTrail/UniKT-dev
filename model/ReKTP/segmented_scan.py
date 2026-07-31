@@ -121,7 +121,7 @@ def segmented_block_affine_exclusive_scan(
     if matrix.size(1) == 0:
         return torch.zeros_like(initial_state)
 
-    # CUDA 路径走 fused Triton kernel（含可微分反向），CPU 路径保持 PyTorch 实现。
+    # CUDA uses the fused differentiable Triton kernel; CPU stays on PyTorch.
     if matrix.is_cuda:
         try:
             from model.ReKTP.triton_scan import (
@@ -132,7 +132,7 @@ def segmented_block_affine_exclusive_scan(
                 matrix, bias, segment_ids, valid_mask, initial_state
             )
         except ImportError:
-            pass  # triton 不可用时回退到 PyTorch 实现。
+            pass  # Fall back to PyTorch when triton is unavailable.
     return _segmented_block_affine_exclusive_scan_py(
         matrix, bias, segment_ids, valid_mask, initial_state
     )

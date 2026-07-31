@@ -21,9 +21,14 @@ class ReKTPConfig(ModelConfig):
         d_state: Mamba SSM state dimension (only used when encoder_type='mamba').
         d_conv: Mamba local convolution width (only used when encoder_type='mamba').
         expand: Mamba internal expansion factor (only used when encoder_type='mamba').
-        encoder_type: Global history encoder to ablate: 'mamba', 'lstm', or
-            'transformer'. The rest of the model is identical across choices.
+        encoder_type: Global history encoder: 'mamba', 'lstm', or 'transformer'.
+            The rest of the model is identical across choices.
         n_heads: Number of attention heads (only used when encoder_type='transformer').
+        question_embed_dim: Intrinsic width of the per-question embedding; -1
+            (default) means ``hidden_dim`` and 0 removes the pathway, leaving
+            question identity to the ``question_diff`` scalar and the KC side.
+            Widths below ``hidden_dim`` are lifted back by a shared projection,
+            cutting per-question parameters to ``num_questions * dim``.
         residual_scale: Maximum Frobenius scale of each 2x2 residual block.
         dropout: Dropout probability.
         local_credit_scale: Maximum centered scalar credit modulation for local
@@ -75,6 +80,12 @@ class ReKTPConfig(ModelConfig):
     )
     local_credit_scale: float = 0.0
     local_aux_weight: float = 0.0
+    question_embed_dim: int = field(
+        default=-1,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0, 8, 16, 32, 64, 128, 256]}
+        },
+    )
     epochs: int = 100
     learning_rate: float = field(
         default=2.7e-3,
@@ -102,8 +113,8 @@ class ReKTPTrainer(BaseTrainer):
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
-        # gap 以序列位置为单位，最大为 max_seq_len，桶号为 floor(log2(gap))，
-        # 故可达桶数恰为 floor(log2(max_seq_len)) + 1；更多行永远拿不到梯度。
+        # Gaps are sequence positions bounded by max_seq_len and bucketed as
+        # floor(log2(gap)), so exactly floor(log2(max_seq_len)) + 1 rows exist.
         max_seq_len = int(data_src.get_metadata("max_seq_len"))
         max_gap_bins = max(1, max_seq_len.bit_length())
         logger.info(
@@ -125,6 +136,9 @@ class ReKTPTrainer(BaseTrainer):
             local_credit_scale=m.local_credit_scale,
             encoder_type=m.encoder_type,
             n_heads=m.n_heads,
+            question_embed_dim=(
+                None if m.question_embed_dim < 0 else m.question_embed_dim
+            ),
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

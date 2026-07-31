@@ -1,24 +1,19 @@
-"""Triton 加速的分段块仿射独占扫描（含正向与反向 kernel）。
+"""Triton kernels for the segmented block-affine exclusive scan.
 
-ReKTP 的核心计算是 ``h' = A h + b`` 形式的分段独占前缀扫描：每个位置携带一个
-固定的 2x2 块算子 ``A`` 与偏置 ``b``，输出为应用该算子之前的状态。原始 PyTorch
-实现用 Python 递归的工作高效 (Blelloch) 扫描，层级深、中间张量多、kernel launch
-开销大。本文件用 fused Triton kernel 替代：
+Each position carries a fixed 2x2 block operator ``A`` and bias ``b``; the scan
+returns the state before that operator is applied, resetting at segment
+boundaries.
 
-- 正向：每个 program 处理一个 batch row，沿 ``hidden_block`` 维度向量化，沿序列
-  维度做带段边界 reset 的顺序独占扫描。
-- 反向：线性递归 ``h_{i+1} = A_i h_i + b_i`` 的伴随 (adjoint) 反向扫描，外加一个
-  正向前缀扫描用于还原 ``d init``。
+- Forward: one program per batch row, vectorised over ``hidden_block``, running
+  a sequential exclusive scan with segment resets along the sequence.
+- Backward: an adjoint reverse scan over the recurrence
+  ``h_{i+1} = A_i h_i + b_i``, plus a forward prefix scan to recover ``d init``.
 
-数值上与 PyTorch 实现等价（浮点结合顺序不同导致的舍入差异在 1e-6 量级），对训练
-结果的影响可忽略。仅覆盖 GPU/CUDA 路径；CPU 仍走 ``segmented_scan.py`` 的 PyTorch
-实现。
+``d matrix`` / ``d bias`` match PyTorch autograd only while ``initial_state`` is
+constant within a segment, which holds because it is derived from the segment id.
+``d init`` is exact per position (``prefix_i^T @ g_i``) regardless.
 
-注：反向的 ``d matrix`` / ``d bias`` 把扫描视为段内线性递归
-``h_{i+1} = A_i h_i + b_i``（``h_s = init``），仅在 ``initial_state`` 段内恒定时与
-PyTorch autograd 严格一致。ReKTP 的 ``initial_state = tanh(proj(embed(skill|question)))``
-天然满足这一条件（同段 skill/question id 相同）。``d init`` 则逐位置精确
-(``prefix_i^T @ g_i``)，与恒定性无关。
+CUDA only; CPU uses the PyTorch implementation in ``segmented_scan.py``.
 """
 
 import torch
@@ -42,16 +37,16 @@ def _fwd_kernel(
     stride_vn,
     BLOCK_H: tl.constexpr,
 ):
-    """单 batch row 的正向分段块仿射独占扫描。
+    """Forward segmented block-affine exclusive scan for one batch row.
 
-    carry 为当前位置的独占前缀仿射算子；段头处置重置为单位算子，无效位置算子视
-    为单位算子、输出为 0。
+    ``carry`` holds the exclusive prefix operator; it resets to the identity at
+    each segment head. Invalid positions act as the identity and output zero.
     """
     pid_b = tl.program_id(0)
     h_offs = tl.arange(0, BLOCK_H)
     h_mask = h_offs < H
 
-    # carry = 单位仿射算子 (A=I, b=0)。
+    # carry = identity affine operator (A=I, b=0).
     ca00 = tl.full([BLOCK_H], 1.0, dtype=tl.float32)
     ca01 = tl.zeros([BLOCK_H], dtype=tl.float32)
     ca10 = tl.zeros([BLOCK_H], dtype=tl.float32)
@@ -88,7 +83,7 @@ def _fwd_kernel(
         ni0 = tl.load(i_base + 0, mask=h_mask, other=0.0).to(tl.float32)
         ni1 = tl.load(i_base + 1, mask=h_mask, other=0.0).to(tl.float32)
 
-        # 无效位置算子替换为单位算子。
+        # Invalid positions act as the identity operator.
         na00 = tl.where(vn, na00, 1.0)
         na01 = tl.where(vn, na01, 0.0)
         na10 = tl.where(vn, na10, 0.0)
@@ -96,7 +91,7 @@ def _fwd_kernel(
         nb0 = tl.where(vn, nb0, 0.0)
         nb1 = tl.where(vn, nb1, 0.0)
 
-        # 段头判断：当前有效，且 (行首 或 上一位置无效 或 段 id 改变)。
+        # Segment head: valid, and either row start, prior invalid, or new id.
         is_head = vn & ((n == 0) | (prev_valid == 0) | (seg_n != prev_seg))
         ca00 = tl.where(is_head, 1.0, ca00)
         ca01 = tl.where(is_head, 0.0, ca01)
@@ -105,7 +100,7 @@ def _fwd_kernel(
         cb0 = tl.where(is_head, 0.0, cb0)
         cb1 = tl.where(is_head, 0.0, cb1)
 
-        # 输出 = carry @ init（无效位置为 0）。
+        # Output = carry @ init, zeroed at invalid positions.
         o0 = ca00 * ni0 + ca01 * ni1 + cb0
         o1 = ca10 * ni0 + ca11 * ni1 + cb1
         o0 = tl.where(vn, o0, 0.0)
@@ -114,7 +109,7 @@ def _fwd_kernel(
         tl.store(o_base + 0, o0, mask=h_mask)
         tl.store(o_base + 1, o1, mask=h_mask)
 
-        # 推进 carry = compose(carry, op) = op ∘ carry。
+        # Advance carry = op composed after carry.
         nca00 = na00 * ca00 + na01 * ca10
         nca01 = na00 * ca01 + na01 * ca11
         nca10 = na10 * ca00 + na11 * ca10
@@ -149,11 +144,12 @@ def _bwd_adj_kernel(
     stride_vn,
     BLOCK_H: tl.constexpr,
 ):
-    """反向伴随扫描：计算 d matrix 与 d bias。
+    """Adjoint reverse scan producing ``d matrix`` and ``d bias``.
 
-    线性递归 ``h_{i+1} = A_i h_i + b_i`` 的伴随 ``a_i = g_i + A_i^T a_{i+1}``，
-    沿序列反向扫描；``dA_i = a_{i+1} h_i^T``、``db_i = a_{i+1}``，仅在 op 被使用
-    (即 i+1 同段) 时非零。``h`` 为正向输出。
+    For the recurrence ``h_{i+1} = A_i h_i + b_i`` the adjoint is
+    ``a_i = g_i + A_i^T a_{i+1}``, scanned backwards. ``dA_i = a_{i+1} h_i^T``
+    and ``db_i = a_{i+1}`` are nonzero only where the operator is used, that is
+    where ``i+1`` shares the segment. ``h`` is the forward output.
     """
     pid_b = tl.program_id(0)
     h_offs = tl.arange(0, BLOCK_H)
@@ -200,7 +196,7 @@ def _bwd_adj_kernel(
         ai0 = g0 + a00 * ae0 + a10 * ae1
         ai1 = g1 + a01 * ae0 + a11 * ae1
 
-        # dA_i = a_eff ⊗ h_i ; db_i = a_eff ; 仅 same_next（op 被使用）时非零。
+        # dA_i = a_eff (x) h_i, db_i = a_eff, nonzero only where op is used.
         da00 = tl.where(same_next, ae0 * h0, 0.0)
         da01 = tl.where(same_next, ae0 * h1, 0.0)
         da10 = tl.where(same_next, ae1 * h0, 0.0)
@@ -208,7 +204,7 @@ def _bwd_adj_kernel(
         dbo0 = tl.where(same_next, ae0, 0.0)
         dbo1 = tl.where(same_next, ae1, 0.0)
 
-        # 无效位置梯度为 0，并截断伴随链。
+        # Zero the gradient and cut the adjoint chain at invalid positions.
         da00 = tl.where(vi, da00, 0.0)
         da01 = tl.where(vi, da01, 0.0)
         da10 = tl.where(vi, da10, 0.0)
@@ -246,15 +242,16 @@ def _bwd_dinit_kernel(
     stride_vn,
     BLOCK_H: tl.constexpr,
 ):
-    """正向重算独占前缀矩阵以还原 d init = prefix_i^T @ g_i。
+    """Recompute exclusive prefix matrices to recover ``d init``.
 
-    匹配 PyTorch 实现对 ``initial_state`` 的逐位置使用（而非仅在段头）。
+    Yields ``prefix_i^T @ g_i``, matching the per-position use of
+    ``initial_state`` rather than only using it at segment heads.
     """
     pid_b = tl.program_id(0)
     h_offs = tl.arange(0, BLOCK_H)
     h_mask = h_offs < H
 
-    # carry = 独占前缀的矩阵部分 prefix_i^A，初始为单位阵。
+    # carry = matrix part of the exclusive prefix, starting from the identity.
     c00 = tl.full([BLOCK_H], 1.0, dtype=tl.float32)
     c01 = tl.zeros([BLOCK_H], dtype=tl.float32)
     c10 = tl.zeros([BLOCK_H], dtype=tl.float32)
@@ -290,7 +287,7 @@ def _bwd_dinit_kernel(
         c10 = tl.where(is_head, 0.0, c10)
         c11 = tl.where(is_head, 1.0, c11)
 
-        # dinit_n = carry^T @ g_n。
+        # dinit_n = carry^T @ g_n
         di0 = c00 * g0 + c10 * g1
         di1 = c01 * g0 + c11 * g1
         di0 = tl.where(vn, di0, 0.0)
@@ -299,7 +296,7 @@ def _bwd_dinit_kernel(
         tl.store(di_base + 0, di0, mask=h_mask)
         tl.store(di_base + 1, di1, mask=h_mask)
 
-        # 推进 carry = A_n @ carry（无效位置用单位阵）。
+        # Advance carry = A_n @ carry, using the identity at invalid positions.
         a00e = tl.where(vn, a00, 1.0)
         a01e = tl.where(vn, a01, 0.0)
         a10e = tl.where(vn, a10, 0.0)
@@ -318,7 +315,7 @@ def _bwd_dinit_kernel(
 
 
 class _SegmentedBlockAffineExclusiveScan(torch.autograd.Function):
-    """可微分的分段块仿射独占扫描。"""
+    """Differentiable segmented block-affine exclusive scan."""
 
     @staticmethod
     def forward(ctx, matrix, bias, segment_ids, valid_mask, initial_state):
@@ -418,17 +415,17 @@ def triton_segmented_block_affine_exclusive_scan(
     valid_mask: torch.Tensor,
     initial_state: torch.Tensor,
 ) -> torch.Tensor:
-    """Triton 实现的分段块仿射独占扫描（可微分），接口与 ``segmented_scan`` 一致。
+    """Differentiable Triton scan matching the ``segmented_scan`` interface.
 
     Args:
-        matrix: 块算子，形状 ``[B, N, H, 2, 2]``。
-        bias: 块偏置，形状 ``[B, N, H, 2]``。
-        segment_ids: 段标识，形状 ``[B, N]``。
-        valid_mask: 有效掩码，形状 ``[B, N]``。
-        initial_state: 初始块状态，形状 ``[B, N, H, 2]``。
+        matrix: Block operators with shape ``[B, N, H, 2, 2]``.
+        bias: Block biases with shape ``[B, N, H, 2]``.
+        segment_ids: Segment identifier per position, shape ``[B, N]``.
+        valid_mask: Valid occurrence mask, shape ``[B, N]``.
+        initial_state: Initial block states with shape ``[B, N, H, 2]``.
 
     Returns:
-        每个位置应用其算子之前的状态，形状 ``[B, N, H, 2]``。
+        State immediately before each transition, shape ``[B, N, H, 2]``.
     """
     return _SegmentedBlockAffineExclusiveScan.apply(
         matrix, bias, segment_ids, valid_mask, initial_state

@@ -1,19 +1,7 @@
 """ReKTP: private KC scans with a swappable global history encoder.
 
 The global encoder is selected by ``encoder_type`` (``mamba`` / ``lstm`` /
-``transformer``) so the Mamba block can be ablated against LSTM or causal
-self-attention while keeping the rest of the model fixed.
-
-历史上这里还有一条按题目分段的私有状态扫描。在题目粒度数据集上，同一题在单条
-子序列内几乎不复现（assistments09 实测 0.79%），故该扫描在 99.21% 的位置退化为
-闭式解 ``decay(b_t) ⊙ tanh(W·E_q)``（``b_t = floor(log2(t+1))``），与作答历史严格
-独立 —— 即一个由位置调制的静态题目特征，而非状态记忆。训练后的权重印证了这一点：
-``question_residual`` 范数仅 0.033（同类 ``local_residual`` 为 0.601），说明状态转移
-未被学到，而 ``question_init`` 范数达 4.482，是该分支中最大者。
-
-因此这里保留其实际功能、去掉失效机制：``_question_static_states`` 直接计算上述闭式
-解，省去 argsort + 分段扫描 + scatter，仅放弃 0.79% 复现位置上的作答信息（oracle
-上界 +0.0032）。
+``transformer``), which keeps the rest of the model fixed across those choices.
 """
 
 import numpy as np
@@ -22,7 +10,7 @@ from torch import nn
 
 from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
 
-# 支持的全局序列编码器类型，用于消融对比 Mamba。
+# Global sequence-encoder types selectable via ``encoder_type``.
 GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer")
 
 
@@ -38,7 +26,7 @@ class GlobalMambaBlock(nn.Module):
         dropout: float,
     ):
         super().__init__()
-        # 延迟导入：LSTM/Transformer 消融变体可在未安装 mamba_ssm 的环境中运行。
+        # Imported lazily so the LSTM/Transformer variants run without mamba_ssm.
         from mamba_ssm import Mamba
 
         self.mamba = Mamba(
@@ -57,11 +45,10 @@ class GlobalMambaBlock(nn.Module):
 
 
 class GlobalLSTMBlock(nn.Module):
-    """LSTM ablation block with the same residual shell as the Mamba block."""
+    """LSTM block with the same residual shell as the Mamba block."""
 
     def __init__(self, d_model: int, dropout: float):
         super().__init__()
-        # 单向 LSTM 天然因果，等价于 Mamba 的因果序列建模角色。
         self.lstm = nn.LSTM(d_model, d_model, batch_first=True)
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
@@ -69,13 +56,14 @@ class GlobalLSTMBlock(nn.Module):
     def forward(
         self, x: torch.Tensor, mask: torch.Tensor | None = None
     ) -> torch.Tensor:
-        # 输入 padding 已在外部置零，单向因果使末尾 padding 不影响前置有效输出。
+        # Input padding is pre-zeroed; a unidirectional pass keeps trailing
+        # padding from reaching earlier valid positions.
         out, _ = self.lstm(x)
         return self.norm(x + self.dropout(out))
 
 
 class GlobalTransformerBlock(nn.Module):
-    """Causal self-attention ablation block with the same residual shell."""
+    """Causal self-attention block with the same residual shell."""
 
     def __init__(self, d_model: int, n_heads: int, dropout: float):
         super().__init__()
@@ -89,12 +77,13 @@ class GlobalTransformerBlock(nn.Module):
         self, x: torch.Tensor, mask: torch.Tensor | None = None
     ) -> torch.Tensor:
         seq_len = x.size(1)
-        # 因果掩码：屏蔽未来位置，避免预测 t+1 时泄漏其答案。
+        # Causal mask: hide future positions so predicting t+1 cannot see it.
         causal_mask = torch.triu(
             torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device),
             diagonal=1,
         )
-        # 同时屏蔽 padding key；有效 query 至少可见自身，故不会产生 NaN。
+        # Also mask padding keys. Valid queries always see themselves, so no
+        # row becomes fully masked and produces NaN.
         key_padding_mask = None if mask is None else ~mask.bool()
         out, _ = self.attn(
             x, x, x, attn_mask=causal_mask, key_padding_mask=key_padding_mask
@@ -153,6 +142,7 @@ class ReKTP(nn.Module):
         local_credit_scale: float = 0.0,
         encoder_type: str = "mamba",
         n_heads: int = 8,
+        question_embed_dim: int | None = None,
     ):
         super().__init__()
         if encoder_type not in GLOBAL_ENCODER_TYPES:
@@ -194,7 +184,25 @@ class ReKTP(nn.Module):
         self.register_buffer("question_skill_ids", skill_ids, persistent=True)
         self.register_buffer("question_skill_mask", skill_mask, persistent=True)
 
-        self.question_embed = nn.Embedding(self.num_questions, hidden_dim)
+        # Intrinsic width of the per-question embedding. ``0`` drops the
+        # pathway, leaving question identity to ``question_diff`` and the KC side.
+        if question_embed_dim is None:
+            question_embed_dim = hidden_dim
+        if question_embed_dim < 0:
+            raise ValueError("question_embed_dim must be non-negative")
+        self.question_embed_dim = question_embed_dim
+        if question_embed_dim == 0:
+            self.question_embed = None
+            self.question_embed_proj = None
+        else:
+            self.question_embed = nn.Embedding(self.num_questions, question_embed_dim)
+            # Below full width a shared projection lifts the rows back to
+            # ``hidden_dim``; at full width the projection is skipped.
+            self.question_embed_proj = (
+                None
+                if question_embed_dim == hidden_dim
+                else nn.Linear(question_embed_dim, hidden_dim, bias=False)
+            )
         self.skill_embed = nn.Embedding(
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
@@ -212,7 +220,7 @@ class ReKTP(nn.Module):
         self.local_readout = nn.Linear(3 * hidden_dim, 1)
         self.local_global_film = nn.Linear(hidden_dim, 2 * hidden_dim)
         self.local_credit = nn.Linear(hidden_dim, 1)
-        # 题目静态特征通路：等价于原题目扫描在无前驱位置的闭式解。
+        # Static question-feature pathway, modulated by sequence position.
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
         self.global_blocks = nn.ModuleList(
@@ -269,6 +277,25 @@ class ReKTP(nn.Module):
         count = weights.sum(dim=-2).clamp_min(1.0)
         return (values * weights).sum(dim=-2) / count
 
+    def _question_vector(self, questions: torch.Tensor) -> torch.Tensor:
+        """Return the per-question vector at ``hidden_dim`` width.
+
+        ``question_embed_dim`` sets the intrinsic width: 0 removes the pathway
+        (zeros), a value below ``hidden_dim`` is lifted by a shared projection,
+        and ``hidden_dim`` uses the embedding directly.
+        """
+        if self.question_embed is None:
+            return torch.zeros(
+                *questions.shape,
+                self.hidden_dim,
+                device=questions.device,
+                dtype=self.skill_embed.weight.dtype,
+            )
+        vector = self.question_embed(questions)
+        if self.question_embed_proj is not None:
+            vector = self.question_embed_proj(vector)
+        return vector
+
     def _question_conditioned_local_readout(
         self,
         local_state: torch.Tensor,
@@ -278,7 +305,7 @@ class ReKTP(nn.Module):
     ) -> torch.Tensor:
         """Read decoupled KC states with current-question dependent weights."""
         skill_embedding = self.skill_embed(skill_ids)
-        question_embedding = self.question_embed(questions).unsqueeze(-2)
+        question_embedding = self._question_vector(questions).unsqueeze(-2)
         question_embedding = question_embedding.expand_as(local_state)
         score_input = torch.cat(
             (local_state, skill_embedding, question_embedding),
@@ -416,7 +443,7 @@ class ReKTP(nn.Module):
 
         skill_embedding = self.skill_embed(packed_skill)
         local_input = (
-            self.question_embed(packed_question)
+            self._question_vector(packed_question)
             + skill_embedding
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
@@ -493,17 +520,12 @@ class ReKTP(nn.Module):
     ) -> torch.Tensor:
         """Return the position-modulated static question feature.
 
-        这是原按题目分段扫描在"无前驱"位置的闭式解：
-
-        ``s_t = exp(-softplus(W_d · e_gap[b_t])) ⊙ tanh(W_init · E_q)``
-
-        其中 ``b_t = floor(log2(t + 1))``。原扫描在 assistments09 上有 99.21% 的
-        位置落入该情形，故此处与其数学等价；差异仅限同题复现位置（0.79%），那些
-        位置原本会叠加作答信息。
+        ``s_t = exp(-softplus(W_d . e_gap[b_t])) * tanh(W_init . E_q)`` with
+        ``b_t = floor(log2(t + 1))``. Padding positions are zeroed.
         """
         _, seq_len = questions.shape
         times = torch.arange(seq_len, device=questions.device).unsqueeze(0)
-        # gap 沿用原实现：首次出现记为 t + 1（自序列开头起算）。
+        # Gap counts from the start of the sequence, so position t maps to t + 1.
         gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
         gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1).expand_as(questions)
 
@@ -512,7 +534,7 @@ class ReKTP(nn.Module):
                 self.question_decay(self.gap_embed(gap_bucket))
             )
         )
-        static_state = torch.tanh(self.question_init(self.question_embed(questions)))
+        static_state = torch.tanh(self.question_init(self._question_vector(questions)))
         state = decay * static_state
         return state.masked_fill(~mask.unsqueeze(-1), 0.0)
 
@@ -524,7 +546,7 @@ class ReKTP(nn.Module):
         pooled_skill = self._masked_mean(self.skill_embed(skill_ids), skill_mask)
         pooled_change = self._masked_mean(self.skill_change(skill_ids), skill_mask)
         event = (
-            self.question_embed(questions)
+            self._question_vector(questions)
             + pooled_skill
             + self.question_diff(questions) * pooled_change
         )
