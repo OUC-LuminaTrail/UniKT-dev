@@ -112,9 +112,7 @@ class SkillCrossEffect(nn.Module):
         width = rank * num_scales
         self.source_embed = nn.Embedding(2 * num_skills, width)
         self.target_embed = nn.Embedding(num_skills + 1, width, padding_idx=num_skills)
-        # The target factor is zero-initialized below, so the residual starts at
-        # exactly zero while this nonzero gate lets target rows learn immediately.
-        self.logit_scale = nn.Parameter(torch.tensor(math.atanh(0.1)))
+        self.logit_scale = nn.Parameter(torch.zeros(()))
 
         positive_scales = num_scales - 1
         max_exponent = max(0.0, float(max_gap_bins - 2))
@@ -126,7 +124,9 @@ class SkillCrossEffect(nn.Module):
         self.register_buffer("decay_rates", rates, persistent=True)
 
         nn.init.normal_(self.source_embed.weight, mean=0.0, std=0.02)
-        nn.init.zeros_(self.target_embed.weight)
+        nn.init.normal_(self.target_embed.weight, mean=0.0, std=0.02)
+        with torch.no_grad():
+            self.target_embed.weight[num_skills].zero_()
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:

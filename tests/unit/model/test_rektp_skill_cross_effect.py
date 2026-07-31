@@ -164,19 +164,6 @@ def test_cross_effect_scan_has_finite_embedding_gradients():
         assert torch.isfinite(parameter.grad).all()
 
 
-def test_zero_residual_initialization_still_trains_target_factor():
-    module = SkillCrossEffect(2, rank=3, num_scales=4, max_gap_bins=5)
-    inputs = _single_skill_inputs(torch.tensor([[1, 0, 1]]))
-
-    scores = module(*inputs)
-    assert torch.all(scores == 0.0)
-    scores.sum().backward()
-
-    assert module.target_embed.weight.grad is not None
-    assert module.target_embed.weight.grad.norm() > 0.0
-    assert torch.isfinite(module.target_embed.weight.grad).all()
-
-
 def test_disabled_and_zero_initialized_enabled_models_match():
     baseline = ReKTP(**_model_kwargs()).eval()
     enabled = ReKTP(
@@ -196,7 +183,7 @@ def test_disabled_and_zero_initialized_enabled_models_match():
         baseline_logits = baseline(questions, responses, times, mask)
         enabled_logits = enabled(questions, responses, times, mask)
 
-    assert torch.all(enabled.skill_cross_effect.target_embed.weight == 0.0)
+    assert enabled.skill_cross_effect.logit_scale.item() == 0.0
     torch.testing.assert_close(enabled_logits, baseline_logits)
 
 
