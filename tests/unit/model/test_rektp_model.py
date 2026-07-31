@@ -64,6 +64,15 @@ def _dim_kwargs(hidden_dim=16):
     }
 
 
+def _position_times(questions: torch.Tensor) -> torch.Tensor:
+    """Position-index times reproducing the pre-real-time gap semantics."""
+    return (
+        torch.arange(questions.size(1), dtype=torch.float64, device=questions.device)
+        .unsqueeze(0)
+        .expand(questions.shape[0], -1)
+    )
+
+
 def test_default_question_embed_dim_matches_hidden_dim():
     model = ReKTP(**_dim_kwargs())
 
@@ -123,10 +132,11 @@ def test_zero_dim_still_runs_and_keeps_the_difficulty_scalar():
     questions = torch.tensor([[0, 1, 2, 0]])
     responses = torch.tensor([[1, 0, 1, 0]])
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
     with torch.no_grad():
-        logits = model(questions, responses, mask)
-        shifted = model(questions.roll(1, dims=1), responses, mask)
+        logits = model(questions, responses, times, mask)
+        shifted = model(questions.roll(1, dims=1), responses, times, mask)
 
     assert logits.shape == questions.shape
     assert torch.isfinite(logits).all()
@@ -293,11 +303,12 @@ def test_other_kc_response_does_not_change_private_state():
     questions = torch.tensor([[0, 1, 0, 1]])
     responses = torch.tensor([[1, 0, 1, 0]])
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
-    baseline, _ = model._local_pre_states(questions, responses, mask)
+    baseline, _ = model._local_pre_states(questions, responses, times, mask)
     changed_responses = responses.clone()
     changed_responses[:, 0] = 0
-    changed, _ = model._local_pre_states(questions, changed_responses, mask)
+    changed, _ = model._local_pre_states(questions, changed_responses, times, mask)
 
     # Position 3 addresses KC 1, so changing KC 0 at position 0 cannot alter it.
     torch.testing.assert_close(changed[:, 3], baseline[:, 3])
@@ -314,9 +325,10 @@ def test_question_static_state_is_a_pure_function_of_question_and_position():
         model.question_decay.weight.zero_()
         model.question_decay.weight[:, 0] = 1.0
     mask = torch.ones(1, 4, dtype=torch.bool)
+    times = torch.arange(4, dtype=torch.float64).unsqueeze(0)
 
-    state = model._question_static_states(torch.tensor([[0, 1, 2, 0]]), mask)
-    repeated = model._question_static_states(torch.tensor([[0, 0, 0, 0]]), mask)
+    state = model._question_static_states(torch.tensor([[0, 1, 2, 0]]), times, mask)
+    repeated = model._question_static_states(torch.tensor([[0, 0, 0, 0]]), times, mask)
 
     # Position 0 carries question 0 in both sequences, so the outputs agree.
     torch.testing.assert_close(state[:, 0], repeated[:, 0])
@@ -331,7 +343,7 @@ def test_question_static_state_matches_removed_scan_without_repeats():
     questions = torch.tensor([[0, 1, 2, 1]])
     mask = torch.ones_like(questions, dtype=torch.bool)
 
-    times = torch.arange(questions.size(1)).unsqueeze(0)
+    times = torch.arange(questions.size(1), dtype=torch.float64).unsqueeze(0)
     gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
     gap_bucket = gap_bucket.clamp_max(model.max_gap_bins - 1).expand_as(questions)
     decay = torch.exp(
@@ -339,7 +351,7 @@ def test_question_static_state_matches_removed_scan_without_repeats():
     )
     expected = decay * torch.tanh(model.question_init(model.question_embed(questions)))
 
-    actual = model._question_static_states(questions, mask)
+    actual = model._question_static_states(questions, times, mask)
 
     torch.testing.assert_close(actual, expected)
 
@@ -348,8 +360,9 @@ def test_question_static_state_zeroes_padding():
     model = _build_model(torch.device("cpu"))
     questions = torch.tensor([[0, 1, 2, 0]])
     mask = torch.tensor([[True, True, False, False]])
+    times = torch.arange(4, dtype=torch.float64).unsqueeze(0)
 
-    state = model._question_static_states(questions, mask)
+    state = model._question_static_states(questions, times, mask)
 
     assert torch.all(state[:, 2:] == 0.0)
     assert not torch.all(state[:, :2] == 0.0)
@@ -369,12 +382,64 @@ def test_current_gap_affects_kc_read_states():
     short_responses = torch.tensor([[1, 0, 1, 0, 0]])
     long_responses = torch.tensor([[1, 0, 0, 0, 1]])
     mask = torch.ones_like(short_responses, dtype=torch.bool)
+    times = _position_times(short_questions)
 
-    short_local, _ = model._local_pre_states(short_questions, short_responses, mask)
-    long_local, _ = model._local_pre_states(long_questions, long_responses, mask)
+    short_local, _ = model._local_pre_states(
+        short_questions, short_responses, times, mask
+    )
+    long_local, _ = model._local_pre_states(long_questions, long_responses, times, mask)
 
     # KC 0 has the same first event but a gap of 2 versus 4.
     assert not torch.allclose(short_local[:, 2], long_local[:, 4])
+
+
+def test_real_time_gap_affects_kc_read_states():
+    model = _build_model(torch.device("cpu"))
+    with torch.no_grad():
+        model.gap_embed.weight.zero_()
+        model.gap_embed.weight[1, 0] = 2.0
+        model.local_decay.weight.zero_()
+        model.local_decay.bias.zero_()
+        model.local_decay.weight[:, 0] = 1.0
+    questions = torch.tensor([[0, 1, 0]])
+    responses = torch.tensor([[1, 0, 1]])
+    mask = torch.ones_like(responses, dtype=torch.bool)
+    # Identical question/response patterns; only the elapsed seconds between
+    # the two KC-0 occurrences differ (2s vs 16s -> gap buckets 1 vs 3).
+    short_times = torch.tensor([[0.0, 1.0, 2.0]])
+    long_times = torch.tensor([[0.0, 1.0, 16.0]])
+    short_local, _ = model._local_pre_states(questions, responses, short_times, mask)
+    long_local, _ = model._local_pre_states(questions, responses, long_times, mask)
+    assert not torch.allclose(short_local[:, 2], long_local[:, 2])
+
+
+def test_packing_keeps_kc_segments_contiguous_with_large_real_times():
+    model = _build_model(torch.device("cpu"))
+    # A naive (skill * stride + real_seconds) sort key would interleave the two
+    # skills here; segment contiguity must be preserved regardless of time scale.
+    questions = torch.tensor([[0, 1, 0, 1]])
+    responses = torch.tensor([[1, 0, 1, 0]])
+    times = torch.tensor([[0.0, 1000.0, 5000.0, 6000.0]])
+    mask = torch.ones_like(questions, dtype=torch.bool)
+    packed_skill, _, _, _, packed_valid, _, _ = model._pack_kc_occurrences(
+        questions, responses, times, mask
+    )
+    valid_skill = packed_skill[0][packed_valid[0]]
+    runs = (valid_skill[1:] != valid_skill[:-1]).sum().item() + 1
+    assert runs == 2  # exactly one contiguous run per skill
+
+
+def test_forward_handles_padding_when_valid_times_are_large():
+    # Padding positions hold time 0 while valid times are large; without the
+    # padding pin, relative padding times go negative and log2 yields NaN.
+    model = _build_model(torch.device("cpu"))
+    questions = torch.tensor([[0, 1, 2, 0]])
+    responses = torch.tensor([[1, 0, 1, 0]])
+    times = torch.tensor([[100.0, 200.0, 300.0, 0.0]])
+    mask = torch.tensor([[True, True, True, False]])
+    with torch.no_grad():
+        logits = model(questions, responses, times, mask)
+    assert torch.isfinite(logits).all()
 
 
 def test_target_answer_does_not_leak_into_its_prediction():
@@ -387,11 +452,12 @@ def test_target_answer_does_not_leak_into_its_prediction():
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
-    baseline = model(questions, responses, mask)
+    baseline = model(questions, responses, times, mask)
     changed_responses = responses.clone()
     changed_responses[:, 2] = 0
-    changed = model(questions, changed_responses, mask)
+    changed = model(questions, changed_responses, times, mask)
 
     # Output position 1 predicts response at position 2.
     torch.testing.assert_close(changed[:, 1], baseline[:, 1])
@@ -403,8 +469,9 @@ def test_forward_backward_has_finite_gradients():
     questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
     responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
-    loss = model(questions, responses, mask)[:, :-1].square().mean()
+    loss = model(questions, responses, times, mask)[:, :-1].square().mean()
     loss.backward()
 
     gradients = [
@@ -421,8 +488,9 @@ def test_encoder_variant_forward_shape_and_finite(encoder_type):
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
-    logits = model(questions, responses, mask)
+    logits = model(questions, responses, times, mask)
 
     assert logits.shape == questions.shape
     assert torch.isfinite(logits).all()
@@ -436,8 +504,9 @@ def test_encoder_variant_forward_handles_padding(encoder_type):
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.tensor([[True, True, False, False]], device=device)
+    times = _position_times(questions)
 
-    logits = model(questions, responses, mask)
+    logits = model(questions, responses, times, mask)
 
     assert logits.shape == questions.shape
     assert torch.isfinite(logits).all()
@@ -450,8 +519,9 @@ def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
     responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
-    loss = model(questions, responses, mask)[:, :-1].square().mean()
+    loss = model(questions, responses, times, mask)[:, :-1].square().mean()
     loss.backward()
 
     gradients = [
@@ -469,10 +539,11 @@ def test_encoder_variant_does_not_leak_future_response(encoder_type):
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
 
-    baseline = model(questions, responses, mask)
+    baseline = model(questions, responses, times, mask)
     changed_responses = responses.clone()
     changed_responses[:, 2] = 0
-    changed = model(questions, changed_responses, mask)
+    changed = model(questions, changed_responses, times, mask)
 
     torch.testing.assert_close(changed[:, :2], baseline[:, :2])

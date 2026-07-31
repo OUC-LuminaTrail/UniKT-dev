@@ -1,5 +1,6 @@
 """Question-level data preparation for ReKTP."""
 
+import math
 from typing import Any
 
 import numpy as np
@@ -18,13 +19,19 @@ logger = get_logger(__name__)
 class ReKTPDataset(Dataset):
     """One position per original question interaction."""
 
-    def __init__(self, questions, responses, masks):
+    def __init__(self, questions, responses, times, masks):
         self.questions = torch.from_numpy(np.asarray(questions)).long()
         self.responses = torch.from_numpy(np.asarray(responses)).long()
+        self.times = torch.from_numpy(np.asarray(times)).double()
         self.masks = torch.from_numpy(np.asarray(masks)).bool()
 
     def __getitem__(self, index):
-        return self.questions[index], self.responses[index], self.masks[index]
+        return (
+            self.questions[index],
+            self.responses[index],
+            self.times[index],
+            self.masks[index],
+        )
 
     def __len__(self):
         return len(self.questions)
@@ -62,9 +69,14 @@ def build_question_skill_table(data_src: DataSource) -> tuple[np.ndarray, np.nda
     return skill_ids, skill_mask
 
 
+def derive_max_gap_bins(time_seqs: np.ndarray) -> int:
+    """Derive the log2-gap bucket count covering the largest time span."""
+    max_span = max(1.0, float(time_seqs.max()))
+    return max(2, int(math.floor(math.log2(max_span))) + 2)
+
+
 class ReKTPModelData(QuestionModelData):
     """Prepare original question sequences and a separate question-KC view."""
-
     def __init__(self, data_src: DataSource, cache: bool = False):
         super().__init__(data_src, cache=cache)
 
@@ -82,13 +94,18 @@ class ReKTPModelData(QuestionModelData):
             )
 
         questions, responses, masks, _ = self.load_sequence_data()
+        times = self._build_time_sequences()
         train_data, val_data, test_data = self.split_kfold_data(
-            questions, responses, masks, fold_idx=fold_idx
+            questions, responses, times, masks, fold_idx=fold_idx
         )
         question_skill_ids, question_skill_mask = build_question_skill_table(
             self.data_src
         )
-
+        max_gap_bins = derive_max_gap_bins(times)
+        logger.info(
+            "Derived max_gap_bins=%d from the largest intra-sequence time span",
+            max_gap_bins,
+        )
         logger.info("Using K-fold: fold %d/%d", fold_idx + 1, kfold_n_splits)
         return (
             ReKTPDataset(*train_data),
@@ -97,12 +114,56 @@ class ReKTPModelData(QuestionModelData):
             {
                 "question_skill_ids": question_skill_ids,
                 "question_skill_mask": question_skill_mask,
+                "max_gap_bins": max_gap_bins,
             },
         )
+
+    def _build_time_sequences(self) -> np.ndarray:
+        """Return per-position interaction times in seconds (float64).
+
+        Real timestamps are used when the split data carries a ``timestamp``
+        column (milliseconds converted to seconds). ``assistments09`` stores
+        ``order_id`` there instead of wall-clock time, so its
+        ``ms_first_response`` dwell times are accumulated like the original
+        HawkesKT implementation. Sequences without a usable timestamp fall
+        back to position indices.
+        """
+        q_data = self.data_src.get_split_question_sequence_data()
+        num_users = q_data["user"].n_unique()
+        max_seq_len = int(self.data_src.get_metadata("max_seq_len"))
+        time_seqs = np.zeros((num_users, max_seq_len), dtype=np.float64)
+        user_indices = q_data["user"].to_numpy()
+        seq_positions = q_data["seq_pos"].to_numpy()
+        columns = q_data.columns
+
+        if self.data_src.dataset == "assistments09" and "ms_first_response" in columns:
+            dwell = (
+                q_data["ms_first_response"].fill_null(0).to_numpy().astype(np.float64)
+                / 1000.0
+            )
+            cumshift = np.zeros(num_users, dtype=np.float64)
+            for idx in np.lexsort((seq_positions, user_indices)):
+                uid = user_indices[idx]
+                pos = seq_positions[idx]
+                time_seqs[uid, pos] = cumshift[uid]
+                cumshift[uid] += dwell[idx] + 1.0
+        elif "timestamp" in columns:
+            time_seqs[user_indices, seq_positions] = (
+                q_data["timestamp"].fill_null(0).to_numpy().astype(np.float64) / 1000.0
+            )
+        else:
+            logger.warning(
+                "No usable timestamp column for dataset %r; ReKTP time gaps "
+                "fall back to position indices",
+                self.data_src.dataset,
+            )
+            time_seqs[user_indices, seq_positions] = seq_positions.astype(np.float64)
+        return time_seqs
 
 
 __all__ = [
     "ReKTPDataset",
     "ReKTPModelData",
     "build_question_skill_table",
+    "derive_max_gap_bins",
 ]

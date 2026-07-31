@@ -111,13 +111,21 @@ class ReKTPTrainer(BaseTrainer):
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
-        # Gaps are sequence positions bounded by max_seq_len and bucketed as
-        # floor(log2(gap)), so exactly floor(log2(max_seq_len)) + 1 rows exist.
-        max_seq_len = int(data_src.get_metadata("max_seq_len"))
-        max_gap_bins = max(1, max_seq_len.bit_length())
-        logger.info(
-            "Derived max_gap_bins=%d from max_seq_len=%d", max_gap_bins, max_seq_len
-        )
+        max_gap_bins = extra.get("max_gap_bins")
+        if max_gap_bins is None:
+            max_seq_len = int(data_src.get_metadata("max_seq_len"))
+            max_gap_bins = max(1, max_seq_len.bit_length())
+            logger.info(
+                "Falling back to max_gap_bins=%d from max_seq_len=%d",
+                max_gap_bins,
+                max_seq_len,
+            )
+        else:
+            max_gap_bins = int(max_gap_bins)
+            logger.info(
+                "Derived max_gap_bins=%d from the largest intra-sequence time span",
+                max_gap_bins,
+            )
         logger.info("Initializing ReKTP model...")
         model = ReKTP(
             data_metadata=data_src.get_metadata(),
@@ -153,14 +161,15 @@ class ReKTPTrainer(BaseTrainer):
         )
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
     ) -> dict[str, torch.Tensor]:
-        questions, responses, mask = batch_data
+        questions, responses, times, mask = batch_data
         questions = self._move_tensor_to_device(questions)
         responses = self._move_tensor_to_device(responses)
+        times = self._move_tensor_to_device(times)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        logits_full = self.model(questions, responses, mask)
+        logits_full = self.model(questions, responses, times, mask)
         logits, labels, _ = self._extract_valid_predictions(
             logits_full, responses, mask, same_position=False
         )

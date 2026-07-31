@@ -372,6 +372,7 @@ class ReKTP(nn.Module):
         self,
         questions: torch.Tensor,
         responses: torch.Tensor,
+        times: torch.Tensor,
         mask: torch.Tensor,
     ) -> tuple[torch.Tensor, ...]:
         batch_size, seq_len = questions.shape
@@ -380,8 +381,11 @@ class ReKTP(nn.Module):
         occurrence_mask = skill_mask & mask.unsqueeze(-1)
         max_skills = skill_ids.size(-1)
 
-        times = torch.arange(seq_len, device=questions.device).view(1, seq_len, 1)
-        times = times.expand(batch_size, seq_len, max_skills)
+        # Real elapsed seconds (or position indices when unavailable); only
+        # differences within a sequence matter.
+        times = times.reshape(batch_size, seq_len, 1).expand(
+            batch_size, seq_len, max_skills
+        )
         question_occ = questions.unsqueeze(-1).expand_as(skill_ids)
         response_occ = responses.unsqueeze(-1).expand_as(skill_ids)
 
@@ -391,9 +395,19 @@ class ReKTP(nn.Module):
         flat_response = response_occ.flatten(1)
         flat_valid = occurrence_mask.flatten(1)
 
+        # Sort by (skill, position): the source data is already chronological, so
+        # position order equals time order inside a skill segment. Real seconds
+        # cannot seed the sort key (they exceed the skill stride); they are used
+        # only for the gap computation below.
+        positions = (
+            torch.arange(seq_len, device=questions.device)
+            .view(1, seq_len, 1)
+            .expand(batch_size, seq_len, max_skills)
+        )
+        flat_pos = positions.flatten(1)
         invalid_key = (self.num_skills + 1) * (seq_len + 1)
-        sort_key = flat_skill * (seq_len + 1) + flat_time
-        sort_key = torch.where(flat_valid, sort_key, invalid_key + flat_time)
+        sort_key = flat_skill * (seq_len + 1) + flat_pos
+        sort_key = torch.where(flat_valid, sort_key, invalid_key + flat_pos)
         order = torch.argsort(sort_key, dim=1, stable=True)
 
         def gather(values: torch.Tensor) -> torch.Tensor:
@@ -413,6 +427,7 @@ class ReKTP(nn.Module):
         self,
         questions: torch.Tensor,
         responses: torch.Tensor,
+        times: torch.Tensor,
         mask: torch.Tensor,
         global_context: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -425,7 +440,7 @@ class ReKTP(nn.Module):
             packed_valid,
             order,
             occurrence_mask,
-        ) = self._pack_kc_occurrences(questions, responses, mask)
+        ) = self._pack_kc_occurrences(questions, responses, times, mask)
 
         previous_time = torch.zeros_like(packed_time)
         previous_time[:, 1:] = packed_time[:, :-1]
@@ -514,16 +529,16 @@ class ReKTP(nn.Module):
     def _question_static_states(
         self,
         questions: torch.Tensor,
+        times: torch.Tensor,
         mask: torch.Tensor,
     ) -> torch.Tensor:
-        """Return the position-modulated static question feature.
+        """Return the elapsed-time-modulated static question feature.
 
         ``s_t = exp(-softplus(W_d . e_gap[b_t])) * tanh(W_init . E_q)`` with
-        ``b_t = floor(log2(t + 1))``. Padding positions are zeroed.
+        ``b_t = floor(log2(t + 1))``, where ``t`` is the elapsed time in
+        seconds since the sequence start. Padding positions are zeroed.
         """
-        _, seq_len = questions.shape
-        times = torch.arange(seq_len, device=questions.device).unsqueeze(0)
-        # Gap counts from the start of the sequence, so position t maps to t + 1.
+        # Elapsed seconds since the sequence start, floored to avoid a zero gap.
         gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
         gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1).expand_as(questions)
 
@@ -578,19 +593,34 @@ class ReKTP(nn.Module):
         self,
         questions: torch.Tensor,
         responses: torch.Tensor,
+        times: torch.Tensor,
         mask: torch.Tensor,
     ) -> torch.Tensor:
-        """Return next-item logits where output[t] predicts response[t+1]."""
+        """Return next-item logits where output[t] predicts response[t+1].
+
+        ``times`` holds per-position interaction times in seconds; only
+        within-sequence differences are used, so any consistent offset works.
+        """
         mask = mask.bool()
+        if times.shape != questions.shape:
+            raise ValueError(
+                "times must have shape [batch_size, seq_len] matching questions"
+            )
+        # Interactions are measured relative to the first valid interaction;
+        # padding is pinned to zero so log-bucketing never sees negatives.
+        first_time = times.masked_fill(~mask, torch.inf).min(dim=1, keepdim=True).values
+        times = times - first_time
+        times = times.masked_fill(~mask, 0.0)
         event_embedding, _ = self._event_embeddings(questions)
         global_state = self._global_history_states(event_embedding, responses, mask)
         local_pre_state, _ = self._local_pre_states(
             questions,
             responses,
+            times,
             mask,
             global_state,
         )
-        question_static_state = self._question_static_states(questions, mask)
+        question_static_state = self._question_static_states(questions, times, mask)
 
         features = torch.cat(
             [
