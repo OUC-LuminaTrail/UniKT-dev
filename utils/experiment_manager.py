@@ -77,16 +77,36 @@ class ExperimentManager:
         # original training archive.
         self.is_existing_run = False
 
-        # Create experiment directory
+        # Create experiment directory; disambiguate same-second launches.
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         exp_name = f"{model_name}_{dataset_name}_{timestamp}"
         if self.tags:
             exp_name += "_" + "_".join(self.tags)
 
-        self.exp_dir = self.base_dir / exp_type.value / exp_name
-        self.exp_dir.mkdir(parents=True, exist_ok=True)
+        self.exp_dir = self._create_unique_dir(self.base_dir / exp_type.value, exp_name)
 
         logger.debug(f"Experiment directory created: {self.exp_dir}")
+
+    @staticmethod
+    def _create_unique_dir(parent: Path, name: str) -> Path:
+        """Create ``parent/name`` atomically, appending ``_2``, ``_3``, ... on collision.
+
+        ``mkdir(exist_ok=False)`` is atomic, so concurrent processes colliding
+        on the second-resolution timestamp each land in distinct directories.
+        """
+        candidate = parent / name
+        suffix = 1
+        while True:
+            try:
+                candidate.mkdir(parents=True, exist_ok=False)
+                return candidate
+            except FileExistsError:
+                suffix += 1
+                candidate = parent / f"{name}_{suffix}"
+                logger.warning(
+                    f"Run directory '{parent / name}' already exists; "
+                    f"using '{candidate}' instead"
+                )
 
     def get_log_dir(self) -> str:
         """Return the absolute path to the experiment log directory.
