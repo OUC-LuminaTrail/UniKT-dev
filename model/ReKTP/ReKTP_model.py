@@ -15,7 +15,7 @@ GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer")
 
 
 class GlobalMambaBlock(nn.Module):
-    """Mamba block with the residual and normalization used by this project."""
+    """Mamba-2 block with the residual and normalization used by this project."""
 
     def __init__(
         self,
@@ -27,13 +27,28 @@ class GlobalMambaBlock(nn.Module):
     ):
         super().__init__()
         # Imported lazily so the LSTM/Transformer variants run without mamba_ssm.
-        from mamba_ssm import Mamba
+        from mamba_ssm import Mamba2
 
-        self.mamba = Mamba(
+        # Mamba-2's conv1d channels are d_ssm + 2 * d_state and must be a
+        # multiple of 8; with d_ssm == d_inner that constrains d_state.
+        d_inner = expand * d_model
+        if (d_inner + 2 * d_state) % 8 != 0:
+            raise ValueError(
+                "Mamba-2 requires expand * d_model + 2 * d_state to be a "
+                f"multiple of 8, got d_model={d_model}, expand={expand}, "
+                f"d_state={d_state}"
+            )
+        # d_ssm must be divisible by headdim; pick the largest power of two
+        # no larger than 64 so small hidden sizes still work.
+        headdim = min(64, d_inner)
+        while d_inner % headdim != 0:
+            headdim //= 2
+        self.mamba = Mamba2(
             d_model=d_model,
             d_state=d_state,
             d_conv=d_conv,
             expand=expand,
+            headdim=headdim,
         )
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)

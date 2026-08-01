@@ -18,7 +18,9 @@ class ReKTPConfig(ModelConfig):
     Args:
         hidden_dim: Shared event, local-state, and encoder dimension.
         n_blocks: Number of global encoder blocks.
-        d_state: Mamba SSM state dimension (only used when encoder_type='mamba').
+        d_state: Mamba-2 SSM state dimension. Mamba-2 requires
+            expand * hidden_dim + 2 * d_state to be a multiple of 8, so the
+            default is 32 and the optuna space steps by 4.
         d_conv: Mamba local convolution width (only used when encoder_type='mamba').
         expand: Mamba internal expansion factor (only used when encoder_type='mamba').
         encoder_type: Global history encoder: 'mamba', 'lstm', or 'transformer'.
@@ -46,7 +48,8 @@ class ReKTPConfig(ModelConfig):
         default=4, metadata={"optuna": {"type": "int", "low": 1, "high": 4}}
     )
     d_state: int = field(
-        default=30, metadata={"optuna": {"type": "int", "low": 8, "high": 32}}
+        default=32,
+        metadata={"optuna": {"type": "int", "low": 8, "high": 32, "step": 4}},
     )
     d_conv: int = field(
         default=4,
