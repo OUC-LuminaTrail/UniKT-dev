@@ -594,9 +594,13 @@ class BaseTrainer(ABC):
         self._run_start_time = time.perf_counter()
         self._init_metric_logger()
 
-        self._train_core()
-
-        self._finish()
+        try:
+            self._train_core()
+        finally:
+            # Finalize even when training raises: an un-finished run stays
+            # active, and SwanLab's login refuses to run while a run is active,
+            # which would disable tracking for every subsequent optuna trial.
+            self._finish()
 
     def _train_core(self) -> None:
         """Training core. Single stage runs one epoch loop; multi-stage trainers override this to chain multiple stages."""
