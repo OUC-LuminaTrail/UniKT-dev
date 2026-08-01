@@ -38,6 +38,11 @@ class ReKTPConfig(ModelConfig):
         weight_decay: Adam weight decay.
         batch_size: Training batch size.
         max_clip_grad_norm: Maximum gradient clipping norm.
+        amp: Enable bf16 autocast for the forward pass. The matmul-heavy
+            encoder and Linear layers run in bfloat16; backward is
+            autograd-managed, and the custom triton scan keeps fp32 internally.
+            Local to ReKTP for quick checking, not the framework-level
+            precision node. Off by default.
     """
 
     hidden_dim: int = field(
@@ -61,6 +66,7 @@ class ReKTPConfig(ModelConfig):
     )
     encoder_type: str = field(default="mamba")
     n_heads: int = field(default=8)
+    amp: bool = False
     residual_scale: float = field(
         default=0.04,
         metadata={"optuna": {"type": "float", "low": 0.02, "high": 0.3, "log": True}},
@@ -148,7 +154,15 @@ class ReKTPTrainer(BaseTrainer):
         times = self._move_tensor_to_device(times)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)
 
-        logits_full = self.model(questions, responses, times, mask)
+        use_amp = bool(self.run_config.model.amp)
+        with torch.autocast(
+            device_type=self.device_.type,
+            dtype=torch.bfloat16,
+            enabled=use_amp,
+        ):
+            logits_full = self.model(questions, responses, times, mask)
+        if use_amp:
+            logits_full = logits_full.float()
         logits, labels, _ = self._extract_valid_predictions(
             logits_full, responses, mask, same_position=False
         )
