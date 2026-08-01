@@ -4,6 +4,8 @@ The global encoder is selected by ``encoder_type`` (``mamba`` / ``lstm`` /
 ``transformer``), which keeps the rest of the model fixed across those choices.
 """
 
+from collections import namedtuple
+
 import numpy as np
 import torch
 from torch import nn
@@ -12,6 +14,19 @@ from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
 
 # Global sequence-encoder types selectable via ``encoder_type``.
 GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer")
+
+# Question-derived tensors computed once per forward and shared across the
+# sub-methods that would otherwise re-gather and re-embed them.
+_QuestionFeatures = namedtuple(
+    "_QuestionFeatures",
+    [
+        "skill_ids",
+        "skill_mask",
+        "question_vector",
+        "skill_embedding",
+        "skill_change",
+    ],
+)
 
 
 class GlobalMambaBlock(nn.Module):
@@ -318,16 +333,39 @@ class ReKTP(nn.Module):
             vector = self.question_embed_proj(vector)
         return vector
 
+    def _resolve_question_features(self, questions: torch.Tensor) -> _QuestionFeatures:
+        """Gather the question-derived tensors once for reuse across forward.
+
+        ``question_skill_ids[questions]``, the ``skill_embed`` / ``skill_change``
+        lookups, and the ``_question_vector`` projection are each needed in
+        several sub-methods. Computing them here and threading the result
+        avoids repeating the gathers and the large ``[B, N, K, hidden]``
+        embedding tensors.
+        """
+        skill_ids = self.question_skill_ids[questions]
+        return _QuestionFeatures(
+            skill_ids=skill_ids,
+            skill_mask=self.question_skill_mask[questions],
+            question_vector=self._question_vector(questions),
+            skill_embedding=self.skill_embed(skill_ids),
+            skill_change=self.skill_change(skill_ids),
+        )
+
     def _question_conditioned_local_readout(
         self,
         local_state: torch.Tensor,
         skill_ids: torch.Tensor,
         readout_mask: torch.Tensor,
         questions: torch.Tensor,
+        skill_embedding: torch.Tensor | None = None,
+        question_vector: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Read decoupled KC states with current-question dependent weights."""
-        skill_embedding = self.skill_embed(skill_ids)
-        question_embedding = self._question_vector(questions).unsqueeze(-2)
+        if skill_embedding is None:
+            skill_embedding = self.skill_embed(skill_ids)
+        if question_vector is None:
+            question_vector = self._question_vector(questions)
+        question_embedding = question_vector.unsqueeze(-2)
         question_embedding = question_embedding.expand_as(local_state)
         score_input = torch.cat(
             (local_state, skill_embedding, question_embedding),
@@ -386,10 +424,14 @@ class ReKTP(nn.Module):
         responses: torch.Tensor,
         times: torch.Tensor,
         mask: torch.Tensor,
+        skill_ids: torch.Tensor | None = None,
+        skill_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, ...]:
         batch_size, seq_len = questions.shape
-        skill_ids = self.question_skill_ids[questions]
-        skill_mask = self.question_skill_mask[questions]
+        if skill_ids is None:
+            skill_ids = self.question_skill_ids[questions]
+        if skill_mask is None:
+            skill_mask = self.question_skill_mask[questions]
         occurrence_mask = skill_mask & mask.unsqueeze(-1)
         max_skills = skill_ids.size(-1)
 
@@ -442,8 +484,19 @@ class ReKTP(nn.Module):
         times: torch.Tensor,
         mask: torch.Tensor,
         global_context: torch.Tensor,
+        q_features: _QuestionFeatures | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len = questions.shape
+        skill_ids = (
+            q_features.skill_ids
+            if q_features is not None
+            else self.question_skill_ids[questions]
+        )
+        skill_mask = (
+            q_features.skill_mask
+            if q_features is not None
+            else self.question_skill_mask[questions]
+        )
         (
             packed_skill,
             packed_time,
@@ -452,7 +505,9 @@ class ReKTP(nn.Module):
             packed_valid,
             order,
             occurrence_mask,
-        ) = self._pack_kc_occurrences(questions, responses, times, mask)
+        ) = self._pack_kc_occurrences(
+            questions, responses, times, mask, skill_ids, skill_mask
+        )
 
         previous_time = torch.zeros_like(packed_time)
         previous_time[:, 1:] = packed_time[:, :-1]
@@ -525,12 +580,19 @@ class ReKTP(nn.Module):
         local_state = unpacked_state.view(
             batch_size, seq_len, max_skills, self.hidden_dim
         )
-        skill_ids = self.question_skill_ids[questions]
+        if q_features is not None:
+            readout_skill_embedding = q_features.skill_embedding
+            readout_question_vector = q_features.question_vector
+        else:
+            readout_skill_embedding = self.skill_embed(skill_ids)
+            readout_question_vector = self._question_vector(questions)
         return self._question_conditioned_local_readout(
             local_state,
             skill_ids,
             occurrence_mask,
             questions,
+            skill_embedding=readout_skill_embedding,
+            question_vector=readout_question_vector,
         )
 
     def _question_static_states(
@@ -538,6 +600,7 @@ class ReKTP(nn.Module):
         questions: torch.Tensor,
         times: torch.Tensor,
         mask: torch.Tensor,
+        question_vector: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return the elapsed-time-modulated static question feature.
 
@@ -554,17 +617,27 @@ class ReKTP(nn.Module):
                 self.question_decay(self.gap_embed(gap_bucket))
             )
         )
-        static_state = torch.tanh(self.question_init(self._question_vector(questions)))
+        if question_vector is None:
+            question_vector = self._question_vector(questions)
+        static_state = torch.tanh(self.question_init(question_vector))
         state = decay * static_state
         return state.masked_fill(~mask.unsqueeze(-1), 0.0)
 
-    def _event_embeddings(self, questions: torch.Tensor) -> torch.Tensor:
-        skill_ids = self.question_skill_ids[questions]
-        skill_mask = self.question_skill_mask[questions]
-        pooled_skill = self._masked_mean(self.skill_embed(skill_ids), skill_mask)
-        pooled_change = self._masked_mean(self.skill_change(skill_ids), skill_mask)
+    def _event_embeddings(
+        self,
+        questions: torch.Tensor,
+        q_features: _QuestionFeatures | None = None,
+    ) -> torch.Tensor:
+        if q_features is None:
+            q_features = self._resolve_question_features(questions)
+        pooled_skill = self._masked_mean(
+            q_features.skill_embedding, q_features.skill_mask
+        )
+        pooled_change = self._masked_mean(
+            q_features.skill_change, q_features.skill_mask
+        )
         return (
-            self._question_vector(questions)
+            q_features.question_vector
             + pooled_skill
             + self.question_diff(questions) * pooled_change
         )
@@ -615,7 +688,8 @@ class ReKTP(nn.Module):
         first_time = times.masked_fill(~mask, torch.inf).min(dim=1, keepdim=True).values
         times = times - first_time
         times = times.masked_fill(~mask, 0.0)
-        event_embedding = self._event_embeddings(questions)
+        q_features = self._resolve_question_features(questions)
+        event_embedding = self._event_embeddings(questions, q_features)
         global_state = self._global_history_states(event_embedding, responses, mask)
         local_pre_state = self._local_pre_states(
             questions,
@@ -623,8 +697,11 @@ class ReKTP(nn.Module):
             times,
             mask,
             global_state,
+            q_features,
         )
-        question_static_state = self._question_static_states(questions, times, mask)
+        question_static_state = self._question_static_states(
+            questions, times, mask, q_features.question_vector
+        )
 
         features = torch.cat(
             [
