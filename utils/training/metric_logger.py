@@ -340,6 +340,12 @@ class SwanLabMetricLogger(MetricLogger):
         if webhook:
             callbacks.append(LarkCallback(webhook_url=webhook, secret=secret))
 
+        # Re-authenticate per run: SwanLab revokes the session token on
+        # finish() but the SDK reuses the now-invalid client, so the next run
+        # in the same process would 401 on every request.
+        swanlab.login(relogin=True)
+        # reinit finalizes any still-active run (e.g. a prior trial that raised
+        # before finishing) before starting this one, instead of erroring out.
         swanlab.init(
             workspace=os.getenv("KT_SWANLAB_WORKSPACE") or None,
             project=os.getenv("KT_SWANLAB_PROJECT") or "UniKT",
@@ -349,6 +355,7 @@ class SwanLabMetricLogger(MetricLogger):
             group=group,
             tags=tags,
             settings=swanlab.Settings(),
+            reinit=True,
         )
         self._initialized = True
 
