@@ -70,8 +70,7 @@ class GlobalConvBlock(nn.Module):
 class ReKTP(nn.Module):
     """Question-level KT with decoupled per-KC storage and global interaction.
 
-    Readout concatenates ``[global_state, question_static_state,
-    local_pre_state, event_embedding]``.
+    Readout concatenates ``[global_state, local_pre_state, event_embedding]``.
     """
 
     def __init__(
@@ -151,9 +150,6 @@ class ReKTP(nn.Module):
         self.local_global_film = (
             nn.Linear(hidden_dim, 2 * hidden_dim) if use_global_film else None
         )
-        # Static question-feature pathway, modulated by sequence position.
-        self.question_init = nn.Linear(hidden_dim, hidden_dim)
-        self.question_decay = nn.Linear(hidden_dim, hidden_dim)
         self.global_blocks = nn.ModuleList(
             GlobalConvBlock(
                 d_model=hidden_dim,
@@ -172,12 +168,12 @@ class ReKTP(nn.Module):
         )
         self.global_norm = nn.LayerNorm(hidden_dim)
         # IRT prediction head: logit = a·(θ−β), where θ is read from the
-        # 4-way readout features by ``ability_head`` and β is the shared
+        # 3-way readout features by ``ability_head`` and β is the shared
         # ``question_diff`` of the predicted (next) question. Zero-initialized
         # so the model starts at chance (logit 0); the head is a pure
         # 2PL-style IRT decomposition, interpretable as ability minus
         # difficulty scaled by the learned discrimination ``a``.
-        self.ability_head = nn.Linear(4 * hidden_dim, 1)
+        self.ability_head = nn.Linear(3 * hidden_dim, 1)
         nn.init.zeros_(self.ability_head.weight)
         nn.init.zeros_(self.ability_head.bias)
         self.irt_disc = nn.Parameter(torch.tensor(1.0))
@@ -191,8 +187,6 @@ class ReKTP(nn.Module):
             nn.init.zeros_(layer.bias)
         nn.init.zeros_(self.local_decay.weight)
         nn.init.constant_(self.local_decay.bias, -4.0)
-        nn.init.zeros_(self.question_decay.weight)
-        nn.init.constant_(self.question_decay.bias, -4.0)
 
     @staticmethod
     def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -483,34 +477,6 @@ class ReKTP(nn.Module):
             question_vector=readout_question_vector,
         )
 
-    def _question_static_states(
-        self,
-        questions: torch.Tensor,
-        times: torch.Tensor,
-        mask: torch.Tensor,
-        question_vector: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-        """Return the elapsed-time-modulated static question feature.
-
-        ``s_t = exp(-softplus(W_d . e_gap[b_t])) * tanh(W_init . E_q)`` with
-        ``b_t = floor(log2(t + 1))``, where ``t`` is the elapsed time in
-        seconds since the sequence start. Padding positions are zeroed.
-        """
-        # Elapsed seconds since the sequence start, floored to avoid a zero gap.
-        gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
-        gap_bucket = gap_bucket.clamp_max(self.max_gap_bins - 1).expand_as(questions)
-
-        decay = torch.exp(
-            -torch.nn.functional.softplus(
-                self.question_decay(self.gap_embed(gap_bucket))
-            )
-        )
-        if question_vector is None:
-            question_vector = self._question_vector(questions)
-        static_state = torch.tanh(self.question_init(question_vector))
-        state = decay * static_state
-        return state.masked_fill(~mask.unsqueeze(-1), 0.0)
-
     def _event_embeddings(
         self,
         questions: torch.Tensor,
@@ -587,14 +553,10 @@ class ReKTP(nn.Module):
             global_state,
             q_features,
         )
-        question_static_state = self._question_static_states(
-            questions, times, mask, q_features.question_vector
-        )
 
         features = torch.cat(
             [
                 global_state[:, :-1],
-                question_static_state[:, 1:],
                 local_pre_state[:, 1:],
                 event_embedding[:, 1:],
             ],

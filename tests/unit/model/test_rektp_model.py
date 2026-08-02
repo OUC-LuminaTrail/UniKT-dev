@@ -295,65 +295,6 @@ def test_other_kc_response_does_not_change_private_state():
     assert not torch.allclose(changed[:, 2], baseline[:, 2])
 
 
-def test_question_static_state_is_a_pure_function_of_question_and_position():
-    model = _build_model(DEVICE)
-    with torch.no_grad():
-        # question_decay is zero-initialised, which makes decay gap-independent;
-        # activate it so the position modulation is observable.
-        model.gap_embed.weight.zero_()
-        model.gap_embed.weight[1, 0] = 2.0
-        model.question_decay.weight.zero_()
-        model.question_decay.weight[:, 0] = 1.0
-    mask = torch.ones(1, 4, dtype=torch.bool, device=DEVICE)
-    times = torch.arange(4, dtype=torch.float64, device=DEVICE).unsqueeze(0)
-
-    state = model._question_static_states(
-        torch.tensor([[0, 1, 2, 0]], device=DEVICE), times, mask
-    )
-    repeated = model._question_static_states(
-        torch.tensor([[0, 0, 0, 0]], device=DEVICE), times, mask
-    )
-
-    # Position 0 carries question 0 in both sequences, so the outputs agree.
-    torch.testing.assert_close(state[:, 0], repeated[:, 0])
-    # The same question at gap buckets 0 and 1 is modulated differently.
-    assert not torch.allclose(repeated[:, 0], repeated[:, 1])
-
-
-def test_question_static_state_matches_removed_scan_without_repeats():
-    # The pathway is the closed form the original per-question scan collapsed to
-    # at positions with no predecessor: decay(floor(log2(t+1))) * tanh(W E_q).
-    model = _build_model(DEVICE)
-    questions = torch.tensor([[0, 1, 2, 1]], device=DEVICE)
-    mask = torch.ones_like(questions, dtype=torch.bool)
-
-    times = torch.arange(
-        questions.size(1), dtype=torch.float64, device=DEVICE
-    ).unsqueeze(0)
-    gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
-    gap_bucket = gap_bucket.clamp_max(model.max_gap_bins - 1).expand_as(questions)
-    decay = torch.exp(
-        -torch.nn.functional.softplus(model.question_decay(model.gap_embed(gap_bucket)))
-    )
-    expected = decay * torch.tanh(model.question_init(model.question_embed(questions)))
-
-    actual = model._question_static_states(questions, times, mask)
-
-    torch.testing.assert_close(actual, expected)
-
-
-def test_question_static_state_zeroes_padding():
-    model = _build_model(DEVICE)
-    questions = torch.tensor([[0, 1, 2, 0]], device=DEVICE)
-    mask = torch.tensor([[True, True, False, False]], device=DEVICE)
-    times = torch.arange(4, dtype=torch.float64, device=DEVICE).unsqueeze(0)
-
-    state = model._question_static_states(questions, times, mask)
-
-    assert torch.all(state[:, 2:] == 0.0)
-    assert not torch.all(state[:, :2] == 0.0)
-
-
 def test_current_gap_affects_kc_read_states():
     model = _build_model(DEVICE)
     with torch.no_grad():
