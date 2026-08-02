@@ -33,8 +33,7 @@ def build_kwargs():
         "n_blocks": 1,
         "max_gap_bins": 4,
         "dropout": 0.0,
-        "encoder_type": "lstm",
-        "n_heads": 4,
+        "use_global_film": True,
         # question_embed_dim left default (== hidden_dim) so the question-vector
         # sharing path is exercised.
     }

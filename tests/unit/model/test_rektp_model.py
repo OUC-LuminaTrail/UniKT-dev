@@ -1,27 +1,10 @@
-import importlib.util
-
 import pytest
 import torch
 
 ReKTP = pytest.importorskip("model.ReKTP.ReKTP_model").ReKTP
 
-# Mamba exercises its real CUDA kernels; CPU-only logic tests use LSTM.
-HAS_MAMBA = importlib.util.find_spec("mamba_ssm") is not None
 
-
-def _device_for_encoder(encoder_type):
-    if encoder_type != "mamba":
-        return torch.device("cpu")
-    if not HAS_MAMBA:
-        pytest.skip("mamba_ssm required for the mamba encoder")
-    if not torch.cuda.is_available():
-        pytest.skip("CUDA required for the mamba encoder tests")
-    return torch.device("cuda")
-
-
-def _build_model(device, *, activate_private_writes=True, encoder_type="lstm"):
-    if encoder_type == "mamba" and device.type != "cuda":
-        raise ValueError("Mamba tests must build the model on CUDA")
+def _build_model(device, *, activate_private_writes=True, use_global_film=False):
     # Skill id 2 is the padding sentinel.
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
@@ -31,13 +14,9 @@ def _build_model(device, *, activate_private_writes=True, encoder_type="lstm"):
         question_skill_mask=question_skill_mask,
         hidden_dim=16,
         n_blocks=1,
-        d_state=8,
-        d_conv=2,
-        expand=1,
         max_gap_bins=4,
         dropout=0.0,
-        encoder_type=encoder_type,
-        n_heads=4,
+        use_global_film=use_global_film,
     )
     if activate_private_writes:
         with torch.no_grad():
@@ -58,7 +37,6 @@ def _dim_kwargs(hidden_dim=16):
         ),
         "hidden_dim": hidden_dim,
         "n_blocks": 1,
-        "encoder_type": "lstm",
         "max_gap_bins": 4,
         "dropout": 0.0,
     }
@@ -260,7 +238,9 @@ def test_local_readout_can_weight_kcs_conditionally():
 
 
 def test_global_film_initializes_as_identity_conditioning():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    model = _build_model(
+        torch.device("cpu"), activate_private_writes=False, use_global_film=True
+    )
     local_input = torch.randn(2, 3, model.hidden_dim)
     global_context = torch.randn_like(local_input)
 
@@ -270,7 +250,9 @@ def test_global_film_initializes_as_identity_conditioning():
 
 
 def test_global_film_can_condition_local_write_input():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
+    model = _build_model(
+        torch.device("cpu"), activate_private_writes=False, use_global_film=True
+    )
     local_input = torch.ones(1, 2, model.hidden_dim)
     global_context = torch.zeros_like(local_input)
     global_context[:, :, 0] = torch.tensor([[1.0, -1.0]])
@@ -454,7 +436,7 @@ def test_forward_handles_padding_when_valid_times_are_large():
 
 def test_target_answer_does_not_leak_into_its_prediction():
     device = torch.device("cpu")
-    model = _build_model(device)
+    model = _build_model(device, use_global_film=True)
     with torch.no_grad():
         model.local_global_film.weight.zero_()
         model.local_global_film.bias.zero_()
@@ -491,12 +473,9 @@ def test_forward_backward_has_finite_gradients():
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
-@pytest.mark.parametrize(
-    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
-)
-def test_encoder_variant_forward_shape_and_finite(encoder_type):
-    device = _device_for_encoder(encoder_type)
-    model = _build_model(device, encoder_type=encoder_type)
+def test_encoder_forward_shape_and_finite():
+    device = torch.device("cpu")
+    model = _build_model(device)
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
@@ -508,13 +487,10 @@ def test_encoder_variant_forward_shape_and_finite(encoder_type):
     assert torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize(
-    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
-)
-def test_encoder_variant_forward_handles_padding(encoder_type):
+def test_encoder_forward_handles_padding():
     # Trailing padding must not introduce NaN/Inf, nor move valid predictions out of range.
-    device = _device_for_encoder(encoder_type)
-    model = _build_model(device, encoder_type=encoder_type)
+    device = torch.device("cpu")
+    model = _build_model(device)
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.tensor([[True, True, False, False]], device=device)
@@ -526,12 +502,9 @@ def test_encoder_variant_forward_handles_padding(encoder_type):
     assert torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize(
-    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
-)
-def test_encoder_variant_backward_has_finite_gradients(encoder_type):
-    device = _device_for_encoder(encoder_type)
-    model = _build_model(device, encoder_type=encoder_type).train()
+def test_encoder_backward_has_finite_gradients():
+    device = torch.device("cpu")
+    model = _build_model(device).train()
     questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
     responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
@@ -547,13 +520,10 @@ def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
-@pytest.mark.parametrize(
-    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
-)
-def test_encoder_variant_does_not_leak_future_response(encoder_type):
+def test_encoder_does_not_leak_future_response():
     # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
-    device = _device_for_encoder(encoder_type)
-    model = _activate_head(_build_model(device, encoder_type=encoder_type))
+    device = torch.device("cpu")
+    model = _activate_head(_build_model(device))
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 1]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
@@ -569,15 +539,12 @@ def test_encoder_variant_does_not_leak_future_response(encoder_type):
     torch.testing.assert_close(changed[:, :2], baseline[:, :2])
 
 
-@pytest.mark.parametrize(
-    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
-)
-def test_global_encoder_state_is_truncation_invariant(encoder_type):
+def test_global_encoder_state_is_truncation_invariant():
     # The blocks carry no key-padding mask: they rely on padding being trailing,
     # so a valid position's state must not depend on how much padding follows.
     # Breaking this (left padding, or a non-causal block) invalidates the design.
-    device = _device_for_encoder(encoder_type)
-    model = _build_model(device, encoder_type=encoder_type)
+    device = torch.device("cpu")
+    model = _build_model(device)
     questions = torch.tensor([[0, 1, 2]], device=device)
     responses = torch.tensor([[1, 0, 1]], device=device)
 
@@ -594,60 +561,3 @@ def test_global_encoder_state_is_truncation_invariant(encoder_type):
 
     assert short.abs().max() > 1e-6
     torch.testing.assert_close(padded[:, :3], short)
-
-
-def _sequential_qrnn_reference(block, x):
-    """Manual transcription of GlobalQRNNBlock with the reference recurrence."""
-    source = x
-    if block.window == 2:
-        prev = torch.cat((x.new_zeros(x.size(0), 1, x.size(2)), x[:, :-1]), dim=1)
-        source = torch.cat((x, prev), dim=-1)
-    y = block.linear(source)
-    z, f, o = y.chunk(3, dim=-1)
-    z = torch.tanh(z)
-    f = torch.sigmoid(f)
-    cells = []
-    carry = torch.zeros_like(z[:, :1])
-    for t in range(z.size(1)):
-        carry = f[:, t : t + 1] * z[:, t : t + 1] + (1 - f[:, t : t + 1]) * carry
-        cells.append(carry)
-    hidden = torch.sigmoid(o) * torch.cat(cells, dim=1)
-    return block.norm(x + hidden)
-
-
-@pytest.mark.parametrize("window", [1, 2])
-def test_qrnn_block_matches_manual_reference_recurrence(window):
-    from model.ReKTP.ReKTP_model import GlobalQRNNBlock
-
-    torch.manual_seed(5)
-    block = GlobalQRNNBlock(d_model=16, dropout=0.0, window=window).eval()
-    x = torch.randn(3, 9, 16)
-    expected = _sequential_qrnn_reference(block, x)
-    torch.testing.assert_close(block(x), expected)
-
-
-def test_qrnn_block_window2_zero_pads_sequence_start():
-    # With window 2, position 0 sees a zeroed history, so its output matches a
-    # window-1 block; position 1 additionally sees position 0.
-    from model.ReKTP.ReKTP_model import GlobalQRNNBlock
-
-    torch.manual_seed(6)
-    block1 = GlobalQRNNBlock(d_model=16, dropout=0.0, window=1).eval()
-    block2 = GlobalQRNNBlock(d_model=16, dropout=0.0, window=2).eval()
-    x = torch.randn(2, 5, 16)
-    with torch.no_grad():
-        block1.linear.weight.copy_(block2.linear.weight[:, :16])
-        block1.linear.bias.copy_(block2.linear.bias)
-        y1 = block1(x)
-        y2 = block2(x)
-    # The zero-padded history makes the first position identical...
-    torch.testing.assert_close(y2[:, :1], y1[:, :1])
-    # ...and the windowed gate makes later positions differ.
-    assert not torch.allclose(y2[:, 1:], y1[:, 1:], atol=1e-6)
-
-
-def test_qrnn_block_rejects_window_outside_1_and_2():
-    from model.ReKTP.ReKTP_model import GlobalQRNNBlock
-
-    with pytest.raises(ValueError, match="window"):
-        GlobalQRNNBlock(d_model=16, dropout=0.0, window=3)

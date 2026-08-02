@@ -1,8 +1,8 @@
-"""ReKTP: private KC scans with a swappable global history encoder.
+"""ReKTP: private KC scans with a stacked causal-conv global encoder.
 
-The global encoder is selected by ``encoder_type`` (``mamba`` / ``lstm`` /
-``transformer`` / ``qrnn``), which keeps the rest of the model fixed across
-those choices.
+The global encoder is a stack of ``n_blocks`` causal depthwise-separable conv
+blocks whose dilation grows as ``conv_dilation_base**i``; the rest of the
+model is the same question-level KT pipeline.
 """
 
 from collections import namedtuple
@@ -12,9 +12,6 @@ import torch
 from torch import nn
 
 from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
-
-# Global sequence-encoder types selectable via ``encoder_type``.
-GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer", "qrnn", "conv")
 
 # Question-derived tensors computed once per forward and shared across the
 # sub-methods that would otherwise re-gather and re-embed them.
@@ -30,173 +27,12 @@ _QuestionFeatures = namedtuple(
 )
 
 
-class GlobalMambaBlock(nn.Module):
-    """Mamba-2 block with the residual and normalization used by this project."""
-
-    def __init__(
-        self,
-        d_model: int,
-        d_state: int,
-        d_conv: int,
-        expand: int,
-        dropout: float,
-    ):
-        super().__init__()
-        # Imported lazily so the LSTM/Transformer variants run without mamba_ssm.
-        from mamba_ssm import Mamba2
-
-        # Mamba-2's conv1d channels are d_ssm + 2 * d_state and must be a
-        # multiple of 8; with d_ssm == d_inner that constrains d_state.
-        d_inner = expand * d_model
-        if (d_inner + 2 * d_state) % 8 != 0:
-            raise ValueError(
-                "Mamba-2 requires expand * d_model + 2 * d_state to be a "
-                f"multiple of 8, got d_model={d_model}, expand={expand}, "
-                f"d_state={d_state}"
-            )
-        # d_ssm must be divisible by headdim; pick the largest power of two
-        # no larger than 64 so small hidden sizes still work.
-        headdim = min(64, d_inner)
-        while d_inner % headdim != 0:
-            headdim //= 2
-        self.mamba = Mamba2(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=d_conv,
-            expand=expand,
-            headdim=headdim,
-        )
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        return self.norm(x + self.dropout(self.mamba(x)))
-
-
-class GlobalLSTMBlock(nn.Module):
-    """LSTM block with the same residual shell as the Mamba block."""
-
-    def __init__(self, d_model: int, dropout: float):
-        super().__init__()
-        self.lstm = nn.LSTM(d_model, d_model, batch_first=True)
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        # Input padding is pre-zeroed; a unidirectional pass keeps trailing
-        # padding from reaching earlier valid positions.
-        out, _ = self.lstm(x)
-        return self.norm(x + self.dropout(out))
-
-
-class GlobalQRNNBlock(nn.Module):
-    """QRNN-fo block (Bradbury et al., 2017) with the same residual shell.
-
-    A causal windowed linear layer produces the candidate ``z``, forget ``f``,
-    and output ``o`` gates; the recurrent pooling
-    ``c_t = f_t * z_t + (1 - f_t) * c_{t-1}`` runs in parallel (Triton on CUDA,
-    log-depth scan on CPU), and the block emits ``h_t = o_t * c_t``. Matches
-    the reference implementation (salesforce/pytorch-qrnn): window 1 or 2 with
-    zero-padded history at the sequence start, ``tanh`` on ``z`` and
-    ``sigmoid`` on ``f``/``o``. ``zoneout`` is not ported; the residual shell
-    already applies ``dropout``.
-    """
-
-    def __init__(self, d_model: int, dropout: float, window: int = 2):
-        super().__init__()
-        if window not in (1, 2):
-            raise ValueError(
-                "QRNN window must be 1 or 2, matching the reference implementation"
-            )
-        self.window = window
-        # One large matmul over the concatenated window beats several small ones.
-        self.linear = nn.Linear(window * d_model, 3 * d_model)
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        from model.ReKTP.qrnn_scan import qrnn_pool
-
-        # Input padding is pre-zeroed; the pooling is causal, so trailing
-        # padding cannot reach earlier valid positions (same as the LSTM).
-        if self.window == 2:
-            # Pack [x_t, x_{t-1}] into one buffer: current frame in the head
-            # half, causally-shifted frame in the tail half.
-            b_sz, seq_len, hidden = x.shape
-            source = x.new_empty(b_sz, seq_len, 2 * hidden)
-            source[:, :, :hidden] = x
-            source[:, 1:, hidden:] = x[:, :-1]
-            source[:, 0, hidden:] = 0
-        else:
-            source = x
-        y = self.linear(source)
-        z, f, o = y.chunk(3, dim=-1)
-        # qrnn_pool applies tanh/sigmoid internally (fused into the scan kernel),
-        # so the raw gated-linear outputs feed it directly.
-        cell = qrnn_pool(z, f)
-        hidden = torch.sigmoid(o) * cell
-        return self.norm(x + self.dropout(hidden))
-
-
-class GlobalTransformerBlock(nn.Module):
-    """Causal self-attention block with the same residual shell.
-
-    Requires trailing (right-side) padding, which the sequence builder
-    guarantees. ``mask`` is accepted for interface parity but unused: under
-    right padding the causal mask alone already hides every padding key from
-    every valid query.
-    """
-
-    def __init__(self, d_model: int, n_heads: int, dropout: float):
-        super().__init__()
-        self.attn = nn.MultiheadAttention(
-            d_model, n_heads, dropout=dropout, batch_first=True
-        )
-        self.n_heads = n_heads
-        self.norm = nn.LayerNorm(d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
-        # Projections come from ``self.attn`` so parameter names and their
-        # initialization are unchanged; only the attention call is fused.
-        # No key-padding mask: padding is trailing, so every padding key sits at
-        # an index above any valid query and the causal mask already hides it.
-        batch_size, seq_len, d_model = x.shape
-        head_dim = d_model // self.n_heads
-        projected = torch.nn.functional.linear(
-            x, self.attn.in_proj_weight, self.attn.in_proj_bias
-        )
-        query, key, value = projected.chunk(3, dim=-1)
-        head_shape = (batch_size, seq_len, self.n_heads, head_dim)
-        query, key, value = (
-            tensor.view(head_shape).transpose(1, 2) for tensor in (query, key, value)
-        )
-        attended = torch.nn.functional.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            dropout_p=self.attn.dropout if self.training else 0.0,
-            is_causal=True,
-        )
-        attended = attended.transpose(1, 2).reshape(batch_size, seq_len, d_model)
-        out = self.attn.out_proj(attended)
-        return self.norm(x + self.dropout(out))
-
-
 class GlobalConvBlock(nn.Module):
-    """Causal depthwise-separable conv block with the same residual shell.
+    """Causal depthwise-separable conv block with a residual shell.
 
     A left-padded depthwise conv mixes the last ``kernel_size`` positions per
     channel in parallel, a pointwise conv mixes channels, and the residual
-    shell matches the other global blocks. Fully parallel across time (no
+    shell applies normalization and dropout. Fully parallel across time (no
     sequential scan) and O(T) memory; stacking blocks with growing dilation
     widens the receptive field.
     """
@@ -221,9 +57,7 @@ class GlobalConvBlock(nn.Module):
         self.norm = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(
-        self, x: torch.Tensor, mask: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         y = x.transpose(1, 2)  # [B, d, N]
         y = torch.nn.functional.pad(y, (self.pad, 0))
@@ -231,46 +65,6 @@ class GlobalConvBlock(nn.Module):
         y = self.pointwise(y)
         y = torch.nn.functional.gelu(y).transpose(1, 2)  # [B, N, d]
         return self.norm(residual + self.dropout(y))
-
-
-def build_global_block(
-    encoder_type: str,
-    d_model: int,
-    dropout: float,
-    *,
-    d_state: int = 16,
-    d_conv: int = 4,
-    expand: int = 2,
-    n_heads: int = 8,
-    window: int = 2,
-    kernel_size: int = 3,
-    dilation: int = 1,
-) -> nn.Module:
-    """Construct one global sequence-mixing block for the requested encoder type."""
-    if encoder_type == "mamba":
-        return GlobalMambaBlock(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=d_conv,
-            expand=expand,
-            dropout=dropout,
-        )
-    if encoder_type == "lstm":
-        return GlobalLSTMBlock(d_model=d_model, dropout=dropout)
-    if encoder_type == "qrnn":
-        return GlobalQRNNBlock(d_model=d_model, dropout=dropout, window=window)
-    if encoder_type == "conv":
-        return GlobalConvBlock(
-            d_model=d_model,
-            dropout=dropout,
-            kernel_size=kernel_size,
-            dilation=dilation,
-        )
-    if encoder_type == "transformer":
-        return GlobalTransformerBlock(d_model=d_model, n_heads=n_heads, dropout=dropout)
-    raise ValueError(
-        f"encoder_type must be one of {GLOBAL_ENCODER_TYPES}, got {encoder_type!r}"
-    )
 
 
 class ReKTP(nn.Module):
@@ -287,33 +81,17 @@ class ReKTP(nn.Module):
         question_skill_mask: np.ndarray | torch.Tensor,
         hidden_dim: int = 128,
         n_blocks: int = 2,
-        d_state: int = 16,
-        d_conv: int = 4,
-        expand: int = 2,
         max_gap_bins: int = 8,
         residual_scale: float = 0.1,
         dropout: float = 0.2,
-        encoder_type: str = "conv",
-        n_heads: int = 8,
-        window: int = 2,
         conv_kernel_size: int = 3,
         conv_dilation_base: int = 2,
         use_global_film: bool = False,
         question_embed_dim: int | None = None,
     ):
         super().__init__()
-        if encoder_type not in GLOBAL_ENCODER_TYPES:
-            raise ValueError(
-                f"encoder_type must be one of {GLOBAL_ENCODER_TYPES}, "
-                f"got {encoder_type!r}"
-            )
         if hidden_dim % 2 != 0:
             raise ValueError("ReKTP hidden_dim must be divisible by 2")
-        if encoder_type == "transformer" and hidden_dim % n_heads != 0:
-            raise ValueError(
-                f"hidden_dim ({hidden_dim}) must be divisible by n_heads ({n_heads}) "
-                "for the transformer encoder"
-            )
         if max_gap_bins < 1:
             raise ValueError("max_gap_bins must be at least 1")
         if residual_scale <= 0.0:
@@ -377,15 +155,9 @@ class ReKTP(nn.Module):
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
         self.global_blocks = nn.ModuleList(
-            build_global_block(
-                encoder_type,
+            GlobalConvBlock(
                 d_model=hidden_dim,
                 dropout=dropout,
-                d_state=d_state,
-                d_conv=d_conv,
-                expand=expand,
-                n_heads=n_heads,
-                window=window,
                 kernel_size=conv_kernel_size,
                 dilation=conv_dilation_base**i,
             )
@@ -767,7 +539,7 @@ class ReKTP(nn.Module):
         global_state = event_embedding + self.answer_embed(responses)
         global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
         for block in self.global_blocks:
-            global_state = block(global_state, mask)
+            global_state = block(global_state)
         return self.global_norm(global_state + self.global_ffn(global_state))
 
     def _irt_term(

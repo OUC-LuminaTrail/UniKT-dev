@@ -17,24 +17,13 @@ class ReKTPConfig(ModelConfig):
 
     Args:
         hidden_dim: Shared event, local-state, and encoder dimension.
-        n_blocks: Number of global encoder blocks.
-        d_state: Mamba-2 SSM state dimension. Mamba-2 requires
-            expand * hidden_dim + 2 * d_state to be a multiple of 8, so the
-            default is 32 and the optuna space steps by 4.
-        d_conv: Mamba local convolution width (only used when encoder_type='mamba').
-        expand: Mamba internal expansion factor (only used when encoder_type='mamba').
-        encoder_type: Global history encoder: 'mamba', 'lstm', 'transformer',
-            or 'qrnn'. The rest of the model is identical across choices.
-        n_heads: Number of attention heads (only used when encoder_type='transformer').
-        q_window: QRNN convolutional window size, 1 or 2 (only used when
-            encoder_type='qrnn'). Matches salesforce/pytorch-qrnn, whose paper
-            default is 2.
-        conv_kernel_size: Causal-conv kernel size (only used when
-            encoder_type='conv'). Each block mixes the last ``kernel_size``
-            positions; the receptive field grows with dilation across blocks.
-        conv_dilation_base: Dilation base per block (only used when
-            encoder_type='conv'); block ``i`` uses ``base**i``. 2 gives
-            exponential receptive-field growth (TCN style), 1 gives uniform.
+        n_blocks: Number of global conv encoder blocks.
+        conv_kernel_size: Causal-conv kernel size. Each block mixes the last
+            ``kernel_size`` positions; the receptive field grows with dilation
+            across blocks.
+        conv_dilation_base: Dilation base per block; block ``i`` uses
+            ``base**i``. 2 gives exponential receptive-field growth (TCN
+            style), 1 gives uniform.
         use_global_film: If True, modulate the local KC input with the global
             state via FiLM (``local_global_film``). Off by default.
         question_embed_dim: Intrinsic width of the per-question embedding; -1
@@ -62,24 +51,6 @@ class ReKTPConfig(ModelConfig):
     )
     n_blocks: int = field(
         default=4, metadata={"optuna": {"type": "int", "low": 1, "high": 4}}
-    )
-    d_state: int = field(
-        default=32,
-        metadata={"optuna": {"type": "int", "low": 8, "high": 32, "step": 4}},
-    )
-    d_conv: int = field(
-        default=4,
-        metadata={"optuna": {"type": "categorical", "choices": [2, 4]}},
-    )
-    expand: int = field(
-        default=4,
-        metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
-    )
-    encoder_type: str = field(default="conv")
-    n_heads: int = field(default=8)
-    q_window: int = field(
-        default=2,
-        metadata={"optuna": {"type": "categorical", "choices": [1, 2]}},
     )
     conv_kernel_size: int = field(
         default=3,
@@ -143,15 +114,9 @@ class ReKTPTrainer(BaseTrainer):
             question_skill_mask=extra["question_skill_mask"],
             hidden_dim=m.hidden_dim,
             n_blocks=m.n_blocks,
-            d_state=m.d_state,
-            d_conv=m.d_conv,
-            expand=m.expand,
             max_gap_bins=max_gap_bins,
             residual_scale=m.residual_scale,
             dropout=m.dropout,
-            encoder_type=m.encoder_type,
-            n_heads=m.n_heads,
-            window=m.q_window,
             conv_kernel_size=m.conv_kernel_size,
             conv_dilation_base=m.conv_dilation_base,
             use_global_film=m.use_global_film,
