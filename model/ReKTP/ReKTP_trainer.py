@@ -63,8 +63,8 @@ class ReKTPConfig(ModelConfig):
     use_global_film: bool = False
     amp: bool = False
     residual_scale: float = field(
-        default=0.04,
-        metadata={"optuna": {"type": "float", "low": 0.02, "high": 0.3, "log": True}},
+        default=0.3,
+        metadata={"optuna": {"type": "float", "low": 0.02, "high": 1.0, "log": True}},
     )
     dropout: float = field(
         default=0.4, metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}}
@@ -89,8 +89,8 @@ class ReKTPConfig(ModelConfig):
         metadata={"optuna": {"type": "categorical", "choices": [32, 64, 80, 128]}},
     )
     max_clip_grad_norm: float = field(
-        default=15.0,
-        metadata={"optuna": {"type": "float", "low": 0.5, "high": 20, "log": True}},
+        default=5.0,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 10, "log": True}},
     )
 
 
@@ -145,7 +145,7 @@ class ReKTPTrainer(BaseTrainer):
         questions = self._move_tensor_to_device(questions)
         responses = self._move_tensor_to_device(responses)
         times = self._move_tensor_to_device(times)
-        mask = self._move_tensor_to_device(mask, dtype=torch.bool)
+        mask = self._move_tensor_to_device(mask)
 
         use_amp = bool(self.run_config.model.amp)
         with torch.autocast(
