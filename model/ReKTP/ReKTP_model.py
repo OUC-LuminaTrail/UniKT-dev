@@ -293,7 +293,7 @@ class ReKTP(nn.Module):
         max_gap_bins: int = 8,
         residual_scale: float = 0.1,
         dropout: float = 0.2,
-        encoder_type: str = "mamba",
+        encoder_type: str = "conv",
         n_heads: int = 8,
         window: int = 2,
         conv_kernel_size: int = 3,

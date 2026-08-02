@@ -75,7 +75,7 @@ class ReKTPConfig(ModelConfig):
         default=4,
         metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
     )
-    encoder_type: str = field(default="mamba")
+    encoder_type: str = field(default="conv")
     n_heads: int = field(default=8)
     q_window: int = field(
         default=2,
