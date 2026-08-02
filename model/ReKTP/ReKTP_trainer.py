@@ -23,9 +23,12 @@ class ReKTPConfig(ModelConfig):
             default is 32 and the optuna space steps by 4.
         d_conv: Mamba local convolution width (only used when encoder_type='mamba').
         expand: Mamba internal expansion factor (only used when encoder_type='mamba').
-        encoder_type: Global history encoder: 'mamba', 'lstm', or 'transformer'.
-            The rest of the model is identical across choices.
+        encoder_type: Global history encoder: 'mamba', 'lstm', 'transformer',
+            or 'qrnn'. The rest of the model is identical across choices.
         n_heads: Number of attention heads (only used when encoder_type='transformer').
+        q_window: QRNN convolutional window size, 1 or 2 (only used when
+            encoder_type='qrnn'). Matches salesforce/pytorch-qrnn, whose paper
+            default is 2.
         question_embed_dim: Intrinsic width of the per-question embedding; -1
             (default) means ``hidden_dim`` and 0 removes the pathway, leaving
             question identity to the ``question_diff`` scalar and the KC side.
@@ -66,6 +69,10 @@ class ReKTPConfig(ModelConfig):
     )
     encoder_type: str = field(default="mamba")
     n_heads: int = field(default=8)
+    q_window: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [1, 2]}},
+    )
     amp: bool = False
     residual_scale: float = field(
         default=0.04,
@@ -127,6 +134,7 @@ class ReKTPTrainer(BaseTrainer):
             dropout=m.dropout,
             encoder_type=m.encoder_type,
             n_heads=m.n_heads,
+            window=m.q_window,
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),

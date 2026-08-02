@@ -1,7 +1,8 @@
 """ReKTP: private KC scans with a swappable global history encoder.
 
 The global encoder is selected by ``encoder_type`` (``mamba`` / ``lstm`` /
-``transformer``), which keeps the rest of the model fixed across those choices.
+``transformer`` / ``qrnn``), which keeps the rest of the model fixed across
+those choices.
 """
 
 from collections import namedtuple
@@ -13,7 +14,7 @@ from torch import nn
 from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
 
 # Global sequence-encoder types selectable via ``encoder_type``.
-GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer")
+GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer", "qrnn")
 
 # Question-derived tensors computed once per forward and shared across the
 # sub-methods that would otherwise re-gather and re-embed them.
@@ -92,6 +93,49 @@ class GlobalLSTMBlock(nn.Module):
         return self.norm(x + self.dropout(out))
 
 
+class GlobalQRNNBlock(nn.Module):
+    """QRNN-fo block (Bradbury et al., 2017) with the same residual shell.
+
+    A causal windowed linear layer produces the candidate ``z``, forget ``f``,
+    and output ``o`` gates; the recurrent pooling
+    ``c_t = f_t * z_t + (1 - f_t) * c_{t-1}`` runs in parallel (Triton on CUDA,
+    log-depth scan on CPU), and the block emits ``h_t = o_t * c_t``. Matches
+    the reference implementation (salesforce/pytorch-qrnn): window 1 or 2 with
+    zero-padded history at the sequence start, ``tanh`` on ``z`` and
+    ``sigmoid`` on ``f``/``o``. ``zoneout`` is not ported; the residual shell
+    already applies ``dropout``.
+    """
+
+    def __init__(self, d_model: int, dropout: float, window: int = 2):
+        super().__init__()
+        if window not in (1, 2):
+            raise ValueError(
+                "QRNN window must be 1 or 2, matching the reference implementation"
+            )
+        self.window = window
+        # One large matmul over the concatenated window beats several small ones.
+        self.linear = nn.Linear(window * d_model, 3 * d_model)
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        from model.ReKTP.qrnn_scan import qrnn_pool
+
+        # Input padding is pre-zeroed; the pooling is causal, so trailing
+        # padding cannot reach earlier valid positions (same as the LSTM).
+        source = x
+        if self.window == 2:
+            prev = torch.cat((x.new_zeros(x.size(0), 1, x.size(2)), x[:, :-1]), dim=1)
+            source = torch.cat((x, prev), dim=-1)
+        y = self.linear(source)
+        z, f, o = y.chunk(3, dim=-1)
+        cell = qrnn_pool(torch.tanh(z), torch.sigmoid(f))
+        hidden = torch.sigmoid(o) * cell
+        return self.norm(x + self.dropout(hidden))
+
+
 class GlobalTransformerBlock(nn.Module):
     """Causal self-attention block with the same residual shell.
 
@@ -148,6 +192,7 @@ def build_global_block(
     d_conv: int = 4,
     expand: int = 2,
     n_heads: int = 8,
+    window: int = 2,
 ) -> nn.Module:
     """Construct one global sequence-mixing block for the requested encoder type."""
     if encoder_type == "mamba":
@@ -160,6 +205,8 @@ def build_global_block(
         )
     if encoder_type == "lstm":
         return GlobalLSTMBlock(d_model=d_model, dropout=dropout)
+    if encoder_type == "qrnn":
+        return GlobalQRNNBlock(d_model=d_model, dropout=dropout, window=window)
     if encoder_type == "transformer":
         return GlobalTransformerBlock(d_model=d_model, n_heads=n_heads, dropout=dropout)
     raise ValueError(
@@ -189,6 +236,7 @@ class ReKTP(nn.Module):
         dropout: float = 0.2,
         encoder_type: str = "mamba",
         n_heads: int = 8,
+        window: int = 2,
         question_embed_dim: int | None = None,
     ):
         super().__init__()
@@ -272,6 +320,7 @@ class ReKTP(nn.Module):
                 d_conv=d_conv,
                 expand=expand,
                 n_heads=n_heads,
+                window=window,
             )
             for _ in range(n_blocks)
         )

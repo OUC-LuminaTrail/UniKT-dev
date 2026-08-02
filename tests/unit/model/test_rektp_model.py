@@ -491,7 +491,7 @@ def test_forward_backward_has_finite_gradients():
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
+@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
 def test_encoder_variant_forward_shape_and_finite(encoder_type):
     device = _device_for_encoder(encoder_type)
     model = _build_model(device, encoder_type=encoder_type)
@@ -506,7 +506,7 @@ def test_encoder_variant_forward_shape_and_finite(encoder_type):
     assert torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
+@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
 def test_encoder_variant_forward_handles_padding(encoder_type):
     # Trailing padding must not introduce NaN/Inf, nor move valid predictions out of range.
     device = _device_for_encoder(encoder_type)
@@ -522,7 +522,7 @@ def test_encoder_variant_forward_handles_padding(encoder_type):
     assert torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
+@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
 def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     device = _device_for_encoder(encoder_type)
     model = _build_model(device, encoder_type=encoder_type).train()
@@ -541,7 +541,7 @@ def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
+@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
 def test_encoder_variant_does_not_leak_future_response(encoder_type):
     # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
     device = _device_for_encoder(encoder_type)
@@ -561,7 +561,7 @@ def test_encoder_variant_does_not_leak_future_response(encoder_type):
     torch.testing.assert_close(changed[:, :2], baseline[:, :2])
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer"])
+@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
 def test_global_encoder_state_is_truncation_invariant(encoder_type):
     # The blocks carry no key-padding mask: they rely on padding being trailing,
     # so a valid position's state must not depend on how much padding follows.
@@ -584,3 +584,60 @@ def test_global_encoder_state_is_truncation_invariant(encoder_type):
 
     assert short.abs().max() > 1e-6
     torch.testing.assert_close(padded[:, :3], short)
+
+
+def _sequential_qrnn_reference(block, x):
+    """Manual transcription of GlobalQRNNBlock with the reference recurrence."""
+    source = x
+    if block.window == 2:
+        prev = torch.cat((x.new_zeros(x.size(0), 1, x.size(2)), x[:, :-1]), dim=1)
+        source = torch.cat((x, prev), dim=-1)
+    y = block.linear(source)
+    z, f, o = y.chunk(3, dim=-1)
+    z = torch.tanh(z)
+    f = torch.sigmoid(f)
+    cells = []
+    carry = torch.zeros_like(z[:, :1])
+    for t in range(z.size(1)):
+        carry = f[:, t : t + 1] * z[:, t : t + 1] + (1 - f[:, t : t + 1]) * carry
+        cells.append(carry)
+    hidden = torch.sigmoid(o) * torch.cat(cells, dim=1)
+    return block.norm(x + hidden)
+
+
+@pytest.mark.parametrize("window", [1, 2])
+def test_qrnn_block_matches_manual_reference_recurrence(window):
+    from model.ReKTP.ReKTP_model import GlobalQRNNBlock
+
+    torch.manual_seed(5)
+    block = GlobalQRNNBlock(d_model=16, dropout=0.0, window=window).eval()
+    x = torch.randn(3, 9, 16)
+    expected = _sequential_qrnn_reference(block, x)
+    torch.testing.assert_close(block(x), expected)
+
+
+def test_qrnn_block_window2_zero_pads_sequence_start():
+    # With window 2, position 0 sees a zeroed history, so its output matches a
+    # window-1 block; position 1 additionally sees position 0.
+    from model.ReKTP.ReKTP_model import GlobalQRNNBlock
+
+    torch.manual_seed(6)
+    block1 = GlobalQRNNBlock(d_model=16, dropout=0.0, window=1).eval()
+    block2 = GlobalQRNNBlock(d_model=16, dropout=0.0, window=2).eval()
+    x = torch.randn(2, 5, 16)
+    with torch.no_grad():
+        block1.linear.weight.copy_(block2.linear.weight[:, :16])
+        block1.linear.bias.copy_(block2.linear.bias)
+        y1 = block1(x)
+        y2 = block2(x)
+    # The zero-padded history makes the first position identical...
+    torch.testing.assert_close(y2[:, :1], y1[:, :1])
+    # ...and the windowed gate makes later positions differ.
+    assert not torch.allclose(y2[:, 1:], y1[:, 1:], atol=1e-6)
+
+
+def test_qrnn_block_rejects_window_outside_1_and_2():
+    from model.ReKTP.ReKTP_model import GlobalQRNNBlock
+
+    with pytest.raises(ValueError, match="window"):
+        GlobalQRNNBlock(d_model=16, dropout=0.0, window=3)
