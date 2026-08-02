@@ -298,6 +298,7 @@ class ReKTP(nn.Module):
         window: int = 2,
         conv_kernel_size: int = 3,
         conv_dilation_base: int = 2,
+        use_global_film: bool = False,
         question_embed_dim: int | None = None,
     ):
         super().__init__()
@@ -368,7 +369,10 @@ class ReKTP(nn.Module):
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
         self.local_readout = nn.Linear(3 * hidden_dim, 1)
-        self.local_global_film = nn.Linear(hidden_dim, 2 * hidden_dim)
+        self.use_global_film = use_global_film
+        self.local_global_film = (
+            nn.Linear(hidden_dim, 2 * hidden_dim) if use_global_film else None
+        )
         # Static question-feature pathway, modulated by sequence position.
         self.question_init = nn.Linear(hidden_dim, hidden_dim)
         self.question_decay = nn.Linear(hidden_dim, hidden_dim)
@@ -407,12 +411,10 @@ class ReKTP(nn.Module):
         self.irt_disc = nn.Parameter(torch.tensor(1.0))
 
         nn.init.zeros_(self.question_diff.weight)
-        for layer in (
-            self.local_residual,
-            self.local_write,
-            self.local_readout,
-            self.local_global_film,
-        ):
+        zeroed_layers = [self.local_residual, self.local_write, self.local_readout]
+        if self.local_global_film is not None:
+            zeroed_layers.append(self.local_global_film)
+        for layer in zeroed_layers:
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
         nn.init.zeros_(self.local_decay.weight)
@@ -498,6 +500,8 @@ class ReKTP(nn.Module):
         local_input: torch.Tensor,
         global_context: torch.Tensor,
     ) -> torch.Tensor:
+        if self.local_global_film is None:
+            return local_input
         gamma, beta = self.local_global_film(global_context).chunk(2, dim=-1)
         return local_input * (1.0 + gamma) + beta
 

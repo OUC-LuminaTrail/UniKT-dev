@@ -35,6 +35,8 @@ class ReKTPConfig(ModelConfig):
         conv_dilation_base: Dilation base per block (only used when
             encoder_type='conv'); block ``i`` uses ``base**i``. 2 gives
             exponential receptive-field growth (TCN style), 1 gives uniform.
+        use_global_film: If True, modulate the local KC input with the global
+            state via FiLM (``local_global_film``). Off by default.
         question_embed_dim: Intrinsic width of the per-question embedding; -1
             (default) means ``hidden_dim`` and 0 removes the pathway, leaving
             question identity to the ``question_diff`` scalar and the KC side.
@@ -87,6 +89,7 @@ class ReKTPConfig(ModelConfig):
         default=2,
         metadata={"optuna": {"type": "categorical", "choices": [1, 2]}},
     )
+    use_global_film: bool = False
     amp: bool = False
     residual_scale: float = field(
         default=0.04,
@@ -151,6 +154,7 @@ class ReKTPTrainer(BaseTrainer):
             window=m.q_window,
             conv_kernel_size=m.conv_kernel_size,
             conv_dilation_base=m.conv_dilation_base,
+            use_global_film=m.use_global_film,
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),
