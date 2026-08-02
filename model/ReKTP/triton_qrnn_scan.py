@@ -1,15 +1,16 @@
 """Triton kernels for the QRNN pooling recurrence (ForgetMult).
 
 The QRNN's recurrent pooling is the per-channel scalar affine scan
-``c_t = f_t * z_t + (1 - f_t) * c_{t-1}`` with ``c_{-1} = 0``. Unlike the
-segmented block-affine scan, it has no segments, no initial states, and no
-valid mask: padding is trailing and the recurrence is causal, so padding
-cannot influence earlier valid positions.
+``c_t = sigmoid(f_t) * tanh(z_t) + (1 - sigmoid(f_t)) * c_{t-1}`` with
+``c_{-1} = 0``. The ``tanh``/``sigmoid`` activations are fused into the kernels,
+so callers pass the raw candidate ``z`` and pre-gate ``f`` straight from the
+gated linear layer -- this saves two elementwise passes plus their temporary
+tensors and shortens the launch chain of the enclosing block.
 
 - Forward: one program per batch row, vectorised over ``hidden``, running a
-  sequential scan along the sequence. Each position is two FMAs.
-- Backward: an adjoint reverse scan over ``q_t = g_t + (1 - f_{t+1}) q_{t+1}``
-  with ``d f_t = q_t (z_t - c_{t-1})`` and ``d z_t = q_t f_t``.
+  sequential scan with the activation folded into each step.
+- Backward: an adjoint reverse scan that recomputes the activations and applies
+  the tanh/sigmoid chain rule, returning gradients w.r.t. the raw ``z``/``f``.
 
 CUDA only; CPU uses the log-depth scan in ``qrnn_scan.py``.
 """
@@ -29,7 +30,11 @@ def _fwd_kernel(
     stride_b,
     BLOCK_H: tl.constexpr,
 ):
-    """Forward QRNN pooling scan for one batch row (vectorised over hidden)."""
+    """Forward QRNN pooling scan for one batch row, fusing tanh/sigmoid.
+
+    ``z`` and ``f`` are raw (pre-activation); the recurrence is
+    ``c_t = sigmoid(f_t) * tanh(z_t) + (1 - sigmoid(f_t)) * c_{t-1}``.
+    """
     pid_b = tl.program_id(0)
     h_offs = tl.arange(0, BLOCK_H)
     h_mask = h_offs < H
@@ -44,7 +49,10 @@ def _fwd_kernel(
     for n in range(N):
         zn = tl.load(z_row + n * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
         fn = tl.load(f_row + n * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
-        carry = fn * zn + (1.0 - fn) * carry
+        sf = tl.sigmoid(fn)
+        # tl has no tanh; use the identity tanh(x) = 2*sigmoid(2x) - 1.
+        tz = 2.0 * tl.sigmoid(2.0 * zn) - 1.0
+        carry = sf * tz + (1.0 - sf) * carry
         tl.store(o_row + n * H + h_offs, carry, mask=h_mask)
 
 
@@ -61,20 +69,22 @@ def _bwd_kernel(
     stride_b,
     BLOCK_H: tl.constexpr,
 ):
-    """Backward adjoint reverse scan for the QRNN pooling.
+    """Backward adjoint reverse scan, fusing the tanh/sigmoid chain rule.
 
-    For ``c_t = a_t c_{t-1} + b_t`` with ``a_t = 1 - f_t`` and
-    ``b_t = f_t z_t``, the adjoint is ``q_t = g_t + a_{t+1} q_{t+1}`` with
-    ``d a_t = q_t c_{t-1}`` and ``d b_t = q_t``, so
-    ``d f_t = q_t (z_t - c_{t-1})`` and ``d z_t = q_t f_t``. The previous cell
-    state ``c_{t-1}`` is carried from the saved forward output.
+    With ``tz = tanh(z)``, ``sf = sigmoid(f)``, ``a = 1 - sf``, ``b = sf * tz``
+    and the adjoint ``q_t = g_t + a_{t+1} q_{t+1}``, the gradients back at the
+    raw inputs are ``dL/dz_t = q_t * sf * (1 - tz^2)`` and
+    ``dL/df_t = q_t * (tz - c_{t-1}) * sf * (1 - sf)``. The activations are
+    recomputed from the saved raw ``z``/``f``; ``c_{t-1}`` comes from the saved
+    forward output.
     """
     pid_b = tl.program_id(0)
     h_offs = tl.arange(0, BLOCK_H)
     h_mask = h_offs < H
 
     q = tl.zeros([BLOCK_H], dtype=tl.float32)
-    next_f = tl.zeros([BLOCK_H], dtype=tl.float32)
+    # sf at i+1, carried across iterations; 0 at i = N-1 (term vanishes anyway).
+    next_sf = tl.zeros([BLOCK_H], dtype=tl.float32)
 
     g_row = g_ptr + pid_b * stride_b
     z_row = z_ptr + pid_b * stride_b
@@ -86,8 +96,8 @@ def _bwd_kernel(
     for n in range(N):
         i = N - 1 - n
         gi = tl.load(g_row + i * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
-        zi = tl.load(z_row + i * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
-        fi = tl.load(f_row + i * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
+        zr = tl.load(z_row + i * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
+        fr = tl.load(f_row + i * H + h_offs, mask=h_mask, other=0.0).to(tl.float32)
         # Previous cell state c_{i-1}, zero at the sequence start.
         cm1 = tl.load(
             c_row + (i - 1) * H + h_offs,
@@ -95,18 +105,24 @@ def _bwd_kernel(
             other=0.0,
         ).to(tl.float32)
 
-        # q_i = g_i + (1 - f_{i+1}) q_{i+1}; at i = N-1 the term vanishes.
-        q = gi + (1.0 - next_f) * q
-        next_f = fi
-        dz = q * fi
-        df = q * (zi - cm1)
+        sf = tl.sigmoid(fr)
+        # tl has no tanh; use tanh(x) = 2*sigmoid(2x) - 1.
+        tz = 2.0 * tl.sigmoid(2.0 * zr) - 1.0
+
+        # q_i = g_i + (1 - sf_{i+1}) q_{i+1}; at i = N-1 the term vanishes.
+        q = gi + (1.0 - next_sf) * q
+        next_sf = sf
+
+        # Chain rule back to the raw inputs z, f.
+        dz = q * sf * (1.0 - tz * tz)
+        df = q * (tz - cm1) * sf * (1.0 - sf)
 
         tl.store(dz_row + i * H + h_offs, dz, mask=h_mask)
         tl.store(df_row + i * H + h_offs, df, mask=h_mask)
 
 
 class _QRNNPool(torch.autograd.Function):
-    """Differentiable QRNN pooling scan (ForgetMult recurrence)."""
+    """Differentiable QRNN pooling scan over raw (pre-activation) z and f."""
 
     @staticmethod
     def forward(ctx, z, f):
@@ -114,7 +130,6 @@ class _QRNNPool(torch.autograd.Function):
             raise ValueError("z and f must have matching [batch, seq_len, dim] shape")
         if z.size(1) == 0:
             ctx.empty = True
-            ctx.save_for_backward(f)
             return torch.zeros_like(z)
 
         z = z.contiguous()
@@ -142,7 +157,8 @@ class _QRNNPool(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_out):
         if ctx.empty:
-            return torch.zeros_like(ctx.saved_tensors[0]), None
+            zg = torch.zeros_like(grad_out)
+            return zg, zg.clone()
         z, f, out = ctx.saved_tensors
         grad_out = grad_out.contiguous()
         if not grad_out.is_cuda:
@@ -152,8 +168,8 @@ class _QRNNPool(torch.autograd.Function):
         length = ctx.length
         dim = ctx.dim
         block_h = ctx.block_h
-        dz = torch.zeros_like(z)
-        df = torch.zeros_like(f)
+        dz = torch.empty_like(z)
+        df = torch.empty_like(f)
 
         _bwd_kernel[(batch,)](
             grad_out,
@@ -171,15 +187,18 @@ class _QRNNPool(torch.autograd.Function):
 
 
 def triton_qrnn_pool(z: torch.Tensor, f: torch.Tensor) -> torch.Tensor:
-    """Differentiable Triton QRNN pooling scan.
+    """Differentiable Triton QRNN pooling scan over raw (pre-activation) inputs.
 
     Args:
-        z: Candidate values with shape ``[B, N, H]`` (already tanh-activated).
-        f: Forget gates with shape ``[B, N, H]``, assumed in ``[0, 1]``.
+        z: Raw candidate values with shape ``[B, N, H]`` (the kernel applies
+            ``tanh`` internally).
+        f: Raw forget gates with shape ``[B, N, H]`` (the kernel applies
+            ``sigmoid`` internally).
 
     Returns:
         Cell states ``c`` with shape ``[B, N, H]``, where
-        ``c_t = f_t * z_t + (1 - f_t) * c_{t-1}`` and ``c_{-1} = 0``.
+        ``c_t = sigmoid(f_t) * tanh(z_t) + (1 - sigmoid(f_t)) * c_{t-1}`` and
+        ``c_{-1} = 0``.
     """
     return _QRNNPool.apply(z, f)
 

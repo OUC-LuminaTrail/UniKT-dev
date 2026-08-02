@@ -5,11 +5,17 @@ from model.ReKTP.qrnn_scan import qrnn_pool
 
 
 def _sequential_pool(z, f):
-    """Direct transcription of the ForgetMult recurrence."""
+    """Direct transcription of the ForgetMult recurrence over raw z, f.
+
+    The scan applies ``tanh`` to ``z`` and ``sigmoid`` to ``f`` internally,
+    matching the fused kernel's contract.
+    """
+    tz = torch.tanh(z)
+    sf = torch.sigmoid(f)
     cells = []
     prev = torch.zeros_like(z[:, :1])
     for t in range(z.size(1)):
-        prev = f[:, t : t + 1] * z[:, t : t + 1] + (1 - f[:, t : t + 1]) * prev
+        prev = sf[:, t : t + 1] * tz[:, t : t + 1] + (1 - sf[:, t : t + 1]) * prev
         cells.append(prev)
     return torch.cat(cells, dim=1)
 
@@ -17,7 +23,7 @@ def _sequential_pool(z, f):
 def _random_example(batch=3, length=9, dim=5):
     torch.manual_seed(23)
     z = torch.randn(batch, length, dim)
-    f = torch.sigmoid(torch.randn(batch, length, dim))
+    f = torch.randn(batch, length, dim)
     return z, f
 
 
@@ -47,14 +53,14 @@ def test_qrnn_pool_gradients_match_sequential_recurrence():
 @pytest.mark.parametrize("length", [1, 2, 3, 7, 16, 33])
 def test_qrnn_pool_handles_short_and_non_power_of_two_lengths(length):
     z = torch.randn(2, length, 4)
-    f = torch.sigmoid(torch.randn(2, length, 4))
+    f = torch.randn(2, length, 4)
     expected = _sequential_pool(z, f)
     torch.testing.assert_close(qrnn_pool(z, f), expected)
 
 
 def test_qrnn_pool_zero_length_returns_zeros():
     z = torch.randn(2, 0, 4)
-    f = torch.sigmoid(torch.randn(2, 0, 4))
+    f = torch.randn(2, 0, 4)
     out = qrnn_pool(z, f)
     assert out.shape == z.shape
     assert (out == 0).all()
@@ -69,7 +75,7 @@ def test_qrnn_pool_rejects_shape_mismatch():
 def test_qrnn_pool_triton_matches_cpu_and_autograd_on_cuda():
     torch.manual_seed(7)
     z = torch.randn(8, 64, 32, device="cuda")
-    f = torch.sigmoid(torch.randn(8, 64, 32, device="cuda"))
+    f = torch.randn(8, 64, 32, device="cuda")
 
     expected = _sequential_pool(z, f)
     actual = qrnn_pool(z, f)
@@ -91,7 +97,7 @@ def test_qrnn_pool_triton_matches_cpu_and_autograd_on_cuda():
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
 def test_qrnn_pool_triton_handles_bf16():
     z = torch.randn(4, 16, 8, device="cuda").bfloat16()
-    f = torch.sigmoid(torch.randn(4, 16, 8, device="cuda")).bfloat16()
+    f = torch.randn(4, 16, 8, device="cuda").bfloat16()
     out = qrnn_pool(z, f)
     assert out.dtype == z.dtype
     assert torch.isfinite(out).all()

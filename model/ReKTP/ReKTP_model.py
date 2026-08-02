@@ -125,13 +125,21 @@ class GlobalQRNNBlock(nn.Module):
 
         # Input padding is pre-zeroed; the pooling is causal, so trailing
         # padding cannot reach earlier valid positions (same as the LSTM).
-        source = x
         if self.window == 2:
-            prev = torch.cat((x.new_zeros(x.size(0), 1, x.size(2)), x[:, :-1]), dim=1)
-            source = torch.cat((x, prev), dim=-1)
+            # Pack [x_t, x_{t-1}] into one buffer: current frame in the head
+            # half, causally-shifted frame in the tail half.
+            b_sz, seq_len, hidden = x.shape
+            source = x.new_empty(b_sz, seq_len, 2 * hidden)
+            source[:, :, :hidden] = x
+            source[:, 1:, hidden:] = x[:, :-1]
+            source[:, 0, hidden:] = 0
+        else:
+            source = x
         y = self.linear(source)
         z, f, o = y.chunk(3, dim=-1)
-        cell = qrnn_pool(torch.tanh(z), torch.sigmoid(f))
+        # qrnn_pool applies tanh/sigmoid internally (fused into the scan kernel),
+        # so the raw gated-linear outputs feed it directly.
+        cell = qrnn_pool(z, f)
         hidden = torch.sigmoid(o) * cell
         return self.norm(x + self.dropout(hidden))
 

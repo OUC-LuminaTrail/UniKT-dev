@@ -15,9 +15,15 @@ import torch
 
 
 def _pool_py(z: torch.Tensor, f: torch.Tensor) -> torch.Tensor:
-    """Inclusive scalar affine scan via Hillis-Steele (log depth)."""
-    a = 1.0 - f
-    b = f * z
+    """Inclusive scalar affine scan via Hillis-Steele (log depth).
+
+    ``z`` and ``f`` are raw (pre-activation); ``tanh``/``sigmoid`` are applied
+    here so the CPU path matches the fused Triton kernel's contract.
+    """
+    tz = torch.tanh(z)
+    sf = torch.sigmoid(f)
+    a = 1.0 - sf
+    b = sf * tz
     n = b.size(1)
     offset = 1
     while offset < n:
@@ -35,8 +41,10 @@ def qrnn_pool(z: torch.Tensor, f: torch.Tensor) -> torch.Tensor:
     """Apply the QRNN pooling recurrence ``c_t = f_t * z_t + (1 - f_t) * c_{t-1}``.
 
     Args:
-        z: Candidate values with shape ``[B, N, H]`` (already tanh-activated).
-        f: Forget gates with shape ``[B, N, H]``, assumed in ``[0, 1]``.
+        z: Raw candidate values with shape ``[B, N, H]`` (``tanh`` is applied
+            inside the scan).
+        f: Raw forget gates with shape ``[B, N, H]`` (``sigmoid`` is applied
+            inside the scan).
 
     Returns:
         Cell states ``c`` with shape ``[B, N, H]``, starting from ``c_{-1} = 0``.
