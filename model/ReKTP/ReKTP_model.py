@@ -14,7 +14,7 @@ from torch import nn
 from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
 
 # Global sequence-encoder types selectable via ``encoder_type``.
-GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer", "qrnn")
+GLOBAL_ENCODER_TYPES = ("mamba", "lstm", "transformer", "qrnn", "conv")
 
 # Question-derived tensors computed once per forward and shared across the
 # sub-methods that would otherwise re-gather and re-embed them.
@@ -191,6 +191,48 @@ class GlobalTransformerBlock(nn.Module):
         return self.norm(x + self.dropout(out))
 
 
+class GlobalConvBlock(nn.Module):
+    """Causal depthwise-separable conv block with the same residual shell.
+
+    A left-padded depthwise conv mixes the last ``kernel_size`` positions per
+    channel in parallel, a pointwise conv mixes channels, and the residual
+    shell matches the other global blocks. Fully parallel across time (no
+    sequential scan) and O(T) memory; stacking blocks with growing dilation
+    widens the receptive field.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        dropout: float,
+        kernel_size: int = 3,
+        dilation: int = 1,
+    ):
+        super().__init__()
+        if kernel_size < 1:
+            raise ValueError("conv kernel_size must be >= 1")
+        # Causal: left-pad only, so each position looks back
+        # (kernel_size - 1) * dilation steps and never at the future.
+        self.pad = (kernel_size - 1) * dilation
+        self.depthwise = nn.Conv1d(
+            d_model, d_model, kernel_size, dilation=dilation, groups=d_model
+        )
+        self.pointwise = nn.Conv1d(d_model, d_model, 1)
+        self.norm = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self, x: torch.Tensor, mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        residual = x
+        y = x.transpose(1, 2)  # [B, d, N]
+        y = torch.nn.functional.pad(y, (self.pad, 0))
+        y = self.depthwise(y)
+        y = self.pointwise(y)
+        y = torch.nn.functional.gelu(y).transpose(1, 2)  # [B, N, d]
+        return self.norm(residual + self.dropout(y))
+
+
 def build_global_block(
     encoder_type: str,
     d_model: int,
@@ -201,6 +243,8 @@ def build_global_block(
     expand: int = 2,
     n_heads: int = 8,
     window: int = 2,
+    kernel_size: int = 3,
+    dilation: int = 1,
 ) -> nn.Module:
     """Construct one global sequence-mixing block for the requested encoder type."""
     if encoder_type == "mamba":
@@ -215,6 +259,13 @@ def build_global_block(
         return GlobalLSTMBlock(d_model=d_model, dropout=dropout)
     if encoder_type == "qrnn":
         return GlobalQRNNBlock(d_model=d_model, dropout=dropout, window=window)
+    if encoder_type == "conv":
+        return GlobalConvBlock(
+            d_model=d_model,
+            dropout=dropout,
+            kernel_size=kernel_size,
+            dilation=dilation,
+        )
     if encoder_type == "transformer":
         return GlobalTransformerBlock(d_model=d_model, n_heads=n_heads, dropout=dropout)
     raise ValueError(
@@ -245,6 +296,8 @@ class ReKTP(nn.Module):
         encoder_type: str = "mamba",
         n_heads: int = 8,
         window: int = 2,
+        conv_kernel_size: int = 3,
+        conv_dilation_base: int = 2,
         question_embed_dim: int | None = None,
     ):
         super().__init__()
@@ -329,8 +382,10 @@ class ReKTP(nn.Module):
                 expand=expand,
                 n_heads=n_heads,
                 window=window,
+                kernel_size=conv_kernel_size,
+                dilation=conv_dilation_base**i,
             )
-            for _ in range(n_blocks)
+            for i in range(n_blocks)
         )
         self.global_ffn = nn.Sequential(
             nn.Linear(hidden_dim, 4 * hidden_dim),

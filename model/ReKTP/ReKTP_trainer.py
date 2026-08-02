@@ -29,6 +29,12 @@ class ReKTPConfig(ModelConfig):
         q_window: QRNN convolutional window size, 1 or 2 (only used when
             encoder_type='qrnn'). Matches salesforce/pytorch-qrnn, whose paper
             default is 2.
+        conv_kernel_size: Causal-conv kernel size (only used when
+            encoder_type='conv'). Each block mixes the last ``kernel_size``
+            positions; the receptive field grows with dilation across blocks.
+        conv_dilation_base: Dilation base per block (only used when
+            encoder_type='conv'); block ``i`` uses ``base**i``. 2 gives
+            exponential receptive-field growth (TCN style), 1 gives uniform.
         question_embed_dim: Intrinsic width of the per-question embedding; -1
             (default) means ``hidden_dim`` and 0 removes the pathway, leaving
             question identity to the ``question_diff`` scalar and the KC side.
@@ -70,6 +76,14 @@ class ReKTPConfig(ModelConfig):
     encoder_type: str = field(default="mamba")
     n_heads: int = field(default=8)
     q_window: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [1, 2]}},
+    )
+    conv_kernel_size: int = field(
+        default=3,
+        metadata={"optuna": {"type": "categorical", "choices": [3, 5, 7]}},
+    )
+    conv_dilation_base: int = field(
         default=2,
         metadata={"optuna": {"type": "categorical", "choices": [1, 2]}},
     )
@@ -135,6 +149,8 @@ class ReKTPTrainer(BaseTrainer):
             encoder_type=m.encoder_type,
             n_heads=m.n_heads,
             window=m.q_window,
+            conv_kernel_size=m.conv_kernel_size,
+            conv_dilation_base=m.conv_dilation_base,
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),
