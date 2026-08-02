@@ -491,7 +491,9 @@ def test_forward_backward_has_finite_gradients():
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
+@pytest.mark.parametrize(
+    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
+)
 def test_encoder_variant_forward_shape_and_finite(encoder_type):
     device = _device_for_encoder(encoder_type)
     model = _build_model(device, encoder_type=encoder_type)
@@ -506,7 +508,9 @@ def test_encoder_variant_forward_shape_and_finite(encoder_type):
     assert torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
+@pytest.mark.parametrize(
+    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
+)
 def test_encoder_variant_forward_handles_padding(encoder_type):
     # Trailing padding must not introduce NaN/Inf, nor move valid predictions out of range.
     device = _device_for_encoder(encoder_type)
@@ -522,7 +526,9 @@ def test_encoder_variant_forward_handles_padding(encoder_type):
     assert torch.isfinite(logits).all()
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
+@pytest.mark.parametrize(
+    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
+)
 def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     device = _device_for_encoder(encoder_type)
     model = _build_model(device, encoder_type=encoder_type).train()
@@ -541,7 +547,9 @@ def test_encoder_variant_backward_has_finite_gradients(encoder_type):
     assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
+@pytest.mark.parametrize(
+    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
+)
 def test_encoder_variant_does_not_leak_future_response(encoder_type):
     # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
     device = _device_for_encoder(encoder_type)
@@ -561,7 +569,9 @@ def test_encoder_variant_does_not_leak_future_response(encoder_type):
     torch.testing.assert_close(changed[:, :2], baseline[:, :2])
 
 
-@pytest.mark.parametrize("encoder_type", ["mamba", "lstm", "transformer", "qrnn"])
+@pytest.mark.parametrize(
+    "encoder_type", ["mamba", "lstm", "transformer", "qrnn", "conv"]
+)
 def test_global_encoder_state_is_truncation_invariant(encoder_type):
     # The blocks carry no key-padding mask: they rely on padding being trailing,
     # so a valid position's state must not depend on how much padding follows.
