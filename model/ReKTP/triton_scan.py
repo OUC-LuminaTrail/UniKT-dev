@@ -13,7 +13,8 @@ boundaries.
 constant within a segment, which holds because it is derived from the segment id.
 ``d init`` is exact per position (``prefix_i^T @ g_i``) regardless.
 
-CUDA only; CPU uses the PyTorch implementation in ``segmented_scan.py``.
+ReKTP requires CUDA: the scan ships only this Triton kernel, so the public
+entry raises on non-CUDA input.
 """
 
 import torch
@@ -408,14 +409,18 @@ class _SegmentedBlockAffineExclusiveScan(torch.autograd.Function):
         return dmat, dbias, None, None, dinit
 
 
-def triton_segmented_block_affine_exclusive_scan(
+def segmented_block_affine_exclusive_scan(
     matrix: torch.Tensor,
     bias: torch.Tensor,
     segment_ids: torch.Tensor,
     valid_mask: torch.Tensor,
     initial_state: torch.Tensor,
 ) -> torch.Tensor:
-    """Differentiable Triton scan matching the ``segmented_scan`` interface.
+    """Apply an exclusive block-affine scan inside contiguous segments.
+
+    Each valid position represents ``h_after = matrix @ h_before + bias``.
+    ReKTP uses fixed 2x2 feature blocks. Runs the fused differentiable Triton
+    kernel; ReKTP requires CUDA, so CPU input raises.
 
     Args:
         matrix: Block operators with shape ``[B, N, H, 2, 2]``.
@@ -427,9 +432,28 @@ def triton_segmented_block_affine_exclusive_scan(
     Returns:
         State immediately before each transition, shape ``[B, N, H, 2]``.
     """
+    if matrix.ndim != 5 or matrix.shape[-2:] != (2, 2):
+        raise ValueError("matrix must have shape [B, N, H, 2, 2]")
+    expected_vector_shape = matrix.shape[:-1]
+    if bias.shape != expected_vector_shape:
+        raise ValueError("bias must match matrix shape without its last dimension")
+    if initial_state.shape != expected_vector_shape:
+        raise ValueError(
+            "initial_state must match matrix shape without its last dimension"
+        )
+    if segment_ids.shape != matrix.shape[:2] or valid_mask.shape != matrix.shape[:2]:
+        raise ValueError(
+            "segment_ids and valid_mask must match matrix's first dimensions"
+        )
+    if matrix.size(1) == 0:
+        return torch.zeros_like(initial_state)
+    if not matrix.is_cuda:
+        raise RuntimeError(
+            "ReKTP requires CUDA: the segmented scan only ships a Triton kernel"
+        )
     return _SegmentedBlockAffineExclusiveScan.apply(
         matrix, bias, segment_ids, valid_mask, initial_state
     )
 
 
-__all__ = ["triton_segmented_block_affine_exclusive_scan"]
+__all__ = ["segmented_block_affine_exclusive_scan"]

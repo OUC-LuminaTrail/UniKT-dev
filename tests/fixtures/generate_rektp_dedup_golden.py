@@ -4,7 +4,9 @@ Captures the forward output and backward gradients of a fixed model state on a
 fixed input. The dedup refactor must reproduce these bit-for-bit, so this
 snapshot is the equivalence oracle for ``tests/unit/model/test_rektp_dedup.py``.
 
-Regenerate only after an intentional numerical change::
+ReKTP requires CUDA, so the snapshot is captured on the default GPU device;
+all tensors are saved on CPU and moved back by the test. Regenerate only after
+an intentional numerical change::
 
     pixi run python tests/fixtures/generate_rektp_dedup_golden.py
 """
@@ -40,8 +42,10 @@ def build_kwargs():
 
 
 def build_model():
+    if not torch.cuda.is_available():
+        raise RuntimeError("ReKTP requires CUDA to generate the golden snapshot")
     torch.manual_seed(1234)
-    model = ReKTP(**build_kwargs())
+    model = ReKTP(**build_kwargs()).to("cuda")
     with torch.no_grad():
         # The IRT head and several local layers are zero-initialised; activate
         # them so the logits and gradients are non-trivial and a regression
@@ -58,15 +62,18 @@ def build_model():
 
 
 def main():
+    device = torch.device("cuda")
     model = build_model().train()
-    questions = torch.tensor([[0, 1, 2, 3, 4, 0], [1, 2, 0, 4, 3, 1]])
-    responses = torch.tensor([[1, 0, 1, 0, 1, 0], [0, 1, 1, 0, 0, 1]])
+    questions = torch.tensor([[0, 1, 2, 3, 4, 0], [1, 2, 0, 4, 3, 1]], device=device)
+    responses = torch.tensor([[1, 0, 1, 0, 1, 0], [0, 1, 1, 0, 0, 1]], device=device)
     times = torch.tensor(
         [[0.0, 1.0, 2.0, 4.0, 8.0, 16.0], [0.0, 3.0, 9.0, 12.0, 15.0, 20.0]],
         dtype=torch.float64,
+        device=device,
     )
     mask = torch.tensor(
-        [[True, True, True, True, True, False], [True, True, True, True, True, True]]
+        [[True, True, True, True, True, False], [True, True, True, True, True, True]],
+        device=device,
     )
 
     logits = model(questions, responses, times, mask)
@@ -74,18 +81,20 @@ def main():
     loss.backward()
 
     grads = {
-        name: param.grad.detach().clone()
+        name: param.grad.detach().cpu().clone()
         for name, param in model.named_parameters()
         if param.grad is not None
     }
     snapshot = {
         "kwargs": build_kwargs(),
-        "state_dict": model.state_dict(),
-        "questions": questions,
-        "responses": responses,
-        "times": times,
-        "mask": mask,
-        "logits": logits.detach(),
+        "state_dict": {
+            name: tensor.cpu() for name, tensor in model.state_dict().items()
+        },
+        "questions": questions.cpu(),
+        "responses": responses.cpu(),
+        "times": times.cpu(),
+        "mask": mask.cpu(),
+        "logits": logits.detach().cpu(),
         "grads": grads,
     }
     out_path = Path(__file__).parent / "rektp_dedup_golden.pt"

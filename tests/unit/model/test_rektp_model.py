@@ -3,6 +3,12 @@ import torch
 
 ReKTP = pytest.importorskip("model.ReKTP.ReKTP_model").ReKTP
 
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="ReKTP requires CUDA"
+)
+
+DEVICE = torch.device("cuda")
+
 
 def _build_model(device, *, activate_private_writes=True, use_global_film=False):
     # Skill id 2 is the padding sentinel.
@@ -120,12 +126,12 @@ def test_zero_dim_drops_exactly_the_question_rows():
 
 
 def test_zero_dim_still_runs_and_keeps_the_difficulty_scalar():
-    model = ReKTP(**_dim_kwargs(), question_embed_dim=0).eval()
+    model = ReKTP(**_dim_kwargs(), question_embed_dim=0).to(DEVICE).eval()
     with torch.no_grad():
         # question_diff is zero-initialised, so activate it to expose the scalar.
         model.question_diff.weight.normal_(0.0, 0.5)
-    questions = torch.tensor([[0, 1, 2, 0]])
-    responses = torch.tensor([[1, 0, 1, 0]])
+    questions = torch.tensor([[0, 1, 2, 0]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -159,8 +165,8 @@ def test_model_requires_complete_2x2_state_blocks():
 
 
 def test_residual_transitions_initialize_as_decay_only():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
-    event_input = torch.randn(2, 3, model.hidden_dim)
+    model = _build_model(DEVICE, activate_private_writes=False)
+    event_input = torch.randn(2, 3, model.hidden_dim, device=DEVICE)
     decay = torch.rand_like(event_input)
 
     transition, bias = model._block_affine_transition(
@@ -178,8 +184,8 @@ def test_residual_transitions_initialize_as_decay_only():
 
 
 def test_event_conditioned_residual_blocks_respect_scale():
-    model = _build_model(torch.device("cpu"))
-    event_input = torch.randn(2, 3, model.hidden_dim)
+    model = _build_model(DEVICE)
+    event_input = torch.randn(2, 3, model.hidden_dim, device=DEVICE)
     decay = torch.ones_like(event_input)
 
     transition, _ = model._block_affine_transition(
@@ -189,18 +195,18 @@ def test_event_conditioned_residual_blocks_respect_scale():
         decay,
     )
 
-    identity = torch.eye(model.state_block_size)
+    identity = torch.eye(model.state_block_size, device=DEVICE)
     residual = transition - identity
     block_norm = torch.linalg.vector_norm(residual, dim=(-2, -1))
     assert torch.all(block_norm < model.residual_scale)
 
 
 def test_local_readout_initializes_as_masked_mean():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
-    local_state = torch.randn(1, 2, 2, model.hidden_dim)
-    skill_ids = torch.tensor([[[0, 1], [0, 2]]])
-    readout_mask = torch.tensor([[[True, True], [True, False]]])
-    questions = torch.tensor([[2, 0]])
+    model = _build_model(DEVICE, activate_private_writes=False)
+    local_state = torch.randn(1, 2, 2, model.hidden_dim, device=DEVICE)
+    skill_ids = torch.tensor([[[0, 1], [0, 2]]], device=DEVICE)
+    readout_mask = torch.tensor([[[True, True], [True, False]]], device=DEVICE)
+    questions = torch.tensor([[2, 0]], device=DEVICE)
 
     actual = model._question_conditioned_local_readout(
         local_state,
@@ -214,13 +220,13 @@ def test_local_readout_initializes_as_masked_mean():
 
 
 def test_local_readout_can_weight_kcs_conditionally():
-    model = _build_model(torch.device("cpu"), activate_private_writes=False)
-    local_state = torch.zeros(1, 1, 2, model.hidden_dim)
+    model = _build_model(DEVICE, activate_private_writes=False)
+    local_state = torch.zeros(1, 1, 2, model.hidden_dim, device=DEVICE)
     local_state[0, 0, 0, 0] = -1.0
     local_state[0, 0, 1, 0] = 1.0
-    skill_ids = torch.tensor([[[0, 1]]])
-    readout_mask = torch.tensor([[[True, True]]])
-    questions = torch.tensor([[2]])
+    skill_ids = torch.tensor([[[0, 1]]], device=DEVICE)
+    readout_mask = torch.tensor([[[True, True]]], device=DEVICE)
+    questions = torch.tensor([[2]], device=DEVICE)
 
     with torch.no_grad():
         model.local_readout.weight.zero_()
@@ -238,10 +244,8 @@ def test_local_readout_can_weight_kcs_conditionally():
 
 
 def test_global_film_initializes_as_identity_conditioning():
-    model = _build_model(
-        torch.device("cpu"), activate_private_writes=False, use_global_film=True
-    )
-    local_input = torch.randn(2, 3, model.hidden_dim)
+    model = _build_model(DEVICE, activate_private_writes=False, use_global_film=True)
+    local_input = torch.randn(2, 3, model.hidden_dim, device=DEVICE)
     global_context = torch.randn_like(local_input)
 
     actual = model._condition_local_input(local_input, global_context)
@@ -250,12 +254,10 @@ def test_global_film_initializes_as_identity_conditioning():
 
 
 def test_global_film_can_condition_local_write_input():
-    model = _build_model(
-        torch.device("cpu"), activate_private_writes=False, use_global_film=True
-    )
-    local_input = torch.ones(1, 2, model.hidden_dim)
+    model = _build_model(DEVICE, activate_private_writes=False, use_global_film=True)
+    local_input = torch.ones(1, 2, model.hidden_dim, device=DEVICE)
     global_context = torch.zeros_like(local_input)
-    global_context[:, :, 0] = torch.tensor([[1.0, -1.0]])
+    global_context[:, :, 0] = torch.tensor([[1.0, -1.0]], device=DEVICE)
 
     with torch.no_grad():
         model.local_global_film.weight.zero_()
@@ -269,9 +271,9 @@ def test_global_film_can_condition_local_write_input():
 
 
 def test_other_kc_response_does_not_change_private_state():
-    model = _build_model(torch.device("cpu"))
-    questions = torch.tensor([[0, 1, 0, 1]])
-    responses = torch.tensor([[1, 0, 1, 0]])
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 0, 1]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -294,7 +296,7 @@ def test_other_kc_response_does_not_change_private_state():
 
 
 def test_question_static_state_is_a_pure_function_of_question_and_position():
-    model = _build_model(torch.device("cpu"))
+    model = _build_model(DEVICE)
     with torch.no_grad():
         # question_decay is zero-initialised, which makes decay gap-independent;
         # activate it so the position modulation is observable.
@@ -302,11 +304,15 @@ def test_question_static_state_is_a_pure_function_of_question_and_position():
         model.gap_embed.weight[1, 0] = 2.0
         model.question_decay.weight.zero_()
         model.question_decay.weight[:, 0] = 1.0
-    mask = torch.ones(1, 4, dtype=torch.bool)
-    times = torch.arange(4, dtype=torch.float64).unsqueeze(0)
+    mask = torch.ones(1, 4, dtype=torch.bool, device=DEVICE)
+    times = torch.arange(4, dtype=torch.float64, device=DEVICE).unsqueeze(0)
 
-    state = model._question_static_states(torch.tensor([[0, 1, 2, 0]]), times, mask)
-    repeated = model._question_static_states(torch.tensor([[0, 0, 0, 0]]), times, mask)
+    state = model._question_static_states(
+        torch.tensor([[0, 1, 2, 0]], device=DEVICE), times, mask
+    )
+    repeated = model._question_static_states(
+        torch.tensor([[0, 0, 0, 0]], device=DEVICE), times, mask
+    )
 
     # Position 0 carries question 0 in both sequences, so the outputs agree.
     torch.testing.assert_close(state[:, 0], repeated[:, 0])
@@ -317,11 +323,13 @@ def test_question_static_state_is_a_pure_function_of_question_and_position():
 def test_question_static_state_matches_removed_scan_without_repeats():
     # The pathway is the closed form the original per-question scan collapsed to
     # at positions with no predecessor: decay(floor(log2(t+1))) * tanh(W E_q).
-    model = _build_model(torch.device("cpu"))
-    questions = torch.tensor([[0, 1, 2, 1]])
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 2, 1]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
 
-    times = torch.arange(questions.size(1), dtype=torch.float64).unsqueeze(0)
+    times = torch.arange(
+        questions.size(1), dtype=torch.float64, device=DEVICE
+    ).unsqueeze(0)
     gap_bucket = torch.floor(torch.log2((times + 1).float())).long()
     gap_bucket = gap_bucket.clamp_max(model.max_gap_bins - 1).expand_as(questions)
     decay = torch.exp(
@@ -335,10 +343,10 @@ def test_question_static_state_matches_removed_scan_without_repeats():
 
 
 def test_question_static_state_zeroes_padding():
-    model = _build_model(torch.device("cpu"))
-    questions = torch.tensor([[0, 1, 2, 0]])
-    mask = torch.tensor([[True, True, False, False]])
-    times = torch.arange(4, dtype=torch.float64).unsqueeze(0)
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 2, 0]], device=DEVICE)
+    mask = torch.tensor([[True, True, False, False]], device=DEVICE)
+    times = torch.arange(4, dtype=torch.float64, device=DEVICE).unsqueeze(0)
 
     state = model._question_static_states(questions, times, mask)
 
@@ -347,7 +355,7 @@ def test_question_static_state_zeroes_padding():
 
 
 def test_current_gap_affects_kc_read_states():
-    model = _build_model(torch.device("cpu"))
+    model = _build_model(DEVICE)
     with torch.no_grad():
         model.gap_embed.weight.zero_()
         model.gap_embed.weight[2, 0] = 2.0
@@ -355,10 +363,10 @@ def test_current_gap_affects_kc_read_states():
         model.local_decay.bias.zero_()
         model.local_decay.weight[:, 0] = 1.0
 
-    short_questions = torch.tensor([[0, 1, 0, 1, 1]])
-    long_questions = torch.tensor([[0, 1, 1, 1, 0]])
-    short_responses = torch.tensor([[1, 0, 1, 0, 0]])
-    long_responses = torch.tensor([[1, 0, 0, 0, 1]])
+    short_questions = torch.tensor([[0, 1, 0, 1, 1]], device=DEVICE)
+    long_questions = torch.tensor([[0, 1, 1, 1, 0]], device=DEVICE)
+    short_responses = torch.tensor([[1, 0, 1, 0, 0]], device=DEVICE)
+    long_responses = torch.tensor([[1, 0, 0, 0, 1]], device=DEVICE)
     mask = torch.ones_like(short_responses, dtype=torch.bool)
     times = _position_times(short_questions)
 
@@ -382,20 +390,20 @@ def test_current_gap_affects_kc_read_states():
 
 
 def test_real_time_gap_affects_kc_read_states():
-    model = _build_model(torch.device("cpu"))
+    model = _build_model(DEVICE)
     with torch.no_grad():
         model.gap_embed.weight.zero_()
         model.gap_embed.weight[1, 0] = 2.0
         model.local_decay.weight.zero_()
         model.local_decay.bias.zero_()
         model.local_decay.weight[:, 0] = 1.0
-    questions = torch.tensor([[0, 1, 0]])
-    responses = torch.tensor([[1, 0, 1]])
+    questions = torch.tensor([[0, 1, 0]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1]], device=DEVICE)
     mask = torch.ones_like(responses, dtype=torch.bool)
     # Identical question/response patterns; only the elapsed seconds between
     # the two KC-0 occurrences differ (2s vs 16s -> gap buckets 1 vs 3).
-    short_times = torch.tensor([[0.0, 1.0, 2.0]])
-    long_times = torch.tensor([[0.0, 1.0, 16.0]])
+    short_times = torch.tensor([[0.0, 1.0, 2.0]], device=DEVICE)
+    long_times = torch.tensor([[0.0, 1.0, 16.0]], device=DEVICE)
     short_local = model._local_pre_states(
         questions, responses, short_times, mask, _zero_global_context(model, questions)
     )
@@ -406,12 +414,12 @@ def test_real_time_gap_affects_kc_read_states():
 
 
 def test_packing_keeps_kc_segments_contiguous_with_large_real_times():
-    model = _build_model(torch.device("cpu"))
+    model = _build_model(DEVICE)
     # A naive (skill * stride + real_seconds) sort key would interleave the two
     # skills here; segment contiguity must be preserved regardless of time scale.
-    questions = torch.tensor([[0, 1, 0, 1]])
-    responses = torch.tensor([[1, 0, 1, 0]])
-    times = torch.tensor([[0.0, 1000.0, 5000.0, 6000.0]])
+    questions = torch.tensor([[0, 1, 0, 1]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
+    times = torch.tensor([[0.0, 1000.0, 5000.0, 6000.0]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     packed_skill, _, _, _, packed_valid, _, _ = model._pack_kc_occurrences(
         questions, responses, times, mask
@@ -424,18 +432,18 @@ def test_packing_keeps_kc_segments_contiguous_with_large_real_times():
 def test_forward_handles_padding_when_valid_times_are_large():
     # Padding positions hold time 0 while valid times are large; without the
     # padding pin, relative padding times go negative and log2 yields NaN.
-    model = _build_model(torch.device("cpu"))
-    questions = torch.tensor([[0, 1, 2, 0]])
-    responses = torch.tensor([[1, 0, 1, 0]])
-    times = torch.tensor([[100.0, 200.0, 300.0, 0.0]])
-    mask = torch.tensor([[True, True, True, False]])
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 2, 0]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
+    times = torch.tensor([[100.0, 200.0, 300.0, 0.0]], device=DEVICE)
+    mask = torch.tensor([[True, True, True, False]], device=DEVICE)
     with torch.no_grad():
         logits = model(questions, responses, times, mask)
     assert torch.isfinite(logits).all()
 
 
 def test_target_answer_does_not_leak_into_its_prediction():
-    device = torch.device("cpu")
+    device = DEVICE
     model = _build_model(device, use_global_film=True)
     with torch.no_grad():
         model.local_global_film.weight.zero_()
@@ -456,7 +464,7 @@ def test_target_answer_does_not_leak_into_its_prediction():
 
 
 def test_forward_backward_has_finite_gradients():
-    device = torch.device("cpu")
+    device = DEVICE
     model = _build_model(device).train()
     questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
     responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
@@ -474,7 +482,7 @@ def test_forward_backward_has_finite_gradients():
 
 
 def test_encoder_forward_shape_and_finite():
-    device = torch.device("cpu")
+    device = DEVICE
     model = _build_model(device)
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
@@ -489,7 +497,7 @@ def test_encoder_forward_shape_and_finite():
 
 def test_encoder_forward_handles_padding():
     # Trailing padding must not introduce NaN/Inf, nor move valid predictions out of range.
-    device = torch.device("cpu")
+    device = DEVICE
     model = _build_model(device)
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
@@ -503,7 +511,7 @@ def test_encoder_forward_handles_padding():
 
 
 def test_encoder_backward_has_finite_gradients():
-    device = torch.device("cpu")
+    device = DEVICE
     model = _build_model(device).train()
     questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
     responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
@@ -522,7 +530,7 @@ def test_encoder_backward_has_finite_gradients():
 
 def test_encoder_does_not_leak_future_response():
     # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
-    device = torch.device("cpu")
+    device = DEVICE
     model = _activate_head(_build_model(device))
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 1]], device=device)
@@ -543,7 +551,7 @@ def test_global_encoder_state_is_truncation_invariant():
     # The blocks carry no key-padding mask: they rely on padding being trailing,
     # so a valid position's state must not depend on how much padding follows.
     # Breaking this (left padding, or a non-causal block) invalidates the design.
-    device = torch.device("cpu")
+    device = DEVICE
     model = _build_model(device)
     questions = torch.tensor([[0, 1, 2]], device=device)
     responses = torch.tensor([[1, 0, 1]], device=device)

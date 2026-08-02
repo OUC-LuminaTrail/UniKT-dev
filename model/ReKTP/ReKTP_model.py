@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
+from model.ReKTP.triton_scan import segmented_block_affine_exclusive_scan
 
 # Question-derived tensors computed once per forward and shared across the
 # sub-methods that would otherwise re-gather and re-embed them.

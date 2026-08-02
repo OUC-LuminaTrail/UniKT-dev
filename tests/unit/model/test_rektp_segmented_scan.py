@@ -1,6 +1,13 @@
+import pytest
 import torch
 
-from model.ReKTP.segmented_scan import segmented_block_affine_exclusive_scan
+from model.ReKTP.triton_scan import segmented_block_affine_exclusive_scan
+
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="ReKTP segmented scan requires CUDA"
+)
+
+DEVICE = torch.device("cuda")
 
 
 def _serial_block_scan(matrix, bias, segment_ids, valid_mask, initial_state):
@@ -21,12 +28,14 @@ def _serial_block_scan(matrix, bias, segment_ids, valid_mask, initial_state):
 
 def _block_example():
     torch.manual_seed(11)
-    segment_ids = torch.tensor([[0, 0, 0, 2, 2, 5, 5, 5, 9]])
-    valid_mask = torch.tensor([[1, 1, 1, 1, 1, 1, 1, 1, 0]], dtype=torch.bool)
-    identity = torch.eye(2).view(1, 1, 1, 2, 2)
-    matrix = identity + 0.1 * torch.randn(1, 9, 3, 2, 2)
-    bias = torch.randn(1, 9, 3, 2)
-    initial = torch.randn(1, 9, 3, 2)
+    segment_ids = torch.tensor([[0, 0, 0, 2, 2, 5, 5, 5, 9]], device=DEVICE)
+    valid_mask = torch.tensor(
+        [[1, 1, 1, 1, 1, 1, 1, 1, 0]], dtype=torch.bool, device=DEVICE
+    )
+    identity = torch.eye(2, device=DEVICE).view(1, 1, 1, 2, 2)
+    matrix = identity + 0.1 * torch.randn(1, 9, 3, 2, 2, device=DEVICE)
+    bias = torch.randn(1, 9, 3, 2, device=DEVICE)
+    initial = torch.randn(1, 9, 3, 2, device=DEVICE)
     initial[:, 1:3] = initial[:, :1]
     initial[:, 4:5] = initial[:, 3:4]
     initial[:, 6:8] = initial[:, 5:6]
@@ -62,7 +71,7 @@ def test_block_scan_excludes_current_noncommuting_transition():
     )
     changed_matrix = matrix.clone()
     changed_bias = bias.clone()
-    changed_matrix[:, 1] = torch.tensor([[0.0, 2.0], [-1.0, 0.5]])
+    changed_matrix[:, 1] = torch.tensor([[0.0, 2.0], [-1.0, 0.5]], device=DEVICE)
     changed_bias[:, 1] = 99.0
     changed = segmented_block_affine_exclusive_scan(
         changed_matrix, changed_bias, segment_ids, valid_mask, initial
@@ -72,11 +81,13 @@ def test_block_scan_excludes_current_noncommuting_transition():
 
 
 def test_block_scan_supports_pure_additive_write_without_erasure():
-    identity = torch.eye(2).view(1, 1, 1, 2, 2).expand(1, 4, 2, 2, 2)
-    bias = torch.arange(16, dtype=torch.float32).reshape(1, 4, 2, 2) / 10.0
-    segment_ids = torch.zeros(1, 4, dtype=torch.long)
-    valid_mask = torch.ones(1, 4, dtype=torch.bool)
-    initial = torch.randn(1, 4, 2, 2)
+    identity = torch.eye(2, device=DEVICE).view(1, 1, 1, 2, 2).expand(1, 4, 2, 2, 2)
+    bias = (
+        torch.arange(16, dtype=torch.float32, device=DEVICE).reshape(1, 4, 2, 2) / 10.0
+    )
+    segment_ids = torch.zeros(1, 4, dtype=torch.long, device=DEVICE)
+    valid_mask = torch.ones(1, 4, dtype=torch.bool, device=DEVICE)
+    initial = torch.randn(1, 4, 2, 2, device=DEVICE)
     initial[:] = initial[:, :1]
 
     actual = segmented_block_affine_exclusive_scan(
