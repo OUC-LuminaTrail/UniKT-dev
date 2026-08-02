@@ -6,6 +6,7 @@ from typing import Any
 import yaml
 from optuna.pruners import (
     BasePruner,
+    HyperbandPruner,
     MedianPruner,
     PercentilePruner,
     SuccessiveHalvingPruner,
@@ -78,6 +79,12 @@ class HyperparameterSpace:
                 )
             if self.low >= self.high:
                 raise ValueError(f"Parameter '{self.name}': low must be less than high")
+            if self.log and self.step is not None:
+                raise ValueError(
+                    f"Parameter '{self.name}': 'step' and 'log' are mutually exclusive"
+                )
+            if self.step is not None and self.step <= 0:
+                raise ValueError(f"Parameter '{self.name}': step must be positive")
         elif self.type == "categorical":
             if not self.choices:
                 raise ValueError(
@@ -123,6 +130,7 @@ class HyperparameterSpace:
                 self.name,
                 low=float(self.low),
                 high=float(self.high),
+                step=float(self.step) if self.step else None,
                 log=self.log or False,
             )
         elif self.type == "categorical":
@@ -141,7 +149,9 @@ class OptunaConfig:
     )
 
     # Pruner configuration
-    pruner: str = "median"  # 'median', 'percentile', 'successive_halving', None
+    pruner: str = (
+        "median"  # 'median', 'percentile', 'successive_halving', 'hyperband', None
+    )
     pruner_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Search configuration
@@ -214,6 +224,8 @@ class OptunaConfig:
             return PercentilePruner(**kwargs)
         elif pruner_name == "successive_halving":
             return SuccessiveHalvingPruner(**kwargs)
+        elif pruner_name == "hyperband":
+            return HyperbandPruner(**kwargs)
         else:
             raise ValueError(f"Unsupported pruner: {pruner_name}")
 
