@@ -1,20 +1,24 @@
-"""Triton kernels for the segmented block-affine exclusive scan.
+"""Scan kernels for the segmented block-affine exclusive scan.
 
-Each position carries a fixed 2x2 block operator ``A`` and bias ``b``; the scan
+Each position carries a square block operator ``A`` and bias ``b``; the scan
 returns the state before that operator is applied, resetting at segment
 boundaries.
 
-- Forward: one program per batch row, vectorised over ``hidden_block``, running
-  a sequential exclusive scan with segment resets along the sequence.
-- Backward: an adjoint reverse scan over the recurrence
+- Forward (Triton, 2x2 blocks only): one program per batch row, vectorised
+  over ``hidden_block``, running a sequential exclusive scan with segment
+  resets along the sequence.
+- Backward (Triton): an adjoint reverse scan over the recurrence
   ``h_{i+1} = A_i h_i + b_i``, plus a forward prefix scan to recover ``d init``.
 
 ``d matrix`` / ``d bias`` match PyTorch autograd only while ``initial_state`` is
 constant within a segment, which holds because it is derived from the segment id.
 ``d init`` is exact per position (``prefix_i^T @ g_i``) regardless.
 
-ReKTP requires CUDA: the scan ships only this Triton kernel, so the public
-entry raises on non-CUDA input.
+The serial fallback places no such restriction: pure autograd covers the
+backward pass for any ``initial_state``.
+
+Non-2x2 block sizes (ablation: 1x1, 3x3, ...) and CPU inputs fall back to a
+pure-PyTorch serial scan with identical semantics and autograd coverage.
 """
 
 import torch
@@ -409,6 +413,64 @@ class _SegmentedBlockAffineExclusiveScan(torch.autograd.Function):
         return dmat, dbias, None, None, dinit
 
 
+def _serial_block_affine_exclusive_scan(
+    matrix: torch.Tensor,
+    bias: torch.Tensor,
+    segment_ids: torch.Tensor,
+    valid_mask: torch.Tensor,
+    initial_state: torch.Tensor,
+) -> torch.Tensor:
+    """Serial scan mirroring the Triton kernel, for any block size and device.
+
+    Pure PyTorch ops, so autograd covers the backward pass. Semantics match
+    ``_fwd_kernel``: output is the carry composed over the segment so far,
+    applied to the per-position initial state; the carry resets to the
+    identity at segment heads and invalid positions act as the identity and
+    output zero.
+    """
+    batch, length, heads, block, _ = matrix.shape
+    identity = torch.eye(block, device=matrix.device, dtype=matrix.dtype)
+    carry = identity.expand(batch, heads, block, block)
+    carry_bias = torch.zeros(
+        batch, heads, block, device=matrix.device, dtype=matrix.dtype
+    )
+    prev_valid = torch.zeros(batch, dtype=torch.bool, device=matrix.device)
+    prev_seg = torch.full((batch,), -1, dtype=segment_ids.dtype, device=matrix.device)
+    outputs = []
+    for n in range(length):
+        op = matrix[:, n]
+        op_bias = bias[:, n]
+        init_n = initial_state[:, n]
+        valid_n = valid_mask[:, n]
+        seg_n = segment_ids[:, n]
+
+        # Segment head: valid, and either row start, prior invalid, or new id.
+        # Reset happens before the output: a segment head emits its own
+        # initial state (carry = identity), matching the Triton kernel.
+        is_head = valid_n & ((n == 0) | ~prev_valid | (seg_n != prev_seg))
+        carry = torch.where(is_head[:, None, None, None], identity, carry)
+        carry_bias = torch.where(
+            is_head[:, None, None], torch.zeros_like(carry_bias), carry_bias
+        )
+
+        # Output = carry @ init_n + carry_bias, zeroed at invalid positions.
+        state = torch.einsum("bhij,bhj->bhi", carry, init_n) + carry_bias
+        outputs.append(
+            torch.where(valid_n[:, None, None], state, torch.zeros_like(state))
+        )
+
+        # Advance carry = op composed after carry; invalid acts as identity.
+        op_eff = torch.where(valid_n[:, None, None, None], op, identity)
+        op_bias_eff = torch.where(
+            valid_n[:, None, None], op_bias, torch.zeros_like(op_bias)
+        )
+        carry = torch.einsum("bhij,bhjk->bhik", op_eff, carry)
+        carry_bias = torch.einsum("bhij,bhj->bhi", op_eff, carry_bias) + op_bias_eff
+        prev_valid = valid_n
+        prev_seg = seg_n
+    return torch.stack(outputs, dim=1)
+
+
 def segmented_block_affine_exclusive_scan(
     matrix: torch.Tensor,
     bias: torch.Tensor,
@@ -419,21 +481,22 @@ def segmented_block_affine_exclusive_scan(
     """Apply an exclusive block-affine scan inside contiguous segments.
 
     Each valid position represents ``h_after = matrix @ h_before + bias``.
-    ReKTP uses fixed 2x2 feature blocks. Runs the fused differentiable Triton
-    kernel; ReKTP requires CUDA, so CPU input raises.
+    ReKTP's local transition uses square feature blocks; block size 2 (the
+    default) runs the fused differentiable Triton kernel, any other size or a
+    CPU input falls back to the serial PyTorch scan with identical semantics.
 
     Args:
-        matrix: Block operators with shape ``[B, N, H, 2, 2]``.
-        bias: Block biases with shape ``[B, N, H, 2]``.
+        matrix: Block operators with shape ``[B, N, H, S, S]``.
+        bias: Block biases with shape ``[B, N, H, S]``.
         segment_ids: Segment identifier per position, shape ``[B, N]``.
         valid_mask: Valid occurrence mask, shape ``[B, N]``.
-        initial_state: Initial block states with shape ``[B, N, H, 2]``.
+        initial_state: Initial block states with shape ``[B, N, H, S]``.
 
     Returns:
-        State immediately before each transition, shape ``[B, N, H, 2]``.
+        State immediately before each transition, shape ``[B, N, H, S]``.
     """
-    if matrix.ndim != 5 or matrix.shape[-2:] != (2, 2):
-        raise ValueError("matrix must have shape [B, N, H, 2, 2]")
+    if matrix.ndim != 5 or matrix.shape[-2] != matrix.shape[-1]:
+        raise ValueError("matrix must have shape [B, N, H, S, S]")
     expected_vector_shape = matrix.shape[:-1]
     if bias.shape != expected_vector_shape:
         raise ValueError("bias must match matrix shape without its last dimension")
@@ -447,11 +510,11 @@ def segmented_block_affine_exclusive_scan(
         )
     if matrix.size(1) == 0:
         return torch.zeros_like(initial_state)
-    if not matrix.is_cuda:
-        raise RuntimeError(
-            "ReKTP requires CUDA: the segmented scan only ships a Triton kernel"
+    if matrix.shape[-1] == 2 and matrix.is_cuda:
+        return _SegmentedBlockAffineExclusiveScan.apply(
+            matrix, bias, segment_ids, valid_mask, initial_state
         )
-    return _SegmentedBlockAffineExclusiveScan.apply(
+    return _serial_block_affine_exclusive_scan(
         matrix, bias, segment_ids, valid_mask, initial_state
     )
 

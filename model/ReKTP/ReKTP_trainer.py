@@ -26,12 +26,17 @@ class ReKTPConfig(ModelConfig):
             style), 1 gives uniform.
         use_global_film: If True, modulate the local KC input with the global
             state via FiLM (``local_global_film``). Off by default.
+        state_block_size: Side of the square block in the local state
+            transition. 2 (default) runs the fused Triton scan; 1 removes
+            intra-block coupling (each dimension evolves independently) and
+            larger sizes widen the coupled block, both via the serial scan
+            fallback. Ablation knob for the block-affine transition.
         question_embed_dim: Intrinsic width of the per-question embedding; -1
             (default) means ``hidden_dim`` and 0 removes the pathway, leaving
             question identity to the ``question_diff`` scalar and the KC side.
             Widths below ``hidden_dim`` are lifted back by a shared projection,
             cutting per-question parameters to ``num_questions * dim``.
-        residual_scale: Maximum Frobenius scale of each 2x2 residual block.
+        residual_scale: Maximum Frobenius scale of each square residual block.
         dropout: Dropout probability.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
@@ -61,6 +66,10 @@ class ReKTPConfig(ModelConfig):
         metadata={"optuna": {"type": "categorical", "choices": [1, 2]}},
     )
     use_global_film: bool = False
+    state_block_size: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
+    )
     amp: bool = False
     residual_scale: float = field(
         default=0.3,
@@ -123,6 +132,7 @@ class ReKTPTrainer(BaseTrainer):
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),
+            state_block_size=m.state_block_size,
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

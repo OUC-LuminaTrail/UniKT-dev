@@ -150,18 +150,49 @@ def test_negative_question_embed_dim_is_rejected():
         ReKTP(**_dim_kwargs(), question_embed_dim=-2)
 
 
-def test_model_requires_complete_2x2_state_blocks():
+def test_model_requires_complete_state_blocks():
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
 
-    with pytest.raises(ValueError, match="divisible by 2"):
+    with pytest.raises(ValueError, match="divisible by state_block_size"):
         ReKTP(
             data_metadata={"num_questions": 3, "num_skills": 2},
             question_skill_ids=question_skill_ids,
             question_skill_mask=question_skill_mask,
-            hidden_dim=15,
+            hidden_dim=16,
             n_blocks=1,
+            state_block_size=3,
         )
+
+
+def test_zero_state_block_size_is_rejected():
+    with pytest.raises(ValueError, match="state_block_size must be at least 1"):
+        ReKTP(**_dim_kwargs(), state_block_size=0)
+
+
+@pytest.mark.parametrize("state_block_size", [1, 3])
+def test_ablated_state_block_size_runs_and_backpropagates(state_block_size):
+    # 1 removes intra-block coupling (fully independent dimensions), 3 widens
+    # the coupled block; both route through the serial scan fallback.
+    hidden_dim = 18 if state_block_size == 3 else 16
+    model = ReKTP(
+        **_dim_kwargs(hidden_dim=hidden_dim), state_block_size=state_block_size
+    )
+    assert model.num_state_blocks == hidden_dim // state_block_size
+    model = _activate_head(model.to(DEVICE)).train()
+    questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=DEVICE)
+    mask = torch.ones_like(questions, dtype=torch.bool)
+    times = _position_times(questions)
+
+    loss = model(questions, responses, times, mask)[:, :-1].square().mean()
+    loss.backward()
+
+    gradients = [
+        parameter.grad for parameter in model.parameters() if parameter.grad is not None
+    ]
+    assert gradients
+    assert all(torch.isfinite(gradient).all() for gradient in gradients)
 
 
 def test_residual_transitions_initialize_as_decay_only():

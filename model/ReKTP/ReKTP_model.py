@@ -87,10 +87,13 @@ class ReKTP(nn.Module):
         conv_dilation_base: int = 2,
         use_global_film: bool = False,
         question_embed_dim: int | None = None,
+        state_block_size: int = 2,
     ):
         super().__init__()
-        if hidden_dim % 2 != 0:
-            raise ValueError("ReKTP hidden_dim must be divisible by 2")
+        if state_block_size < 1:
+            raise ValueError("ReKTP state_block_size must be at least 1")
+        if hidden_dim % state_block_size != 0:
+            raise ValueError("ReKTP hidden_dim must be divisible by state_block_size")
         if max_gap_bins < 1:
             raise ValueError("max_gap_bins must be at least 1")
         if residual_scale <= 0.0:
@@ -99,8 +102,8 @@ class ReKTP(nn.Module):
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
         self.max_gap_bins = max_gap_bins
-        self.state_block_size = 2
-        self.num_state_blocks = hidden_dim // self.state_block_size
+        self.state_block_size = state_block_size
+        self.num_state_blocks = hidden_dim // state_block_size
         self.residual_scale = residual_scale
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
@@ -141,7 +144,7 @@ class ReKTP(nn.Module):
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
 
-        self.local_residual = nn.Linear(hidden_dim, 2 * hidden_dim)
+        self.local_residual = nn.Linear(hidden_dim, hidden_dim * state_block_size)
         self.local_write = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
