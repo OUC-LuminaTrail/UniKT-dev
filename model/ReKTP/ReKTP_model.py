@@ -88,6 +88,7 @@ class ReKTP(nn.Module):
         use_global_film: bool = False,
         question_embed_dim: int | None = None,
         state_block_size: int = 2,
+        use_parallel_scan: bool = True,
     ):
         super().__init__()
         if state_block_size < 1:
@@ -105,6 +106,7 @@ class ReKTP(nn.Module):
         self.state_block_size = state_block_size
         self.num_state_blocks = hidden_dim // state_block_size
         self.residual_scale = residual_scale
+        self.use_parallel_scan = use_parallel_scan
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
         skill_mask = torch.as_tensor(question_skill_mask, dtype=torch.bool)
@@ -418,18 +420,19 @@ class ReKTP(nn.Module):
             raise ValueError(
                 "global_context must have shape [batch_size, seq_len, hidden_dim]"
             )
-        max_skills = occurrence_mask.size(-1)
-        flat_global = (
-            global_context.unsqueeze(-2)
-            .expand(batch_size, seq_len, max_skills, self.hidden_dim)
-            .flatten(1, 2)
-        )
-        packed_global = torch.gather(
-            flat_global,
-            1,
-            order.unsqueeze(-1).expand_as(local_input),
-        )
-        local_input = self._condition_local_input(local_input, packed_global)
+        if self.local_global_film is not None:
+            max_skills = occurrence_mask.size(-1)
+            flat_global = (
+                global_context.unsqueeze(-2)
+                .expand(batch_size, seq_len, max_skills, self.hidden_dim)
+                .flatten(1, 2)
+            )
+            packed_global = torch.gather(
+                flat_global,
+                1,
+                order.unsqueeze(-1).expand_as(local_input),
+            )
+            local_input = self._condition_local_input(local_input, packed_global)
         decay = torch.exp(
             -torch.nn.functional.softplus(self.local_decay(self.gap_embed(gap_bucket)))
         )
@@ -454,6 +457,7 @@ class ReKTP(nn.Module):
             packed_skill,
             packed_valid,
             initial_blocks,
+            parallel=self.use_parallel_scan,
         )
         packed_pre_decay = packed_pre_decay_blocks.flatten(-2)
         packed_state = decay * packed_pre_decay
