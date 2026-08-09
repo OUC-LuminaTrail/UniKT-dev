@@ -1,0 +1,22 @@
+# Best hyperparameters for ReKTP on assistments17_per_que from Optuna search
+# (see runs/hyperparam_search/ReKTP_assistments17_per_que_*_n_trials100/ for the full study).
+
+experiment:
+  model_name: ReKTP
+
+data:
+  dataset: assistments17_per_que
+
+model:
+  hidden_dim: 128
+  n_blocks: 4
+  conv_kernel_size: 5
+  conv_dilation_base: 2
+  residual_scale: 0.09857641832994568
+  dropout: 0.36145867738335236
+  question_embed_dim: 8
+  epochs: 100
+  learning_rate: 0.0034776461627954096
+  weight_decay: 6.54031611949147e-05
+  batch_size: 32
+  max_clip_grad_norm: 0.8384652735101705

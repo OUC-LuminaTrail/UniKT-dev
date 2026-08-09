@@ -1,0 +1,22 @@
+# Best hyperparameters for ReKTP on junyi2015 from Optuna search
+# (see runs/hyperparam_search/ReKTP_junyi2015_*_n_trials100/ for the full study).
+
+experiment:
+  model_name: ReKTP
+
+data:
+  dataset: junyi2015
+
+model:
+  hidden_dim: 256
+  n_blocks: 4
+  conv_kernel_size: 7
+  conv_dilation_base: 2
+  residual_scale: 0.5662428094150256
+  dropout: 0.2004527458709971
+  question_embed_dim: 16
+  epochs: 100
+  learning_rate: 0.0019134186197567553
+  weight_decay: 2.9961543863442397e-05
+  batch_size: 32
+  max_clip_grad_norm: 5.173488901262155

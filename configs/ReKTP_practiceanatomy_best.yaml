@@ -1,0 +1,22 @@
+# Best hyperparameters for ReKTP on practiceanatomy from Optuna search
+# (see runs/hyperparam_search/ReKTP_practiceanatomy_*_n_trials100/ for the full study).
+
+experiment:
+  model_name: ReKTP
+
+data:
+  dataset: practiceanatomy
+
+model:
+  hidden_dim: 128
+  n_blocks: 4
+  conv_kernel_size: 7
+  conv_dilation_base: 2
+  residual_scale: 0.4580242039758188
+  dropout: 0.08952859675580649
+  question_embed_dim: 0
+  epochs: 100
+  learning_rate: 0.0026148979280400664
+  weight_decay: 2.028553471628133e-05
+  batch_size: 64
+  max_clip_grad_norm: 0.6726145216178251
