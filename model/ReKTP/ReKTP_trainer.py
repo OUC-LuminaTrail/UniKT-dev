@@ -108,7 +108,10 @@ class ReKTPTrainer(BaseTrainer):
     """Train ReKTP with one next-item objective per original question."""
 
     def build_components(self, rc, data_src) -> RuntimeComponents:
-        from model.ReKTP.ReKTP_data import ReKTPModelData
+        from model.ReKTP.ReKTP_data import (
+            ReKTPModelData,
+            rektp_packed_collate_fn,
+        )
         from model.ReKTP.ReKTP_model import ReKTP
 
         model_data = ReKTPModelData(data_src)
@@ -146,16 +149,18 @@ class ReKTPTrainer(BaseTrainer):
             train_data=train_data,
             val_data=val_data,
             test_data=test_data,
+            collate_fn=rektp_packed_collate_fn,
         )
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        self, batch_data: tuple[torch.Tensor, ...]
     ) -> dict[str, torch.Tensor]:
-        questions, responses, times, mask = batch_data
+        questions, responses, times, mask, kc_order = batch_data
         questions = self._move_tensor_to_device(questions)
         responses = self._move_tensor_to_device(responses)
         times = self._move_tensor_to_device(times)
         mask = self._move_tensor_to_device(mask)
+        kc_order = self._move_tensor_to_device(kc_order)
 
         use_amp = bool(self.run_config.model.amp)
         with torch.autocast(
@@ -163,7 +168,9 @@ class ReKTPTrainer(BaseTrainer):
             dtype=torch.bfloat16,
             enabled=use_amp,
         ):
-            logits_full = self.model(questions, responses, times, mask)
+            logits_full = self.model(
+                questions, responses, times, mask, kc_order=kc_order
+            )
         if use_amp:
             logits_full = logits_full.float()
         logits, labels, _ = self._extract_valid_predictions(

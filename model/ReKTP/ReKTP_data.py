@@ -17,13 +17,40 @@ logger = get_logger(__name__)
 
 
 class ReKTPDataset(Dataset):
-    """One position per original question interaction."""
+    """Question sequences with a once-precomputed KC packing order."""
 
-    def __init__(self, questions, responses, times, masks):
+    def __init__(
+        self,
+        questions,
+        responses,
+        times,
+        masks,
+        question_skill_ids,
+        question_skill_mask,
+    ):
         self.questions = torch.from_numpy(np.asarray(questions)).long()
         self.responses = torch.from_numpy(np.asarray(responses)).long()
         self.times = torch.from_numpy(np.asarray(times)).double()
         self.masks = torch.from_numpy(np.asarray(masks)).bool()
+
+        question_skill_ids = torch.from_numpy(np.asarray(question_skill_ids)).long()
+        question_skill_mask = torch.from_numpy(np.asarray(question_skill_mask)).bool()
+        skill_ids = question_skill_ids[self.questions]
+        occurrence_mask = question_skill_mask[self.questions] & self.masks.unsqueeze(-1)
+        _, seq_len, _ = skill_ids.shape
+        positions = torch.arange(seq_len).view(1, seq_len, 1).expand_as(skill_ids)
+        flat_skill = skill_ids.flatten(1)
+        flat_position = positions.flatten(1)
+        flat_valid = occurrence_mask.flatten(1)
+        invalid_key = (int(question_skill_ids.max()) + 1) * (seq_len + 1)
+        sort_key = flat_skill * (seq_len + 1) + flat_position
+        sort_key = torch.where(
+            flat_valid,
+            sort_key,
+            invalid_key + flat_position,
+        )
+        self.kc_order = torch.argsort(sort_key, dim=1, stable=True)
+        self.kc_valid_counts = flat_valid.sum(dim=1)
 
     def __getitem__(self, index):
         return (
@@ -31,10 +58,20 @@ class ReKTPDataset(Dataset):
             self.responses[index],
             self.times[index],
             self.masks[index],
+            self.kc_order[index],
+            self.kc_valid_counts[index],
         )
 
     def __len__(self):
         return len(self.questions)
+
+
+def rektp_packed_collate_fn(batch):
+    """Stack dense inputs and trim precomputed orders to the batch width."""
+    dense_columns = [torch.stack(column) for column in zip(*(row[:4] for row in batch))]
+    packed_length = max(int(row[5]) for row in batch)
+    kc_order = torch.stack([row[4][:packed_length] for row in batch])
+    return (*dense_columns, kc_order)
 
 
 def build_question_skill_table(data_src: DataSource) -> tuple[np.ndarray, np.ndarray]:
@@ -105,9 +142,9 @@ class ReKTPModelData(QuestionModelData):
         )
         logger.info("Using K-fold: fold %d/%d", fold_idx + 1, kfold_n_splits)
         return (
-            ReKTPDataset(*train_data),
-            ReKTPDataset(*val_data),
-            ReKTPDataset(*test_data),
+            ReKTPDataset(*train_data, question_skill_ids, question_skill_mask),
+            ReKTPDataset(*val_data, question_skill_ids, question_skill_mask),
+            ReKTPDataset(*test_data, question_skill_ids, question_skill_mask),
             {
                 "question_skill_ids": question_skill_ids,
                 "question_skill_mask": question_skill_mask,
@@ -163,4 +200,5 @@ __all__ = [
     "ReKTPModelData",
     "build_question_skill_table",
     "derive_max_gap_bins",
+    "rektp_packed_collate_fn",
 ]

@@ -311,6 +311,7 @@ class ReKTP(nn.Module):
         mask: torch.Tensor,
         skill_ids: torch.Tensor | None = None,
         skill_mask: torch.Tensor | None = None,
+        kc_order: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, ...]:
         batch_size, seq_len = questions.shape
         if skill_ids is None:
@@ -334,25 +335,28 @@ class ReKTP(nn.Module):
         flat_response = response_occ.flatten(1)
         flat_valid = occurrence_mask.flatten(1)
 
-        # Sort by (skill, position): the source data is already chronological, so
-        # position order equals time order inside a skill segment. Real seconds
-        # cannot seed the sort key (they exceed the skill stride); they are used
-        # only for the gap computation below.
-        positions = (
-            torch.arange(seq_len, device=questions.device)
-            .view(1, seq_len, 1)
-            .expand(batch_size, seq_len, max_skills)
-        )
-        flat_pos = positions.flatten(1)
-        invalid_key = (self.num_skills + 1) * (seq_len + 1)
-        sort_key = flat_skill * (seq_len + 1) + flat_pos
-        sort_key = torch.where(flat_valid, sort_key, invalid_key + flat_pos)
-        order = torch.argsort(sort_key, dim=1, stable=True)
-
-        # Keep only the longest valid prefix required by this batch. Shorter
-        # rows remain padded to that shared width for the dense segmented scan.
-        packed_length = int(flat_valid.sum(dim=1).max().item())
-        order = order[:, :packed_length]
+        if kc_order is None:
+            # Direct model calls retain the original dynamic-sort fallback.
+            positions = (
+                torch.arange(seq_len, device=questions.device)
+                .view(1, seq_len, 1)
+                .expand(batch_size, seq_len, max_skills)
+            )
+            flat_pos = positions.flatten(1)
+            invalid_key = (self.num_skills + 1) * (seq_len + 1)
+            sort_key = flat_skill * (seq_len + 1) + flat_pos
+            sort_key = torch.where(flat_valid, sort_key, invalid_key + flat_pos)
+            order = torch.argsort(sort_key, dim=1, stable=True)
+            packed_length = int(flat_valid.sum(dim=1).max().item())
+            order = order[:, :packed_length]
+        else:
+            if kc_order.ndim != 2 or kc_order.size(0) != batch_size:
+                raise ValueError("kc_order must have shape [batch_size, packed_length]")
+            if kc_order.size(1) > flat_skill.size(1):
+                raise ValueError("kc_order width exceeds the flattened KC width")
+            if kc_order.device != questions.device:
+                raise ValueError("kc_order must be on the same device as questions")
+            order = kc_order.long()
 
         def gather(values: torch.Tensor) -> torch.Tensor:
             return torch.gather(values, 1, order)
@@ -375,6 +379,7 @@ class ReKTP(nn.Module):
         mask: torch.Tensor,
         global_context: torch.Tensor,
         q_features: _QuestionFeatures | None = None,
+        kc_order: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len = questions.shape
         skill_ids = (
@@ -396,7 +401,13 @@ class ReKTP(nn.Module):
             order,
             occurrence_mask,
         ) = self._pack_kc_occurrences(
-            questions, responses, times, mask, skill_ids, skill_mask
+            questions,
+            responses,
+            times,
+            mask,
+            skill_ids,
+            skill_mask,
+            kc_order=kc_order,
         )
 
         previous_time = torch.zeros_like(packed_time)
@@ -540,6 +551,7 @@ class ReKTP(nn.Module):
         responses: torch.Tensor,
         times: torch.Tensor,
         mask: torch.Tensor,
+        kc_order: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return next-item logits where output[t] predicts response[t+1].
 
@@ -566,6 +578,7 @@ class ReKTP(nn.Module):
             mask,
             global_state,
             q_features,
+            kc_order=kc_order,
         )
 
         features = torch.cat(
