@@ -349,6 +349,11 @@ class ReKTP(nn.Module):
         sort_key = torch.where(flat_valid, sort_key, invalid_key + flat_pos)
         order = torch.argsort(sort_key, dim=1, stable=True)
 
+        # Keep only the longest valid prefix required by this batch. Shorter
+        # rows remain padded to that shared width for the dense segmented scan.
+        packed_length = int(flat_valid.sum(dim=1).max().item())
+        order = order[:, :packed_length]
+
         def gather(values: torch.Tensor) -> torch.Tensor:
             return torch.gather(values, 1, order)
 
@@ -457,7 +462,13 @@ class ReKTP(nn.Module):
         )
         packed_pre_decay = packed_pre_decay_blocks.flatten(-2)
         packed_state = decay * packed_pre_decay
-        unpacked_state = torch.zeros_like(packed_state)
+        # Restore the original [seq_len, max_skills] layout for readout; the
+        # trimmed suffix contains only invalid padding and therefore stays zero.
+        unpacked_state = packed_state.new_zeros(
+            batch_size,
+            seq_len * max_skills,
+            self.hidden_dim,
+        )
         scatter_index = order.unsqueeze(-1).expand_as(packed_state)
         unpacked_state.scatter_(1, scatter_index, packed_state)
 
