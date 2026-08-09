@@ -31,10 +31,6 @@ class ReKTPConfig(ModelConfig):
             intra-block coupling (each dimension evolves independently) and
             larger sizes widen the coupled block, both via the serial scan
             fallback. Ablation knob for the block-affine transition.
-        use_parallel_scan: Enable the length-aware associative Triton scan for
-            2x2 local-state blocks. Disable it to reproduce the original serial
-            Triton forward/backward implementation.
-        use_fused_adam: Use CUDA fused Adam to reduce parameter-update launches.
         question_embed_dim: Intrinsic width of the per-question embedding; -1
             (default) means ``hidden_dim`` and 0 removes the pathway, leaving
             question identity to the ``question_diff`` scalar and the KC side.
@@ -74,8 +70,6 @@ class ReKTPConfig(ModelConfig):
         default=2,
         metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
     )
-    use_parallel_scan: bool = True
-    use_fused_adam: bool = True
     amp: bool = False
     residual_scale: float = field(
         default=0.3,
@@ -138,20 +132,10 @@ class ReKTPTrainer(BaseTrainer):
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),
-            use_parallel_scan=m.use_parallel_scan,
             state_block_size=m.state_block_size,
         )
-        requested_device = rc.general.device
-        use_fused_adam = (
-            m.use_fused_adam
-            and torch.cuda.is_available()
-            and (requested_device is None or str(requested_device).startswith("cuda"))
-        )
         optimizer = torch.optim.Adam(
-            model.parameters(),
-            lr=m.learning_rate,
-            weight_decay=m.weight_decay,
-            fused=use_fused_adam,
+            model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
         return RuntimeComponents(
             model=model,

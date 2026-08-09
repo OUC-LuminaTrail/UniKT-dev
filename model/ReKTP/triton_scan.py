@@ -4,13 +4,11 @@ Each position carries a square block operator ``A`` and bias ``b``; the scan
 returns the state before that operator is applied, resetting at segment
 boundaries.
 
-- Forward (Triton, 2x2 blocks only): a segmented associative scan parallelises
-  across both state blocks and sequence positions. Tiny inputs retain the
-  lower-overhead serial kernel.
-- Backward (Triton): long inputs use a reversed associative scan for the
-  recurrence adjoint ``h_{i+1} = A_i h_i + b_i`` and a parallel forward
-  prefix scan for ``d init``; shorter inputs retain the fused serial kernels
-  to avoid extra allocation and launch overhead.
+- Forward (Triton, 2x2 blocks only): one program per batch row, vectorised
+  over ``hidden_block``, running a sequential exclusive scan with segment
+  resets along the sequence.
+- Backward (Triton): an adjoint reverse scan over the recurrence
+  ``h_{i+1} = A_i h_i + b_i``, plus a forward prefix scan to recover ``d init``.
 
 ``d matrix`` / ``d bias`` match PyTorch autograd only while ``initial_state`` is
 constant within a segment, which holds because it is derived from the segment id.
@@ -26,257 +24,6 @@ pure-PyTorch serial scan with identical semantics and autograd coverage.
 import torch
 import triton
 import triton.language as tl
-
-
-@triton.jit
-def _parallel_adjoint_kernel(
-    adj_ptr,
-    grad_ptr,
-    matrix_ptr,
-    seg_ptr,
-    valid_ptr,
-    N: tl.constexpr,
-    H: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-):
-    """Compute every recurrence adjoint with a reversed parallel scan."""
-    pid = tl.program_id(0)
-    batch = pid // H
-    head = pid - batch * H
-    r = tl.arange(0, BLOCK_N)
-    i = N - 1 - r
-    in_range = r < N
-    valid_i = tl.load(valid_ptr + batch * N + i, mask=in_range, other=0).to(tl.int1)
-    seg_i = tl.load(seg_ptr + batch * N + i, mask=in_range, other=-1)
-    next_valid = tl.load(
-        valid_ptr + batch * N + i + 1,
-        mask=in_range & (i + 1 < N),
-        other=0,
-    ).to(tl.int1)
-    next_seg = tl.load(
-        seg_ptr + batch * N + i + 1,
-        mask=in_range & (i + 1 < N),
-        other=-1,
-    )
-    is_head = (~valid_i) | (i + 1 >= N) | (~next_valid) | (seg_i != next_seg)
-
-    m = matrix_ptr + ((batch * N + i) * H + head) * 4
-    g = grad_ptr + ((batch * N + i) * H + head) * 2
-    # f_i(x) = A_i^T x + g_i. Scanning the reversed sequence composes
-    # f_i after f_{i+1}, so its bias is the inclusive adjoint a_i.
-    a00 = tl.load(m + 0, mask=in_range, other=1.0).to(tl.float32)
-    a01 = tl.load(m + 2, mask=in_range, other=0.0).to(tl.float32)
-    a10 = tl.load(m + 1, mask=in_range, other=0.0).to(tl.float32)
-    a11 = tl.load(m + 3, mask=in_range, other=1.0).to(tl.float32)
-    b0 = tl.load(g + 0, mask=in_range, other=0.0).to(tl.float32)
-    b1 = tl.load(g + 1, mask=in_range, other=0.0).to(tl.float32)
-    a00, a01, a10, a11, b0, b1, _ = tl.associative_scan(
-        (a00, a01, a10, a11, b0, b1, is_head),
-        axis=0,
-        combine_fn=_combine_segmented_affine_2x2,
-    )
-    adj = adj_ptr + ((batch * N + i) * H + head) * 2
-    tl.store(adj + 0, tl.where(valid_i, b0, 0.0), mask=in_range)
-    tl.store(adj + 1, tl.where(valid_i, b1, 0.0), mask=in_range)
-
-
-@triton.jit
-def _parallel_parameter_grad_kernel(
-    dmat_ptr,
-    dbias_ptr,
-    adj_ptr,
-    state_ptr,
-    seg_ptr,
-    valid_ptr,
-    total: tl.constexpr,
-    N: tl.constexpr,
-    H: tl.constexpr,
-    BLOCK: tl.constexpr,
-):
-    """Form dA/db from the already-scanned next-position adjoints."""
-    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
-    mask = offs < total
-    head = offs % H
-    position = (offs // H) % N
-    batch = offs // (N * H)
-    valid_i = tl.load(valid_ptr + batch * N + position, mask=mask, other=0).to(tl.int1)
-    next_valid = tl.load(
-        valid_ptr + batch * N + position + 1,
-        mask=mask & (position + 1 < N),
-        other=0,
-    ).to(tl.int1)
-    seg_i = tl.load(seg_ptr + batch * N + position, mask=mask, other=-1)
-    next_seg = tl.load(
-        seg_ptr + batch * N + position + 1,
-        mask=mask & (position + 1 < N),
-        other=-1,
-    )
-    used = valid_i & next_valid & (seg_i == next_seg)
-    adj = adj_ptr + ((batch * N + position + 1) * H + head) * 2
-    state = state_ptr + offs * 2
-    a0 = tl.load(adj + 0, mask=mask & used, other=0.0).to(tl.float32)
-    a1 = tl.load(adj + 1, mask=mask & used, other=0.0).to(tl.float32)
-    h0 = tl.load(state + 0, mask=mask, other=0.0).to(tl.float32)
-    h1 = tl.load(state + 1, mask=mask, other=0.0).to(tl.float32)
-    dm = dmat_ptr + offs * 4
-    db = dbias_ptr + offs * 2
-    tl.store(dm + 0, a0 * h0, mask=mask)
-    tl.store(dm + 1, a0 * h1, mask=mask)
-    tl.store(dm + 2, a1 * h0, mask=mask)
-    tl.store(dm + 3, a1 * h1, mask=mask)
-    tl.store(db + 0, a0, mask=mask)
-    tl.store(db + 1, a1, mask=mask)
-
-
-@triton.jit
-def _parallel_dinit_kernel(
-    dinit_ptr,
-    grad_ptr,
-    matrix_ptr,
-    seg_ptr,
-    valid_ptr,
-    N: tl.constexpr,
-    H: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-):
-    """Parallel exclusive matrix prefix used to recover per-position dinit."""
-    pid = tl.program_id(0)
-    batch = pid // H
-    head = pid - batch * H
-    n = tl.arange(0, BLOCK_N)
-    in_range = n < N
-    valid_n = tl.load(valid_ptr + batch * N + n, mask=in_range, other=0).to(tl.int1)
-    seg_n = tl.load(seg_ptr + batch * N + n, mask=in_range, other=-1)
-    prev_valid = tl.load(
-        valid_ptr + batch * N + n - 1,
-        mask=in_range & (n > 0),
-        other=0,
-    ).to(tl.int1)
-    prev_seg = tl.load(
-        seg_ptr + batch * N + n - 1,
-        mask=in_range & (n > 0),
-        other=-1,
-    )
-    is_head = (~valid_n) | (n == 0) | (~prev_valid) | (seg_n != prev_seg)
-    prev = n - 1
-    m = matrix_ptr + ((batch * N + prev) * H + head) * 4
-    use_prev = in_range & (~is_head)
-    a00 = tl.load(m + 0, mask=use_prev, other=1.0).to(tl.float32)
-    a01 = tl.load(m + 1, mask=use_prev, other=0.0).to(tl.float32)
-    a10 = tl.load(m + 2, mask=use_prev, other=0.0).to(tl.float32)
-    a11 = tl.load(m + 3, mask=use_prev, other=1.0).to(tl.float32)
-    zero0 = tl.zeros([BLOCK_N], tl.float32)
-    zero1 = tl.zeros([BLOCK_N], tl.float32)
-    a00, a01, a10, a11, _, _, _ = tl.associative_scan(
-        (a00, a01, a10, a11, zero0, zero1, is_head),
-        axis=0,
-        combine_fn=_combine_segmented_affine_2x2,
-    )
-    g = grad_ptr + ((batch * N + n) * H + head) * 2
-    g0 = tl.load(g + 0, mask=in_range, other=0.0).to(tl.float32)
-    g1 = tl.load(g + 1, mask=in_range, other=0.0).to(tl.float32)
-    di0 = a00 * g0 + a10 * g1
-    di1 = a01 * g0 + a11 * g1
-    di = dinit_ptr + ((batch * N + n) * H + head) * 2
-    tl.store(di + 0, tl.where(valid_n, di0, 0.0), mask=in_range)
-    tl.store(di + 1, tl.where(valid_n, di1, 0.0), mask=in_range)
-
-
-@triton.jit
-def _combine_segmented_affine_2x2(
-    la00,
-    la01,
-    la10,
-    la11,
-    lb0,
-    lb1,
-    lhead,
-    ra00,
-    ra01,
-    ra10,
-    ra11,
-    rb0,
-    rb1,
-    rhead,
-):
-    """Compose adjacent affine ranges, resetting when the right range starts."""
-    a00 = ra00 * la00 + ra01 * la10
-    a01 = ra00 * la01 + ra01 * la11
-    a10 = ra10 * la00 + ra11 * la10
-    a11 = ra10 * la01 + ra11 * la11
-    b0 = ra00 * lb0 + ra01 * lb1 + rb0
-    b1 = ra10 * lb0 + ra11 * lb1 + rb1
-    return (
-        tl.where(rhead, ra00, a00),
-        tl.where(rhead, ra01, a01),
-        tl.where(rhead, ra10, a10),
-        tl.where(rhead, ra11, a11),
-        tl.where(rhead, rb0, b0),
-        tl.where(rhead, rb1, b1),
-        lhead | rhead,
-    )
-
-
-@triton.jit
-def _parallel_fwd_kernel(
-    matrix_ptr,
-    bias_ptr,
-    seg_ptr,
-    valid_ptr,
-    init_ptr,
-    out_ptr,
-    N: tl.constexpr,
-    H: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-):
-    """Parallel exclusive segmented scan for one (batch, state-block) row."""
-    pid = tl.program_id(0)
-    batch = pid // H
-    head = pid - batch * H
-    n = tl.arange(0, BLOCK_N)
-    in_range = n < N
-    current_valid = tl.load(valid_ptr + batch * N + n, mask=in_range, other=0).to(
-        tl.int1
-    )
-    current_seg = tl.load(seg_ptr + batch * N + n, mask=in_range, other=-1)
-    prev_valid = tl.load(
-        valid_ptr + batch * N + n - 1,
-        mask=in_range & (n > 0),
-        other=0,
-    ).to(tl.int1)
-    prev_seg = tl.load(
-        seg_ptr + batch * N + n - 1,
-        mask=in_range & (n > 0),
-        other=-1,
-    )
-    is_head = (~current_valid) | (n == 0) | (~prev_valid) | (current_seg != prev_seg)
-
-    # Scan the operator immediately preceding each output position. Segment
-    # heads carry the identity, making the inclusive result exclusive in time.
-    prev = n - 1
-    m = matrix_ptr + ((batch * N + prev) * H + head) * 4
-    b = bias_ptr + ((batch * N + prev) * H + head) * 2
-    use_prev = in_range & (~is_head)
-    a00 = tl.load(m + 0, mask=use_prev, other=1.0).to(tl.float32)
-    a01 = tl.load(m + 1, mask=use_prev, other=0.0).to(tl.float32)
-    a10 = tl.load(m + 2, mask=use_prev, other=0.0).to(tl.float32)
-    a11 = tl.load(m + 3, mask=use_prev, other=1.0).to(tl.float32)
-    b0 = tl.load(b + 0, mask=use_prev, other=0.0).to(tl.float32)
-    b1 = tl.load(b + 1, mask=use_prev, other=0.0).to(tl.float32)
-    a00, a01, a10, a11, b0, b1, _ = tl.associative_scan(
-        (a00, a01, a10, a11, b0, b1, is_head),
-        axis=0,
-        combine_fn=_combine_segmented_affine_2x2,
-    )
-
-    i = init_ptr + ((batch * N + n) * H + head) * 2
-    i0 = tl.load(i + 0, mask=in_range, other=0.0).to(tl.float32)
-    i1 = tl.load(i + 1, mask=in_range, other=0.0).to(tl.float32)
-    o0 = a00 * i0 + a01 * i1 + b0
-    o1 = a10 * i0 + a11 * i1 + b1
-    o = out_ptr + ((batch * N + n) * H + head) * 2
-    tl.store(o + 0, tl.where(current_valid, o0, 0.0), mask=in_range)
-    tl.store(o + 1, tl.where(current_valid, o1, 0.0), mask=in_range)
 
 
 @triton.jit
@@ -576,8 +323,7 @@ class _SegmentedBlockAffineExclusiveScan(torch.autograd.Function):
     """Differentiable segmented block-affine exclusive scan."""
 
     @staticmethod
-    def forward(ctx, matrix, bias, segment_ids, valid_mask, initial_state, parallel):
-        ctx.parallel = parallel
+    def forward(ctx, matrix, bias, segment_ids, valid_mask, initial_state):
         if matrix.ndim != 5 or matrix.shape[-2:] != (2, 2):
             raise ValueError("matrix must have shape [B, N, H, 2, 2]")
         if matrix.size(1) == 0:
@@ -599,124 +345,72 @@ class _SegmentedBlockAffineExclusiveScan(torch.autograd.Function):
         ctx.length = length
         ctx.heads = heads
 
-        if not parallel or length < 128:
-            _fwd_kernel[(batch,)](
-                matrix,
-                bias,
-                segment_ids,
-                valid_mask,
-                initial_state,
-                out,
-                length,
-                heads,
-                matrix.stride(0),
-                matrix.stride(1),
-                initial_state.stride(0),
-                initial_state.stride(1),
-                BLOCK_H=block_h,
-            )
-        else:
-            block_n = triton.next_power_of_2(length)
-            _parallel_fwd_kernel[(batch * heads,)](
-                matrix,
-                bias,
-                segment_ids,
-                valid_mask,
-                initial_state,
-                out,
-                N=length,
-                H=heads,
-                BLOCK_N=block_n,
-            )
+        _fwd_kernel[(batch,)](
+            matrix,
+            bias,
+            segment_ids,
+            valid_mask,
+            initial_state,
+            out,
+            length,
+            heads,
+            matrix.stride(0),
+            matrix.stride(1),
+            initial_state.stride(0),
+            initial_state.stride(1),
+            BLOCK_H=block_h,
+        )
         ctx.save_for_backward(matrix, bias, segment_ids, valid_mask, initial_state, out)
         return out
 
     @staticmethod
     def backward(ctx, grad_out):
         if ctx.empty:
-            return torch.zeros_like(ctx.saved_tensors[0]), None, None, None, None, None
+            return torch.zeros_like(ctx.saved_tensors[0]), None, None, None, None
         matrix, bias, segment_ids, valid_mask, initial_state, out = ctx.saved_tensors
         grad_out = grad_out.contiguous()
         if not grad_out.is_cuda:
-            return None, None, None, None, None, None
+            return None, None, None, None, None
 
         batch = matrix.shape[0]
+        dmat = torch.zeros_like(matrix)
+        dbias = torch.zeros_like(bias)
+        dinit = torch.zeros_like(initial_state)
         length = ctx.length
         heads = ctx.heads
-        dmat = torch.empty_like(matrix)
-        dbias = torch.empty_like(bias)
-        dinit = torch.empty_like(initial_state)
-        if not ctx.parallel or length < 512:
-            block_h = ctx.block_h
-            _bwd_adj_kernel[(batch,)](
-                dmat,
-                dbias,
-                grad_out,
-                out,
-                matrix,
-                segment_ids,
-                valid_mask,
-                length,
-                heads,
-                matrix.stride(0),
-                matrix.stride(1),
-                initial_state.stride(0),
-                initial_state.stride(1),
-                BLOCK_H=block_h,
-            )
-            _bwd_dinit_kernel[(batch,)](
-                dinit,
-                grad_out,
-                matrix,
-                segment_ids,
-                valid_mask,
-                length,
-                heads,
-                matrix.stride(0),
-                matrix.stride(1),
-                initial_state.stride(0),
-                initial_state.stride(1),
-                BLOCK_H=block_h,
-            )
-        else:
-            adjoint = torch.empty_like(initial_state)
-            block_n = triton.next_power_of_2(length)
-            scan_grid = (batch * heads,)
-            _parallel_adjoint_kernel[scan_grid](
-                adjoint,
-                grad_out,
-                matrix,
-                segment_ids,
-                valid_mask,
-                N=length,
-                H=heads,
-                BLOCK_N=block_n,
-            )
-            total = batch * length * heads
-            grad_block = 256
-            _parallel_parameter_grad_kernel[(triton.cdiv(total, grad_block),)](
-                dmat,
-                dbias,
-                adjoint,
-                out,
-                segment_ids,
-                valid_mask,
-                total=total,
-                N=length,
-                H=heads,
-                BLOCK=grad_block,
-            )
-            _parallel_dinit_kernel[scan_grid](
-                dinit,
-                grad_out,
-                matrix,
-                segment_ids,
-                valid_mask,
-                N=length,
-                H=heads,
-                BLOCK_N=block_n,
-            )
-        return dmat, dbias, None, None, dinit, None
+        block_h = ctx.block_h
+
+        _bwd_adj_kernel[(batch,)](
+            dmat,
+            dbias,
+            grad_out,
+            out,
+            matrix,
+            segment_ids,
+            valid_mask,
+            length,
+            heads,
+            matrix.stride(0),
+            matrix.stride(1),
+            initial_state.stride(0),
+            initial_state.stride(1),
+            BLOCK_H=block_h,
+        )
+        _bwd_dinit_kernel[(batch,)](
+            dinit,
+            grad_out,
+            matrix,
+            segment_ids,
+            valid_mask,
+            length,
+            heads,
+            matrix.stride(0),
+            matrix.stride(1),
+            initial_state.stride(0),
+            initial_state.stride(1),
+            BLOCK_H=block_h,
+        )
+        return dmat, dbias, None, None, dinit
 
 
 def _serial_block_affine_exclusive_scan(
@@ -783,8 +477,6 @@ def segmented_block_affine_exclusive_scan(
     segment_ids: torch.Tensor,
     valid_mask: torch.Tensor,
     initial_state: torch.Tensor,
-    *,
-    parallel: bool = True,
 ) -> torch.Tensor:
     """Apply an exclusive block-affine scan inside contiguous segments.
 
@@ -796,8 +488,6 @@ def segmented_block_affine_exclusive_scan(
     Args:
         matrix: Block operators with shape ``[B, N, H, S, S]``.
         bias: Block biases with shape ``[B, N, H, S]``.
-        parallel: Enable the length-aware associative CUDA scan. False forces
-            the original serial Triton forward and backward kernels.
         segment_ids: Segment identifier per position, shape ``[B, N]``.
         valid_mask: Valid occurrence mask, shape ``[B, N]``.
         initial_state: Initial block states with shape ``[B, N, H, S]``.
@@ -822,7 +512,7 @@ def segmented_block_affine_exclusive_scan(
         return torch.zeros_like(initial_state)
     if matrix.shape[-1] == 2 and matrix.is_cuda:
         return _SegmentedBlockAffineExclusiveScan.apply(
-            matrix, bias, segment_ids, valid_mask, initial_state, parallel
+            matrix, bias, segment_ids, valid_mask, initial_state
         )
     return _serial_block_affine_exclusive_scan(
         matrix, bias, segment_ids, valid_mask, initial_state

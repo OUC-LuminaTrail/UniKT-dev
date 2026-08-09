@@ -1,10 +1,7 @@
 import pytest
 import torch
 
-from model.ReKTP.triton_scan import (
-    _serial_block_affine_exclusive_scan,
-    segmented_block_affine_exclusive_scan,
-)
+from model.ReKTP.triton_scan import segmented_block_affine_exclusive_scan
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available(), reason="ReKTP segmented scan requires CUDA"
@@ -137,72 +134,3 @@ def test_block_scan_gradients_match_serial_reference():
         parallel_gradients, serial_gradients, strict=True
     ):
         torch.testing.assert_close(parallel_gradient, serial_gradient)
-
-
-def test_long_block_scan_parallel_backward_matches_serial_fallback():
-    """Exercise the parallel-backward path above its dispatch threshold."""
-    torch.manual_seed(23)
-    length = 520
-    identity = torch.eye(2, device=DEVICE).view(1, 1, 1, 2, 2)
-    matrix = identity + 0.01 * torch.randn(1, length, 2, 2, 2, device=DEVICE)
-    bias = 0.01 * torch.randn(1, length, 2, 2, device=DEVICE)
-    segment_ids = (torch.arange(length, device=DEVICE) // 40).view(1, length)
-    valid_mask = torch.ones(1, length, dtype=torch.bool, device=DEVICE)
-    initial = torch.randn(1, length, 2, 2, device=DEVICE)
-    for start in range(0, length, 40):
-        initial[:, start : start + 40] = initial[:, start : start + 1]
-    weights = torch.randn_like(initial)
-
-    parallel_matrix = matrix.clone().requires_grad_()
-    parallel_bias = bias.clone().requires_grad_()
-    parallel_initial = initial.clone().requires_grad_()
-    parallel = segmented_block_affine_exclusive_scan(
-        parallel_matrix, parallel_bias, segment_ids, valid_mask, parallel_initial
-    )
-    parallel_gradients = torch.autograd.grad(
-        (parallel * weights).sum(),
-        (parallel_matrix, parallel_bias, parallel_initial),
-    )
-
-    original_matrix = matrix.clone().requires_grad_()
-    original_bias = bias.clone().requires_grad_()
-    original_initial = initial.clone().requires_grad_()
-    original = segmented_block_affine_exclusive_scan(
-        original_matrix,
-        original_bias,
-        segment_ids,
-        valid_mask,
-        original_initial,
-        parallel=False,
-    )
-    original_gradients = torch.autograd.grad(
-        (original * weights).sum(),
-        (original_matrix, original_bias, original_initial),
-    )
-
-    serial_matrix = matrix.clone().requires_grad_()
-    serial_bias = bias.clone().requires_grad_()
-    serial_initial = initial.clone().requires_grad_()
-    serial = _serial_block_affine_exclusive_scan(
-        serial_matrix, serial_bias, segment_ids, valid_mask, serial_initial
-    )
-    serial_gradients = torch.autograd.grad(
-        (serial * weights).sum(),
-        (serial_matrix, serial_bias, serial_initial),
-    )
-
-    torch.testing.assert_close(parallel, serial, atol=1e-5, rtol=1e-4)
-    torch.testing.assert_close(original, serial, atol=1e-5, rtol=1e-4)
-    for original_gradient, serial_gradient in zip(
-        original_gradients, serial_gradients, strict=True
-    ):
-        torch.testing.assert_close(
-            original_gradient, serial_gradient, atol=1e-5, rtol=1e-4
-        )
-
-    for parallel_gradient, serial_gradient in zip(
-        parallel_gradients, serial_gradients, strict=True
-    ):
-        torch.testing.assert_close(
-            parallel_gradient, serial_gradient, atol=1e-5, rtol=1e-4
-        )
