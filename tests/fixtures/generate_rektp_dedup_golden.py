@@ -35,7 +35,6 @@ def build_kwargs():
         "n_blocks": 1,
         "max_gap_bins": 4,
         "dropout": 0.0,
-        "use_global_film": True,
         # question_embed_dim left default (== hidden_dim) so the question-vector
         # sharing path is exercised.
     }
@@ -52,10 +51,8 @@ def build_model():
         # cannot hide behind identically-zero output.
         model.ability_head.weight.normal_(0.0, 0.2)
         model.question_diff.weight.normal_(0.0, 0.2)
-        model.local_residual.weight.normal_(0.0, 0.05)
         model.local_write.weight.normal_(0.0, 0.05)
         model.local_readout.weight.normal_(0.0, 0.05)
-        model.local_global_film.weight.normal_(0.0, 0.02)
         model.global_ffn[0].weight.normal_(0.0, 0.05)
         model.global_ffn[3].weight.normal_(0.0, 0.05)
     return model

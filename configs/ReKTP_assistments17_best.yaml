@@ -12,7 +12,6 @@ model:
   n_blocks: 4
   conv_kernel_size: 3
   conv_dilation_base: 2
-  residual_scale: 0.8467153207597368
   dropout: 0.15025381207125008
   question_embed_dim: 16
   epochs: 100

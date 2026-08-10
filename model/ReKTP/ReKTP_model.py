@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from model.ReKTP.triton_scan import segmented_block_affine_exclusive_scan
+from model.ReKTP.triton_scan import segmented_scalar_affine_exclusive_scan
 
 # Question-derived tensors computed once per forward and shared across the
 # sub-methods that would otherwise re-gather and re-embed them.
@@ -81,30 +81,18 @@ class ReKTP(nn.Module):
         hidden_dim: int = 128,
         n_blocks: int = 2,
         max_gap_bins: int = 8,
-        residual_scale: float = 0.1,
         dropout: float = 0.2,
         conv_kernel_size: int = 3,
         conv_dilation_base: int = 2,
-        use_global_film: bool = False,
         question_embed_dim: int | None = None,
-        state_block_size: int = 2,
     ):
         super().__init__()
-        if state_block_size < 1:
-            raise ValueError("ReKTP state_block_size must be at least 1")
-        if hidden_dim % state_block_size != 0:
-            raise ValueError("ReKTP hidden_dim must be divisible by state_block_size")
         if max_gap_bins < 1:
             raise ValueError("max_gap_bins must be at least 1")
-        if residual_scale <= 0.0:
-            raise ValueError("residual_scale must be positive")
         self.num_questions = int(data_metadata["num_questions"])
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
         self.max_gap_bins = max_gap_bins
-        self.state_block_size = state_block_size
-        self.num_state_blocks = hidden_dim // state_block_size
-        self.residual_scale = residual_scale
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
         skill_mask = torch.as_tensor(question_skill_mask, dtype=torch.bool)
@@ -144,15 +132,13 @@ class ReKTP(nn.Module):
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
 
-        self.local_residual = nn.Linear(hidden_dim, hidden_dim * state_block_size)
+        # Scalar per-dimension transition: the gap-modulated decay forgets and
+        # the event-conditioned write updates; the segmented scan keeps one
+        # private state per KC.
         self.local_write = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
         self.local_readout = nn.Linear(3 * hidden_dim, 1)
-        self.use_global_film = use_global_film
-        self.local_global_film = (
-            nn.Linear(hidden_dim, 2 * hidden_dim) if use_global_film else None
-        )
         self.global_blocks = nn.ModuleList(
             GlobalConvBlock(
                 d_model=hidden_dim,
@@ -182,9 +168,7 @@ class ReKTP(nn.Module):
         self.irt_disc = nn.Parameter(torch.tensor(1.0))
 
         nn.init.zeros_(self.question_diff.weight)
-        zeroed_layers = [self.local_residual, self.local_write, self.local_readout]
-        if self.local_global_film is not None:
-            zeroed_layers.append(self.local_global_film)
+        zeroed_layers = [self.local_write, self.local_readout]
         for layer in zeroed_layers:
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
@@ -264,45 +248,6 @@ class ReKTP(nn.Module):
         weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
         return (local_state * weights.unsqueeze(-1)).sum(dim=-2)
 
-    def _condition_local_input(
-        self,
-        local_input: torch.Tensor,
-        global_context: torch.Tensor,
-    ) -> torch.Tensor:
-        if self.local_global_film is None:
-            return local_input
-        gamma, beta = self.local_global_film(global_context).chunk(2, dim=-1)
-        return local_input * (1.0 + gamma) + beta
-
-    def _block_affine_transition(
-        self,
-        event_input: torch.Tensor,
-        residual_layer: nn.Linear,
-        write_layer: nn.Linear,
-        decay: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        leading_shape = event_input.shape[:-1]
-        block_shape = (*leading_shape, self.num_state_blocks)
-        raw_residual = residual_layer(event_input).reshape(
-            *block_shape, self.state_block_size, self.state_block_size
-        )
-        residual_norm = (
-            raw_residual.square().sum(dim=(-2, -1), keepdim=True).add(1e-12).sqrt()
-        )
-        residual = self.residual_scale * raw_residual / (1.0 + residual_norm)
-
-        identity = torch.eye(
-            self.state_block_size,
-            device=event_input.device,
-            dtype=event_input.dtype,
-        )
-        decay_blocks = decay.reshape(*block_shape, self.state_block_size)
-        transition = (identity + residual) * decay_blocks.unsqueeze(-2)
-        bias = torch.tanh(write_layer(event_input)).reshape(
-            *block_shape, self.state_block_size
-        )
-        return transition, bias
-
     def _pack_kc_occurrences(
         self,
         questions: torch.Tensor,
@@ -377,7 +322,6 @@ class ReKTP(nn.Module):
         responses: torch.Tensor,
         times: torch.Tensor,
         mask: torch.Tensor,
-        global_context: torch.Tensor,
         q_features: _QuestionFeatures | None = None,
         kc_order: torch.Tensor | None = None,
     ) -> torch.Tensor:
@@ -392,6 +336,7 @@ class ReKTP(nn.Module):
             if q_features is not None
             else self.question_skill_mask[questions]
         )
+        max_skills = skill_ids.size(-1)
         (
             packed_skill,
             packed_time,
@@ -429,49 +374,26 @@ class ReKTP(nn.Module):
             + self.question_diff(packed_question) * self.skill_change(packed_skill)
             + self.answer_embed(packed_response)
         )
-        expected_context_shape = (*questions.shape, self.hidden_dim)
-        if global_context.shape != expected_context_shape:
-            raise ValueError(
-                "global_context must have shape [batch_size, seq_len, hidden_dim]"
-            )
-        max_skills = occurrence_mask.size(-1)
-        flat_global = (
-            global_context.unsqueeze(-2)
-            .expand(batch_size, seq_len, max_skills, self.hidden_dim)
-            .flatten(1, 2)
-        )
-        packed_global = torch.gather(
-            flat_global,
-            1,
-            order.unsqueeze(-1).expand_as(local_input),
-        )
-        local_input = self._condition_local_input(local_input, packed_global)
+        gap_embedding = self.gap_embed(gap_bucket)
         decay = torch.exp(
-            -torch.nn.functional.softplus(self.local_decay(self.gap_embed(gap_bucket)))
+            -torch.nn.functional.softplus(self.local_decay(gap_embedding))
         )
         valid_3d = packed_valid.unsqueeze(-1)
         decay = torch.where(valid_3d, decay, torch.ones_like(decay))
         initial_state = torch.tanh(self.local_init(skill_embedding))
-        transition, bias = self._block_affine_transition(
-            local_input,
-            self.local_residual,
-            self.local_write,
-            decay,
-        )
-        initial_blocks = initial_state.reshape(
-            *initial_state.shape[:-1],
-            self.num_state_blocks,
-            self.state_block_size,
-        )
+        # Scalar transition in the 1x1 scan layout: [B, N, H, 1, 1] / [B, N, H, 1].
+        transition = decay.unsqueeze(-1).unsqueeze(-1)
+        bias = torch.tanh(self.local_write(local_input)).unsqueeze(-1)
+        initial_blocks = initial_state.unsqueeze(-1)
 
-        packed_pre_decay_blocks = segmented_block_affine_exclusive_scan(
+        packed_pre_decay_blocks = segmented_scalar_affine_exclusive_scan(
             transition,
             bias,
             packed_skill,
             packed_valid,
             initial_blocks,
         )
-        packed_pre_decay = packed_pre_decay_blocks.flatten(-2)
+        packed_pre_decay = packed_pre_decay_blocks.squeeze(-1)
         packed_state = decay * packed_pre_decay
         # Restore the original [seq_len, max_skills] layout for readout; the
         # trimmed suffix contains only invalid padding and therefore stays zero.
@@ -576,7 +498,6 @@ class ReKTP(nn.Module):
             responses,
             times,
             mask,
-            global_state,
             q_features,
             kc_order=kc_order,
         )

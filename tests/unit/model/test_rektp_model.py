@@ -10,7 +10,7 @@ pytestmark = pytest.mark.skipif(
 DEVICE = torch.device("cuda")
 
 
-def _build_model(device, *, activate_private_writes=True, use_global_film=False):
+def _build_model(device, *, activate_private_writes=True):
     # Skill id 2 is the padding sentinel.
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
@@ -22,7 +22,6 @@ def _build_model(device, *, activate_private_writes=True, use_global_film=False)
         n_blocks=1,
         max_gap_bins=4,
         dropout=0.0,
-        use_global_film=use_global_film,
     )
     if activate_private_writes:
         with torch.no_grad():
@@ -30,7 +29,6 @@ def _build_model(device, *, activate_private_writes=True, use_global_film=False)
             model.answer_embed.weight[1].fill_(0.25)
             identity = torch.eye(model.hidden_dim)
             model.local_write.weight.copy_(0.05 * identity)
-            model.local_residual.weight[:, :].fill_(0.01)
     return model.to(device).eval()
 
 
@@ -68,11 +66,6 @@ def _position_times(questions: torch.Tensor) -> torch.Tensor:
         .unsqueeze(0)
         .expand(questions.shape[0], -1)
     )
-
-
-def _zero_global_context(model, questions: torch.Tensor) -> torch.Tensor:
-    """Zero global context; the film layer then leaves the input unchanged."""
-    return torch.zeros(*questions.shape, model.hidden_dim, device=questions.device)
 
 
 def test_default_question_embed_dim_matches_hidden_dim():
@@ -150,88 +143,6 @@ def test_negative_question_embed_dim_is_rejected():
         ReKTP(**_dim_kwargs(), question_embed_dim=-2)
 
 
-def test_model_requires_complete_state_blocks():
-    question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
-    question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
-
-    with pytest.raises(ValueError, match="divisible by state_block_size"):
-        ReKTP(
-            data_metadata={"num_questions": 3, "num_skills": 2},
-            question_skill_ids=question_skill_ids,
-            question_skill_mask=question_skill_mask,
-            hidden_dim=16,
-            n_blocks=1,
-            state_block_size=3,
-        )
-
-
-def test_zero_state_block_size_is_rejected():
-    with pytest.raises(ValueError, match="state_block_size must be at least 1"):
-        ReKTP(**_dim_kwargs(), state_block_size=0)
-
-
-@pytest.mark.parametrize("state_block_size", [1, 3])
-def test_ablated_state_block_size_runs_and_backpropagates(state_block_size):
-    # 1 removes intra-block coupling (fully independent dimensions), 3 widens
-    # the coupled block; both route through the serial scan fallback.
-    hidden_dim = 18 if state_block_size == 3 else 16
-    model = ReKTP(
-        **_dim_kwargs(hidden_dim=hidden_dim), state_block_size=state_block_size
-    )
-    assert model.num_state_blocks == hidden_dim // state_block_size
-    model = _activate_head(model.to(DEVICE)).train()
-    questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=DEVICE)
-    responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=DEVICE)
-    mask = torch.ones_like(questions, dtype=torch.bool)
-    times = _position_times(questions)
-
-    loss = model(questions, responses, times, mask)[:, :-1].square().mean()
-    loss.backward()
-
-    gradients = [
-        parameter.grad for parameter in model.parameters() if parameter.grad is not None
-    ]
-    assert gradients
-    assert all(torch.isfinite(gradient).all() for gradient in gradients)
-
-
-def test_residual_transitions_initialize_as_decay_only():
-    model = _build_model(DEVICE, activate_private_writes=False)
-    event_input = torch.randn(2, 3, model.hidden_dim, device=DEVICE)
-    decay = torch.rand_like(event_input)
-
-    transition, bias = model._block_affine_transition(
-        event_input,
-        model.local_residual,
-        model.local_write,
-        decay,
-    )
-
-    expected = torch.diag_embed(
-        decay.reshape(2, 3, model.num_state_blocks, model.state_block_size)
-    )
-    torch.testing.assert_close(transition, expected)
-    torch.testing.assert_close(bias, torch.zeros_like(bias))
-
-
-def test_event_conditioned_residual_blocks_respect_scale():
-    model = _build_model(DEVICE)
-    event_input = torch.randn(2, 3, model.hidden_dim, device=DEVICE)
-    decay = torch.ones_like(event_input)
-
-    transition, _ = model._block_affine_transition(
-        event_input,
-        model.local_residual,
-        model.local_write,
-        decay,
-    )
-
-    identity = torch.eye(model.state_block_size, device=DEVICE)
-    residual = transition - identity
-    block_norm = torch.linalg.vector_norm(residual, dim=(-2, -1))
-    assert torch.all(block_norm < model.residual_scale)
-
-
 def test_local_readout_initializes_as_masked_mean():
     model = _build_model(DEVICE, activate_private_writes=False)
     local_state = torch.randn(1, 2, 2, model.hidden_dim, device=DEVICE)
@@ -274,33 +185,6 @@ def test_local_readout_can_weight_kcs_conditionally():
     assert actual[0, 0, 0] > 0.9
 
 
-def test_global_film_initializes_as_identity_conditioning():
-    model = _build_model(DEVICE, activate_private_writes=False, use_global_film=True)
-    local_input = torch.randn(2, 3, model.hidden_dim, device=DEVICE)
-    global_context = torch.randn_like(local_input)
-
-    actual = model._condition_local_input(local_input, global_context)
-
-    torch.testing.assert_close(actual, local_input)
-
-
-def test_global_film_can_condition_local_write_input():
-    model = _build_model(DEVICE, activate_private_writes=False, use_global_film=True)
-    local_input = torch.ones(1, 2, model.hidden_dim, device=DEVICE)
-    global_context = torch.zeros_like(local_input)
-    global_context[:, :, 0] = torch.tensor([[1.0, -1.0]], device=DEVICE)
-
-    with torch.no_grad():
-        model.local_global_film.weight.zero_()
-        model.local_global_film.bias.zero_()
-        model.local_global_film.weight[model.hidden_dim, 0] = 0.5
-
-    actual = model._condition_local_input(local_input, global_context)
-
-    assert actual[0, 0, 0] > local_input[0, 0, 0]
-    assert actual[0, 1, 0] < local_input[0, 1, 0]
-
-
 def test_other_kc_response_does_not_change_private_state():
     model = _build_model(DEVICE)
     questions = torch.tensor([[0, 1, 0, 1]], device=DEVICE)
@@ -308,9 +192,7 @@ def test_other_kc_response_does_not_change_private_state():
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
-    baseline = model._local_pre_states(
-        questions, responses, times, mask, _zero_global_context(model, questions)
-    )
+    baseline = model._local_pre_states(questions, responses, times, mask)
     changed_responses = responses.clone()
     changed_responses[:, 0] = 0
     changed = model._local_pre_states(
@@ -318,7 +200,6 @@ def test_other_kc_response_does_not_change_private_state():
         changed_responses,
         times,
         mask,
-        _zero_global_context(model, questions),
     )
 
     # Position 3 addresses KC 1, so changing KC 0 at position 0 cannot alter it.
@@ -347,14 +228,12 @@ def test_current_gap_affects_kc_read_states():
         short_responses,
         times,
         mask,
-        _zero_global_context(model, short_questions),
     )
     long_local = model._local_pre_states(
         long_questions,
         long_responses,
         times,
         mask,
-        _zero_global_context(model, long_questions),
     )
 
     # KC 0 has the same first event but a gap of 2 versus 4.
@@ -376,12 +255,8 @@ def test_real_time_gap_affects_kc_read_states():
     # the two KC-0 occurrences differ (2s vs 16s -> gap buckets 1 vs 3).
     short_times = torch.tensor([[0.0, 1.0, 2.0]], device=DEVICE)
     long_times = torch.tensor([[0.0, 1.0, 16.0]], device=DEVICE)
-    short_local = model._local_pre_states(
-        questions, responses, short_times, mask, _zero_global_context(model, questions)
-    )
-    long_local = model._local_pre_states(
-        questions, responses, long_times, mask, _zero_global_context(model, questions)
-    )
+    short_local = model._local_pre_states(questions, responses, short_times, mask)
+    long_local = model._local_pre_states(questions, responses, long_times, mask)
     assert not torch.allclose(short_local[:, 2], long_local[:, 2])
 
 
@@ -416,11 +291,7 @@ def test_forward_handles_padding_when_valid_times_are_large():
 
 def test_target_answer_does_not_leak_into_its_prediction():
     device = DEVICE
-    model = _build_model(device, use_global_film=True)
-    with torch.no_grad():
-        model.local_global_film.weight.zero_()
-        model.local_global_film.bias.zero_()
-        model.local_global_film.weight[model.hidden_dim :, :] = 0.05
+    model = _build_model(device)
     questions = torch.tensor([[0, 1, 0, 2]], device=device)
     responses = torch.tensor([[1, 0, 1, 0]], device=device)
     mask = torch.ones_like(questions, dtype=torch.bool)
