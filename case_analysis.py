@@ -29,7 +29,7 @@ from pathlib import Path
 import model  # noqa: F401
 from utils.case_analysis import HeatmapVisualizer
 from utils.case_analysis.result_collector import ResultCollector
-from utils.core import ANALYZERS, get_logger
+from utils.core import ANALYZERS, add_file_handler, get_logger
 from utils.data_process import get_data_source
 
 logger = get_logger(__name__)
@@ -267,6 +267,8 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    add_file_handler(Path(args.run_dir).resolve() / "case_analysis" / "run.log")
 
     if args.command == "inference":
         cmd_inference(args)

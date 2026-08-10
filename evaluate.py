@@ -12,7 +12,7 @@ from pathlib import Path
 
 import model  # noqa: F401
 from utils.config import load_run_config_archive
-from utils.core import TRAINERS, get_logger, seed_everything
+from utils.core import TRAINERS, add_file_handler, get_logger, seed_everything
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager
 
@@ -89,12 +89,16 @@ def main():
     seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
 
     exp_manager = ExperimentManager.from_run_dir(run_dir)
+    # Route evaluate outputs into run_dir/evaluate/ to keep the training dir
+    # untouched (mirrors case_analysis/).
+    eval_manager = exp_manager.create_sub_experiment("evaluate")
+    add_file_handler(Path(eval_manager.get_log_dir()) / "run.log")
     logger.info(f"Loading dataset: {dataset_name}...")
     data_src = get_data_source(rc)
 
     logger.info(f"Initializing trainer for model: {model_name}...")
     trainer = TRAINERS.get(model_name)(
-        rc=rc, data_src=data_src, exp_manager=exp_manager
+        rc=rc, data_src=data_src, exp_manager=eval_manager
     )
     trainer.load_weights(str(checkpoint_path))
 

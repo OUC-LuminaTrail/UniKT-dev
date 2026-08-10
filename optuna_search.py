@@ -7,10 +7,11 @@ optimization metrics, and trial history export.
 
 import argparse
 import os
+from pathlib import Path
 
 import model  # noqa: F401
 from utils.config import ConfigParser
-from utils.core import TRAINERS, get_logger
+from utils.core import TRAINERS, add_file_handler, get_logger
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
@@ -60,6 +61,7 @@ def main():
         base_dir="runs",
         tags=[f"n_trials{optuna_config.n_trials}"],
     )
+    add_file_handler(Path(exp_manager.get_log_dir()) / "run.log")
     logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 
     logger.info("=" * 60)
