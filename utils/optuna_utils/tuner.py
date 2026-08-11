@@ -47,6 +47,7 @@ class OptunaTuner:
 
         # Create study
         self.study: optuna.Study | None = None
+        self._param_importances: dict[str, float] | None = None
         self._setup_logging()
 
     def _setup_logging(self):
@@ -147,6 +148,9 @@ class OptunaTuner:
             show_progress_bar=(self.config.verbose > 0),
         )
 
+        # Assess fANOVA parameter importances (best-effort)
+        self._param_importances = self._compute_param_importances()
+
         # Save results
         if self.config.save_dir:
             self._save_results()
@@ -186,6 +190,41 @@ class OptunaTuner:
             logger.warning("No completed trials; cannot determine best params")
             return {}
 
+    def _compute_param_importances(self) -> dict[str, float] | None:
+        """Assess fANOVA parameter importances from completed trials.
+
+        Best-effort: returns None when too few trials completed or the evaluator
+        errors, so importance never blocks result saving. Multi-objective studies
+        assess importance against the first objective.
+        """
+        from optuna.importance import FanovaImportanceEvaluator, get_param_importances
+
+        completed = [
+            t for t in self.study.trials if t.state == optuna.trial.TrialState.COMPLETE
+        ]
+        if len(completed) < 4:
+            logger.info(
+                f"Skipping param importance: {len(completed)} completed trial(s) "
+                "(need >= 4 for a stable fANOVA estimate)"
+            )
+            return None
+
+        evaluator = FanovaImportanceEvaluator(seed=self.config.seed)
+
+        def target(trial):
+            return trial.values[0]
+
+        try:
+            importances = get_param_importances(
+                self.study,
+                evaluator=evaluator,
+                target=target if len(self.study.directions) > 1 else None,
+            )
+        except Exception as e:
+            logger.warning(f"Param importance evaluation failed: {e}")
+            return None
+        return dict(importances)
+
     def _save_results(self):
         """Save search results to disk as yaml."""
         if not self.study or not self.config.save_dir:
@@ -215,6 +254,18 @@ class OptunaTuner:
             yaml.safe_dump(trials_data, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
+
+        # Parameter importances (fANOVA)
+        if self._param_importances:
+            importance_path = os.path.join(
+                self.config.save_dir, "param_importances.yaml"
+            )
+            Path(importance_path).write_text(
+                yaml.safe_dump(
+                    self._param_importances, sort_keys=False, allow_unicode=True
+                ),
+                encoding="utf-8",
+            )
 
         # Configuration echo
         config_path = os.path.join(self.config.save_dir, "optuna_config.yaml")
@@ -265,6 +316,12 @@ class OptunaTuner:
                     log.append(f"  {param}: {value}")
             except ValueError:
                 log.append("No completed trials.")
+
+        if self._param_importances:
+            log.append("\nParameter Importances (fANOVA, top 5):")
+            for param, imp in list(self._param_importances.items())[:5]:
+                log.append(f"  {param}: {imp:.4f}")
+
         logger.info("\n".join(log))
 
     def get_dataframe(self):
