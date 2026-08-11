@@ -185,6 +185,69 @@ def test_local_readout_can_weight_kcs_conditionally():
     assert actual[0, 0, 0] > 0.9
 
 
+def test_local_readout_matches_cat_linear_reference():
+    torch.manual_seed(0)
+    model = _build_model(DEVICE, activate_private_writes=False)
+    with torch.no_grad():
+        model.local_readout.weight.normal_(0.0, 0.5)
+        model.local_readout.bias.normal_(0.0, 0.5)
+
+    B, N, K, H = 2, 3, 2, model.hidden_dim
+    local_state = torch.randn(B, N, K, H, device=DEVICE)
+    skill_embedding = torch.randn(B, N, K, H, device=DEVICE)
+    question_vector = torch.randn(B, N, H, device=DEVICE)
+    readout_mask = torch.tensor(
+        [[[True, True], [True, False], [False, True]]], device=DEVICE
+    ).expand(B, N, K)
+    skill_ids = torch.zeros(B, N, K, dtype=torch.long, device=DEVICE)
+    questions = torch.zeros(B, N, dtype=torch.long, device=DEVICE)
+
+    actual = model._question_conditioned_local_readout(
+        local_state,
+        skill_ids,
+        readout_mask,
+        questions,
+        skill_embedding=skill_embedding,
+        question_vector=question_vector,
+    )
+
+    # Reference: cat -> Linear(3H, 1) then the same masked-softmax readout.
+    weight = model.local_readout.weight
+    bias = model.local_readout.bias
+    question_embedding = question_vector.unsqueeze(-2).expand_as(local_state)
+    score_input = torch.cat((local_state, skill_embedding, question_embedding), dim=-1)
+    scores = torch.nn.functional.linear(score_input, weight, bias).squeeze(-1)
+    masked_scores = scores.masked_fill(~readout_mask, torch.finfo(scores.dtype).min)
+    weights = torch.softmax(masked_scores, dim=-1)
+    weights = torch.where(readout_mask, weights, torch.zeros_like(weights))
+    weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
+    expected = (local_state * weights.unsqueeze(-1)).sum(dim=-2)
+
+    torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-4)
+
+
+def test_event_embeddings_pools_skill_change():
+    torch.manual_seed(0)
+    model = _build_model(DEVICE, activate_private_writes=False)
+    with torch.no_grad():
+        model.question_diff.weight.normal_(0.0, 0.5)
+        model.skill_change.weight.normal_(0.0, 0.5)
+    questions = torch.tensor([[0, 1, 2, 0]], device=DEVICE)
+    q_features = model._resolve_question_features(questions)
+
+    actual = model._event_embeddings(questions, q_features)
+
+    pooled_skill = model._masked_mean(q_features.skill_embedding, q_features.skill_mask)
+    skill_change = model.skill_change(q_features.skill_ids)
+    pooled_change = model._masked_mean(skill_change, q_features.skill_mask)
+    expected = (
+        q_features.question_vector
+        + pooled_skill
+        + model.question_diff(questions) * pooled_change
+    )
+    torch.testing.assert_close(actual, expected)
+
+
 def test_other_kc_response_does_not_change_private_state():
     model = _build_model(DEVICE)
     questions = torch.tensor([[0, 1, 0, 1]], device=DEVICE)

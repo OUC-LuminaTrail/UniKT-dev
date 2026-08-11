@@ -30,7 +30,6 @@ _QuestionFeatures = namedtuple(
         "skill_mask",
         "question_vector",
         "skill_embedding",
-        "skill_change",
     ],
 )
 
@@ -222,11 +221,10 @@ class ReKTP(nn.Module):
     def _resolve_question_features(self, questions: torch.Tensor) -> _QuestionFeatures:
         """Gather the question-derived tensors once for reuse across forward.
 
-        ``question_skill_ids[questions]``, the ``skill_embed`` / ``skill_change``
-        lookups, and the ``_question_vector`` projection are each needed in
-        several sub-methods. Computing them here and threading the result
-        avoids repeating the gathers and the large ``[B, N, K, hidden]``
-        embedding tensors.
+        ``question_skill_ids[questions]``, the ``skill_embed`` lookup, and the
+        ``_question_vector`` projection are each needed in several sub-methods.
+        Computing them here and threading the result avoids repeating the
+        gathers and the large ``[B, N, K, hidden]`` embedding tensors.
         """
         skill_ids = self.question_skill_ids[questions]
         return _QuestionFeatures(
@@ -234,7 +232,6 @@ class ReKTP(nn.Module):
             skill_mask=self.question_skill_mask[questions],
             question_vector=self._question_vector(questions),
             skill_embedding=self.skill_embed(skill_ids),
-            skill_change=self.skill_change(skill_ids),
         )
 
     def _question_conditioned_local_readout(
@@ -251,13 +248,20 @@ class ReKTP(nn.Module):
             skill_embedding = self.skill_embed(skill_ids)
         if question_vector is None:
             question_vector = self._question_vector(questions)
-        question_embedding = question_vector.unsqueeze(-2)
-        question_embedding = question_embedding.expand_as(local_state)
-        score_input = torch.cat(
-            (local_state, skill_embedding, question_embedding),
-            dim=-1,
+        # Linear(3*hidden_dim, 1) as three per-feature Linear(hidden_dim, 1) slices.
+        h = self.hidden_dim
+        weight = self.local_readout.weight
+        w_local = weight[:, :h]
+        w_skill = weight[:, h : 2 * h]
+        w_question = weight[:, 2 * h :]
+        scores = (
+            torch.nn.functional.linear(local_state, w_local).squeeze(-1)
+            + torch.nn.functional.linear(skill_embedding, w_skill).squeeze(-1)
+            + torch.nn.functional.linear(question_vector, w_question)
+            .squeeze(-1)
+            .unsqueeze(-1)
+            + self.local_readout.bias
         )
-        scores = self.local_readout(score_input).squeeze(-1)
         masked_scores = scores.masked_fill(
             ~readout_mask,
             torch.finfo(scores.dtype).min,
@@ -461,9 +465,8 @@ class ReKTP(nn.Module):
         pooled_skill = self._masked_mean(
             q_features.skill_embedding, q_features.skill_mask
         )
-        pooled_change = self._masked_mean(
-            q_features.skill_change, q_features.skill_mask
-        )
+        skill_change = self.skill_change(q_features.skill_ids)
+        pooled_change = self._masked_mean(skill_change, q_features.skill_mask)
         return (
             q_features.question_vector
             + pooled_skill
