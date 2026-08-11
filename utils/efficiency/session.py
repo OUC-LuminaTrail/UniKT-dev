@@ -34,6 +34,9 @@ def build_target(rc, data_src, exp_manager, weights_path: str | None = None):
     Shared by the single-run entry and the per-point sweep so the two never
     duplicate the build + optional weight-load + adapter-wrap sequence.
     """
+    # Seed before model init so weights, the prefetched batch, and dropout are
+    # stable across runs; deterministic mode stays off during benchmarking.
+    seed_everything(rc.general.seed, deterministic=False)
     trainer = TRAINERS.get(rc.experiment.model_name)(
         rc=rc, data_src=data_src, exp_manager=exp_manager
     )
@@ -59,10 +62,6 @@ class EfficiencySession:
 
     def run(self) -> EfficiencyReport:
         """Run the enabled stages under a shared resource sampler and assemble the report."""
-        seed_everything(
-            self.rc.general.seed, deterministic=not self.rc.general.no_deterministic
-        )
-
         device = self.device
         # Move model/loss onto the device via the target; the benchmark never
         # calls trainer.run(), so without this the forward moves inputs to device
@@ -119,7 +118,8 @@ class EfficiencySession:
             config=config_to_dict(self.cfg),
             determinism={
                 "seed": self.rc.general.seed,
-                "deterministic": not self.rc.general.no_deterministic,
+                # Benchmarking always runs with deterministic algorithms off.
+                "deterministic": False,
                 **environment.determinism_dict(),
             },
             environment=environment,
