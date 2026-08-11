@@ -29,6 +29,12 @@ class ReKTPConfig(ModelConfig):
             question identity to the ``question_diff`` scalar and the KC side.
             Widths below ``hidden_dim`` are lifted back by a shared projection,
             cutting per-question parameters to ``num_questions * dim``.
+        use_global: Ablate the global causal dilated-conv branch. ``False``
+            skips the stacked conv encoder and feeds zero global features to
+            the readout; the branch parameters then stay inert.
+        use_local: Ablate the local per-KC affine recursion branch. ``False``
+            skips the segmented scan and feeds zero local features to the
+            readout; the branch parameters then stay inert.
         dropout: Dropout probability.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
@@ -67,6 +73,8 @@ class ReKTPConfig(ModelConfig):
             "optuna": {"type": "categorical", "choices": [0, 8, 16, 32, 64, 128, 256]}
         },
     )
+    use_global: bool = True
+    use_local: bool = True
     epochs: int = 100
     learning_rate: float = field(
         default=2.7e-3,
@@ -116,6 +124,8 @@ class ReKTPTrainer(BaseTrainer):
             question_embed_dim=(
                 None if m.question_embed_dim < 0 else m.question_embed_dim
             ),
+            use_global=m.use_global,
+            use_local=m.use_local,
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

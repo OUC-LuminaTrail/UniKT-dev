@@ -3,6 +3,14 @@
 The global encoder is a stack of ``n_blocks`` causal depthwise-separable conv
 blocks whose dilation grows as ``conv_dilation_base**i``; the rest of the
 model is the same question-level KT pipeline.
+
+Ablation: ``use_global`` toggles the global causal dilated-conv branch
+(:meth:`ReKTP._global_history_states`) and ``use_local`` toggles the local
+per-KC affine recursion branch (:meth:`ReKTP._local_pre_states`). An ablated
+branch is skipped entirely in the forward pass and feeds all-zero features to
+the readout, so its parameters never receive a gradient and stay inert; the
+architecture, parameter count, and shared pathway (event embeddings, IRT head)
+are unchanged, isolating each branch's contribution.
 """
 
 from collections import namedtuple
@@ -71,6 +79,9 @@ class ReKTP(nn.Module):
     """Question-level KT with decoupled per-KC storage and global interaction.
 
     Readout concatenates ``[global_state, local_pre_state, event_embedding]``.
+    ``use_global`` / ``use_local`` ablate the global dilated-conv branch and
+    the local affine-recursion branch respectively; an ablated branch emits
+    all-zero features of the same shape, keeping the rest of the model intact.
     """
 
     def __init__(
@@ -85,6 +96,8 @@ class ReKTP(nn.Module):
         conv_kernel_size: int = 3,
         conv_dilation_base: int = 2,
         question_embed_dim: int | None = None,
+        use_global: bool = True,
+        use_local: bool = True,
     ):
         super().__init__()
         if max_gap_bins < 1:
@@ -93,6 +106,12 @@ class ReKTP(nn.Module):
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
         self.max_gap_bins = max_gap_bins
+        # Ablation switches. ``use_global=False`` removes the stacked causal
+        # dilated-conv branch and ``use_local=False`` removes the per-KC
+        # affine recursion branch; both together leave only the shared event
+        # embedding + IRT readout (a valid lower-bound baseline).
+        self.use_global = bool(use_global)
+        self.use_local = bool(use_local)
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
         skill_mask = torch.as_tensor(question_skill_mask, dtype=torch.bool)
@@ -326,6 +345,14 @@ class ReKTP(nn.Module):
         kc_order: torch.Tensor | None = None,
     ) -> torch.Tensor:
         batch_size, seq_len = questions.shape
+        if not self.use_local:
+            return torch.zeros(
+                batch_size,
+                seq_len,
+                self.hidden_dim,
+                device=questions.device,
+                dtype=self.skill_embed.weight.dtype,
+            )
         skill_ids = (
             q_features.skill_ids
             if q_features is not None
@@ -449,6 +476,8 @@ class ReKTP(nn.Module):
         responses: torch.Tensor,
         mask: torch.Tensor,
     ) -> torch.Tensor:
+        if not self.use_global:
+            return torch.zeros_like(event_embedding)
         global_state = event_embedding + self.answer_embed(responses)
         global_state = global_state.masked_fill(~mask.unsqueeze(-1), 0.0)
         for block in self.global_blocks:
