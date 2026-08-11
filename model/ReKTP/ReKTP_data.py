@@ -67,11 +67,23 @@ class ReKTPDataset(Dataset):
 
 
 def rektp_packed_collate_fn(batch):
-    """Stack dense inputs and trim precomputed orders to the batch width."""
+    """Stack dense inputs and trim precomputed orders to the batch width.
+
+    The returned 6-tuple adds ``valid_idx``: the row-major indices of the
+    adjacent-pair valid mask ``mask[:, :-1] & mask[:, 1:]`` flattened over
+    ``[B, S-1]``, computed on the CPU at collate time. The forward pass
+    gathers logits/labels at these indices instead of running
+    ``torch.masked_select``, which would trigger a ``nonzero`` GPU->CPU sync
+    on every forward; both select the same elements in the same order, so
+    the extracted tensors are bitwise identical.
+    """
     dense_columns = [torch.stack(column) for column in zip(*(row[:4] for row in batch))]
     packed_length = max(int(row[5]) for row in batch)
     kc_order = torch.stack([row[4][:packed_length] for row in batch])
-    return (*dense_columns, kc_order)
+    masks = dense_columns[3]
+    valid_mask = masks[:, :-1] & masks[:, 1:]
+    valid_idx = valid_mask.flatten().nonzero().flatten()
+    return (*dense_columns, kc_order, valid_idx)
 
 
 def build_question_skill_table(data_src: DataSource) -> tuple[np.ndarray, np.ndarray]:

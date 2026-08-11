@@ -145,12 +145,13 @@ class ReKTPTrainer(BaseTrainer):
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, ...]
     ) -> dict[str, torch.Tensor]:
-        questions, responses, times, mask, kc_order = batch_data
+        questions, responses, times, mask, kc_order, valid_idx = batch_data
         questions = self._move_tensor_to_device(questions)
         responses = self._move_tensor_to_device(responses)
         times = self._move_tensor_to_device(times)
         mask = self._move_tensor_to_device(mask)
         kc_order = self._move_tensor_to_device(kc_order)
+        valid_idx = self._move_tensor_to_device(valid_idx)
 
         use_amp = bool(self.run_config.model.amp)
         with torch.autocast(
@@ -163,9 +164,12 @@ class ReKTPTrainer(BaseTrainer):
             )
         if use_amp:
             logits_full = logits_full.float()
-        logits, labels, _ = self._extract_valid_predictions(
-            logits_full, responses, mask, same_position=False
-        )
+        # Next-item extraction at the CPU-precomputed valid indices (row-major
+        # over the flattened [B, S-1] grid). Equivalent to
+        # ``_extract_valid_predictions``'s masked_select — same elements, same
+        # order, bitwise identical — but gathers instead of syncing the GPU.
+        logits = logits_full[:, :-1].flatten()[valid_idx]
+        labels = responses.float()[:, 1:].flatten()[valid_idx]
         logits, labels = self._handle_empty_batch(logits, labels)
         probabilities = torch.sigmoid(logits)
         return {

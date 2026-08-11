@@ -2,11 +2,14 @@ import math
 
 import numpy as np
 import polars as pl
+import torch
 
 from model.ReKTP.ReKTP_data import (
+    ReKTPDataset,
     ReKTPModelData,
     build_question_skill_table,
     derive_max_gap_bins,
+    rektp_packed_collate_fn,
 )
 from utils.model_data import QuestionModelData
 
@@ -118,3 +121,55 @@ def test_derive_max_gap_bins_covers_span_plus_one():
 def test_derive_max_gap_bins_value_and_minimum():
     assert derive_max_gap_bins(np.array([[0.0, 16.0]])) == 6
     assert derive_max_gap_bins(np.zeros((3, 5))) == 2
+
+
+def _make_dataset():
+    question_skill_ids = np.array([[0, 1], [1, 2]])
+    question_skill_mask = np.array([[True, True], [True, False]])
+    return ReKTPDataset(
+        [[0, 1, 0, 1], [1, 0, 1, 1]],
+        [[1, 0, 1, 0], [0, 1, 0, 1]],
+        [np.arange(4, dtype=np.float64), np.arange(4, dtype=np.float64)],
+        [[True, True, True, True], [False, True, True, True]],
+        question_skill_ids,
+        question_skill_mask,
+    )
+
+
+def test_collate_valid_idx_matches_masked_select():
+    """valid_idx gathers exactly the elements masked_select would keep."""
+    dataset = _make_dataset()
+    rows = [dataset[i] for i in range(len(dataset))]
+    questions, responses, times, masks, kc_order, valid_idx = rektp_packed_collate_fn(
+        rows
+    )
+    assert questions.shape == (2, 4)
+    assert responses.shape == (2, 4)
+    assert times.shape == (2, 4)
+    assert masks.shape == (2, 4)
+    assert kc_order.shape[0] == 2
+    assert kc_order.shape[1] == max(int(row[5]) for row in rows)
+
+    valid_mask = masks[:, :-1] & masks[:, 1:]
+    expected = valid_mask.flatten().nonzero().flatten()
+    torch.testing.assert_close(valid_idx, expected)
+    # gather on a probe grid selects the same elements as masked_select
+    probe = torch.arange(questions.numel(), dtype=torch.float32).view_as(questions)
+    gathered = probe[:, :-1].flatten()[valid_idx]
+    masked = torch.masked_select(probe[:, :-1], valid_mask)
+    torch.testing.assert_close(gathered, masked)
+
+
+def test_collate_valid_idx_empty_when_no_adjacent_pairs():
+    """Fully masked sequences yield an empty valid_idx (surfaced by the trainer)."""
+    dataset = _make_dataset()
+    rows = [dataset[i] for i in range(len(dataset))]
+    # overwrite both rows' masks so no position has a valid predecessor pair
+    empty_mask = torch.tensor([False, False, False, True])
+    rows = [
+        (row[0], row[1], row[2], empty_mask.clone(), row[4], row[5]) for row in rows
+    ]
+    _, _, _, masks, _, valid_idx = rektp_packed_collate_fn(rows)
+    valid_mask = masks[:, :-1] & masks[:, 1:]
+    assert valid_idx.numel() == int(valid_mask.sum())
+    assert valid_idx.numel() == 0
