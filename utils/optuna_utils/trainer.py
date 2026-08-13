@@ -29,7 +29,7 @@ class TrainerObjectiveWrapper:
         trainer_class: type,
         data_src_fn: Callable[[], Any],
         base_rc: Any,
-        metric_name: str = "auc",
+        metric_name: str | list[str] = "auc",
         max_epochs: int | None = None,
         exp_manager=None,
     ):
@@ -39,19 +39,25 @@ class TrainerObjectiveWrapper:
             trainer_class: Trainer class.
             data_src_fn: Data source factory function.
             base_rc: Base RunConfig instance.
-            metric_name: Metric name to optimise.
+            metric_name: Metric name (str) or names (list) to optimise; a list
+                enables multi-objective search.
             max_epochs: Maximum number of epochs.
             exp_manager: Experiment manager for creating trial subdirectories.
         """
         self.trainer_class = trainer_class
         self.data_src_fn = data_src_fn
         self.base_rc = base_rc
-        self.metric_name = metric_name
-        self.maximize = direction_for_metric(metric_name) == "maximize"
+        self.metric_names = (
+            [metric_name] if isinstance(metric_name, str) else list(metric_name)
+        )
+        self._multi = len(self.metric_names) > 1
+        self.maximize = direction_for_metric(self.metric_names[0]) == "maximize"
         self.max_epochs = max_epochs or getattr(base_rc.model, "epochs", 50)
         self.exp_manager = exp_manager
 
-    def __call__(self, trial, params: dict[str, Any] | None = None, **kwargs) -> float:
+    def __call__(
+        self, trial, params: dict[str, Any] | None = None, **kwargs
+    ) -> float | list[float]:
         """Execute a single trial with a given hyperparameter combination.
 
         Args:
@@ -84,9 +90,14 @@ class TrainerObjectiveWrapper:
                     f"trial_{trial.number}"
                 )
 
-            pruning_cb = OptunaTrialCallback(
-                trial=trial, metric_name=self.metric_name, maximize=self.maximize
-            )
+            # Pruning is single-objective only (trial.report takes one value).
+            pruning_cb = None
+            if not self._multi:
+                pruning_cb = OptunaTrialCallback(
+                    trial=trial,
+                    metric_name=self.metric_names[0],
+                    maximize=self.maximize,
+                )
 
             data_src = self.data_src_fn()
             trainer = self.trainer_class(
@@ -95,7 +106,8 @@ class TrainerObjectiveWrapper:
             # Register the pruning callback via the trainer's controlled hook:
             # single-stage trainers append to the live list; multi-stage trainers
             # register into _custom_callbacks so every stage includes it.
-            trainer.add_callback(pruning_cb)
+            if pruning_cb is not None:
+                trainer.add_callback(pruning_cb)
 
             # Record the trial dir before run() so it survives a mid-run failure;
             # OptunaTuner copies the best trial's run_config.yaml from here.
@@ -104,7 +116,7 @@ class TrainerObjectiveWrapper:
 
             trainer.run()
 
-            if pruning_cb.pruned:
+            if pruning_cb is not None and pruning_cb.pruned:
                 es = trainer.early_stopping
                 best_epoch = es.best_epoch if es is not None else None
                 raise optuna.TrialPruned(
@@ -149,23 +161,28 @@ class TrainerObjectiveWrapper:
             setattr(trial_rc.model, name, value)
         return trial_rc
 
-    def _extract_metric(self, trainer, pruning_cb) -> float:
-        """Extract the raw metric value from the trainer.
+    def _extract_metric(self, trainer, pruning_cb) -> float | list[float]:
+        """Extract the optimised metric value(s) from the trainer.
 
-        Prefers the callback's tracked best value, falling back to
-        EarlyStopping's best epoch record.
+        Single-objective: prefers the pruning callback's tracked best value,
+        falling back to EarlyStopping's best epoch record. Multi-objective: reads
+        every objective from EarlyStopping's best-epoch metrics dict.
 
         Args:
             trainer: The trainer instance.
-            pruning_cb: The Optuna trial callback.
+            pruning_cb: The Optuna trial callback (None for multi-objective).
 
         Returns:
-            The metric value.
+            The metric value (single-objective) or a list of values
+            (multi-objective).
         """
-        metric_lower = self.metric_name.lower()
+        if self._multi:
+            return self._extract_multi(trainer)
+
+        metric_lower = self.metric_names[0].lower()
 
         # Prefer callback-tracked best value
-        if pruning_cb.best_value is not None:
+        if pruning_cb is not None and pruning_cb.best_value is not None:
             return pruning_cb.best_value
 
         es = getattr(trainer, "early_stopping", None)
@@ -177,10 +194,29 @@ class TrainerObjectiveWrapper:
 
         raise RuntimeError(
             f"Could not extract metric '{metric_lower}' from trainer "
-            f"(pruning_cb.best_value={pruning_cb.best_value}, "
+            f"(pruning_cb.best_value="
+            f"{pruning_cb.best_value if pruning_cb is not None else None}, "
             f"early_stopping attached={es is not None}). "
             f"Ensure validation data is provided and the metric name is correct."
         )
+
+    def _extract_multi(self, trainer) -> list[float]:
+        """Extract each objective from the best epoch's metrics dict."""
+        es = getattr(trainer, "early_stopping", None)
+        best_metrics = getattr(es, "best_metrics", None) if es is not None else None
+        values: list[float] = []
+        for name in self.metric_names:
+            value = best_metrics.get(name.lower()) if best_metrics else None
+            if value is None:
+                available = sorted(best_metrics) if best_metrics else None
+                raise RuntimeError(
+                    f"Could not extract metric '{name}' from trainer "
+                    f"(early_stopping attached={es is not None}, "
+                    f"best_metrics keys={available}). "
+                    f"Ensure validation data is provided and the metric name is correct."
+                )
+            values.append(float(value))
+        return values
 
 
 class OptunaTunerBuilder:

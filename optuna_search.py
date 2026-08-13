@@ -37,9 +37,10 @@ def main():
     opt_parser.add_argument(
         "--metric",
         type=str,
-        choices=["auc", "acc", "rmse", "loss"],
-        default="auc",
-        help="Metric to optimize",
+        nargs="+",
+        choices=["auc", "acc", "auprc", "rmse", "loss"],
+        default=["auc"],
+        help="Metric(s) to optimize; pass multiple for multi-objective search",
     )
     opt_parser.add_argument(
         "--resume",
@@ -87,11 +88,18 @@ def main():
             f"Resume: study_name='{optuna_config.study_name}' (must match the "
             f"original run), db={optuna_config.save_dir}/study.db"
         )
-    # Optimization direction is determined by the metric, overriding the config file's direction
-    optuna_config.directions = [direction_for_metric(optuna_args.metric)]
-    logger.info(
-        f"Optimizing metric '{optuna_args.metric}' ({optuna_config.directions[0]})"
-    )
+    # Directions are derived from the metric(s); multiple metrics enable
+    # multi-objective search (override any directions in the config file).
+    metrics = optuna_args.metric
+    optuna_config.directions = [direction_for_metric(m) for m in metrics]
+    if len(metrics) > 1:
+        logger.info(
+            f"Multi-objective search: metrics={metrics}, "
+            f"directions={optuna_config.directions}"
+        )
+        logger.info("For multi-objective, set 'sampler: nsgaii' in the optuna config")
+    else:
+        logger.info(f"Optimizing metric '{metrics[0]}' ({optuna_config.directions[0]})")
 
     # Search space is derived solely from the model's ModelConfig field metadata.
     param_spaces = param_spaces_from_model_config(model_name)

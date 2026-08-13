@@ -8,8 +8,11 @@ from optuna.pruners import (
     BasePruner,
     HyperbandPruner,
     MedianPruner,
+    PatientPruner,
     PercentilePruner,
     SuccessiveHalvingPruner,
+    ThresholdPruner,
+    WilcoxonPruner,
 )
 from optuna.samplers import (
     BaseSampler,
@@ -23,10 +26,11 @@ from optuna.samplers import (
 )
 from optuna.trial import Trial
 
-# auc/acc are maximise, rmse/loss are minimise
+# auc/acc/auprc are maximise, rmse/loss are minimise
 _METRIC_DIRECTIONS: dict[str, str] = {
     "auc": "maximize",
     "acc": "maximize",
+    "auprc": "maximize",
     "rmse": "minimize",
     "loss": "minimize",
 }
@@ -150,9 +154,7 @@ class OptunaConfig:
     seed: int = 42  # Seed for stochastic samplers (tpe/random/cmaes/gp/nsgaii/qmc); grid exhaustive
 
     # Pruner configuration
-    pruner: str = (
-        "median"  # 'median', 'percentile', 'successive_halving', 'hyperband', None
-    )
+    pruner: str = "median"  # 'median','percentile','successive_halving','hyperband','threshold','wilcoxon','patient', None
     pruner_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Search configuration
@@ -233,6 +235,12 @@ class OptunaConfig:
             return SuccessiveHalvingPruner(**kwargs)
         elif pruner_name == "hyperband":
             return HyperbandPruner(**kwargs)
+        elif pruner_name == "threshold":
+            return ThresholdPruner(**kwargs)
+        elif pruner_name == "wilcoxon":
+            return WilcoxonPruner(**kwargs)
+        elif pruner_name == "patient":
+            return PatientPruner(**kwargs)
         else:
             raise ValueError(f"Unsupported pruner: {pruner_name}")
 
