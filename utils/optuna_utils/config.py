@@ -8,22 +8,29 @@ from optuna.pruners import (
     BasePruner,
     HyperbandPruner,
     MedianPruner,
+    PatientPruner,
     PercentilePruner,
     SuccessiveHalvingPruner,
+    ThresholdPruner,
+    WilcoxonPruner,
 )
 from optuna.samplers import (
     BaseSampler,
     CmaEsSampler,
+    GPSampler,
     GridSampler,
+    NSGAIISampler,
+    QMCSampler,
     RandomSampler,
     TPESampler,
 )
 from optuna.trial import Trial
 
-# auc/acc are maximise, rmse/loss are minimise
+# auc/acc/auprc are maximise, rmse/loss are minimise
 _METRIC_DIRECTIONS: dict[str, str] = {
     "auc": "maximize",
     "acc": "maximize",
+    "auprc": "maximize",
     "rmse": "minimize",
     "loss": "minimize",
 }
@@ -72,6 +79,12 @@ class HyperparameterSpace:
                 )
             if self.low >= self.high:
                 raise ValueError(f"Parameter '{self.name}': low must be less than high")
+            if self.log and self.step is not None:
+                raise ValueError(
+                    f"Parameter '{self.name}': 'step' and 'log' are mutually exclusive"
+                )
+            if self.step is not None and self.step <= 0:
+                raise ValueError(f"Parameter '{self.name}': step must be positive")
         elif self.type == "float":
             if self.low is None or self.high is None:
                 raise ValueError(
@@ -142,16 +155,12 @@ class OptunaConfig:
     """Optuna search configuration."""
 
     # Sampler configuration
-    sampler: str = "tpe"  # 'tpe', 'random', 'grid', 'cmaes'
+    sampler: str = "tpe"  # 'tpe','random','grid','cmaes','gp','nsgaii','qmc' (nsgaii: multi-objective)
     sampler_kwargs: dict[str, Any] = field(default_factory=dict)
-    seed: int = (
-        42  # Seed for stochastic samplers (tpe/random/cmaes); grid is exhaustive
-    )
+    seed: int = 42  # Seed for stochastic samplers (tpe/random/cmaes/gp/nsgaii/qmc); grid exhaustive
 
     # Pruner configuration
-    pruner: str = (
-        "median"  # 'median', 'percentile', 'successive_halving', 'hyperband', None
-    )
+    pruner: str = "median"  # 'median','percentile','successive_halving','hyperband','threshold','wilcoxon','patient', None
     pruner_kwargs: dict[str, Any] = field(default_factory=dict)
 
     # Search configuration
@@ -196,6 +205,12 @@ class OptunaConfig:
             return GridSampler(**kwargs)
         elif sampler_name == "cmaes":
             return CmaEsSampler(**kwargs)
+        elif sampler_name == "gp":
+            return GPSampler(**kwargs)
+        elif sampler_name == "nsgaii":
+            return NSGAIISampler(**kwargs)
+        elif sampler_name == "qmc":
+            return QMCSampler(**kwargs)
         else:
             raise ValueError(f"Unsupported sampler: {sampler_name}")
 
@@ -226,6 +241,12 @@ class OptunaConfig:
             return SuccessiveHalvingPruner(**kwargs)
         elif pruner_name == "hyperband":
             return HyperbandPruner(**kwargs)
+        elif pruner_name == "threshold":
+            return ThresholdPruner(**kwargs)
+        elif pruner_name == "wilcoxon":
+            return WilcoxonPruner(**kwargs)
+        elif pruner_name == "patient":
+            return PatientPruner(**kwargs)
         else:
             raise ValueError(f"Unsupported pruner: {pruner_name}")
 
