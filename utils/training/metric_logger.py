@@ -332,6 +332,7 @@ class SwanLabMetricLogger(MetricLogger):
             config: Experiment configuration dict.
         """
         import swanlab
+        from swanlab.exceptions import AuthenticationError
         from swanlab.plugin.notification import LarkCallback
 
         callbacks = []
@@ -342,8 +343,18 @@ class SwanLabMetricLogger(MetricLogger):
 
         # Re-authenticate per run: SwanLab revokes the session token on
         # finish() but the SDK reuses the now-invalid client, so the next run
-        # in the same process would 401 on every request.
-        swanlab.login(relogin=True)
+        # in the same process would 401 on every request. Only re-authenticate
+        # when a stored key exists — without one, login() raises
+        # AuthenticationError and would short-circuit swanlab.init's own
+        # interactive login prompt (prompt_init_mode), the only path that
+        # actually surfaces an API-key input box.
+        try:
+            swanlab.login(relogin=True)
+        except AuthenticationError:
+            logger.info(
+                "No stored SwanLab API key; deferring to interactive login "
+                "inside swanlab.init."
+            )
         # reinit finalizes any still-active run (e.g. a prior trial that raised
         # before finishing) before starting this one, instead of erroring out.
         swanlab.init(
