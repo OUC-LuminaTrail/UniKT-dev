@@ -1,11 +1,12 @@
 """Trainer integration with Optuna objective functions."""
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import optuna
 
-from utils.core import get_logger, seed_everything
+from utils.core import add_file_handler, get_logger, seed_everything
 
 from .callback import OptunaTrialCallback
 from .config import (
@@ -77,29 +78,39 @@ class TrainerObjectiveWrapper:
             trial_exp_manager = self.exp_manager.create_sub_experiment(
                 f"trial_{trial.number}"
             )
+            # Point the shared file sink at this trial's run.log so each trial
+            # dir is self-contained; the parent sink is restored in finally to
+            # keep per-trial epoch output out of the search-level run.log.
+            add_file_handler(Path(trial_exp_manager.get_log_dir()) / "run.log")
 
-        pruning_cb = OptunaTrialCallback(
-            trial=trial, metric_name=self.metric_name, maximize=self.maximize
-        )
-
-        data_src = self.data_src_fn()
-        trainer = self.trainer_class(
-            rc=trial_rc, data_src=data_src, exp_manager=trial_exp_manager
-        )
-        # trainer.__init__ already calls build(), so the callback list is finalised;
-        # append directly to the active list.
-        trainer.callback_manager.callbacks.append(pruning_cb)
-
-        trainer.run()
-
-        if pruning_cb.pruned:
-            es = trainer.early_stopping
-            best_epoch = es.best_epoch if es is not None else None
-            raise optuna.TrialPruned(
-                f"Trial {trial.number} pruned at epoch {best_epoch}"
+        try:
+            pruning_cb = OptunaTrialCallback(
+                trial=trial, metric_name=self.metric_name, maximize=self.maximize
             )
 
-        return self._extract_metric(trainer, pruning_cb)
+            data_src = self.data_src_fn()
+            trainer = self.trainer_class(
+                rc=trial_rc, data_src=data_src, exp_manager=trial_exp_manager
+            )
+            # trainer.__init__ already calls build(), so the callback list is finalised;
+            # append directly to the active list.
+            trainer.callback_manager.callbacks.append(pruning_cb)
+
+            trainer.run()
+
+            if pruning_cb.pruned:
+                es = trainer.early_stopping
+                best_epoch = es.best_epoch if es is not None else None
+                raise optuna.TrialPruned(
+                    f"Trial {trial.number} pruned at epoch {best_epoch}"
+                )
+
+            return self._extract_metric(trainer, pruning_cb)
+        finally:
+            # Restore the parent sink so inter-trial and summary logs land in
+            # the search dir rather than the last trial's run.log.
+            if self.exp_manager is not None:
+                add_file_handler(Path(self.exp_manager.get_log_dir()) / "run.log")
 
     def _create_trial_rc(self, params: dict[str, Any]) -> Any:
         """Evolve the base RunConfig with a trial's model hyperparameters.
