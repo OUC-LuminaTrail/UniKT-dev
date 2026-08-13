@@ -22,7 +22,7 @@ import torch
 from rich.console import Console
 
 from utils.config import config_to_dict
-from utils.core import get_logger
+from utils.core import add_file_handler, get_logger
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
 from .report import EfficiencyReport
@@ -209,6 +209,7 @@ class EfficiencySweep:
 
     def run(self) -> SweepReport:
         """Run every point (printing each report) and index the runs."""
+        add_file_handler(Path(self.sweep_dir) / "run.log")
         if self.cfg.general.output_dir:
             logger.warning(
                 "[Sweep] --efficiency.general.output_dir ignored in sweep mode; "
@@ -256,15 +257,21 @@ class EfficiencySweep:
         rc = copy.deepcopy(self.rc)
         point.mutate(rc, self.cfg)
         child_exp = self.parent_exp.create_sub_experiment(point.label)
-        target = build_target(rc, self.data_src, child_exp, self.weights_path)
-        report = EfficiencySession(
-            target=target,
-            rc=rc,
-            eff_cfg=self.cfg,
-            output_dir=child_exp.get_log_dir(),
-        ).run()
-        report.print_console()
-        return report, child_exp.get_log_dir()
+        # Point the shared file sink at this point's run.log so each point dir
+        # is self-contained; the sweep-level sink is restored in finally.
+        add_file_handler(Path(child_exp.get_log_dir()) / "run.log")
+        try:
+            target = build_target(rc, self.data_src, child_exp, self.weights_path)
+            report = EfficiencySession(
+                target=target,
+                rc=rc,
+                eff_cfg=self.cfg,
+                output_dir=child_exp.get_log_dir(),
+            ).run()
+            report.print_console()
+            return report, child_exp.get_log_dir()
+        finally:
+            add_file_handler(Path(self.sweep_dir) / "run.log")
 
     def _print_summary(self, sweep_report: SweepReport) -> None:
         """Print a short index of which points ran and where their reports live."""
