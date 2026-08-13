@@ -49,6 +49,13 @@ def main():
         metavar="RUN_DIR",
         help="Resume an existing search from its run directory (reuses study.db)",
     )
+    opt_parser.add_argument(
+        "--keep-trial-artifacts",
+        action="store_true",
+        default=False,
+        help="Keep per-trial SwanLab tracking, checkpoints, and test evaluation "
+        "(disabled by default during search to save compute)",
+    )
     optuna_args, remaining = opt_parser.parse_known_args()
 
     # Stage 2: RunConfig via reflective ConfigParser on the remaining argv.
@@ -100,6 +107,18 @@ def main():
         logger.info("For multi-objective, set 'sampler: nsgaii' in the optuna config")
     else:
         logger.info(f"Optimizing metric '{metrics[0]}' ({optuna_config.directions[0]})")
+
+    # A search only needs the validation metric, so disable per-trial side effects
+    # that waste compute and clutter the workspace (~N SwanLab runs, ~2N checkpoint
+    # files, N test evaluations for N trials). --keep-trial-artifacts opts out.
+    if not optuna_args.keep_trial_artifacts:
+        rc.general.swanlab = False
+        rc.general.save_last_checkpoint = False
+        rc.general.skip_test = True
+        logger.info(
+            "Per-trial SwanLab tracking, checkpoint saving, and test evaluation "
+            "disabled to save compute (pass --keep-trial-artifacts to keep them)"
+        )
 
     # Search space is derived solely from the model's ModelConfig field metadata.
     param_spaces = param_spaces_from_model_config(model_name)
