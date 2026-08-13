@@ -27,6 +27,7 @@ from routers import (
     preprocess,
     registry,
     schemas_api,
+    search,
     settings_api,
     tasks,
 )
@@ -130,6 +131,7 @@ set_page(Page)
 add_pagination(app)
 
 app.include_router(tasks.router)
+app.include_router(search.router)
 app.include_router(logs.router)
 app.include_router(events.router)
 app.include_router(environments.router)

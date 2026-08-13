@@ -15,6 +15,11 @@ export function useTaskEvents() {
         old ? { ...old, status: event.status, pid: event.pid ?? old.pid } : old,
       )
       queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
+      // Search tasks share the tasks table / task_status event stream; refresh
+      // the search views too so the list/detail update live on status change.
+      queryClient.invalidateQueries({ queryKey: ['searches-list'] })
+      queryClient.invalidateQueries({ queryKey: ['searches-counts'] })
+      queryClient.invalidateQueries({ queryKey: ['search', event.id] })
     } else {
       queryClient.invalidateQueries({ queryKey: ['preprocess-active-tasks'] })
       queryClient.invalidateQueries({ queryKey: ['preprocess-task', event.id] })

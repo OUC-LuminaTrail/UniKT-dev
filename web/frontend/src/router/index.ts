@@ -29,6 +29,28 @@ const router = createRouter({
       },
     },
     {
+      path: '/search',
+      name: 'searches',
+      component: () => import('@/views/SearchList.vue'),
+      meta: { title: 'route.title.searches' },
+    },
+    {
+      path: '/search/new',
+      name: 'search-new',
+      component: () => import('@/views/SearchLaunch.vue'),
+      meta: { title: 'route.title.search-new', parent: 'searches', flush: true },
+    },
+    {
+      path: '/search/:id',
+      name: 'search-detail',
+      component: () => import('@/views/SearchDetail.vue'),
+      meta: { title: 'route.title.search-detail', parent: 'searches' },
+      beforeEnter: (to) => {
+        const id = Number(to.params.id)
+        if (isNaN(id) || id <= 0) return { name: 'searches' }
+      },
+    },
+    {
       path: '/gpu',
       name: 'gpu',
       component: () => import('@/views/GPUMonitor.vue'),

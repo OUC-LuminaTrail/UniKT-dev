@@ -139,6 +139,7 @@ import { formatDateTime } from '@/utils/date'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
+import { statusMap } from '@/composables/useStatusMap'
 
 const { hasGpu } = useSystemCapabilities()
 const { t } = useI18n()
@@ -169,15 +170,6 @@ const { data: task, isPending: loading } = useQuery({
 
 const stopping = ref(false)
 const killing = ref(false)
-
-const statusMap: Record<string, { color: string; label: string }> = {
-  running: { color: 'var(--accent-blue)', label: 'common.status.running' },
-  completed: { color: 'var(--accent-green)', label: 'common.status.completed' },
-  failed: { color: 'var(--accent-red)', label: 'common.status.failed' },
-  stopped: { color: 'var(--accent-orange)', label: 'common.status.stopped' },
-  stopping: { color: 'var(--accent-orange)', label: 'common.status.stopping' },
-  pending: { color: 'var(--text-tertiary)', label: 'common.status.pending' },
-}
 
 const exitCodeClass = computed(() => {
   if (task.value?.exit_code == null) return ''
