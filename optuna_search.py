@@ -6,16 +6,19 @@ optimization metrics, and trial history export.
 """
 
 import argparse
+import copy
 import os
 from pathlib import Path
 
+import yaml
+
 import model  # noqa: F401
-from utils.config import ConfigParser
+from utils.config import ConfigParser, config_to_dict
 from utils.core import TRAINERS, add_file_handler, get_logger
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
-    OptunaTunerBuilder,
+    OptunaTuner,
     TrainerObjectiveWrapper,
     direction_for_metric,
     load_optuna_config,
@@ -38,9 +41,24 @@ def main():
     opt_parser.add_argument(
         "--metric",
         type=str,
-        choices=["auc", "acc", "rmse", "loss"],
-        default="auc",
-        help="Metric to optimize",
+        nargs="+",
+        choices=["auc", "acc", "auprc", "rmse", "loss"],
+        default=["auc"],
+        help="Metric(s) to optimize; pass multiple for multi-objective search",
+    )
+    opt_parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        metavar="RUN_DIR",
+        help="Resume an existing search from its run directory (reuses study.db)",
+    )
+    opt_parser.add_argument(
+        "--keep-trial-artifacts",
+        action="store_true",
+        default=False,
+        help="Keep per-trial SwanLab tracking, checkpoints, and test evaluation "
+        "(disabled by default during search to save compute)",
     )
     optuna_args, remaining = opt_parser.parse_known_args()
 
@@ -54,56 +72,97 @@ def main():
     logger.info(f"Loading Optuna config from: {optuna_args.optuna_config}")
     optuna_config = load_optuna_config(optuna_args.optuna_config)
 
-    exp_manager = ExperimentManager(
-        exp_type=ExperimentType.HYPERPARAM_SEARCH,
-        model_name=model_name,
-        dataset_name=rc.data.dataset,
-        base_dir="runs",
-        tags=[f"n_trials{optuna_config.n_trials}"],
-    )
+    if optuna_args.resume:
+        # Reuse the existing run dir so study.db and study_name match the prior
+        # run, letting create_study(load_if_exists=True) restore trial history.
+        exp_manager = ExperimentManager.from_run_dir(optuna_args.resume)
+        logger.info(f"Resuming search in: {exp_manager.get_log_dir()}")
+    else:
+        exp_manager = ExperimentManager(
+            exp_type=ExperimentType.HYPERPARAM_SEARCH,
+            model_name=model_name,
+            dataset_name=rc.data.dataset,
+            base_dir="runs",
+            tags=[f"n_trials{optuna_config.n_trials}"],
+        )
+        logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
     add_file_handler(Path(exp_manager.get_log_dir()) / "run.log")
-    logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 
     logger.info("=" * 60)
     logger.info(f"{model_name} Optuna Hyperparameter Search")
     logger.info("=" * 60)
 
     optuna_config.save_dir = exp_manager.get_log_dir()
-    # Optimization direction is determined by the metric, overriding the config file's direction
-    optuna_config.directions = [direction_for_metric(optuna_args.metric)]
-    logger.info(
-        f"Optimizing metric '{optuna_args.metric}' ({optuna_config.directions[0]})"
-    )
+    if optuna_args.resume:
+        # study_name + db path must match the original run for load_if_exists.
+        # n_trials is the number of NEW trials this invocation (Optuna semantics).
+        logger.info(
+            f"Resume: study_name='{optuna_config.study_name}' (must match the "
+            f"original run), db={optuna_config.save_dir}/study.db"
+        )
+    # Directions are derived from the metric(s); multiple metrics enable
+    # multi-objective search (override any directions in the config file).
+    metrics = optuna_args.metric
+    optuna_config.directions = [direction_for_metric(m) for m in metrics]
+    if len(metrics) > 1:
+        logger.info(
+            f"Multi-objective search: metrics={metrics}, "
+            f"directions={optuna_config.directions}"
+        )
+        logger.info("For multi-objective, set 'sampler: nsgaii' in the optuna config")
+    else:
+        logger.info(f"Optimizing metric '{metrics[0]}' ({optuna_config.directions[0]})")
+
+    # Suppression is search-scoped; apply it to a copy so `rc` stays clean for the
+    # reproduction config. --keep-trial-artifacts opts out of suppression entirely.
+    search_rc = copy.deepcopy(rc)
+    if not optuna_args.keep_trial_artifacts:
+        search_rc.general.swanlab = False
+        search_rc.general.save_last_checkpoint = False
+        search_rc.general.skip_test = True
+        logger.info(
+            "Per-trial SwanLab tracking, checkpoint saving, and test evaluation "
+            "disabled to save compute (pass --keep-trial-artifacts to keep them)"
+        )
 
     # Search space is derived solely from the model's ModelConfig field metadata.
     param_spaces = param_spaces_from_model_config(model_name)
     if not param_spaces:
         raise ValueError(
-            f"No searchable params: {model_name}Config has no fields with 'optuna' metadata."
+            f"{model_name}Config has no fields with 'optuna' metadata, so there is "
+            "nothing to search. To enable hyperparameter search, annotate fields on "
+            "its ModelConfig with metadata={'optuna': {...}}.\n"
+            "Examples (see model/GIKT/GIKT_trainer.py):\n"
+            "    n_hop: int = field(default=3, "
+            "metadata={'optuna': {'type': 'int', 'low': 1, 'high': 5}})\n"
+            "    embedding_dim: int = field(default=100, "
+            "metadata={'optuna': {'type': 'int', 'low': 64, 'high': 256, 'log': True}})\n"
+            "    batch_size: int = field(default=32, "
+            "metadata={'optuna': {'type': 'categorical', 'choices': [32, 64, 128, 256]}})\n"
+            "Supported 'type' values: 'int', 'float', 'categorical'; "
+            "keys: low, high, log, step, choices."
         )
     logger.info(
         f"Searchable params from {model_name}Config: {[s.name for s in param_spaces]}"
     )
 
     def data_src_factory():
-        return get_data_source(rc)
+        return get_data_source(search_rc)
 
     trainer_class = TRAINERS.get(model_name)
 
     objective_wrapper = TrainerObjectiveWrapper(
         trainer_class=trainer_class,
         data_src_fn=data_src_factory,
-        base_rc=rc,
+        base_rc=search_rc,
         metric_name=optuna_args.metric,
         exp_manager=exp_manager,
     )
 
-    tuner = (
-        OptunaTunerBuilder()
-        .with_config(optuna_config)
-        .with_param_spaces(param_spaces)
-        .with_objective(objective_wrapper)
-        .build()
+    tuner = OptunaTuner(
+        config=optuna_config,
+        param_space=param_spaces,
+        objective_fn=objective_wrapper,
     )
 
     logger.info(
@@ -112,6 +171,22 @@ def main():
     best_params = tuner.search()
 
     tuner.print_summary()
+
+    # tuner copied the best trial's (suppressed) archive into best_run_config.yaml;
+    # rebuild it from the clean rc so `train.py --config best_run_config.yaml`
+    # retrains normally (swanlab/checkpoints/test on), not with search suppression.
+    if not optuna_args.keep_trial_artifacts and best_params:
+        repro_rc = copy.deepcopy(rc)
+        for name, value in best_params.items():
+            setattr(repro_rc.model, name, value)
+        repro_cfg_path = Path(optuna_config.save_dir) / "best_run_config.yaml"
+        repro_cfg_path.write_text(
+            yaml.safe_dump(
+                config_to_dict(repro_rc), sort_keys=False, allow_unicode=True
+            ),
+            encoding="utf-8",
+        )
+        logger.info(f"Reproducible best run config saved to {repro_cfg_path}")
 
     df = tuner.get_dataframe()
     if df is not None:
