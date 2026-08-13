@@ -156,6 +156,19 @@ class BaseTrainer(ABC):
         """Return extra callbacks for this run (default: none)."""
         return []
 
+    def add_callback(self, callback: Callback) -> None:
+        """Append a callback to the active run after construction.
+
+        Single-stage trainers already have a live callback list (built in
+        :meth:`build`). Multi-stage trainers build their per-stage callback
+        manager lazily from ``_custom_callbacks`` — registering there ensures the
+        callback runs in every stage.
+        """
+        if self.callback_manager is not None:
+            self.callback_manager.callbacks.append(callback)
+        else:
+            self._custom_callbacks.append(callback)
+
     # ==================== Build ====================
 
     def build(self) -> "BaseTrainer":
@@ -778,7 +791,7 @@ class BaseTrainer(ABC):
             task_id: Progress task ID (optional).
 
         Returns:
-            Total loss for this epoch.
+            Mean loss per batch for this epoch.
         """
         phase = "train" if is_train else "val"
         data_loader = self.train_data if is_train else self.val_data
@@ -788,6 +801,7 @@ class BaseTrainer(ABC):
         self.callback_manager.on_phase_begin(epoch, phase, trainer=self)
 
         total_loss = 0.0
+        num_batches = 0
         for batch_idx, batch_data in enumerate(data_loader):
             self.callback_manager.on_batch_begin(epoch, batch_idx, phase, trainer=self)
 
@@ -798,6 +812,7 @@ class BaseTrainer(ABC):
                     loss = self._run_eval_batch(batch_data)
 
             total_loss += loss
+            num_batches += 1
 
             # Log per-batch loss (optional) and update global step
             if self.run_config.general.log_batch_metrics:
@@ -821,6 +836,10 @@ class BaseTrainer(ABC):
 
         # Aggregate and log metrics
         metrics = self.metrics_accumulator.compute(phase)
+        # Mean loss per batch is comparable across batch sizes (total_loss scales
+        # with batch count); expose via metrics["loss"] for logging + callbacks.
+        mean_loss = total_loss / num_batches if num_batches > 0 else 0.0
+        metrics["loss"] = mean_loss
         self.metric_logger.log_metrics(
             phase=phase,
             metrics=metrics,
@@ -830,10 +849,10 @@ class BaseTrainer(ABC):
         )
 
         self.callback_manager.on_phase_end(
-            epoch, phase, total_loss, metrics, trainer=self
+            epoch, phase, mean_loss, metrics, trainer=self
         )
 
-        return total_loss
+        return mean_loss
 
     def compute_train_step(
         self, batch_data: tuple[Any, ...]

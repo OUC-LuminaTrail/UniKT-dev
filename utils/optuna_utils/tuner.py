@@ -1,6 +1,8 @@
 """Optuna tuner wrapper and utility tools."""
 
 import os
+import shutil
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
@@ -155,6 +157,10 @@ class OptunaTuner:
         if self.config.save_dir:
             self._save_results()
 
+        # Surface a clear error if nothing completed; done after _save_results so
+        # failure details (recorded via trial user_attrs) are still persisted.
+        self._raise_if_all_failed()
+
         return self._best_params()
 
     def _enqueue_defaults(self):
@@ -189,6 +195,85 @@ class OptunaTuner:
         except ValueError:
             logger.warning("No completed trials; cannot determine best params")
             return {}
+
+    def _best_trial(self) -> optuna.trial.FrozenTrial | None:
+        """Return the best trial, or None if unavailable.
+
+        Single-objective returns ``study.best_trial``; multi-objective returns the
+        first Pareto-optimal trial. The result is always a COMPLETE trial, so its
+        archived ``run_config.yaml`` is guaranteed to exist.
+        """
+        if len(self.study.directions) > 1:
+            pareto = self.study.best_trials
+            return pareto[0] if pareto else None
+        try:
+            return self.study.best_trial
+        except ValueError:
+            logger.warning("No completed trials; cannot determine best trial")
+            return None
+
+    def _raise_if_all_failed(self) -> None:
+        """Log trial-outcome counts and raise if no trial completed.
+
+        On total failure, attach the last recorded traceback (stored on the trial
+        by ``TrainerObjectiveWrapper``) so the root cause surfaces instead of a
+        silent empty ``best_params``.
+        """
+        counts = Counter(t.state for t in self.study.trials)
+        n_complete = counts.get(optuna.trial.TrialState.COMPLETE, 0)
+        n_fail = counts.get(optuna.trial.TrialState.FAIL, 0)
+        n_pruned = counts.get(optuna.trial.TrialState.PRUNED, 0)
+        logger.info(
+            f"Trial outcomes: {n_complete} COMPLETE, {n_fail} FAIL, {n_pruned} PRUNED"
+        )
+        if n_complete > 0:
+            return
+
+        detail = ""
+        failed = next(
+            (t for t in self.study.trials if t.state == optuna.trial.TrialState.FAIL),
+            None,
+        )
+        if failed is not None:
+            err = failed.user_attrs.get("error", "unknown")
+            tb = failed.user_attrs.get("traceback")
+            detail = (
+                f"\nLast failure ({err}):\n{tb}" if tb else f"\nLast failure: {err}"
+            )
+        raise RuntimeError(
+            f"All {len(self.study.trials)} trial(s) failed "
+            f"(0 COMPLETE, {n_fail} FAIL, {n_pruned} PRUNED).{detail}"
+        )
+
+    def _save_best_run_config(self) -> None:
+        """Copy the best trial's full ``run_config.yaml`` for reproduction.
+
+        Each trial archives its complete RunConfig under ``trial_<N>/``. Copying
+        the best trial's archive to ``best_run_config.yaml`` lets the result be
+        reproduced with ``python train.py --config best_run_config.yaml``.
+        """
+        best = self._best_trial()
+        if best is None:
+            logger.warning("No best trial; skipping best_run_config.yaml")
+            return
+
+        trial_dir = best.user_attrs.get("trial_dir")
+        if trial_dir is None:
+            trial_dir = os.path.join(self.config.save_dir, f"trial_{best.number}")
+        src = os.path.join(trial_dir, "run_config.yaml")
+        if not os.path.isfile(src):
+            logger.warning(
+                f"Best trial run_config not found at {src}; "
+                "skipping best_run_config.yaml"
+            )
+            return
+
+        dst = os.path.join(self.config.save_dir, "best_run_config.yaml")
+        shutil.copy2(src, dst)
+        logger.info(
+            f"Best run config saved to {dst}\n"
+            f"Reproduce with: python train.py --config {dst}"
+        )
 
     def _compute_param_importances(self) -> dict[str, float] | None:
         """Assess fANOVA parameter importances from completed trials.
@@ -239,6 +324,9 @@ class OptunaTuner:
             encoding="utf-8",
         )
 
+        # Best trial's full run_config.yaml for one-command reproduction
+        self._save_best_run_config()
+
         # Search history
         history_path = os.path.join(self.config.save_dir, "search_history.yaml")
         trials_data = [
@@ -247,6 +335,9 @@ class OptunaTuner:
                 "value": trial.value,
                 "params": trial.params,
                 "state": trial.state.name,
+                "error": trial.user_attrs.get("error"),
+                "best_epoch": trial.user_attrs.get("best_epoch"),
+                "duration_sec": trial.user_attrs.get("duration_sec"),
             }
             for trial in self.study.trials
         ]
@@ -296,12 +387,18 @@ class OptunaTuner:
             logger.warning("No study found. Run search() first.")
             return
 
+        state_counts = Counter(t.state.name for t in self.study.trials)
         log = [
             "=" * 60,
             "Optuna Hyperparameter Search Summary",
             "=" * 60,
             f"Study Name: {self.study.study_name}",
             f"Total Trials: {len(self.study.trials)}",
+            (
+                f"COMPLETE: {state_counts.get('COMPLETE', 0)}, "
+                f"FAIL: {state_counts.get('FAIL', 0)}, "
+                f"PRUNED: {state_counts.get('PRUNED', 0)}"
+            ),
         ]
         if len(self.study.directions) > 1:
             pareto = self.study.best_trials

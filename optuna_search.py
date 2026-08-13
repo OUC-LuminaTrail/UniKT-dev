@@ -41,6 +41,13 @@ def main():
         default="auc",
         help="Metric to optimize",
     )
+    opt_parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        metavar="RUN_DIR",
+        help="Resume an existing search from its run directory (reuses study.db)",
+    )
     optuna_args, remaining = opt_parser.parse_known_args()
 
     # Stage 2: RunConfig via reflective ConfigParser on the remaining argv.
@@ -53,20 +60,33 @@ def main():
     logger.info(f"Loading Optuna config from: {optuna_args.optuna_config}")
     optuna_config = load_optuna_config(optuna_args.optuna_config)
 
-    exp_manager = ExperimentManager(
-        exp_type=ExperimentType.HYPERPARAM_SEARCH,
-        model_name=model_name,
-        dataset_name=rc.data.dataset,
-        base_dir="runs",
-        tags=[f"n_trials{optuna_config.n_trials}"],
-    )
-    logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
+    if optuna_args.resume:
+        # Reuse the existing run dir so study.db and study_name match the prior
+        # run, letting create_study(load_if_exists=True) restore trial history.
+        exp_manager = ExperimentManager.from_run_dir(optuna_args.resume)
+        logger.info(f"Resuming search in: {exp_manager.get_log_dir()}")
+    else:
+        exp_manager = ExperimentManager(
+            exp_type=ExperimentType.HYPERPARAM_SEARCH,
+            model_name=model_name,
+            dataset_name=rc.data.dataset,
+            base_dir="runs",
+            tags=[f"n_trials{optuna_config.n_trials}"],
+        )
+        logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 
     logger.info("=" * 60)
     logger.info(f"{model_name} Optuna Hyperparameter Search")
     logger.info("=" * 60)
 
     optuna_config.save_dir = exp_manager.get_log_dir()
+    if optuna_args.resume:
+        # study_name + db path must match the original run for load_if_exists.
+        # n_trials is the number of NEW trials this invocation (Optuna semantics).
+        logger.info(
+            f"Resume: study_name='{optuna_config.study_name}' (must match the "
+            f"original run), db={optuna_config.save_dir}/study.db"
+        )
     # Optimization direction is determined by the metric, overriding the config file's direction
     optuna_config.directions = [direction_for_metric(optuna_args.metric)]
     logger.info(

@@ -1,5 +1,7 @@
 """Trainer integration with Optuna objective functions."""
 
+import time
+import traceback
 from collections.abc import Callable
 from typing import Any
 
@@ -64,42 +66,74 @@ class TrainerObjectiveWrapper:
         if params is None:
             params = {}
 
-        trial_rc = self._create_trial_rc(params)
+        start_time = time.perf_counter()
 
-        # Reseed before constructing the trainer so every trial starts from
-        # the same RNG state (weight init, data shuffle, training RNG).
-        seed_everything(
-            trial_rc.general.seed, deterministic=not trial_rc.general.no_deterministic
-        )
+        try:
+            trial_rc = self._create_trial_rc(params)
 
-        trial_exp_manager = None
-        if self.exp_manager is not None:
-            trial_exp_manager = self.exp_manager.create_sub_experiment(
-                f"trial_{trial.number}"
+            # Reseed before constructing the trainer so every trial starts from
+            # the same RNG state (weight init, data shuffle, training RNG).
+            seed_everything(
+                trial_rc.general.seed,
+                deterministic=not trial_rc.general.no_deterministic,
             )
 
-        pruning_cb = OptunaTrialCallback(
-            trial=trial, metric_name=self.metric_name, maximize=self.maximize
-        )
+            trial_exp_manager = None
+            if self.exp_manager is not None:
+                trial_exp_manager = self.exp_manager.create_sub_experiment(
+                    f"trial_{trial.number}"
+                )
 
-        data_src = self.data_src_fn()
-        trainer = self.trainer_class(
-            rc=trial_rc, data_src=data_src, exp_manager=trial_exp_manager
-        )
-        # trainer.__init__ already calls build(), so the callback list is finalised;
-        # append directly to the active list.
-        trainer.callback_manager.callbacks.append(pruning_cb)
-
-        trainer.run()
-
-        if pruning_cb.pruned:
-            es = trainer.early_stopping
-            best_epoch = es.best_epoch if es is not None else None
-            raise optuna.TrialPruned(
-                f"Trial {trial.number} pruned at epoch {best_epoch}"
+            pruning_cb = OptunaTrialCallback(
+                trial=trial, metric_name=self.metric_name, maximize=self.maximize
             )
 
-        return self._extract_metric(trainer, pruning_cb)
+            data_src = self.data_src_fn()
+            trainer = self.trainer_class(
+                rc=trial_rc, data_src=data_src, exp_manager=trial_exp_manager
+            )
+            # Register the pruning callback via the trainer's controlled hook:
+            # single-stage trainers append to the live list; multi-stage trainers
+            # register into _custom_callbacks so every stage includes it.
+            trainer.add_callback(pruning_cb)
+
+            # Record the trial dir before run() so it survives a mid-run failure;
+            # OptunaTuner copies the best trial's run_config.yaml from here.
+            if trial_exp_manager is not None:
+                trial.set_user_attr("trial_dir", trial_exp_manager.get_log_dir())
+
+            trainer.run()
+
+            if pruning_cb.pruned:
+                es = trainer.early_stopping
+                best_epoch = es.best_epoch if es is not None else None
+                raise optuna.TrialPruned(
+                    f"Trial {trial.number} pruned at epoch {best_epoch}"
+                )
+
+            value = self._extract_metric(trainer, pruning_cb)
+
+            es = getattr(trainer, "early_stopping", None)
+            trial.set_user_attr("best_epoch", es.best_epoch if es is not None else None)
+            trial.set_user_attr(
+                "duration_sec", round(time.perf_counter() - start_time, 2)
+            )
+            return value
+
+        except optuna.TrialPruned:
+            # Pruning is intentional, not a failure — keep the trial PRUNED.
+            raise
+
+        except Exception as e:
+            # Record the root cause for debugging; re-raise so
+            # study.optimize(catch=...) marks the trial FAIL (not COMPLETE).
+            logger.exception(f"Trial {trial.number} failed")
+            trial.set_user_attr("error", repr(e))
+            trial.set_user_attr("traceback", traceback.format_exc())
+            trial.set_user_attr(
+                "duration_sec", round(time.perf_counter() - start_time, 2)
+            )
+            raise
 
     def _create_trial_rc(self, params: dict[str, Any]) -> Any:
         """Evolve the base RunConfig with a trial's model hyperparameters.
@@ -114,16 +148,6 @@ class TrainerObjectiveWrapper:
         for name, value in params.items():
             setattr(trial_rc.model, name, value)
         return trial_rc
-
-    def _worst_value(self) -> float:
-        """Return the worst possible target value for the current optimisation direction.
-
-        Used as a fallback for failed trials.
-
-        Returns:
-            Negative infinity (maximise) or positive infinity (minimise).
-        """
-        return float("-inf") if self.maximize else float("inf")
 
     def _extract_metric(self, trainer, pruning_cb) -> float:
         """Extract the raw metric value from the trainer.
@@ -151,8 +175,12 @@ class TrainerObjectiveWrapper:
             if es.best_score is not None and es.cfg.monitor.lower() == metric_lower:
                 return float(es.best_score)
 
-        logger.warning(f"Could not extract metric '{metric_lower}' from trainer")
-        return self._worst_value()
+        raise RuntimeError(
+            f"Could not extract metric '{metric_lower}' from trainer "
+            f"(pruning_cb.best_value={pruning_cb.best_value}, "
+            f"early_stopping attached={es is not None}). "
+            f"Ensure validation data is provided and the metric name is correct."
+        )
 
 
 class OptunaTunerBuilder:

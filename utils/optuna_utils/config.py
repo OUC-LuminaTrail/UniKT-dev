@@ -14,7 +14,10 @@ from optuna.pruners import (
 from optuna.samplers import (
     BaseSampler,
     CmaEsSampler,
+    GPSampler,
     GridSampler,
+    NSGAIISampler,
+    QMCSampler,
     RandomSampler,
     TPESampler,
 )
@@ -142,11 +145,9 @@ class OptunaConfig:
     """Optuna search configuration."""
 
     # Sampler configuration
-    sampler: str = "tpe"  # 'tpe', 'random', 'grid', 'cmaes'
+    sampler: str = "tpe"  # 'tpe','random','grid','cmaes','gp','nsgaii','qmc' (nsgaii: multi-objective)
     sampler_kwargs: dict[str, Any] = field(default_factory=dict)
-    seed: int = (
-        42  # Seed for stochastic samplers (tpe/random/cmaes); grid is exhaustive
-    )
+    seed: int = 42  # Seed for stochastic samplers (tpe/random/cmaes/gp/nsgaii/qmc); grid exhaustive
 
     # Pruner configuration
     pruner: str = (
@@ -196,6 +197,12 @@ class OptunaConfig:
             return GridSampler(**kwargs)
         elif sampler_name == "cmaes":
             return CmaEsSampler(**kwargs)
+        elif sampler_name == "gp":
+            return GPSampler(**kwargs)
+        elif sampler_name == "nsgaii":
+            return NSGAIISampler(**kwargs)
+        elif sampler_name == "qmc":
+            return QMCSampler(**kwargs)
         else:
             raise ValueError(f"Unsupported sampler: {sampler_name}")
 
