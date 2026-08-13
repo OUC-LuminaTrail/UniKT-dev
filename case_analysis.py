@@ -24,12 +24,13 @@ Usage:
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import model  # noqa: F401
 from utils.case_analysis import HeatmapVisualizer
 from utils.case_analysis.result_collector import ResultCollector
-from utils.core import ANALYZERS, get_logger
+from utils.core import ANALYZERS, add_file_handler, get_logger
 from utils.data_process import get_data_source
 
 logger = get_logger(__name__)
@@ -268,14 +269,26 @@ Examples:
 
     args = parser.parse_args()
 
+    # --run_dir is declared on each subparser, so a bare `case_analysis.py`
+    # invocation has no run_dir attribute; fall back to help as it did before.
+    if args.command is None:
+        parser.print_help()
+        return
+
+    run_dir = Path(args.run_dir).resolve()
+    # add_file_handler mkdirs its target parent, so validate first — otherwise a
+    # typo'd run_dir spawns a phantom case_analysis/ dir that hides the real error.
+    if not run_dir.exists():
+        logger.error(f"Run directory not found: {run_dir}")
+        sys.exit(1)
+    add_file_handler(run_dir / "case_analysis" / "run.log")
+
     if args.command == "inference":
         cmd_inference(args)
     elif args.command == "select":
         cmd_select(args)
     elif args.command == "plot":
         cmd_plot(args)
-    else:
-        parser.print_help()
 
 
 if __name__ == "__main__":

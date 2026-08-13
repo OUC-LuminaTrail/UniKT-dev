@@ -10,7 +10,13 @@ from .env import load_env
 # isort: on
 
 from .discovery import discover_registrations
-from .logger import get_logger, reset_loggers, set_log_level
+from .logger import (
+    add_file_handler,
+    get_logger,
+    remove_file_handler,
+    reset_loggers,
+    set_log_level,
+)
 from .random import seed_everything
 from .registry import (
     ANALYZERS,
@@ -89,6 +95,7 @@ __all__ = [
     # Registries
     "TRAINERS",
     "UniversalRegistry",
+    "add_file_handler",
     # Discovery
     "discover_registrations",
     # Logger
@@ -106,6 +113,7 @@ __all__ = [
     "register_model_config",
     # Decorators
     "register_trainer",
+    "remove_file_handler",
     "reset_loggers",
     # Random
     "seed_everything",

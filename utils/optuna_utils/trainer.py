@@ -3,11 +3,12 @@
 import time
 import traceback
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import optuna
 
-from utils.core import get_logger, seed_everything
+from utils.core import add_file_handler, get_logger, seed_everything
 
 from .callback import MultiMetricTracker, OptunaTrialCallback
 from .config import direction_for_metric
@@ -77,12 +78,15 @@ class TrainerObjectiveWrapper:
                 trial_rc.general.seed,
                 deterministic=not trial_rc.general.no_deterministic,
             )
-
             trial_exp_manager = None
             if self.exp_manager is not None:
                 trial_exp_manager = self.exp_manager.create_sub_experiment(
                     f"trial_{trial.number}"
                 )
+                # Point the shared file sink at this trial's run.log so each
+                # trial dir is self-contained; the parent sink is restored in
+                # finally to keep per-trial epoch output out of the search log.
+                add_file_handler(Path(trial_exp_manager.get_log_dir()) / "run.log")
 
             # Pruning is single-objective only (trial.report takes one value);
             # multi-objective instead tracks each objective's own best.
@@ -101,9 +105,9 @@ class TrainerObjectiveWrapper:
             trainer = self.trainer_class(
                 rc=trial_rc, data_src=data_src, exp_manager=trial_exp_manager
             )
-            # Register the pruning callback via the trainer's controlled hook:
-            # single-stage trainers append to the live list; multi-stage trainers
-            # register into _custom_callbacks so every stage includes it.
+            # Register callbacks via the trainer's controlled hook: single-stage
+            # trainers append to the live list; multi-stage trainers register
+            # into _custom_callbacks so every stage includes it.
             if pruning_cb is not None:
                 trainer.add_callback(pruning_cb)
             if tracker is not None:
@@ -130,8 +134,7 @@ class TrainerObjectiveWrapper:
                     f"Trial {trial.number} pruned at epoch {best_epoch}"
                 )
 
-            value = self._extract_metric(trainer, pruning_cb, tracker)
-            return value
+            return self._extract_metric(trainer, pruning_cb, tracker)
 
         except optuna.TrialPruned:
             # Pruning is intentional, not a failure — keep the trial PRUNED.
@@ -147,6 +150,12 @@ class TrainerObjectiveWrapper:
                 "duration_sec", round(time.perf_counter() - start_time, 2)
             )
             raise
+
+        finally:
+            # Restore the parent sink so inter-trial and summary logs land in
+            # the search dir rather than the last trial's run.log.
+            if self.exp_manager is not None:
+                add_file_handler(Path(self.exp_manager.get_log_dir()) / "run.log")
 
     def _create_trial_rc(self, params: dict[str, Any]) -> Any:
         """Evolve the base RunConfig with a trial's model hyperparameters.

@@ -14,7 +14,7 @@ import yaml
 
 import model  # noqa: F401
 from utils.config import ConfigParser, config_to_dict
-from utils.core import TRAINERS, get_logger
+from utils.core import TRAINERS, add_file_handler, get_logger
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
@@ -86,6 +86,7 @@ def main():
             tags=[f"n_trials{optuna_config.n_trials}"],
         )
         logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
+    add_file_handler(Path(exp_manager.get_log_dir()) / "run.log")
 
     logger.info("=" * 60)
     logger.info(f"{model_name} Optuna Hyperparameter Search")
