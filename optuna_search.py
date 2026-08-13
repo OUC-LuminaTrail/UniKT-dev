@@ -6,10 +6,14 @@ optimization metrics, and trial history export.
 """
 
 import argparse
+import copy
 import os
+from pathlib import Path
+
+import yaml
 
 import model  # noqa: F401
-from utils.config import ConfigParser
+from utils.config import ConfigParser, config_to_dict
 from utils.core import TRAINERS, get_logger
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
@@ -108,13 +112,13 @@ def main():
     else:
         logger.info(f"Optimizing metric '{metrics[0]}' ({optuna_config.directions[0]})")
 
-    # A search only needs the validation metric, so disable per-trial side effects
-    # that waste compute and clutter the workspace (~N SwanLab runs, ~2N checkpoint
-    # files, N test evaluations for N trials). --keep-trial-artifacts opts out.
+    # Suppression is search-scoped; apply it to a copy so `rc` stays clean for the
+    # reproduction config. --keep-trial-artifacts opts out of suppression entirely.
+    search_rc = copy.deepcopy(rc)
     if not optuna_args.keep_trial_artifacts:
-        rc.general.swanlab = False
-        rc.general.save_last_checkpoint = False
-        rc.general.skip_test = True
+        search_rc.general.swanlab = False
+        search_rc.general.save_last_checkpoint = False
+        search_rc.general.skip_test = True
         logger.info(
             "Per-trial SwanLab tracking, checkpoint saving, and test evaluation "
             "disabled to save compute (pass --keep-trial-artifacts to keep them)"
@@ -142,14 +146,14 @@ def main():
     )
 
     def data_src_factory():
-        return get_data_source(rc)
+        return get_data_source(search_rc)
 
     trainer_class = TRAINERS.get(model_name)
 
     objective_wrapper = TrainerObjectiveWrapper(
         trainer_class=trainer_class,
         data_src_fn=data_src_factory,
-        base_rc=rc,
+        base_rc=search_rc,
         metric_name=optuna_args.metric,
         exp_manager=exp_manager,
     )
@@ -166,6 +170,22 @@ def main():
     best_params = tuner.search()
 
     tuner.print_summary()
+
+    # tuner copied the best trial's (suppressed) archive into best_run_config.yaml;
+    # rebuild it from the clean rc so `train.py --config best_run_config.yaml`
+    # retrains normally (swanlab/checkpoints/test on), not with search suppression.
+    if not optuna_args.keep_trial_artifacts and best_params:
+        repro_rc = copy.deepcopy(rc)
+        for name, value in best_params.items():
+            setattr(repro_rc.model, name, value)
+        repro_cfg_path = Path(optuna_config.save_dir) / "best_run_config.yaml"
+        repro_cfg_path.write_text(
+            yaml.safe_dump(
+                config_to_dict(repro_rc), sort_keys=False, allow_unicode=True
+            ),
+            encoding="utf-8",
+        )
+        logger.info(f"Reproducible best run config saved to {repro_cfg_path}")
 
     df = tuner.get_dataframe()
     if df is not None:
