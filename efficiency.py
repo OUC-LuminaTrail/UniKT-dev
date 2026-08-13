@@ -34,7 +34,7 @@ def main() -> None:
     """Build the model, run all enabled efficiency stages, and print the report."""
     rc, eff_cfg = _parse()
     # Suppress trainer side effects irrelevant to benchmarking.
-    rc.general.swanlab = False
+    rc.general.cloud_tracking = False
     rc.general.checkpoint_path = None
     rc.general.skip_test = True
 

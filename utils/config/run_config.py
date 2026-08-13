@@ -44,7 +44,9 @@ class GeneralConfig:
         device: Device to use ('cuda' or 'cpu'; auto-detect when null).
         seed: Random seed for reproducibility.
         no_deterministic: Disable deterministic algorithms (on by default).
-        swanlab: Enable SwanLab experiment tracking.
+        cloud_tracking: Enable cloud experiment tracking (SwanLab or W&B;
+            backend chosen via the ``KT_TRACKING_BACKEND`` env var, default
+            SwanLab).
         log_batch_metrics: Log per-batch loss to batch_metrics_<phase>.csv.
         skip_test: Skip test-set evaluation after training.
         cache: Enable disk cache for model data preparation.
@@ -57,7 +59,7 @@ class GeneralConfig:
     device: str | None = None
     seed: int = field(default=42, metadata={"preprocess_ui": True})
     no_deterministic: bool = False
-    swanlab: bool = True
+    cloud_tracking: bool = True
     log_batch_metrics: bool = False
     skip_test: bool = False
     cache: bool = False
