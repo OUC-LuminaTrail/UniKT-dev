@@ -163,20 +163,20 @@ from utils.training import MetricLogger
 
 @register_metric_logger("wandb")
 class WandbMetricLogger(MetricLogger):
- def init_run(self, *, log_dir, experiment_name, ...):
- import wandb
- wandb.init(...)
- self._initialized = True
+    def init_run(self, *, log_dir, experiment_name, ...):
+        import wandb
+        wandb.init(...)
+        self._initialized = True
 
- def log_metrics(self, *, phase, metrics, step, ...):
- if not self._initialized:
- return
- ...
+    def log_metrics(self, *, phase, metrics, step, ...):
+        if not self._initialized:
+            return
+        ...
 
- def finish(self):
- if self._initialized:
- import wandb
- wandb.finish
+    def finish(self):
+        if self._initialized:
+            import wandb
+            wandb.finish()
 ```
 
 ## PR 流程

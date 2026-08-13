@@ -19,6 +19,7 @@ from .metric_logger import (
     LocalMetricLogger,
     MetricLogger,
     SwanLabMetricLogger,
+    WandbMetricLogger,
     build_default_metric_loggers,
     get_metric_logger,
 )
@@ -45,6 +46,7 @@ __all__ = [
     "StageResult",
     "SwanLabMetricLogger",
     "TestEvaluationCallback",
+    "WandbMetricLogger",
     "build_default_metric_loggers",
     "get_metric_logger",
 ]

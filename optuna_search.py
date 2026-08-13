@@ -117,7 +117,7 @@ def main():
     # reproduction config. --keep-trial-artifacts opts out of suppression entirely.
     search_rc = copy.deepcopy(rc)
     if not optuna_args.keep_trial_artifacts:
-        search_rc.general.swanlab = False
+        search_rc.general.cloud_tracking = False
         search_rc.general.save_last_checkpoint = False
         search_rc.general.skip_test = True
         logger.info(

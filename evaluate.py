@@ -73,7 +73,7 @@ def main():
     dataset_name = rc.data.dataset
 
     # Override for evaluation mode
-    rc.general.swanlab = False
+    rc.general.cloud_tracking = False
     rc.general.checkpoint_path = None  # weights loaded manually after build
     rc.general.skip_test = True  # prevent TestEvaluationCallback during build
     if args.device is not None:
