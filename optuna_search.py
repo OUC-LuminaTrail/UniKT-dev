@@ -105,7 +105,18 @@ def main():
     param_spaces = param_spaces_from_model_config(model_name)
     if not param_spaces:
         raise ValueError(
-            f"No searchable params: {model_name}Config has no fields with 'optuna' metadata."
+            f"{model_name}Config has no fields with 'optuna' metadata, so there is "
+            "nothing to search. To enable hyperparameter search, annotate fields on "
+            "its ModelConfig with metadata={'optuna': {...}}.\n"
+            "Examples (see model/GIKT/GIKT_trainer.py):\n"
+            "    n_hop: int = field(default=3, "
+            "metadata={'optuna': {'type': 'int', 'low': 1, 'high': 5}})\n"
+            "    embedding_dim: int = field(default=100, "
+            "metadata={'optuna': {'type': 'int', 'low': 64, 'high': 256, 'log': True}})\n"
+            "    batch_size: int = field(default=32, "
+            "metadata={'optuna': {'type': 'categorical', 'choices': [32, 64, 128, 256]}})\n"
+            "Supported 'type' values: 'int', 'float', 'categorical'; "
+            "keys: low, high, log, step, choices."
         )
     logger.info(
         f"Searchable params from {model_name}Config: {[s.name for s in param_spaces]}"
