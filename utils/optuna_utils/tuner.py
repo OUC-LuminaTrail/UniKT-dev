@@ -371,16 +371,6 @@ class OptunaTuner:
 
         logger.info(f"Results saved to {self.config.save_dir}")
 
-    def get_best_trial(self) -> optuna.Trial | None:
-        """Retrieve the best trial from the study.
-
-        Returns:
-            The best Trial, or None if no study exists.
-        """
-        if not self.study:
-            return None
-        return self.study.best_trial
-
     def print_summary(self):
         """Print a summary of the search results."""
         if not self.study:

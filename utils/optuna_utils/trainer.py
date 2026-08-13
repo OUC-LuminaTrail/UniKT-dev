@@ -10,13 +10,7 @@ import optuna
 from utils.core import get_logger, seed_everything
 
 from .callback import OptunaTrialCallback
-from .config import (
-    HyperparameterSpace,
-    OptunaConfig,
-    direction_for_metric,
-    load_optuna_config,
-)
-from .tuner import OptunaTuner
+from .config import direction_for_metric
 
 logger = get_logger(__name__)
 
@@ -30,7 +24,6 @@ class TrainerObjectiveWrapper:
         data_src_fn: Callable[[], Any],
         base_rc: Any,
         metric_name: str | list[str] = "auc",
-        max_epochs: int | None = None,
         exp_manager=None,
     ):
         """Initialise the Trainer wrapper.
@@ -41,7 +34,6 @@ class TrainerObjectiveWrapper:
             base_rc: Base RunConfig instance.
             metric_name: Metric name (str) or names (list) to optimise; a list
                 enables multi-objective search.
-            max_epochs: Maximum number of epochs.
             exp_manager: Experiment manager for creating trial subdirectories.
         """
         self.trainer_class = trainer_class
@@ -52,7 +44,6 @@ class TrainerObjectiveWrapper:
         )
         self._multi = len(self.metric_names) > 1
         self.maximize = direction_for_metric(self.metric_names[0]) == "maximize"
-        self.max_epochs = max_epochs or getattr(base_rc.model, "epochs", 50)
         self.exp_manager = exp_manager
 
     def __call__(
@@ -219,105 +210,6 @@ class TrainerObjectiveWrapper:
         return values
 
 
-class OptunaTunerBuilder:
-    """Optuna tuner builder providing a fluent API."""
-
-    def __init__(self):
-        """Initialise the tuner builder with default empty configuration."""
-        self.config: OptunaConfig | None = None
-        self.param_spaces: list[HyperparameterSpace] = []
-        self.objective_fn: Callable | None = None
-        self.objective_kwargs: dict[str, Any] = {}
-
-    def from_config_file(self, config_path: str) -> "OptunaTunerBuilder":
-        """Load Optuna configuration from a yaml file.
-
-        Args:
-            config_path: Path to the yaml configuration file.
-
-        Returns:
-            Self for chaining.
-        """
-        self.config = load_optuna_config(config_path)
-        return self
-
-    def with_config(self, config: OptunaConfig) -> "OptunaTunerBuilder":
-        """Set the Optuna configuration.
-
-        Args:
-            config: An OptunaConfig instance.
-
-        Returns:
-            Self for chaining.
-        """
-        self.config = config
-        return self
-
-    def with_param_spaces(
-        self, spaces: list[HyperparameterSpace]
-    ) -> "OptunaTunerBuilder":
-        """Set the parameter space definitions.
-
-        Args:
-            spaces: List of HyperparameterSpace instances.
-
-        Returns:
-            Self for chaining.
-        """
-        self.param_spaces = spaces
-        return self
-
-    def with_objective(self, fn: Callable) -> "OptunaTunerBuilder":
-        """Set the objective function.
-
-        Args:
-            fn: Objective function.
-
-        Returns:
-            Self for chaining.
-        """
-        self.objective_fn = fn
-        return self
-
-    def with_objective_kwargs(self, **kwargs) -> "OptunaTunerBuilder":
-        """Set extra keyword arguments to pass to the objective function.
-
-        Args:
-            **kwargs: Keyword arguments for the objective function.
-
-        Returns:
-            Self for chaining.
-        """
-        self.objective_kwargs.update(kwargs)
-        return self
-
-    def build(self) -> OptunaTuner:
-        """Build and return the OptunaTuner.
-
-        Returns:
-            A configured OptunaTuner instance.
-
-        Raises:
-            ValueError: If config, param spaces, or objective function are not set.
-        """
-        if not self.config:
-            raise ValueError(
-                "OptunaConfig not set. Use from_config_file() or with_config()"
-            )
-        if not self.param_spaces:
-            raise ValueError("Parameter spaces not set. Use with_param_spaces()")
-        if not self.objective_fn:
-            raise ValueError("Objective function not set. Use with_objective()")
-
-        return OptunaTuner(
-            config=self.config,
-            param_space=self.param_spaces,
-            objective_fn=self.objective_fn,
-            objective_kwargs=self.objective_kwargs,
-        )
-
-
 __all__ = [
-    "OptunaTunerBuilder",
     "TrainerObjectiveWrapper",
 ]

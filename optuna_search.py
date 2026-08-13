@@ -14,7 +14,7 @@ from utils.core import TRAINERS, get_logger
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 from utils.optuna_utils import (
-    OptunaTunerBuilder,
+    OptunaTuner,
     TrainerObjectiveWrapper,
     direction_for_metric,
     load_optuna_config,
@@ -135,12 +135,10 @@ def main():
         exp_manager=exp_manager,
     )
 
-    tuner = (
-        OptunaTunerBuilder()
-        .with_config(optuna_config)
-        .with_param_spaces(param_spaces)
-        .with_objective(objective_wrapper)
-        .build()
+    tuner = OptunaTuner(
+        config=optuna_config,
+        param_space=param_spaces,
+        objective_fn=objective_wrapper,
     )
 
     logger.info(
