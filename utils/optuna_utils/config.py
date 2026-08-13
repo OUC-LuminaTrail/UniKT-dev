@@ -79,6 +79,12 @@ class HyperparameterSpace:
                 )
             if self.low >= self.high:
                 raise ValueError(f"Parameter '{self.name}': low must be less than high")
+            if self.log and self.step is not None:
+                raise ValueError(
+                    f"Parameter '{self.name}': 'step' and 'log' are mutually exclusive"
+                )
+            if self.step is not None and self.step <= 0:
+                raise ValueError(f"Parameter '{self.name}': step must be positive")
         elif self.type == "float":
             if self.low is None or self.high is None:
                 raise ValueError(
