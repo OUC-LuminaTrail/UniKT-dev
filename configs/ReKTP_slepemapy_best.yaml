@@ -1,0 +1,21 @@
+# Best hyperparameters for ReKTP on slepemapy from Optuna search
+# (runs/hyperparam_search/ReKTP_slepemapy_20260812-164435_n_trials100, trial 93, val AUC 0.7840).
+
+experiment:
+  model_name: ReKTP
+
+data:
+  dataset: slepemapy
+
+model:
+  hidden_dim: 64
+  n_blocks: 4
+  conv_kernel_size: 5
+  conv_dilation_base: 2
+  dropout: 0.08006892212449197
+  question_embed_dim: 32
+  epochs: 100
+  learning_rate: 0.0038727214974797774
+  weight_decay: 6.402339146048242e-06
+  batch_size: 128
+  max_clip_grad_norm: 8.04080001571533
