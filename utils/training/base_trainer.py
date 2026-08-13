@@ -791,7 +791,7 @@ class BaseTrainer(ABC):
             task_id: Progress task ID (optional).
 
         Returns:
-            Mean loss per batch for this epoch.
+            Sample-weighted mean loss for this epoch.
         """
         phase = "train" if is_train else "val"
         data_loader = self.train_data if is_train else self.val_data
@@ -800,19 +800,22 @@ class BaseTrainer(ABC):
         self.model.train() if is_train else self.model.eval()
         self.callback_manager.on_phase_begin(epoch, phase, trainer=self)
 
-        total_loss = 0.0
-        num_batches = 0
+        weighted_loss_sum = 0.0
+        total_samples = 0
         for batch_idx, batch_data in enumerate(data_loader):
             self.callback_manager.on_batch_begin(epoch, batch_idx, phase, trainer=self)
 
             with torch.set_grad_enabled(is_train):
                 if is_train:
-                    loss = self._run_train_batch(batch_data)
+                    loss, n_samples = self._run_train_batch(batch_data)
                 else:
-                    loss = self._run_eval_batch(batch_data)
+                    loss, n_samples = self._run_eval_batch(batch_data)
 
-            total_loss += loss
-            num_batches += 1
+            # Weight by valid element count so a short final partial batch
+            # cannot dominate the epoch average (and skew cross-batch-size
+            # Optuna loss comparison).
+            weighted_loss_sum += loss * n_samples
+            total_samples += n_samples
 
             # Log per-batch loss (optional) and update global step
             if self.run_config.general.log_batch_metrics:
@@ -836,9 +839,9 @@ class BaseTrainer(ABC):
 
         # Aggregate and log metrics
         metrics = self.metrics_accumulator.compute(phase)
-        # Mean loss per batch is comparable across batch sizes (total_loss scales
-        # with batch count); expose via metrics["loss"] for logging + callbacks.
-        mean_loss = total_loss / num_batches if num_batches > 0 else 0.0
+        # Sample-weighted mean is comparable across batch sizes; expose via
+        # metrics["loss"] for logging + callbacks.
+        mean_loss = weighted_loss_sum / total_samples if total_samples > 0 else 0.0
         metrics["loss"] = mean_loss
         self.metric_logger.log_metrics(
             phase=phase,
@@ -876,7 +879,7 @@ class BaseTrainer(ABC):
         self.opt.step()
         return output, loss
 
-    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
+    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> tuple[float, int]:
         """Execute a single training batch.
 
         Performs forward pass, loss computation, backpropagation, gradient
@@ -887,28 +890,31 @@ class BaseTrainer(ABC):
             batch_data: A batch of training data.
 
         Returns:
-            Loss value for this batch (Python scalar).
+            ``(loss, n_samples)``: the per-batch mean loss (Python scalar) and
+            the number of valid elements it was averaged over, so the epoch
+            loop can weight by sample count.
         """
         output, loss = self.compute_train_step(batch_data)
         self.metrics_accumulator.update("train", output)
-        return loss.item()
+        return loss.item(), output["y_label"].numel()
 
     @torch.inference_mode()
-    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
+    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> tuple[float, int]:
         """Execute a single evaluation (validation) batch.
 
         Args:
             batch_data: A batch of validation data.
 
         Returns:
-            Loss value for this batch (Python scalar).
+            ``(loss, n_samples)``: the per-batch mean loss (Python scalar) and
+            the number of valid elements it was averaged over.
         """
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
 
         self.metrics_accumulator.update("val", output)
 
-        return loss.item()
+        return loss.item(), output["y_label"].numel()
 
     @torch.inference_mode()
     def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:
