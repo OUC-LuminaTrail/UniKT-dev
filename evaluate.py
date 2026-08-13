@@ -72,9 +72,6 @@ def main():
     model_name = rc.experiment.model_name
     dataset_name = rc.data.dataset
 
-    logger.info(f"Model: {model_name}  Dataset: {dataset_name}")
-    logger.info(f"Checkpoint: {checkpoint_path}")
-
     # Override for evaluation mode
     rc.general.swanlab = False
     rc.general.checkpoint_path = None  # weights loaded manually after build
@@ -93,6 +90,10 @@ def main():
     # untouched (mirrors case_analysis/).
     eval_manager = exp_manager.create_sub_experiment("evaluate")
     add_file_handler(Path(eval_manager.get_log_dir()) / "run.log")
+
+    # Header logs emitted after the file sink is attached so they reach run.log.
+    logger.info(f"Model: {model_name}  Dataset: {dataset_name}")
+    logger.info(f"Checkpoint: {checkpoint_path}")
     logger.info(f"Loading dataset: {dataset_name}...")
     data_src = get_data_source(rc)
 
