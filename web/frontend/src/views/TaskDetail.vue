@@ -8,154 +8,74 @@
           <el-skeleton-item variant="rect" style="width:72px;height:24px;border-radius:20px" />
         </header>
 
-        <section class="detail-section">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('task.detail.sectionMeta') }}</h2>
-            <span class="section-rule"></span>
-          </div>
-          <div class="meta-grid">
-            <div class="meta-cell" v-for="i in 6" :key="i">
+        <DetailSection :title="t('task.detail.sectionMeta')">
+          <div class="sk-meta-grid">
+            <div v-for="i in 6" :key="i" class="sk-meta-cell">
               <el-skeleton-item variant="text" style="width:40px;height:10px" />
               <el-skeleton-item variant="text" style="width:70%;height:13px;margin-top:2px" />
             </div>
           </div>
-        </section>
+        </DetailSection>
 
-        <section class="detail-section">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('task.detail.sectionCommand') }}</h2>
-            <span class="section-rule"></span>
-          </div>
+        <DetailSection :title="t('task.detail.sectionCommand')">
           <div style="padding:12px 0">
             <el-skeleton-item variant="text" style="width:90%;height:14px" />
           </div>
-        </section>
+        </DetailSection>
 
-        <section class="detail-section">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('task.detail.sectionLog') }}</h2>
-            <span class="section-rule"></span>
-          </div>
-          <div style="min-height:200px;background:var(--term-bg)">
+        <DetailSection :title="t('task.detail.sectionLog')">
+          <div style="min-height:200px;background:var(--term-bg);border-radius:var(--radius-md)">
             <el-skeleton-item variant="text" style="margin:16px;width:60%;height:14px" />
           </div>
-        </section>
+        </DetailSection>
       </div>
     </template>
     <template #default>
-  <div class="task-detail" v-if="task">
-    <header class="detail-header">
-      <button class="back-btn" @click="goBack">
-        <el-icon :size="18"><ArrowLeft /></el-icon>
-      </button>
+      <div class="task-detail" v-if="task">
+        <DetailHeader
+          :name="task.name"
+          :status="task.status"
+          :stopping="stopping"
+          :killing="killing"
+          fallback-route="tasks"
+          @stop="handleStop"
+          @kill="handleKill"
+        />
 
-      <h1 class="task-name">{{ task.name }}</h1>
+        <DetailSection :title="t('task.detail.sectionMeta')">
+          <MetaGrid :cells="metaCells" />
+        </DetailSection>
 
-      <span class="status-badge" :style="{ '--dot-color': statusMap[task.status]?.color }">
-        <span class="status-dot" :class="{ pulse: task.status === 'running' }"></span>
-        <span class="status-label">{{ statusMap[task.status] ? t(statusMap[task.status].label) : task.status }}</span>
-      </span>
+        <CommandBlock :command="task.command" />
 
-      <div class="header-actions" v-if="task.status === 'running'">
-        <button class="action-btn stop" :disabled="stopping" @click="handleStop">
-          <el-icon :size="14"><SwitchButton /></el-icon>
-          <span>{{ stopping ? t('task.detail.stopping') : t('task.detail.stop') }}</span>
-        </button>
-        <button class="action-btn kill" :disabled="killing" @click="handleKill">
-          <el-icon :size="14"><Bottom /></el-icon>
-          <span>{{ killing ? t('task.detail.killing') : t('task.detail.forceKill') }}</span>
-        </button>
+        <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
       </div>
-    </header>
-
-    <section class="detail-section">
-      <div class="section-head">
-        <h2 class="section-title">{{ t('task.detail.sectionMeta') }}</h2>
-        <span class="section-rule"></span>
-      </div>
-      <div class="meta-grid">
-        <div class="meta-cell">
-          <span class="meta-key">{{ t('task.detail.metaModel') }}</span>
-          <span class="meta-val">{{ task.model_name }}</span>
-        </div>
-        <div class="meta-cell">
-          <span class="meta-key">{{ t('task.detail.metaDataset') }}</span>
-          <span class="meta-val">{{ task.dataset_name }}</span>
-        </div>
-        <div class="meta-cell">
-          <span class="meta-key">{{ t('task.detail.metaEnv') }}</span>
-          <span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span>
-        </div>
-        <div class="meta-cell" v-if="hasGpu">
-          <span class="meta-key">GPU</span>
-          <span class="meta-val">{{ gpuDisplay }}</span>
-        </div>
-        <div class="meta-cell">
-          <span class="meta-key">{{ t('task.detail.metaPid') }}</span>
-          <span class="meta-val mono">{{ task.pid || '—' }}</span>
-        </div>
-        <div class="meta-cell">
-          <span class="meta-key">{{ t('task.detail.metaStartedAt') }}</span>
-          <span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span>
-        </div>
-        <div class="meta-cell" v-if="duration">
-          <span class="meta-key">{{ t('task.detail.metaDuration') }}</span>
-          <span class="meta-val mono">{{ duration }}</span>
-        </div>
-        <div class="meta-cell">
-          <span class="meta-key">{{ t('task.detail.metaExitCode') }}</span>
-          <span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="detail-section">
-      <div class="section-head">
-        <h2 class="section-title">{{ t('task.detail.sectionCommand') }}</h2>
-        <span class="section-rule"></span>
-        <button class="copy-btn" @click="copyCommand">{{ t('task.detail.copy') }}</button>
-        <button class="copy-btn" @click="commandExpanded = !commandExpanded">
-          <el-icon :size="12"><component :is="commandExpanded ? ArrowUp : ArrowDown" /></el-icon>
-          <span>{{ commandExpanded ? t('task.detail.collapse') : t('task.detail.expand') }}</span>
-        </button>
-      </div>
-      <pre class="command-text" :class="{ expanded: commandExpanded }"><code>{{ task.command }}</code></pre>
-    </section>
-
-    <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
-  </div>
     </template>
   </el-skeleton>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useRoute, useRouter } from 'vue-router'
+import { useQuery } from '@tanstack/vue-query'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, SwitchButton, Bottom, ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/date'
+import { formatGpu } from '@/utils/format'
 import { getTask, stopTask, killTask, type TaskInfo } from '@/api/tasks'
 import LogCard from '@/components/task/LogCard.vue'
+import DetailHeader from '@/components/common/DetailHeader.vue'
+import DetailSection from '@/components/common/DetailSection.vue'
+import MetaGrid, { type MetaCell } from '@/components/common/MetaGrid.vue'
+import CommandBlock from '@/components/common/CommandBlock.vue'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
-import { statusMap } from '@/composables/useStatusMap'
+import { useTaskDuration } from '@/composables/useTaskDuration'
 
 const { hasGpu } = useSystemCapabilities()
 const { t } = useI18n()
 
 const route = useRoute()
-const router = useRouter()
-const queryClient = useQueryClient()
 const taskId = Number(route.params.id)
-
-const goBack = () => {
-  if (window.history.length > 1) {
-    router.back()
-  } else {
-    router.replace({ name: 'tasks' })
-  }
-}
 
 const { data: task, isPending: loading } = useQuery({
   queryKey: ['task', taskId],
@@ -171,57 +91,31 @@ const { data: task, isPending: loading } = useQuery({
 const stopping = ref(false)
 const killing = ref(false)
 
+const { duration } = useTaskDuration(task)
+
 const exitCodeClass = computed(() => {
   if (task.value?.exit_code == null) return ''
   return task.value.exit_code === 0 ? 'exit-ok' : 'exit-err'
 })
 
-const gpuDisplay = computed(() => {
+const gpuText = computed(() =>
+  formatGpu(task.value?.gpu_assigned ?? task.value?.gpu_request, task.value?.status === 'pending' ? t('task.detail.gpuAuto') : '—'),
+)
+
+const metaCells = computed<MetaCell[]>(() => {
   const taskVal = task.value
-  if (!taskVal) return '—'
-  const val = taskVal.gpu_assigned ?? taskVal.gpu_request
-  if (val === null || val === undefined) {
-    return taskVal.status === 'pending' ? t('task.detail.gpuAuto') : '—'
-  }
-  return `GPU ${val}`
+  if (!taskVal) return []
+  return [
+    { label: t('task.detail.metaModel'), value: taskVal.model_name },
+    { label: t('task.detail.metaDataset'), value: taskVal.dataset_name },
+    { label: t('task.detail.metaEnv'), value: `${taskVal.env_type}:${taskVal.env_name}` },
+    ...(hasGpu.value ? [{ label: 'GPU', value: gpuText.value }] : []),
+    { label: t('task.detail.metaPid'), value: taskVal.pid || '—', mono: true },
+    { label: t('task.detail.metaStartedAt'), value: formatDateTime(taskVal.started_at), mono: true },
+    { label: t('task.detail.metaDuration'), value: duration.value, mono: true },
+    { label: t('task.detail.metaExitCode'), value: taskVal.exit_code ?? '—', mono: true, valueClass: exitCodeClass.value },
+  ]
 })
-
-const now = ref(Date.now())
-let clockTimer: ReturnType<typeof setInterval> | null = null
-// Tick only while the task is active; stop at a terminal state so a fixed
-// finished_at doesn't trigger a per-second recompute for the rest of the page's life.
-watch(() => task.value?.status, (status) => {
-  const active = status === 'running' || status === 'pending' || status === 'stopping'
-  if (active && !clockTimer) {
-    clockTimer = setInterval(() => { now.value = Date.now() }, 1000)
-  } else if (!active && clockTimer) {
-    clearInterval(clockTimer)
-    clockTimer = null
-  }
-}, { immediate: true })
-onUnmounted(() => { if (clockTimer) clearInterval(clockTimer) })
-
-const duration = computed(() => {
-  const t = task.value
-  if (!t?.started_at) return ''
-  const start = new Date(t.started_at).getTime()
-  if (isNaN(start)) return ''
-  const end = t.finished_at ? new Date(t.finished_at).getTime() : now.value
-  if (isNaN(end)) return ''
-  const s = Math.max(0, Math.floor((end - start) / 1000))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  if (h > 0) return `${h}h ${m}m ${sec}s`
-  if (m > 0) return `${m}m ${sec}s`
-  return `${sec}s`
-})
-
-const commandExpanded = ref(false)
-
-const copyCommand = () => {
-  if (task.value) navigator.clipboard.writeText(task.value.command)
-}
 
 const handleStop = async () => {
   try {
@@ -258,241 +152,24 @@ const handleKill = async () => {
   color: var(--text-primary);
 }
 
-.detail-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 36px;
-}
-
-.back-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-
-.back-btn:hover {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
-  border-color: var(--accent-blue);
-}
-
-.task-name {
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: -0.01em;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--dot-color, var(--text-tertiary)) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--dot-color, var(--text-tertiary)) 20%, transparent);
-  flex-shrink: 0;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--dot-color, var(--text-tertiary));
-  flex-shrink: 0;
-}
-
-.status-dot.pulse {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-  0%, 100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-blue) 50%, transparent);
-    opacity: 1;
-  }
-  50% {
-    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-blue) 0%, transparent);
-    opacity: 0.7;
-  }
-}
-
-.status-label {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--dot-color, var(--text-secondary));
-  line-height: 1;
-}
-
-.header-actions {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border-default);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  font-family: var(--font-sans);
-}
-
-.action-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.action-btn.stop:hover:not(:disabled) {
-  border-color: var(--accent-orange);
-  color: var(--accent-orange);
-  background: color-mix(in srgb, var(--accent-orange) 8%, var(--bg-surface));
-}
-
-.action-btn.kill:hover:not(:disabled) {
-  border-color: var(--accent-red);
-  color: var(--accent-red);
-  background: color-mix(in srgb, var(--accent-red) 8%, var(--bg-surface));
-}
-
-.meta-grid {
+/* Skeleton meta placeholders reuse MetaGrid's grid rhythm. */
+.sk-meta-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 14px 24px;
 }
 
-.meta-cell {
+.sk-meta-cell {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.meta-key {
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.meta-val {
-  font-size: 13px;
-  color: var(--text-primary);
-  font-family: var(--font-sans);
-  line-height: 1.4;
-  word-break: break-all;
-}
-
-.meta-val.mono {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-}
-
-.meta-val.exit-ok {
+:deep(.exit-ok) {
   color: var(--accent-green);
 }
 
-.meta-val.exit-err {
+:deep(.exit-err) {
   color: var(--accent-red);
-}
-
-.detail-section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.section-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.section-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  letter-spacing: 0.05em;
-  margin: 0;
-  flex-shrink: 0;
-}
-
-.section-rule {
-  flex: 1;
-  height: 1px;
-  background: var(--border-muted);
-}
-
-.copy-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  background: none;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  padding: 2px 8px;
-  cursor: pointer;
-  font-family: var(--font-sans);
-  transition: all 0.15s ease;
-}
-
-.copy-btn:hover {
-  color: var(--accent-blue);
-  border-color: var(--accent-blue);
-}
-
-.command-text {
-  margin: 0;
-  overflow-x: auto;
-}
-
-.command-text code {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--accent-cyan);
-  line-height: 1.6;
-  white-space: nowrap;
-}
-
-.command-text.expanded code {
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-@media (max-width: 900px) {
-  .meta-grid {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (max-width: 600px) {
-  .meta-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 </style>

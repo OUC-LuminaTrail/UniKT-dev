@@ -33,7 +33,8 @@
           <el-icon><Setting /></el-icon>
           <template #title>{{ t('nav.settings') }}</template>
         </el-menu-item>
-        <el-menu-item @click="toggleDark()">
+        <!-- index is required by ElMenuItem; this is an action, not a route -->
+        <el-menu-item index="theme-toggle" @click="toggleDark()">
           <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
           <template #title>{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</template>
         </el-menu-item>

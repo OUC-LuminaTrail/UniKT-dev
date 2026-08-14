@@ -1,146 +1,204 @@
 <template>
   <el-skeleton :loading="loading && !task" animated>
-    <template #default>
-      <div class="search-detail" v-if="task">
+    <template #template>
+      <div class="search-detail">
         <header class="detail-header">
-          <button class="back-btn" @click="goBack">
-            <el-icon :size="18"><ArrowLeft /></el-icon>
-          </button>
-          <h1 class="task-name">{{ task.name }}</h1>
-          <span class="status-badge" :style="{ '--dot-color': statusMap[task.status]?.color }">
-            <span class="status-dot" :class="{ pulse: task.status === 'running' }"></span>
-            <span>{{ statusMap[task.status] ? t(statusMap[task.status].label) : task.status }}</span>
-          </span>
-          <div class="header-actions" v-if="task.status === 'running'">
-            <button class="action-btn stop" :disabled="stopping" @click="handleStop">
-              <el-icon :size="14"><SwitchButton /></el-icon>
-              <span>{{ stopping ? t('task.detail.stopping') : t('task.detail.stop') }}</span>
-            </button>
-            <button class="action-btn kill" :disabled="killing" @click="handleKill">
-              <el-icon :size="14"><Bottom /></el-icon>
-              <span>{{ killing ? t('task.detail.killing') : t('task.detail.forceKill') }}</span>
-            </button>
-          </div>
+          <el-skeleton-item variant="rect" style="width:32px;height:32px;border-radius:var(--radius-sm);flex-shrink:0" />
+          <el-skeleton-item variant="text" style="width:180px;height:20px" />
+          <el-skeleton-item variant="rect" style="width:72px;height:24px;border-radius:20px" />
         </header>
 
-        <section class="detail-section">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('task.detail.sectionMeta') }}</h2>
-            <span class="section-rule"></span>
+        <div class="detail-body">
+          <div class="info-col">
+            <section class="detail-section">
+              <div class="section-head">
+                <el-skeleton-item variant="text" style="width:60px;height:11px" />
+                <span class="section-rule"></span>
+              </div>
+              <div class="sk-meta-grid">
+                <div v-for="i in 6" :key="i" class="sk-meta-cell">
+                  <el-skeleton-item variant="text" style="width:40px;height:10px" />
+                  <el-skeleton-item variant="text" style="width:70%;height:13px;margin-top:2px" />
+                </div>
+              </div>
+            </section>
+            <section class="detail-section">
+              <div class="section-head">
+                <el-skeleton-item variant="text" style="width:80px;height:11px" />
+                <span class="section-rule"></span>
+              </div>
+              <el-skeleton-item variant="text" style="width:100%;height:8px;border-radius:99px" />
+              <el-skeleton-item variant="rect" style="width:100%;height:64px;border-radius:var(--radius-lg);margin-top:4px" />
+            </section>
           </div>
-          <div class="meta-grid">
-            <div class="meta-cell"><span class="meta-key">{{ t('task.detail.metaModel') }}</span><span class="meta-val">{{ task.model_name }}</span></div>
-            <div class="meta-cell"><span class="meta-key">{{ t('task.detail.metaDataset') }}</span><span class="meta-val">{{ task.dataset_name }}</span></div>
-            <div class="meta-cell"><span class="meta-key">{{ t('task.detail.metaEnv') }}</span><span class="meta-val">{{ task.env_type }}:{{ task.env_name }}</span></div>
-            <div class="meta-cell" v-if="hasGpu"><span class="meta-key">GPU</span><span class="meta-val">{{ gpuDisplay }}</span></div>
-            <div class="meta-cell"><span class="meta-key">{{ t('task.detail.metaPid') }}</span><span class="meta-val mono">{{ task.pid || '—' }}</span></div>
-            <div class="meta-cell"><span class="meta-key">{{ t('task.detail.metaStartedAt') }}</span><span class="meta-val mono">{{ formatDateTime(task.started_at) }}</span></div>
-            <div class="meta-cell" v-if="duration"><span class="meta-key">{{ t('task.detail.metaDuration') }}</span><span class="meta-val mono">{{ duration }}</span></div>
-            <div class="meta-cell"><span class="meta-key">{{ t('task.detail.metaExitCode') }}</span><span class="meta-val mono" :class="exitCodeClass">{{ task.exit_code ?? '—' }}</span></div>
+          <div class="log-col">
+            <el-skeleton-item variant="rect" style="width:100%;height:100%" />
           </div>
-        </section>
+        </div>
+      </div>
+    </template>
+    <template #default>
+      <div class="search-detail" v-if="task" :class="{ 'is-dragging': dragging }">
+        <DetailHeader
+          class="detail-header"
+          :name="task.name"
+          :status="task.status"
+          :stop-label="t('search.stopTask')"
+          :stopping="stopping"
+          :killing="killing"
+          fallback-route="searches"
+          @stop="handleStop"
+          @kill="handleKill"
+        />
 
-        <!-- Trial progress from study.db (live while running). -->
-        <section class="detail-section" v-if="study">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('search.sectionProgress') }}</h2>
-            <span class="section-rule"></span>
-          </div>
-          <div class="progress-row">
-            <el-progress
-              :percentage="progressPct"
-              :status="task.status === 'completed' ? 'success' : undefined"
-            />
-            <span class="progress-text">{{ study.completed }}/{{ study.total }} ({{ t('search.pruned') }} {{ study.pruned }} · {{ t('search.failedTrials') }} {{ study.failed }})</span>
-          </div>
-          <div class="best-card" v-if="study.best_trial">
-            <div class="best-head">
-              <span class="best-label">{{ t('search.bestTrial') }} #{{ study.best_trial.number }}</span>
-              <span class="best-value">{{ metricLabel }} = {{ fmtValue(study.best_trial.value) }}</span>
-            </div>
-            <div class="best-params">
-              <span v-for="(v, k) in study.best_trial.params" :key="k" class="param-pill">
-                <span class="pk">{{ k }}</span>=<span class="pv">{{ v }}</span>
-              </span>
-            </div>
-          </div>
-          <el-table :data="study.trials" size="small" max-height="320" class="trial-table" empty-text="—">
-            <el-table-column prop="number" label="#" width="60" />
-            <el-table-column :label="t('search.trialState')" width="110">
-              <template #default="{ row }">
-                <span class="trial-state" :class="row.state.toLowerCase()">{{ row.state }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column :label="metricLabel" width="120">
-              <template #default="{ row }">{{ row.value == null ? '—' : fmtValue(row.value) }}</template>
-            </el-table-column>
-            <el-table-column :label="t('search.trialParams')">
-              <template #default="{ row }">
-                <span class="trial-params">{{ formatParams(row.params) }}</span>
-              </template>
-            </el-table-column>
-          </el-table>
-        </section>
+        <div ref="bodyEl" class="detail-body">
+          <!-- Left: scrollable info column (user-resizable via the splitter) -->
+          <div class="info-col" :style="{ width: splitPct + '%' }">
+            <DetailSection :title="t('task.detail.sectionMeta')">
+              <MetaGrid :cells="metaCells" />
+            </DetailSection>
 
-        <!-- Optuna Dashboard launcher (study.db is a standard Optuna storage). -->
-        <section class="detail-section" v-if="studyPath && studyPath.study_db_path">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('search.sectionDashboard') }}</h2>
-            <span class="section-rule"></span>
-          </div>
-          <div class="dashboard-row">
-            <code class="dashboard-cmd">{{ studyPath.dashboard_command }}</code>
-            <button class="copy-btn" @click="copyDash">
-              <el-icon :size="12"><CopyDocument /></el-icon>
-              {{ t('task.detail.copy') }}
-            </button>
-          </div>
-          <p class="dashboard-hint" v-if="!studyPath.exists">{{ t('search.dashboardNotReady') }}</p>
-        </section>
+            <!-- Trial progress from study.db (live while running). -->
+            <DetailSection v-if="study" :title="t('search.sectionProgress')">
+              <!-- Segmented progress bar: completed / pruned / failed / running -->
+              <div class="seg-bar" role="progressbar"
+                :aria-label="t('search.sectionProgress')"
+                :aria-valuenow="doneCount" :aria-valuemin="0" :aria-valuemax="study.total"
+                :aria-valuetext="`${doneCount}/${study.total}`">
+                <span class="seg s-ok" :style="{ flexGrow: study.completed || 0 }" />
+                <span class="seg s-pruned" :style="{ flexGrow: study.pruned || 0 }" />
+                <span class="seg s-fail" :style="{ flexGrow: study.failed || 0 }" />
+                <span class="seg s-run" :style="{ flexGrow: study.running || 0 }" />
+              </div>
+              <div class="seg-legend">
+                <span class="lg"><i class="dot d-ok" />{{ t('common.status.completed') }} <b>{{ study.completed }}</b></span>
+                <span class="lg"><i class="dot d-pruned" />{{ t('search.pruned') }} <b>{{ study.pruned }}</b></span>
+                <span class="lg"><i class="dot d-fail" />{{ t('search.failedTrials') }} <b>{{ study.failed }}</b></span>
+                <span class="lg"><i class="dot d-run" />{{ t('common.status.running') }} <b>{{ study.running }}</b></span>
+                <span class="lg lg-total">{{ t('search.trialTotal') }} <b>{{ study.total }}</b></span>
+              </div>
 
-        <section class="detail-section">
-          <div class="section-head">
-            <h2 class="section-title">{{ t('task.detail.sectionCommand') }}</h2>
-            <span class="section-rule"></span>
-            <button class="copy-btn" @click="copyCommand">{{ t('task.detail.copy') }}</button>
-            <button class="copy-btn" @click="commandExpanded = !commandExpanded">
-              <el-icon :size="12"><component :is="commandExpanded ? ArrowUp : ArrowDown" /></el-icon>
-              <span>{{ commandExpanded ? t('task.detail.collapse') : t('task.detail.expand') }}</span>
-            </button>
-          </div>
-          <pre class="command-text" :class="{ expanded: commandExpanded }"><code>{{ task.command }}</code></pre>
-        </section>
+              <div class="best-card" v-if="study.best_trial">
+                <div class="best-head">
+                  <span class="best-badge">{{ t('search.bestTrial') }}</span>
+                  <span class="best-num">#{{ study.best_trial.number }}</span>
+                  <span class="best-value">
+                    <span class="best-metric" :title="dirTooltip">{{ metricLabel }} {{ dirArrow }}</span>
+                    <b>{{ fmtValue(study.best_trial.value) }}</b>
+                  </span>
+                </div>
+                <div class="best-params">
+                  <span v-for="(v, k) in study.best_trial.params" :key="k" class="param-pill">
+                    <span class="pk">{{ k }}</span>=<span class="pv">{{ fmtParam(v) }}</span>
+                  </span>
+                </div>
+              </div>
 
-        <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
+              <el-table
+                :data="sortedTrials"
+                size="small"
+                class="trial-table"
+                :empty-text="t('search.emptyTrials')"
+                max-height="420"
+                :row-class-name="trialRowClass"
+                @sort-change="onTrialSort"
+              >
+                <el-table-column prop="number" label="#" width="56" sortable="custom" />
+                <el-table-column prop="state" :label="t('search.trialState')" width="104" sortable="custom">
+                  <template #default="{ row }">
+                    <span class="t-state" :class="stateClass(row.state)">
+                      <span class="t-dot" />
+                      {{ stateLabel(row.state) }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="value" :label="`${metricLabel} ${dirArrow}`" width="110" align="right" sortable="custom">
+                  <template #default="{ row }">
+                    <span class="t-value" :class="{ 't-best': isBest(row) }">
+                      {{ row.value == null ? '—' : fmtValue(row.value) }}
+                    </span>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="duration" :label="t('search.colDuration')" width="92" align="right" sortable="custom">
+                  <template #default="{ row }">
+                    <span class="t-dur">{{ fmtDuration(row) }}</span>
+                  </template>
+                </el-table-column>
+                <el-table-column :label="t('search.trialParams')" min-width="120">
+                  <template #default="{ row }">
+                    <div class="pill-wrap">
+                      <span v-for="(v, k) in row.params" :key="k" class="param-pill">
+                        <span class="pk">{{ k }}</span>=<span class="pv">{{ fmtParam(v) }}</span>
+                      </span>
+                    </div>
+                  </template>
+                </el-table-column>
+              </el-table>
+            </DetailSection>
+
+            <!-- Optuna Dashboard launcher (study.db is a standard Optuna storage). -->
+            <DetailSection v-if="studyPath && studyPath.study_db_path" :title="t('search.sectionDashboard')">
+              <CommandBlock :command="studyPath.dashboard_command || ''" />
+              <p class="dashboard-hint" v-if="!studyPath.exists">{{ t('search.dashboardNotReady') }}</p>
+            </DetailSection>
+
+            <CommandBlock :command="task.command" />
+          </div>
+
+          <!-- Drag handle: pointer + keyboard resizable, dbl-click or Enter resets -->
+          <div
+            class="splitter"
+            role="separator"
+            aria-orientation="vertical"
+            :aria-label="t('search.resizePane')"
+            :aria-valuenow="Math.round(splitPct)"
+            :aria-valuemin="SPLIT_MIN"
+            :aria-valuemax="SPLIT_MAX"
+            tabindex="0"
+            @pointerdown="onPointerDown"
+            @pointermove="onPointerMove"
+            @pointerup="endDrag"
+            @pointercancel="endDrag"
+            @dblclick="resetSplit"
+            @keydown.left.prevent="nudgeSplit(-3)"
+            @keydown.right.prevent="nudgeSplit(3)"
+            @keydown.enter.prevent="resetSplit"
+          >
+            <span class="splitter-grip" />
+          </div>
+
+          <!-- Right: log pane filling the full column height -->
+          <div class="log-col">
+            <LogCard :ws-url="`/api/tasks/${taskId}/logs/stream`" :task-status="task?.status || 'pending'" :task-id="taskId" />
+          </div>
+        </div>
       </div>
     </template>
   </el-skeleton>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, SwitchButton, Bottom, ArrowDown, ArrowUp, CopyDocument } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/date'
-import { getSearch, stopSearch, killSearch, getSearchTrials, getSearchStudyDb, type SearchTaskInfo } from '@/api/search'
+import { formatGpu } from '@/utils/format'
+import { getSearch, stopSearch, killSearch, getSearchTrials, getSearchStudyDb, type SearchTaskInfo, type SearchTrial } from '@/api/search'
 import LogCard from '@/components/task/LogCard.vue'
+import DetailHeader from '@/components/common/DetailHeader.vue'
+import DetailSection from '@/components/common/DetailSection.vue'
+import MetaGrid, { type MetaCell } from '@/components/common/MetaGrid.vue'
+import CommandBlock from '@/components/common/CommandBlock.vue'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
-import { statusMap } from '@/composables/useStatusMap'
+import { useTaskDuration } from '@/composables/useTaskDuration'
 
 const { hasGpu } = useSystemCapabilities()
 const { t } = useI18n()
 const route = useRoute()
-const router = useRouter()
 const queryClient = useQueryClient()
 const taskId = Number(route.params.id)
-
-const goBack = () => {
-  if (window.history.length > 1) router.back()
-  else router.replace({ name: 'searches' })
-}
 
 const { data: task, isPending: loading } = useQuery({
   queryKey: ['search', taskId],
@@ -168,84 +226,187 @@ const { data: studyPath } = useQuery({
 
 const stopping = ref(false)
 const killing = ref(false)
-const commandExpanded = ref(false)
+
+const { duration } = useTaskDuration(task)
+
+// --- Resizable info/log split (persisted; dbl-click or Enter resets) ---
+const SPLIT_KEY = 'kt-web:search-detail-split'
+const SPLIT_DEFAULT = 42
+const SPLIT_MIN = 28
+const SPLIT_MAX = 72
+const splitPct = ref(Number(localStorage.getItem(SPLIT_KEY)) || SPLIT_DEFAULT)
+const bodyEl = ref<HTMLElement | null>(null)
+const dragging = ref(false)
+
+const clampSplit = (pct: number) => Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, pct))
+
+const onPointerDown = (e: PointerEvent) => {
+  dragging.value = true
+  ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+}
+
+const onPointerMove = (e: PointerEvent) => {
+  if (!dragging.value || !bodyEl.value) return
+  const rect = bodyEl.value.getBoundingClientRect()
+  splitPct.value = clampSplit(((e.clientX - rect.left) / rect.width) * 100)
+}
+
+const endDrag = () => {
+  if (!dragging.value) return
+  dragging.value = false
+  localStorage.setItem(SPLIT_KEY, String(Math.round(splitPct.value)))
+}
+
+const resetSplit = () => {
+  splitPct.value = SPLIT_DEFAULT
+  localStorage.removeItem(SPLIT_KEY)
+}
+
+const nudgeSplit = (delta: number) => {
+  splitPct.value = clampSplit(splitPct.value + delta)
+  localStorage.setItem(SPLIT_KEY, String(Math.round(splitPct.value)))
+}
+
+// --- Metric display: real metric name from task.extra_params (e.g. "auc");
+// direction is conveyed by a compact arrow, words only in the tooltip. ---
+const extraParams = computed<Record<string, any>>(() => {
+  try {
+    return JSON.parse(task.value?.extra_params || '{}')
+  } catch {
+    return {}
+  }
+})
+
+const metricLabel = computed(() => {
+  const m = extraParams.value.metric
+  if (Array.isArray(m)) return m.join(' + ')
+  return typeof m === 'string' && m ? m : t('search.objective')
+})
+
+const dirArrow = computed(() => (study.value?.direction === 'minimize' ? '↓' : '↑'))
+const dirTooltip = computed(() =>
+  t(study.value?.direction === 'minimize' ? 'search.objectiveMin' : 'search.objectiveMax'),
+)
 
 const exitCodeClass = computed(() => {
   if (task.value?.exit_code == null) return ''
   return task.value.exit_code === 0 ? 'exit-ok' : 'exit-err'
 })
 
-const gpuDisplay = computed(() => {
+const gpuText = computed(() =>
+  formatGpu(task.value?.gpu_assigned ?? task.value?.gpu_request, task.value?.status === 'pending' ? t('search.gpuAuto') : '—'),
+)
+
+const metaCells = computed<MetaCell[]>(() => {
   const taskVal = task.value
-  if (!taskVal) return '—'
-  const val = taskVal.gpu_assigned ?? taskVal.gpu_request
-  if (val === null || val === undefined) return taskVal.status === 'pending' ? t('task.detail.gpuAuto') : '—'
-  return `GPU ${val}`
+  if (!taskVal) return []
+  return [
+    { label: t('task.detail.metaModel'), value: taskVal.model_name },
+    { label: t('task.detail.metaDataset'), value: taskVal.dataset_name },
+    { label: t('task.detail.metaEnv'), value: `${taskVal.env_type}:${taskVal.env_name}` },
+    ...(hasGpu.value ? [{ label: 'GPU', value: gpuText.value }] : []),
+    { label: t('task.detail.metaPid'), value: taskVal.pid || '—', mono: true },
+    { label: t('task.detail.metaStartedAt'), value: formatDateTime(taskVal.started_at), mono: true },
+    { label: t('task.detail.metaDuration'), value: duration.value, mono: true },
+    { label: t('task.detail.metaExitCode'), value: taskVal.exit_code ?? '—', mono: true, valueClass: exitCodeClass.value },
+  ]
 })
 
-const progressPct = computed(() => {
-  const s = study.value
-  if (!s || s.total === 0) return 0
-  return Math.round(((s.completed + s.pruned + s.failed) / s.total) * 100)
-})
-
-const metricLabel = computed(() => {
-  const dir = study.value?.direction
-  return dir === 'minimize' ? t('search.objectiveMin') : t('search.objectiveMax')
-})
+// --- Trial display helpers ---
+const doneCount = computed(() => (study.value?.completed ?? 0) + (study.value?.pruned ?? 0) + (study.value?.failed ?? 0))
 
 const fmtValue = (v: number) => (typeof v === 'number' ? v.toFixed(4) : String(v))
-const formatParams = (p: Record<string, any>) =>
-  Object.entries(p || {})
-    .map(([k, v]) => `${k}=${typeof v === 'number' ? +v.toFixed(5) : v}`)
-    .join('  ')
+const fmtParam = (v: unknown) => (typeof v === 'number' ? +v.toFixed(5) : v)
 
-const now = ref(Date.now())
-let clockTimer: ReturnType<typeof setInterval> | null = null
-watch(
-  () => task.value?.status,
-  (status) => {
-    const active = status === 'running' || status === 'pending' || status === 'stopping'
-    if (active && !clockTimer) clockTimer = setInterval(() => (now.value = Date.now()), 1000)
-    else if (!active && clockTimer) {
-      clearInterval(clockTimer)
-      clockTimer = null
-    }
-  },
-  { immediate: true },
-)
-onUnmounted(() => {
-  if (clockTimer) clearInterval(clockTimer)
-})
+// --- Trials table sorting: custom mode driven by @sort-change so we can also
+// express the "running first" default that el-table's default-sort cannot. ---
+type SortOrder = 'ascending' | 'descending' | null
+const trialSort = ref<{ prop: string; order: SortOrder }>({ prop: '', order: null })
 
-const duration = computed(() => {
-  const t = task.value
-  if (!t?.started_at) return ''
-  const start = new Date(t.started_at).getTime()
-  if (isNaN(start)) return ''
-  const end = t.finished_at ? new Date(t.finished_at).getTime() : now.value
-  if (isNaN(end)) return ''
-  const s = Math.max(0, Math.floor((end - start) / 1000))
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  if (h > 0) return `${h}h ${m}m ${sec}s`
-  if (m > 0) return `${m}m ${sec}s`
-  return `${sec}s`
-})
-
-const copyCommand = () => task.value && navigator.clipboard.writeText(task.value.command)
-const copyDash = () => {
-  if (studyPath.value?.dashboard_command) {
-    navigator.clipboard.writeText(studyPath.value.dashboard_command)
-    ElMessage.success(t('search.copied'))
-  }
+const onTrialSort = ({ prop, order }: { prop?: string; order?: SortOrder }) => {
+  trialSort.value = { prop: prop ?? '', order: order ?? null }
 }
+
+const STATE_RANK: Record<string, number> = { COMPLETE: 0, PRUNED: 1, FAIL: 2, RUNNING: 3, WAITING: 4 }
+const isUnfinished = (s: string) => s === 'RUNNING' || s === 'WAITING'
+
+const durationSec = (row: SearchTrial): number | null => {
+  if (!row.datetime_start || !row.datetime_complete) return null
+  const ms = new Date(row.datetime_complete).getTime() - new Date(row.datetime_start).getTime()
+  return isNaN(ms) || ms < 0 ? null : ms / 1000
+}
+
+const sortedTrials = computed<SearchTrial[]>(() => {
+  const rows = [...(study.value?.trials ?? [])]
+  const { prop, order } = trialSort.value
+
+  // Default view: in-flight trials pinned to the top, newest first (# desc)
+  // within each group so live results stay visible without scrolling.
+  if (!prop || !order) {
+    return rows.sort((a, b) => {
+      const ua = isUnfinished(a.state) ? 0 : 1
+      const ub = isUnfinished(b.state) ? 0 : 1
+      return ua !== ub ? ua - ub : b.number - a.number
+    })
+  }
+
+  const dir = order === 'ascending' ? 1 : -1
+  return rows.sort((a, b) => {
+    // Null metric/duration values always sink to the bottom, regardless of direction.
+    if (prop === 'value') {
+      if (a.value == null) return 1
+      if (b.value == null) return -1
+      return (a.value - b.value) * dir
+    }
+    if (prop === 'duration') {
+      const da = durationSec(a)
+      const db = durationSec(b)
+      if (da == null) return 1
+      if (db == null) return -1
+      return (da - db) * dir
+    }
+    if (prop === 'state') return (STATE_RANK[a.state] - STATE_RANK[b.state]) * dir
+    return (a.number - b.number) * dir
+  })
+})
+
+const fmtDuration = (row: SearchTrial) => {
+  const sec = durationSec(row)
+  if (sec == null) return ''
+  const s = Math.floor(sec)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${s % 60}s`
+  return `${Math.floor(m / 60)}h ${m % 60}m`
+}
+
+// Optuna trial states (study.db): RUNNING / COMPLETE / PRUNED / FAIL / WAITING.
+const stateClass = (s: string) => ({
+  COMPLETE: 'st-complete',
+  PRUNED: 'st-pruned',
+  FAIL: 'st-fail',
+  RUNNING: 'st-running',
+  WAITING: 'st-waiting',
+} as Record<string, string>)[s] ?? 'st-waiting'
+
+const stateLabel = (s: string) =>
+  ({
+    COMPLETE: t('common.status.completed'),
+    PRUNED: t('search.pruned'),
+    FAIL: t('search.failedTrials'),
+    RUNNING: t('common.status.running'),
+    WAITING: t('search.stateWaiting'),
+  } as Record<string, string>)[s] ?? s
+
+const isBest = (row: { number: number }) =>
+  !!study.value?.best_trial && row.number === study.value.best_trial.number
+
+const trialRowClass = ({ row }: { row: { number: number } }) => (isBest(row) ? 'best-row' : '')
 
 const handleStop = async () => {
   try {
-    await ElMessageBox.confirm(t('task.detail.stopConfirm'), t('task.detail.stopTitle'), {
-      confirmButtonText: t('task.detail.stop'), cancelButtonText: t('common.cancel'), type: 'warning',
+    await ElMessageBox.confirm(t('search.stopConfirmMsg'), t('search.stopConfirmTitle'), {
+      confirmButtonText: t('common.stop'), cancelButtonText: t('common.cancel'), type: 'warning',
     })
   } catch {
     return
@@ -253,7 +414,7 @@ const handleStop = async () => {
   stopping.value = true
   try {
     await stopSearch(taskId)
-    ElMessage.success(t('task.detail.stopSignalSent'))
+    ElMessage.success(t('search.stopSent'))
   } finally {
     stopping.value = false
   }
@@ -262,7 +423,7 @@ const handleStop = async () => {
 const handleKill = async () => {
   try {
     await ElMessageBox.confirm(t('task.detail.killConfirm'), t('task.detail.killTitle'), {
-      confirmButtonText: t('task.detail.killButton'), cancelButtonText: t('common.cancel'), type: 'error',
+      confirmButtonText: t('common.forceKill'), cancelButtonText: t('common.cancel'), type: 'error',
     })
   } catch {
     return
@@ -270,7 +431,7 @@ const handleKill = async () => {
   killing.value = true
   try {
     await killSearch(taskId)
-    ElMessage.success(t('task.detail.killed'))
+    ElMessage.success(t('search.killed'))
   } finally {
     killing.value = false
   }
@@ -278,68 +439,352 @@ const handleKill = async () => {
 </script>
 
 <style scoped>
+/* Header row + body split into a resizable info column and a full-height log. */
 .search-detail {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  height: 100%;
   max-width: 1200px;
   margin: 0 auto;
-  height: 100%;
   min-height: 0;
   color: var(--text-primary);
 }
-.detail-header { display: flex; align-items: center; gap: 12px; min-height: 36px; }
-.back-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm); background: var(--bg-surface);
-  color: var(--text-secondary); cursor: pointer; transition: all 0.15s ease; flex-shrink: 0;
+
+.detail-header {
+  flex-shrink: 0;
+  margin-bottom: 16px;
 }
-.back-btn:hover { background: var(--bg-elevated); color: var(--text-primary); border-color: var(--accent-blue); }
-.task-name { font-size: 18px; font-weight: 600; color: var(--text-primary); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -0.01em; }
-.status-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; background: color-mix(in srgb, var(--dot-color, var(--text-tertiary)) 12%, transparent); border: 1px solid color-mix(in srgb, var(--dot-color, var(--text-tertiary)) 20%, transparent); flex-shrink: 0; font-size: 12px; }
-.status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot-color, var(--text-tertiary)); flex-shrink: 0; }
-.status-dot.pulse { animation: pulse-glow 2s ease-in-out infinite; }
-@keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-blue) 50%, transparent); opacity: 1; } 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent-blue) 0%, transparent); opacity: 0.7; } }
-.header-actions { display: flex; gap: 8px; margin-left: auto; flex-shrink: 0; }
-.action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-default); background: var(--bg-surface); color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; }
-.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.action-btn.stop:hover:not(:disabled) { border-color: var(--accent-orange); color: var(--accent-orange); }
-.action-btn.kill:hover:not(:disabled) { border-color: var(--accent-red); color: var(--accent-red); }
-.meta-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px 24px; }
-.meta-cell { display: flex; flex-direction: column; gap: 2px; }
-.meta-key { font-size: 11px; font-weight: 500; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.05em; }
-.meta-val { font-size: 13px; color: var(--text-primary); line-height: 1.4; word-break: break-all; }
-.meta-val.mono { font-family: var(--font-mono); font-size: 12.5px; }
-.meta-val.exit-ok { color: var(--accent-green); }
-.meta-val.exit-err { color: var(--accent-red); }
-.detail-section { display: flex; flex-direction: column; gap: 10px; }
-.section-head { display: flex; align-items: center; gap: 12px; }
-.section-title { font-size: 11px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.05em; margin: 0; flex-shrink: 0; }
-.section-rule { flex: 1; height: 1px; background: var(--border-muted); }
-.progress-row { display: flex; align-items: center; gap: 14px; }
-.progress-row .el-progress { flex: 1; }
-.progress-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); white-space: nowrap; }
-.best-card { background: color-mix(in srgb, var(--accent-green) 6%, var(--bg-surface)); border: 1px solid color-mix(in srgb, var(--accent-green) 25%, var(--border-default)); border-radius: var(--radius-lg); padding: 12px 16px; }
-.best-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 8px; }
-.best-label { font-size: 13px; font-weight: 600; color: var(--accent-green); }
-.best-value { font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); }
-.best-params { display: flex; flex-wrap: wrap; gap: 6px; }
-.param-pill { font-family: var(--font-mono); font-size: 12px; background: var(--bg-overlay); padding: 2px 8px; border-radius: var(--radius-sm); color: var(--text-secondary); }
+
+.detail-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.info-col {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 14px;
+}
+
+/* Drag handle between the info column and the log pane. */
+.splitter {
+  position: relative;
+  flex: 0 0 9px;
+  margin: 0 3px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+/* Hit area wider than the 3px visual grip for easier dragging. */
+.splitter::before {
+  content: '';
+  position: absolute;
+  inset: 0 -6px;
+  border-radius: 99px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.splitter::after {
+  content: '';
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 99px;
+  background: var(--border-muted);
+  transition: background 0.15s;
+}
+
+.splitter:hover::after,
+.splitter:focus-visible::after,
+.search-detail.is-dragging .splitter::after {
+  background: var(--accent-blue);
+}
+
+.splitter-grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 26px;
+  transform: translate(-50%, -50%);
+  border-radius: 99px;
+  background: var(--border-default);
+  transition: background 0.15s;
+  pointer-events: none;
+}
+
+.splitter:hover .splitter-grip,
+.splitter:focus-visible .splitter-grip {
+  background: var(--accent-blue);
+  opacity: 0.4;
+}
+
+/* While dragging: consistent cursor + no text selection anywhere. */
+.search-detail.is-dragging {
+  cursor: col-resize;
+  user-select: none;
+}
+
+.log-col {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+/* LogCard fills the pane; its internal rule is replaced by a panel border. */
+.log-col :deep(.log-card) {
+  flex: 1;
+  min-width: 0;
+}
+
+.log-col :deep(.log-card-header) {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-muted);
+}
+
+.log-col :deep(.header-rule) {
+  display: none;
+}
+
+.log-col :deep(.terminal-wrapper) {
+  border-radius: 0;
+}
+
+/* --- Segmented trial progress --- */
+.seg-bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--bg-overlay);
+  overflow: hidden;
+}
+
+.seg {
+  flex-basis: 0;
+  min-width: 0;
+  border-radius: 2px;
+}
+
+.seg.s-ok { background: var(--accent-green); }
+.seg.s-pruned { background: var(--accent-orange); }
+.seg.s-fail { background: var(--accent-red); }
+.seg.s-run { background: var(--accent-blue); animation: seg-pulse 1.6s ease-in-out infinite; }
+
+@keyframes seg-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.seg-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.seg-legend .lg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seg-legend b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.seg-legend .lg-total {
+  margin-left: auto;
+  color: var(--text-tertiary);
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.dot.d-ok { background: var(--accent-green); }
+.dot.d-pruned { background: var(--accent-orange); }
+.dot.d-fail { background: var(--accent-red); }
+.dot.d-run { background: var(--accent-blue); }
+
+/* --- Best trial card --- */
+.best-card {
+  background: color-mix(in srgb, var(--accent-green) 6%, var(--bg-surface));
+  border: 1px solid color-mix(in srgb, var(--accent-green) 25%, var(--border-default));
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+}
+
+.best-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.best-badge {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent-green);
+}
+
+.best-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.best-value {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.best-metric {
+  font-family: var(--font-mono);
+  cursor: help;
+  margin-right: 6px;
+}
+
+.best-value b {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.best-params {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.param-pill {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-overlay);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
 .param-pill .pk { color: var(--text-tertiary); }
 .param-pill .pv { color: var(--text-primary); }
-.trial-table .trial-state { font-size: 11px; font-family: var(--font-mono); padding: 1px 6px; border-radius: var(--radius-sm); }
-.trial-state.complete { color: var(--accent-green); background: color-mix(in srgb, var(--accent-green) 12%, transparent); }
-.trial-state.pruned { color: var(--accent-orange); background: color-mix(in srgb, var(--accent-orange) 12%, transparent); }
-.trial-state.fail { color: var(--accent-red); background: color-mix(in srgb, var(--accent-red) 12%, transparent); }
-.trial-state.running { color: var(--accent-blue); background: color-mix(in srgb, var(--accent-blue) 12%, transparent); }
-.trial-params { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
-.dashboard-row { display: flex; align-items: center; gap: 8px; }
-.dashboard-cmd { flex: 1; font-family: var(--font-mono); font-size: 12.5px; color: var(--accent-cyan); background: var(--term-bg); padding: 8px 12px; border-radius: var(--radius-sm); overflow-x: auto; white-space: nowrap; }
-.copy-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-tertiary); background: none; border: 1px solid var(--border-default); border-radius: var(--radius-sm); padding: 4px 8px; cursor: pointer; transition: all 0.15s ease; }
-.copy-btn:hover { color: var(--accent-blue); border-color: var(--accent-blue); }
+
+/* --- Trials table --- */
+.trial-table {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.trial-table :deep(.best-row td.el-table__cell) {
+  background: color-mix(in srgb, var(--accent-green) 7%, transparent) !important;
+}
+
+.t-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.t-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.st-complete .t-dot { background: var(--accent-green); }
+.st-complete { color: var(--accent-green); }
+.st-pruned .t-dot { background: var(--accent-orange); }
+.st-pruned { color: var(--accent-orange); }
+.st-fail .t-dot { background: var(--accent-red); }
+.st-fail { color: var(--accent-red); }
+.st-running .t-dot { background: var(--accent-blue); box-shadow: 0 0 5px var(--accent-blue); }
+.st-running { color: var(--accent-blue); }
+.st-waiting .t-dot { background: var(--text-tertiary); }
+.st-waiting { color: var(--text-tertiary); }
+
+.t-value,
+.t-dur {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.t-value.t-best {
+  color: var(--accent-green);
+  font-weight: 600;
+}
+
+.pill-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+/* --- Dashboard --- */
 .dashboard-hint { font-size: 12px; color: var(--text-tertiary); margin: 0; }
-.command-text { margin: 0; overflow-x: auto; }
-.command-text code { font-family: var(--font-mono); font-size: 12.5px; color: var(--accent-cyan); line-height: 1.6; white-space: nowrap; }
-.command-text.expanded code { white-space: pre-wrap; word-break: break-all; }
+
+/* --- Skeleton --- */
+.detail-section { display: flex; flex-direction: column; gap: 10px; }
+.section-head { display: flex; align-items: center; gap: 12px; }
+.section-rule { flex: 1; height: 1px; background: var(--border-muted); }
+.sk-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 14px 24px;
+}
+.sk-meta-cell { display: flex; flex-direction: column; gap: 2px; }
+
+:deep(.exit-ok) { color: var(--accent-green); }
+:deep(.exit-err) { color: var(--accent-red); }
+
+/* --- Narrow screens: stack, fixed-height log, splitter hidden --- */
+@media (max-width: 1100px) {
+  .detail-body {
+    flex-direction: column;
+  }
+
+  .info-col {
+    width: 100% !important;
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .splitter {
+    display: none;
+  }
+
+  .log-col {
+    height: 480px;
+    flex: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seg.s-run { animation: none; }
+}
 </style>

@@ -1,167 +1,277 @@
 <template>
-  <div class="search-list">
-    <header class="list-header">
+  <div class="search-list list-view">
+    <div class="page-header">
       <h1 class="page-title">{{ t('search.listTitle') }}</h1>
-      <el-button type="primary" @click="router.push({ name: 'search-new' })">
-        <el-icon style="margin-right: 4px"><Plus /></el-icon>
+      <router-link :to="{ name: 'search-new' }" class="btn-primary">
+        <el-icon :size="14"><Plus /></el-icon>
         {{ t('search.newSearch') }}
-      </el-button>
-    </header>
-
-    <div class="tabs">
-      <button
-        v-for="tab in tabs"
-        :key="tab.key"
-        class="tab-btn"
-        :class="{ active: activeTab === tab.key }"
-        @click="activeTab = tab.key"
-      >
-        {{ t(tab.label) }}
-        <span class="tab-count">{{ counts[tab.key] ?? '' }}</span>
-      </button>
+      </router-link>
     </div>
 
-    <el-skeleton :loading="isPending && !data" animated>
-      <template #default>
-        <el-table
-          :data="data?.items ?? []"
-          stripe
-          @row-click="(row: SearchTaskInfo) => router.push({ name: 'search-detail', params: { id: row.id } })"
-          class="search-table"
-          empty-text="—"
-        >
-          <el-table-column prop="name" :label="t('search.colName')" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="model_name" :label="t('search.colModel')" width="120" />
-          <el-table-column prop="dataset_name" :label="t('search.colDataset')" width="140" />
-          <el-table-column :label="t('search.colStatus')" width="130">
-            <template #default="{ row }">
-              <span class="status-badge" :style="{ '--dot-color': statusMap[row.status]?.color }">
-                <span class="status-dot" :class="{ pulse: row.status === 'running' }"></span>
-                <span>{{ statusMap[row.status] ? t(statusMap[row.status].label) : row.status }}</span>
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="hasGpu" :label="t('search.colGpu')" width="90">
-            <template #default="{ row }">{{ gpuText(row) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('search.colCreated')" width="170">
-            <template #default="{ row }">
-              <span class="mono">{{ formatDateTime(row.created_at) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('search.colActions')" width="120" align="right" fixed="right">
-            <template #default="{ row }">
-              <div class="row-actions" @click.stop>
-                <el-button
-                  v-if="row.status === 'running'"
-                  link
-                  type="warning"
-                  @click="handleStop(row.id)"
-                >{{ t('common.stop') }}</el-button>
-                <el-button
-                  v-if="!['running', 'stopping', 'pending'].includes(row.status)"
-                  link
-                  type="danger"
-                  @click="handleDelete(row)"
-                >{{ t('common.delete') }}</el-button>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+    <ListTabBar
+      v-model="activeTab"
+      :tabs="tabItems"
+      :aria-label="t('search.tabGroupAria')"
+      @update:model-value="switchTab"
+    />
 
-        <el-pagination
-          v-if="(data?.total ?? 0) > pageSize"
-          class="pager"
-          layout="prev, pager, next, total"
-          :total="data?.total ?? 0"
-          :page-size="pageSize"
-          :current-page="page"
-          @current-change="page = $event"
-        />
-      </template>
-    </el-skeleton>
+    <EmptyState
+      v-if="!loading && tasks.length === 0"
+      :title="t('search.emptyTitle')"
+      :hint="t('search.emptyHint')"
+    />
+
+    <template v-else>
+      <transition name="batch-bar">
+        <div v-if="selectedTasks.length > 0" class="batch-bar">
+          <span class="batch-info">{{ t('search.selected') }} <strong>{{ selectedTasks.length }}</strong> {{ t('search.itemsUnit') }}</span>
+          <button class="batch-delete-btn" @click="handleBatchDelete">
+            <el-icon :size="14"><Delete /></el-icon>
+            {{ t('search.batchDelete') }}
+          </button>
+          <button class="batch-clear-btn" @click="clearSelection">{{ t('search.clearSelection') }}</button>
+        </div>
+      </transition>
+
+      <el-table
+        ref="tableRef"
+        :key="activeTab"
+        :data="tasks"
+        row-key="id"
+        size="small"
+        class="task-table"
+        v-loading="loading"
+        :default-sort="currentSort"
+        @sort-change="onSortChange"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="45" reserve-selection />
+        <el-table-column prop="id" label="ID" width="70" sortable />
+        <el-table-column :label="t('search.colName')" min-width="160">
+          <template #default="{ row }">
+            <router-link :to="{ name: 'search-detail', params: { id: row.id } }" class="task-name-link">{{ row.name }}</router-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="model_name" :label="t('search.colModel')" width="110" sortable />
+        <el-table-column prop="dataset_name" :label="t('search.colDataset')" width="110" sortable />
+        <el-table-column prop="env_name" :label="t('search.colEnv')" width="100" sortable>
+          <template #default="{ row }">
+            <span class="env-tag">{{ row.env_name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="hasGpu" label="GPU" width="80">
+          <template #default="{ row }">
+            <span class="gpu-tag">{{ formatGpu(row.gpu_assigned ?? row.gpu_request, t('common.auto')) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" :label="t('search.colStatus')" width="110" sortable>
+          <template #default="{ row }">
+            <StatusBadge :status="row.status" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" :label="t('search.colCreatedAt')" width="170" sortable>
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatDateTime(row.created_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="started_at" :label="t('search.colStartedAt')" width="170" sortable>
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatDateTime(row.started_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="finished_at" :label="t('search.colFinishedAt')" width="170" sortable>
+          <template #default="{ row }">
+            <span class="mono-time">{{ formatDateTime(row.finished_at) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('search.colActions')" width="120" align="right">
+          <template #default="{ row }">
+            <div class="action-group">
+              <router-link :to="{ name: 'search-detail', params: { id: row.id } }" class="action-btn" :title="t('search.viewDetail')">
+                <el-icon :size="15"><View /></el-icon>
+              </router-link>
+              <button
+                v-if="['running', 'stopping', 'pending'].includes(row.status)"
+                class="action-btn action-stop"
+                :title="t('search.stopTask')"
+                @click="handleStop(row.id)"
+              >
+                <el-icon :size="14"><SwitchButton /></el-icon>
+              </button>
+              <button
+                v-if="!['running', 'stopping'].includes(row.status)"
+                class="action-btn action-delete"
+                :title="t('search.deleteTask')"
+                @click="handleDelete(row)"
+              >
+                <el-icon :size="15"><Delete /></el-icon>
+              </button>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-pagination
+        v-if="total > 0"
+        class="table-pagination"
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        size="small"
+        @current-change="handlePageChange"
+        @size-change="handlePageSizeChange"
+      />
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
+import '@/styles/list-shared.css'
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import type { ElTable } from 'element-plus'
+import { Plus, View, Delete, SwitchButton } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/date'
+import { formatGpu } from '@/utils/format'
 import { listSearches, stopSearch, deleteSearch, type SearchTaskInfo } from '@/api/search'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
-import { statusMap } from '@/composables/useStatusMap'
+import { useTabSort } from '@/composables/useTabSort'
+import ListTabBar from '@/components/common/ListTabBar.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 const queryClient = useQueryClient()
 const { hasGpu } = useSystemCapabilities()
 
-const tabs = [
-  { key: '', label: 'common.status.all' },
-  { key: 'running', label: 'common.status.running' },
-  { key: 'completed', label: 'common.status.completed' },
-  { key: 'failed', label: 'common.status.failed' },
-  { key: 'stopped', label: 'common.status.stopped' },
-] as const
-
-const activeTab = ref<string>('')
+const activeTab = ref(route.query.tab?.toString() || sessionStorage.getItem('searchListTab') || 'all')
 const page = ref(1)
-const pageSize = 20
+const pageSize = ref(20)
 
-// Tab counts: an unfiltered query drives the per-status badges cheaply.
-const allQuery = useQuery({
-  queryKey: ['searches-list', ''],
-  queryFn: () => listSearches({ page: 1, page_size: 1 }),
-  refetchInterval: 30000,
-})
+type SortOrder = 'ascending' | 'descending'
+interface SortState {
+  prop: string
+  order: SortOrder
+}
+
+// Same default-sort policy as the training list: newest-finished-first on
+// terminal tabs, id order on the active tab.
+const DEFAULT_SORT: Record<string, SortState> = {
+  running: { prop: 'id', order: 'ascending' },
+  all: { prop: 'finished_at', order: 'descending' },
+  completed: { prop: 'finished_at', order: 'descending' },
+  failed: { prop: 'finished_at', order: 'descending' },
+  stopped: { prop: 'finished_at', order: 'descending' },
+}
+
+const { currentSort, onSortChange } = useTabSort(DEFAULT_SORT, activeTab)
+
+const selectedTasks = ref<SearchTaskInfo[]>([])
+const tableRef = ref<InstanceType<typeof ElTable>>()
+
+// Running count drives the tab badge (running searches only; searches never
+// sit in the reorderable queue UI).
 const countsQuery = useQuery({
   queryKey: ['searches-counts'],
   queryFn: async () => {
-    const entries = await Promise.all(
-      (['running', 'completed', 'failed', 'stopped'] as const).map(async (s) => {
-        const r = await listSearches({ status: s, page: 1, page_size: 1 })
-        return [s, r.total] as const
-      }),
-    )
-    return Object.fromEntries(entries) as Record<string, number>
+    const r = await listSearches({ status: 'running', page: 1, page_size: 1 })
+    return r.total
   },
   refetchInterval: 30000,
 })
-const counts = computed<Record<string, number>>(() => ({
-  '': (allQuery.data.value?.total ?? 0),
-  ...(countsQuery.data.value ?? {}),
-}))
 
-const statusParam = computed(() => (activeTab.value === '' ? undefined : activeTab.value))
+const tabItems = computed(() => [
+  { label: 'search.tabAll', value: 'all' },
+  { label: 'search.tabActive', value: 'running', badge: countsQuery.data.value || undefined },
+  { label: 'common.status.completed', value: 'completed' },
+  { label: 'common.status.failed', value: 'failed' },
+  { label: 'common.status.stopped', value: 'stopped' },
+])
+
+const statusParam = computed(() => (activeTab.value === 'all' ? undefined : activeTab.value))
 
 const { data, isPending } = useQuery({
-  queryKey: computed(() => ['searches-list', statusParam.value, page.value]),
-  queryFn: () => listSearches({ status: statusParam.value, page: page.value, page_size: pageSize }),
+  queryKey: computed(() => ['searches-list', statusParam.value, page.value, pageSize.value]),
+  queryFn: () => listSearches({ status: statusParam.value, page: page.value, page_size: pageSize.value }),
   refetchInterval: 30000,
 })
 
-const gpuText = (row: SearchTaskInfo) => {
-  const val = row.gpu_assigned ?? row.gpu_request
-  if (val === null || val === undefined) return row.status === 'pending' ? t('search.gpuAuto') : '—'
-  return `GPU ${val}`
+const tasks = computed(() => data.value?.items ?? [])
+const total = computed(() => data.value?.total ?? 0)
+const loading = computed(() => isPending.value)
+
+const invalidate = () => {
+  queryClient.invalidateQueries({ queryKey: ['searches-list'] })
+  queryClient.invalidateQueries({ queryKey: ['searches-counts'] })
 }
 
-async function handleStop(id: number) {
+const switchTab = (tab: string) => {
+  activeTab.value = tab
+  page.value = 1
+  selectedTasks.value = []
+  sessionStorage.setItem('searchListTab', tab)
+  router.replace({ query: tab !== 'all' ? { tab } : {} })
+}
+
+const handlePageChange = (p: number) => {
+  page.value = p
+}
+
+const handlePageSizeChange = (s: number) => {
+  pageSize.value = s
+  page.value = 1
+}
+
+const handleSelectionChange = (rows: SearchTaskInfo[]) => {
+  selectedTasks.value = rows
+}
+
+const clearSelection = () => {
+  tableRef.value?.clearSelection()
+}
+
+const handleStop = async (id: number) => {
   try {
-    await stopSearch(id)
-    ElMessage.success(t('search.stopSent'))
-  } finally {
-    queryClient.invalidateQueries({ queryKey: ['searches-list'] })
+    await ElMessageBox.confirm(t('search.stopConfirmMsg'), t('search.stopConfirmTitle'), {
+      confirmButtonText: t('common.stop'),
+      cancelButtonText: t('common.cancel'),
+      type: 'warning',
+    })
+  } catch {
+    return
   }
+  await stopSearch(id)
+  ElMessage.success(t('search.stopSent'))
+  invalidate()
 }
 
-async function handleDelete(row: SearchTaskInfo) {
+const handleDelete = async (row: SearchTaskInfo) => {
+  await ElMessageBox.confirm(t('search.deleteConfirm', { name: row.name }), t('common.delete'), {
+    confirmButtonText: t('common.delete'),
+    cancelButtonText: t('common.cancel'),
+    type: 'warning',
+  })
+  await deleteSearch(row.id)
+  ElMessage.success(t('search.deleted'))
+  invalidate()
+}
+
+const handleBatchDelete = async () => {
+  const count = selectedTasks.value.length
+  const runningSelected = selectedTasks.value.filter(taskVal => ['running', 'stopping', 'pending'].includes(taskVal.status))
+  if (runningSelected.length > 0) {
+    ElMessage.warning(t('search.batchDeleteRunningBlocked', { n: runningSelected.length }))
+    return
+  }
   try {
-    await ElMessageBox.confirm(t('search.deleteConfirm', { name: row.name }), t('common.delete'), {
+    await ElMessageBox.confirm(t('search.batchDeleteConfirmMsg', { n: count }), t('search.batchDelete'), {
       confirmButtonText: t('common.delete'),
       cancelButtonText: t('common.cancel'),
       type: 'warning',
@@ -169,10 +279,15 @@ async function handleDelete(row: SearchTaskInfo) {
   } catch {
     return
   }
-  await deleteSearch(row.id)
-  ElMessage.success(t('search.deleted'))
-  queryClient.invalidateQueries({ queryKey: ['searches-list'] })
-  queryClient.invalidateQueries({ queryKey: ['searches-counts'] })
+  try {
+    await Promise.all(selectedTasks.value.map(taskVal => deleteSearch(taskVal.id)))
+    ElMessage.success(t('search.deletedN', { n: count }))
+    clearSelection()
+    invalidate()
+  } catch (err: any) {
+    ElMessage.error(err?.message || t('search.deleteFailed'))
+    invalidate()
+  }
 }
 </script>
 
@@ -180,102 +295,6 @@ async function handleDelete(row: SearchTaskInfo) {
 .search-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  height: 100%;
-  min-height: 0;
-  color: var(--text-primary);
-}
-
-.list-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.page-title {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-  letter-spacing: -0.3px;
-}
-
-.tabs {
-  display: flex;
-  gap: 4px;
-}
-
-.tab-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.tab-btn:hover {
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
-}
-
-.tab-btn.active {
-  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
-  border-color: var(--accent-blue);
-  color: var(--accent-blue);
-}
-
-.tab-count {
-  font-size: 11px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-}
-
-.search-table {
-  cursor: pointer;
-}
-
-.row-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-.mono {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-}
-
-.status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--dot-color, var(--text-tertiary));
-}
-
-.status-dot.pulse {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-blue) 50%, transparent); opacity: 1; }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent-blue) 0%, transparent); opacity: 0.7; }
-}
-
-.pager {
-  justify-content: center;
-  margin-top: 4px;
+  gap: 20px;
 }
 </style>
