@@ -60,6 +60,17 @@ def main():
         help="Keep per-trial SwanLab tracking, checkpoints, and test evaluation "
         "(disabled by default during search to save compute)",
     )
+    opt_parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=None,
+        help=(
+            "Fixed output directory for all search artifacts (study.db, trial "
+            "subdirs, CSV). When set, the timestamped ExperimentManager dir is "
+            "skipped so callers (e.g. the web backend) can locate study.db "
+            "deterministically. Omit to keep the default timestamped behaviour."
+        ),
+    )
     optuna_args, remaining = opt_parser.parse_known_args()
 
     # Stage 2: RunConfig via reflective ConfigParser on the remaining argv.
@@ -77,6 +88,13 @@ def main():
         # run, letting create_study(load_if_exists=True) restore trial history.
         exp_manager = ExperimentManager.from_run_dir(optuna_args.resume)
         logger.info(f"Resuming search in: {exp_manager.get_log_dir()}")
+    elif optuna_args.output_dir:
+        # Web backend supplies a deterministic dir so study.db is locatable;
+        # wrap it directly instead of creating a fresh timestamped run dir.
+        os.makedirs(optuna_args.output_dir, exist_ok=True)
+        exp_manager = ExperimentManager.from_run_dir(optuna_args.output_dir)
+        exp_manager.exp_type = ExperimentType.HYPERPARAM_SEARCH
+        logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
     else:
         exp_manager = ExperimentManager(
             exp_type=ExperimentType.HYPERPARAM_SEARCH,

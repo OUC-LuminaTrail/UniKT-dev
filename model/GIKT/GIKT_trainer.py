@@ -64,10 +64,9 @@ class GIKTConfig(ModelConfig):
     aggregator: str = "sum"
     variant: str = "hsei"
     sim_emb: str = "question_emb"
-    embedding_dim: int = field(
-        default=100,
-        metadata={"optuna": {"type": "int", "low": 64, "high": 256, "log": True}},
-    )
+    # embedding_dim is NOT searched: hidden_neurons stays at its default and the
+    # model asserts hidden_neurons[-1] == embedding_dim.
+    embedding_dim: int = 100
     hidden_neurons: list[int] = field(default_factory=lambda: [200, 100])
     dropout_probs: list[float] = field(default_factory=lambda: [0.2, 0.2, 0.0])
     epochs: int = 100

@@ -39,6 +39,7 @@ def _parse_group(data: dict) -> ParamGroup:
             choices=cfg.get("choices"),
             short=cfg.get("short"),
             nargs=cfg.get("nargs"),
+            optuna=cfg.get("optuna"),
         )
     return ParamGroup(
         group_name=data["group_name"], node=data.get("node"), params=fields

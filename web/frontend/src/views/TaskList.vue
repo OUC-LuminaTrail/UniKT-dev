@@ -1,5 +1,5 @@
 <template>
-  <div class="task-list">
+  <div class="task-list list-view">
     <div class="page-header">
       <h1 class="page-title">{{ t('route.title.tasks') }}</h1>
       <router-link :to="{ name: 'task-new' }" class="btn-primary">
@@ -8,27 +8,20 @@
       </router-link>
     </div>
 
-    <div class="tab-bar" role="tablist" :aria-label="t('task.list.tabGroupAria')">
-      <button
-        v-for="tab in tabs"
-        :key="tab.value"
-        role="tab"
-        :aria-selected="activeTab === tab.value"
-        :class="['tab-item', { active: activeTab === tab.value }]"
-        @click="switchTab(tab.value)"
-      >
-        {{ t(tab.label) }}
-        <span v-if="tab.value === 'running' && activeCount > 0" class="tab-badge">{{ activeCount }}</span>
-      </button>
-    </div>
+    <ListTabBar
+      v-model="activeTab"
+      :tabs="tabItems"
+      :aria-label="t('task.list.tabGroupAria')"
+      @update:model-value="switchTab"
+    />
 
     <!-- Active tab: running tasks + queued tasks -->
     <template v-if="activeTab === 'running'">
-      <div v-if="runningTasks.length === 0 && queueItems.length === 0" class="empty-state">
-        <el-icon :size="48"><Document /></el-icon>
-        <p>{{ t('task.list.emptyActive') }}</p>
-        <span>{{ t('task.list.emptyActiveHint') }}</span>
-      </div>
+      <EmptyState
+        v-if="runningTasks.length === 0 && queueItems.length === 0"
+        :title="t('task.list.emptyActive')"
+        :hint="t('task.list.emptyActiveHint')"
+      />
 
       <template v-if="runningTasks.length > 0">
         <div class="section-divider divider-running">
@@ -72,15 +65,12 @@
           </el-table-column>
           <el-table-column v-if="hasGpu" label="GPU" width="80">
             <template #default="{ row }">
-              <span class="gpu-tag">{{ formatGpu(row.gpu_assigned) }}</span>
+              <span class="gpu-tag">{{ formatGpu(row.gpu_assigned, t('common.auto')) }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('task.list.colStatus')" width="110">
             <template #default>
-              <span class="status-cell">
-                <span class="status-dot status-running" />
-                <span class="status-text">{{ t('common.status.running') }}</span>
-              </span>
+              <StatusBadge status="running" />
             </template>
           </el-table-column>
           <el-table-column prop="created_at" :label="t('task.list.colCreatedAt')" width="170" sortable>
@@ -157,7 +147,7 @@
           <el-table-column prop="dataset_name" :label="t('task.list.colDataset')" width="110" sortable />
           <el-table-column v-if="hasGpu" label="GPU" width="80">
             <template #default="{ row }">
-              <span class="gpu-tag">{{ formatGpu(row.gpu_request) }}</span>
+              <span class="gpu-tag">{{ formatGpu(row.gpu_request, t('common.auto')) }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="created_at" :label="t('task.list.colCreatedAt')" width="170" sortable>
@@ -196,11 +186,11 @@
 
     <!-- Other tabs -->
     <template v-else>
-      <div v-if="tasks.length === 0" class="empty-state">
-        <el-icon :size="48"><Document /></el-icon>
-        <p>{{ t('task.list.empty') }}</p>
-        <span>{{ t('task.list.emptyHint') }}</span>
-      </div>
+      <EmptyState
+        v-if="tasks.length === 0"
+        :title="t('task.list.empty')"
+        :hint="t('task.list.emptyHint')"
+      />
 
       <template v-else>
         <transition name="batch-bar">
@@ -242,10 +232,7 @@
         </el-table-column>
         <el-table-column prop="status" :label="t('task.list.colStatus')" width="110" sortable>
           <template #default="{ row }">
-            <span class="status-cell">
-              <span :class="['status-dot', `status-${row.status}`]" />
-              <span class="status-text">{{ t(statusLabel(row.status)) }}</span>
-            </span>
+            <StatusBadge :status="row.status" />
           </template>
         </el-table-column>
         <el-table-column prop="created_at" :label="t('task.list.colCreatedAt')" width="170" sortable>
@@ -299,19 +286,25 @@
 </template>
 
 <script setup lang="ts">
+import '@/styles/list-shared.css'
 import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElTable } from 'element-plus'
-import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Document, Clock } from '@element-plus/icons-vue'
+import { Plus, View, SwitchButton, ArrowUp, ArrowDown, Delete, Clock } from '@element-plus/icons-vue'
 import Sortable from '@/utils/sortable'
 import type { SortableEvent } from 'sortablejs'
 import { formatDateTime } from '@/utils/date'
+import { formatGpu } from '@/utils/format'
 import { listTasks, stopTask, deleteTask, type TaskInfo } from '@/api/tasks'
 import { getQueue, reorderQueue, type QueueItem } from '@/api/settings'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
+import { useTabSort } from '@/composables/useTabSort'
+import ListTabBar from '@/components/common/ListTabBar.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
+import StatusBadge from '@/components/common/StatusBadge.vue'
 
 const { t } = useI18n()
 
@@ -339,20 +332,7 @@ const DEFAULT_SORT: Record<string, SortState> = {
   stopped: { prop: 'finished_at', order: 'descending' },
 }
 
-// Per-tab sort overrides, persisted across tab switches.
-const tabSortOverrides = ref<Record<string, SortState>>({})
-
-const currentSort = computed<SortState>(
-  () => tabSortOverrides.value[activeTab.value] ?? DEFAULT_SORT[activeTab.value] ?? DEFAULT_SORT.all
-)
-
-const onSortChange = ({ prop, order }: { prop: string | null; order: SortOrder | null }) => {
-  if (prop && order) {
-    tabSortOverrides.value[activeTab.value] = { prop, order }
-  } else {
-    delete tabSortOverrides.value[activeTab.value]
-  }
-}
+const { currentSort, onSortChange } = useTabSort(DEFAULT_SORT, activeTab)
 
 const page = ref(1)
 const pageSize = ref(20)
@@ -368,26 +348,13 @@ const otherTableRef = ref<InstanceType<typeof ElTable>>()
 const runningTableRef = ref<InstanceType<typeof ElTable>>()
 const queueTableRef = ref<InstanceType<typeof ElTable>>()
 
-const tabs = [
+const tabItems = computed(() => [
   { label: 'task.list.tabAll', value: 'all' },
-  { label: 'task.list.tabActive', value: 'running' },
+  { label: 'task.list.tabActive', value: 'running', badge: activeCount.value || undefined },
   { label: 'common.status.completed', value: 'completed' },
   { label: 'common.status.failed', value: 'failed' },
   { label: 'common.status.stopped', value: 'stopped' },
-]
-
-const statusLabels: Record<string, string> = {
-  running: 'common.status.running',
-  completed: 'common.status.completed',
-  failed: 'common.status.failed',
-  stopped: 'common.status.stopped',
-  pending: 'common.status.pending',
-}
-
-const statusLabel = (s: string) => statusLabels[s] || s
-
-const formatGpu = (val: number | null) =>
-  val === null || val === undefined ? t('common.auto') : `GPU ${val}`
+])
 
 interface TasksData {
   tasks: TaskInfo[]
@@ -454,7 +421,6 @@ const activeCount = computed(() => runningTotal.value + queueItems.value.length)
 const invalidateTasks = () => queryClient.invalidateQueries({ queryKey: ['tasks-list'] })
 
 const switchTab = (tab: string) => {
-  activeTab.value = tab
   page.value = 1
   runningPage.value = 1
   queuePage.value = 1
@@ -751,99 +717,6 @@ const handleBatchCancelQueue = async () => {
   gap: 20px;
 }
 
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.page-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
-  letter-spacing: -0.01em;
-}
-
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  background: var(--accent-blue);
-  color: #fff;
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  font-weight: 500;
-  text-decoration: none;
-  border: 1px solid var(--accent-blue);
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s;
-}
-
-.btn-primary:hover {
-  background: #388bfd;
-  border-color: #388bfd;
-}
-
-html.dark .btn-primary:hover {
-  background: #1f6feb;
-  border-color: #1f6feb;
-}
-
-.tab-bar {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--bg-surface);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-muted);
-  width: fit-content;
-}
-
-.tab-item {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 14px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  font-family: var(--font-sans);
-}
-
-.tab-item:hover {
-  color: var(--text-primary);
-  background: var(--bg-elevated);
-}
-
-.tab-item.active {
-  color: var(--accent-blue);
-  background: var(--bg-elevated);
-  box-shadow: inset 0 -2px 0 var(--accent-blue);
-}
-
-.tab-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--accent-blue);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-}
-
 .section-divider {
   display: flex;
   align-items: center;
@@ -886,43 +759,6 @@ html.dark .btn-primary:hover {
   line-height: 1.6;
 }
 
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 64px 24px;
-  color: var(--text-tertiary);
-  text-align: center;
-}
-
-.empty-state svg {
-  margin-bottom: 16px;
-  opacity: 0.4;
-}
-
-.empty-state p {
-  margin: 0 0 4px;
-  font-size: 15px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.empty-state span {
-  font-size: 13px;
-}
-
-.task-table {
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.table-pagination {
-  margin-top: 12px;
-  justify-content: flex-end;
-}
-
 .pos-badge {
   display: inline-flex;
   align-items: center;
@@ -934,240 +770,6 @@ html.dark .btn-primary:hover {
   font-size: 11px;
   font-family: var(--font-mono);
   font-weight: 500;
-}
-
-.task-name-link {
-  color: var(--text-primary);
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.15s;
-}
-
-.task-name-link:hover {
-  color: var(--accent-blue);
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-
-.task-name-text {
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-.env-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  background: var(--bg-elevated);
-  border-radius: 20px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-  border: 1px solid var(--border-muted);
-}
-
-.gpu-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  background: var(--soft-green);
-  border-radius: 20px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-  color: var(--accent-green);
-  border: 1px solid var(--border-muted);
-}
-
-.status-cell {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.status-dot.status-running {
-  background: var(--accent-blue);
-  box-shadow: 0 0 6px var(--accent-blue);
-}
-
-.status-dot.status-completed {
-  background: var(--accent-green);
-}
-
-.status-dot.status-failed {
-  background: var(--accent-red);
-}
-
-.status-dot.status-stopped {
-  background: var(--accent-orange);
-}
-
-.status-dot.status-pending {
-  background: var(--text-tertiary);
-}
-
-.status-text {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  color: var(--text-secondary);
-}
-
-.mono-time {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-
-.action-group {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-}
-
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 28px;
-  border-radius: var(--radius-sm);
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
-  text-decoration: none;
-}
-
-.action-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-elevated);
-}
-
-.action-stop:hover {
-  color: var(--accent-orange);
-  background: var(--soft-orange);
-}
-
-.action-delete:hover {
-  color: var(--accent-red);
-  background: var(--soft-red);
-}
-
-.batch-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 4px 0;
-}
-
-.batch-info {
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-
-.batch-info strong {
-  color: var(--accent-blue);
-  font-weight: 600;
-}
-
-.batch-delete-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 14px;
-  background: var(--soft-red);
-  color: var(--accent-red);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: var(--font-sans);
-}
-
-.batch-delete-btn:hover {
-  background: var(--accent-red);
-  border-color: var(--accent-red);
-  color: #fff;
-}
-
-.batch-stop-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 14px;
-  background: var(--soft-orange);
-  color: var(--accent-orange);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: var(--font-sans);
-}
-
-.batch-stop-btn:hover {
-  background: var(--accent-orange);
-  border-color: var(--accent-orange);
-  color: #fff;
-}
-
-.batch-cancel-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 14px;
-  background: var(--soft-red);
-  color: var(--accent-red);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: var(--font-sans);
-}
-
-.batch-cancel-btn:hover {
-  background: var(--accent-red);
-  border-color: var(--accent-red);
-  color: #fff;
-}
-
-.batch-clear-btn {
-  padding: 4px 12px;
-  background: transparent;
-  color: var(--text-tertiary);
-  border: 1px solid var(--border-muted);
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-  font-family: var(--font-sans);
-}
-
-.batch-clear-btn:hover {
-  color: var(--text-secondary);
-  border-color: var(--border-default);
-}
-
-.batch-bar-enter-active,
-.batch-bar-leave-active {
-  transition: all 0.2s ease;
-}
-
-.batch-bar-enter-from,
-.batch-bar-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
 }
 
 @media (prefers-reduced-motion: reduce) {

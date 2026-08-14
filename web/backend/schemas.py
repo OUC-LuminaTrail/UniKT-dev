@@ -147,6 +147,7 @@ class ParamField(BaseModel):
     choices: list | None = None
     short: str | None = None
     nargs: str | None = None
+    optuna: dict | None = None
 
 
 class ParamGroup(BaseModel):
@@ -275,3 +276,61 @@ class SystemStatusResponse(BaseModel):
     load_5m: float
     load_15m: float
     updated_at: str
+
+
+class SearchCreate(BaseModel):
+    """Request model for creating a hyperparameter search task.
+
+    Attributes:
+        name: A human-readable name for the search.
+        env_id: Identifier of the Python environment to use.
+        custom_python_path: An optional custom Python interpreter path.
+        model_name: The model to search over.
+        dataset: The dataset to search on.
+        gpu: Requested GPU index, or None for auto-assignment.
+        runconfig_params: Flat RunConfig knobs (epochs/fold/batch_size/...) used
+            as the base configuration for every trial.
+        optuna_config: Optuna study knobs (metric/n_trials/sampler/pruner/...).
+            ``metric`` (auc/acc/rmse/loss) selects the optimised objective.
+    """
+
+    name: str = ""
+    env_id: str
+    custom_python_path: str | None = None
+    model_name: str
+    dataset: str
+    gpu: int | None = None
+    runconfig_params: dict = {}
+    optuna_config: dict = {}
+
+
+class SearchTrialInfo(BaseModel):
+    """One trial row in the search progress table."""
+
+    number: int
+    state: str
+    value: float | None = None
+    params: dict = {}
+    datetime_start: str | None = None
+    datetime_complete: str | None = None
+
+
+class SearchStudyResponse(BaseModel):
+    """Aggregated trial-progress summary read from ``study.db``."""
+
+    total: int
+    completed: int
+    running: int
+    pruned: int
+    failed: int
+    direction: str
+    best_trial: dict | None = None
+    trials: list[SearchTrialInfo] = []
+
+
+class SearchStudyPathResponse(BaseModel):
+    """The ``study.db`` location and a ready-to-copy optuna-dashboard command."""
+
+    study_db_path: str | None = None
+    dashboard_command: str | None = None
+    exists: bool = False

@@ -70,6 +70,9 @@ def _field_spec(f, help_map=None):
         "choices": choices,
         "short": meta.get("short"),
         "nargs": meta.get("nargs"),
+        # Search-space spec (low/high/log/step/choices) for fields carrying
+        # ``optuna`` metadata; None on non-searchable fields.
+        "optuna": meta.get("optuna"),
     }
 
 

@@ -33,7 +33,8 @@
           <el-icon><Setting /></el-icon>
           <template #title>{{ t('nav.settings') }}</template>
         </el-menu-item>
-        <el-menu-item @click="toggleDark()">
+        <!-- index is required by ElMenuItem; this is an action, not a route -->
+        <el-menu-item index="theme-toggle" @click="toggleDark()">
           <el-icon><component :is="isDark ? Sunny : Moon" /></el-icon>
           <template #title>{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</template>
         </el-menu-item>
@@ -60,7 +61,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useDark, useToggle } from '@vueuse/core'
-import { Upload, Monitor, Grid, Setting, Sunny, Moon, Expand, Fold } from '@element-plus/icons-vue'
+import { Upload, Monitor, Grid, Setting, Sunny, Moon, Expand, Fold, Aim } from '@element-plus/icons-vue'
 import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 defineProps<{
@@ -84,6 +85,7 @@ const navItems = computed(() => {
   const items = [
     { path: '/preprocess', label: t('nav.preprocess'), icon: Upload },
     { path: '/tasks', label: t('nav.tasks'), icon: Monitor },
+    { path: '/search', label: t('nav.search'), icon: Aim },
   ]
   if (hasGpu.value) {
     items.push({ path: '/gpu', label: t('nav.gpu'), icon: Grid })
@@ -95,6 +97,7 @@ const activeIndex = computed(() => {
   const path = route.path
   if (path === '/settings') return '/settings'
   if (path.startsWith('/tasks')) return '/tasks'
+  if (path.startsWith('/search')) return '/search'
   return path || '/tasks'
 })
 </script>
