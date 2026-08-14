@@ -1,0 +1,21 @@
+# Best hyperparameters for ReKTP on xes3g5m from Optuna search
+# (runs/hyperparam_search/ReKTP_xes3g5m_20260813-235501_n_trials100, trial 73, val AUC 0.9070).
+
+experiment:
+  model_name: ReKTP
+
+data:
+  dataset: xes3g5m
+
+model:
+  hidden_dim: 128
+  n_blocks: 4
+  conv_kernel_size: 5
+  conv_dilation_base: 2
+  dropout: 0.29194149741701186
+  question_embed_dim: 64
+  epochs: 100
+  learning_rate: 0.004952026953765816
+  weight_decay: 3.1601710881726624e-05
+  batch_size: 32
+  max_clip_grad_norm: 1.7941857910412033
