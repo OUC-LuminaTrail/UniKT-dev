@@ -349,7 +349,9 @@ class OptunaTuner:
         except Exception as e:
             logger.warning(f"Param importance evaluation failed: {e}")
             return None
-        return dict(importances)
+        # Optuna's fANOVA evaluator returns numpy float64 values, which yaml
+        # cannot serialize; coerce to plain floats.
+        return {name: float(value) for name, value in importances.items()}
 
     def _save_results(self):
         """Save search results to disk as yaml."""
