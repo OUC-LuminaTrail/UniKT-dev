@@ -532,7 +532,7 @@ class WandbMetricLogger(MetricLogger):
             config=config,
             group=group,
             tags=tags,
-            reinit=True,
+            reinit="finish_previous",
         )
         self._initialized = True
 
