@@ -145,41 +145,51 @@ def test_negative_question_embed_dim_is_rejected():
 
 def test_local_readout_initializes_as_masked_mean():
     model = _build_model(DEVICE, activate_private_writes=False)
-    local_state = torch.randn(1, 2, 2, model.hidden_dim, device=DEVICE)
-    skill_ids = torch.tensor([[[0, 1], [0, 2]]], device=DEVICE)
-    readout_mask = torch.tensor([[[True, True], [True, False]]], device=DEVICE)
-    questions = torch.tensor([[2, 0]], device=DEVICE)
-
-    actual = model._question_conditioned_local_readout(
-        local_state,
-        skill_ids,
-        readout_mask,
-        questions,
+    with torch.no_grad():
+        model.local_readout.weight.zero_()
+        model.local_readout.bias.zero_()
+    B, P, H = 2, 5, model.hidden_dim
+    packed_state = torch.randn(B, P, H, device=DEVICE)
+    skill_embedding = torch.randn(B, P, H, device=DEVICE)
+    question_vector = torch.randn(B, 4, H, device=DEVICE)
+    packed_pos = torch.tensor(
+        [[0, 0, 1, 2, 2], [0, 1, 1, 3, 3]], device=DEVICE
     )
-    expected = model._masked_mean(local_state, readout_mask)
+    packed_valid = torch.ones(B, P, dtype=torch.bool, device=DEVICE)
+
+    actual = model._packed_question_conditioned_readout(
+        packed_state, skill_embedding, packed_pos, packed_valid, question_vector
+    )
+    # Zeroed weights give uniform scores, so the readout is a per-position
+    # mean over the occurrences of that position.
+    expected = torch.zeros(B, 4, H, device=DEVICE)
+    for b in range(B):
+        for s in range(4):
+            members = packed_pos[b] == s
+            if members.any():
+                expected[b, s] = packed_state[b, members].mean(dim=0)
 
     torch.testing.assert_close(actual, expected)
 
 
 def test_local_readout_can_weight_kcs_conditionally():
     model = _build_model(DEVICE, activate_private_writes=False)
-    local_state = torch.zeros(1, 1, 2, model.hidden_dim, device=DEVICE)
-    local_state[0, 0, 0, 0] = -1.0
-    local_state[0, 0, 1, 0] = 1.0
-    skill_ids = torch.tensor([[[0, 1]]], device=DEVICE)
-    readout_mask = torch.tensor([[[True, True]]], device=DEVICE)
-    questions = torch.tensor([[2]], device=DEVICE)
+    H = model.hidden_dim
+    packed_state = torch.zeros(1, 2, H, device=DEVICE)
+    packed_state[0, 0, 0] = -1.0
+    packed_state[0, 1, 0] = 1.0
+    skill_embedding = torch.zeros(1, 2, H, device=DEVICE)
+    question_vector = torch.zeros(1, 1, H, device=DEVICE)
+    packed_pos = torch.zeros(1, 2, dtype=torch.long, device=DEVICE)
+    packed_valid = torch.ones(1, 2, dtype=torch.bool, device=DEVICE)
 
     with torch.no_grad():
         model.local_readout.weight.zero_()
         model.local_readout.bias.zero_()
         model.local_readout.weight[0, 0] = 8.0
 
-    actual = model._question_conditioned_local_readout(
-        local_state,
-        skill_ids,
-        readout_mask,
-        questions,
+    actual = model._packed_question_conditioned_readout(
+        packed_state, skill_embedding, packed_pos, packed_valid, question_vector
     )
 
     assert actual[0, 0, 0] > 0.9
@@ -199,16 +209,24 @@ def test_local_readout_matches_cat_linear_reference():
     readout_mask = torch.tensor(
         [[[True, True], [True, False], [False, True]]], device=DEVICE
     ).expand(B, N, K)
-    skill_ids = torch.zeros(B, N, K, dtype=torch.long, device=DEVICE)
-    questions = torch.zeros(B, N, dtype=torch.long, device=DEVICE)
 
-    actual = model._question_conditioned_local_readout(
-        local_state,
-        skill_ids,
-        readout_mask,
-        questions,
-        skill_embedding=skill_embedding,
-        question_vector=question_vector,
+    # Pack the (s, k) grid in row-major order, dropping masked occurrences;
+    # the (b, s) groups are then the runs of equal ``packed_pos``.
+    flat_pos = (
+        torch.arange(N, device=DEVICE).view(N, 1).expand(N, K).reshape(-1)
+    )
+    sel = readout_mask.reshape(B, N * K)
+    packed_pos = torch.stack([flat_pos[sel[b]] for b in range(B)])
+    packed_state = torch.stack(
+        [local_state.reshape(B, N * K, H)[b][sel[b]] for b in range(B)]
+    )
+    packed_skill = torch.stack(
+        [skill_embedding.reshape(B, N * K, H)[b][sel[b]] for b in range(B)]
+    )
+    packed_valid = torch.ones_like(packed_pos, dtype=torch.bool)
+
+    actual = model._packed_question_conditioned_readout(
+        packed_state, packed_skill, packed_pos, packed_valid, question_vector
     )
 
     # Reference: cat -> Linear(3H, 1) then the same masked-softmax readout.
@@ -237,9 +255,14 @@ def test_event_embeddings_pools_skill_change():
 
     actual = model._event_embeddings(questions, q_features)
 
-    pooled_skill = model._masked_mean(q_features.skill_embedding, q_features.skill_mask)
+    # Reference: direct gather + masked mean over the KC dimension.
+    counts = q_features.skill_mask.float().sum(dim=-1, keepdim=True).clamp_min(1.0)
+    weights = q_features.skill_mask.float().unsqueeze(-1)
+    pooled_skill = (model.skill_embed(q_features.skill_ids) * weights).sum(
+        dim=-2
+    ) / counts
     skill_change = model.skill_change(q_features.skill_ids)
-    pooled_change = model._masked_mean(skill_change, q_features.skill_mask)
+    pooled_change = (skill_change * weights).sum(dim=-2) / counts
     expected = (
         q_features.question_vector
         + pooled_skill

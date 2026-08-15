@@ -22,14 +22,13 @@ from torch import nn
 from model.ReKTP.triton_scan import segmented_scalar_affine_exclusive_scan
 
 # Question-derived tensors computed once per forward and shared across the
-# sub-methods that would otherwise re-gather and re-embed them.
+# sub-methods that would otherwise re-gather them.
 _QuestionFeatures = namedtuple(
     "_QuestionFeatures",
     [
         "skill_ids",
         "skill_mask",
         "question_vector",
-        "skill_embedding",
     ],
 )
 
@@ -193,12 +192,6 @@ class ReKTP(nn.Module):
         nn.init.zeros_(self.local_decay.weight)
         nn.init.constant_(self.local_decay.bias, -4.0)
 
-    @staticmethod
-    def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-        weights = mask.unsqueeze(-1).to(values.dtype)
-        count = weights.sum(dim=-2).clamp_min(1.0)
-        return (values * weights).sum(dim=-2) / count
-
     def _question_vector(self, questions: torch.Tensor) -> torch.Tensor:
         """Return the per-question vector at ``hidden_dim`` width.
 
@@ -221,96 +214,114 @@ class ReKTP(nn.Module):
     def _resolve_question_features(self, questions: torch.Tensor) -> _QuestionFeatures:
         """Gather the question-derived tensors once for reuse across forward.
 
-        ``question_skill_ids[questions]``, the ``skill_embed`` lookup, and the
-        ``_question_vector`` projection are each needed in several sub-methods.
-        Computing them here and threading the result avoids repeating the
-        gathers and the large ``[B, N, K, hidden]`` embedding tensors.
+        ``question_skill_ids[questions]`` and the ``_question_vector``
+        projection are each needed in several sub-methods; computing them here
+        and threading the result avoids repeating the gathers. The per-KC
+        skill embedding is not materialized: ``_event_embeddings`` pools it
+        over the packed occurrences and the readout consumes the packed
+        per-occurrence embedding already gathered in the local branch.
         """
         skill_ids = self.question_skill_ids[questions]
         return _QuestionFeatures(
             skill_ids=skill_ids,
             skill_mask=self.question_skill_mask[questions],
             question_vector=self._question_vector(questions),
-            skill_embedding=self.skill_embed(skill_ids),
         )
 
-    def _question_conditioned_local_readout(
+    def _packed_question_conditioned_readout(
         self,
-        local_state: torch.Tensor,
-        skill_ids: torch.Tensor,
-        readout_mask: torch.Tensor,
-        questions: torch.Tensor,
-        skill_embedding: torch.Tensor | None = None,
-        question_vector: torch.Tensor | None = None,
+        packed_state: torch.Tensor,
+        packed_skill_embedding: torch.Tensor,
+        packed_pos: torch.Tensor,
+        packed_valid: torch.Tensor,
+        question_vector: torch.Tensor,
     ) -> torch.Tensor:
-        """Read decoupled KC states with current-question dependent weights."""
-        if skill_embedding is None:
-            skill_embedding = self.skill_embed(skill_ids)
-        if question_vector is None:
-            question_vector = self._question_vector(questions)
-        # Linear(3*hidden_dim, 1) as three per-feature Linear(hidden_dim, 1) slices.
+        """Question-conditioned readout directly in packed space.
+
+        Each occurrence carries the private state of one KC of one position;
+        the score combines that state, the KC embedding, and the containing
+        question's vector, and a softmax over the occurrences of the same
+        position weights the states before summing. The (b, s) groups are
+        reduced with ``scatter_reduce`` over the packed position ids, so the
+        unpacked [B, S, K, H] layout (and its scatter) is never materialized.
+        """
         h = self.hidden_dim
         weight = self.local_readout.weight
         w_local = weight[:, :h]
         w_skill = weight[:, h : 2 * h]
         w_question = weight[:, 2 * h :]
+        # Scalar per-feature projections; gathering the projected score avoids
+        # a [B, P, H] gather of ``question_vector``.
+        question_proj = torch.nn.functional.linear(
+            question_vector, w_question
+        ).squeeze(-1)
         scores = (
-            torch.nn.functional.linear(local_state, w_local).squeeze(-1)
-            + torch.nn.functional.linear(skill_embedding, w_skill).squeeze(-1)
-            + torch.nn.functional.linear(question_vector, w_question)
-            .squeeze(-1)
-            .unsqueeze(-1)
+            torch.nn.functional.linear(packed_state, w_local).squeeze(-1)
+            + torch.nn.functional.linear(packed_skill_embedding, w_skill).squeeze(-1)
+            + question_proj.gather(1, packed_pos)
             + self.local_readout.bias
         )
-        masked_scores = scores.masked_fill(
-            ~readout_mask,
-            torch.finfo(scores.dtype).min,
+        # Padded occurrences of a row are invalid; exclude them so they cannot
+        # join the group of the position their padding slot maps to.
+        scores = scores.masked_fill(~packed_valid, torch.finfo(scores.dtype).min)
+        seg_max = torch.scatter_reduce(
+            torch.zeros_like(scores),
+            1,
+            packed_pos,
+            scores,
+            reduce="amax",
+            include_self=False,
         )
-        weights = torch.softmax(masked_scores, dim=-1)
-        weights = torch.where(readout_mask, weights, torch.zeros_like(weights))
-        weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-12)
-        return (local_state * weights.unsqueeze(-1)).sum(dim=-2)
+        weights = torch.exp(scores - seg_max.gather(1, packed_pos))
+        seg_sum = torch.scatter_reduce(
+            torch.zeros_like(scores),
+            1,
+            packed_pos,
+            weights,
+            reduce="sum",
+        )
+        weights = weights / seg_sum.gather(1, packed_pos)
+        weights = torch.where(packed_valid, weights, torch.zeros_like(weights))
+        return torch.scatter_reduce(
+            packed_state.new_zeros(
+                question_vector.size(0), question_vector.size(1), h
+            ),
+            1,
+            packed_pos.unsqueeze(-1).expand(-1, -1, h),
+            packed_state * weights.unsqueeze(-1),
+            reduce="sum",
+        )
 
-    def _pack_kc_occurrences(
+    def _pack_kc_positions(
         self,
         questions: torch.Tensor,
-        responses: torch.Tensor,
-        times: torch.Tensor,
         mask: torch.Tensor,
-        skill_ids: torch.Tensor | None = None,
-        skill_mask: torch.Tensor | None = None,
+        skill_ids: torch.Tensor,
+        skill_mask: torch.Tensor,
         kc_order: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, ...]:
+        """Pack valid KC occurrences of each row in skill-major order.
+
+        Returns the packed skill ids, validity mask, and original position of
+        every occurrence, plus the permutation that maps the flattened
+        [S, K] grid into the packed layout. Shared by the local scan and the
+        event-embedding pooling, so the [B, S, K] grid is gathered once per
+        use instead of materialized as [B, S, K, hidden].
+        """
         batch_size, seq_len = questions.shape
-        if skill_ids is None:
-            skill_ids = self.question_skill_ids[questions]
-        if skill_mask is None:
-            skill_mask = self.question_skill_mask[questions]
         occurrence_mask = skill_mask & mask.unsqueeze(-1)
         max_skills = skill_ids.size(-1)
-
-        # Real elapsed seconds (or position indices when unavailable); only
-        # differences within a sequence matter.
-        times = times.reshape(batch_size, seq_len, 1).expand(
-            batch_size, seq_len, max_skills
-        )
-        question_occ = questions.unsqueeze(-1).expand_as(skill_ids)
-        response_occ = responses.unsqueeze(-1).expand_as(skill_ids)
-
         flat_skill = skill_ids.flatten(1)
-        flat_time = times.flatten(1)
-        flat_question = question_occ.flatten(1)
-        flat_response = response_occ.flatten(1)
         flat_valid = occurrence_mask.flatten(1)
+        positions = (
+            torch.arange(seq_len, device=questions.device)
+            .view(1, seq_len, 1)
+            .expand(batch_size, seq_len, max_skills)
+        )
+        flat_pos = positions.flatten(1)
 
         if kc_order is None:
             # Direct model calls retain the original dynamic-sort fallback.
-            positions = (
-                torch.arange(seq_len, device=questions.device)
-                .view(1, seq_len, 1)
-                .expand(batch_size, seq_len, max_skills)
-            )
-            flat_pos = positions.flatten(1)
             invalid_key = (self.num_skills + 1) * (seq_len + 1)
             sort_key = flat_skill * (seq_len + 1) + flat_pos
             sort_key = torch.where(flat_valid, sort_key, invalid_key + flat_pos)
@@ -329,14 +340,50 @@ class ReKTP(nn.Module):
         def gather(values: torch.Tensor) -> torch.Tensor:
             return torch.gather(values, 1, order)
 
-        return (
-            gather(flat_skill),
-            gather(flat_time),
-            gather(flat_question),
-            gather(flat_response),
-            gather(flat_valid),
+        return gather(flat_skill), gather(flat_valid), gather(flat_pos), order
+
+    def _pack_kc_occurrences(
+        self,
+        questions: torch.Tensor,
+        responses: torch.Tensor,
+        times: torch.Tensor,
+        mask: torch.Tensor,
+        skill_ids: torch.Tensor | None = None,
+        skill_mask: torch.Tensor | None = None,
+        kc_order: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, ...]:
+        batch_size, seq_len = questions.shape
+        if skill_ids is None:
+            skill_ids = self.question_skill_ids[questions]
+        if skill_mask is None:
+            skill_mask = self.question_skill_mask[questions]
+        max_skills = skill_ids.size(-1)
+        (
+            packed_skill,
+            packed_valid,
+            packed_pos,
             order,
-            occurrence_mask,
+        ) = self._pack_kc_positions(questions, mask, skill_ids, skill_mask, kc_order)
+
+        # Real elapsed seconds (or position indices when unavailable); only
+        # differences within a sequence matter.
+        times = times.reshape(batch_size, seq_len, 1).expand(
+            batch_size, seq_len, max_skills
+        )
+        question_occ = questions.unsqueeze(-1).expand_as(skill_ids)
+        response_occ = responses.unsqueeze(-1).expand_as(skill_ids)
+
+        def gather(values: torch.Tensor) -> torch.Tensor:
+            return torch.gather(values, 1, order)
+
+        return (
+            packed_skill,
+            gather(times.flatten(1)),
+            gather(question_occ.flatten(1)),
+            gather(response_occ.flatten(1)),
+            packed_valid,
+            order,
+            packed_pos,
         )
 
     def _local_pre_states(
@@ -367,15 +414,14 @@ class ReKTP(nn.Module):
             if q_features is not None
             else self.question_skill_mask[questions]
         )
-        max_skills = skill_ids.size(-1)
         (
             packed_skill,
             packed_time,
             packed_question,
             packed_response,
             packed_valid,
-            order,
-            occurrence_mask,
+            _order,
+            packed_pos,
         ) = self._pack_kc_occurrences(
             questions,
             responses,
@@ -426,47 +472,86 @@ class ReKTP(nn.Module):
         )
         packed_pre_decay = packed_pre_decay_blocks.squeeze(-1)
         packed_state = decay * packed_pre_decay
-        # Restore the original [seq_len, max_skills] layout for readout; the
-        # trimmed suffix contains only invalid padding and therefore stays zero.
-        unpacked_state = packed_state.new_zeros(
-            batch_size,
-            seq_len * max_skills,
-            self.hidden_dim,
+        # Question-conditioned readout in packed space: the (b, s) groups are
+        # the occurrences of one position, reduced without restoring the
+        # [seq_len, max_skills] layout.
+        question_vector = (
+            q_features.question_vector
+            if q_features is not None
+            else self._question_vector(questions)
         )
-        scatter_index = order.unsqueeze(-1).expand_as(packed_state)
-        unpacked_state.scatter_(1, scatter_index, packed_state)
-
-        max_skills = occurrence_mask.size(-1)
-        local_state = unpacked_state.view(
-            batch_size, seq_len, max_skills, self.hidden_dim
-        )
-        if q_features is not None:
-            readout_skill_embedding = q_features.skill_embedding
-            readout_question_vector = q_features.question_vector
-        else:
-            readout_skill_embedding = self.skill_embed(skill_ids)
-            readout_question_vector = self._question_vector(questions)
-        return self._question_conditioned_local_readout(
-            local_state,
-            skill_ids,
-            occurrence_mask,
-            questions,
-            skill_embedding=readout_skill_embedding,
-            question_vector=readout_question_vector,
+        return self._packed_question_conditioned_readout(
+            packed_state,
+            skill_embedding,
+            packed_pos,
+            packed_valid,
+            question_vector,
         )
 
     def _event_embeddings(
         self,
         questions: torch.Tensor,
         q_features: _QuestionFeatures | None = None,
+        mask: torch.Tensor | None = None,
+        kc_order: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """Per-position event embedding with packed-occurrence KC pooling.
+
+        The per-KC skill and change embeddings are gathered only for the
+        packed occurrences and reduced over each position's group with
+        ``scatter_reduce``, so no [B, S, K, hidden] tensor is materialized.
+        Without ``mask`` every position is treated as valid (all-of-batch
+        pooling, used by direct calls); with it, masked positions pool to
+        zero, which the global branch zeroes out anyway.
+        """
         if q_features is None:
             q_features = self._resolve_question_features(questions)
-        pooled_skill = self._masked_mean(
-            q_features.skill_embedding, q_features.skill_mask
+        if mask is None:
+            mask = torch.ones(
+                questions.shape, dtype=torch.bool, device=questions.device
+            )
+        (packed_skill, packed_valid, packed_pos, _order) = self._pack_kc_positions(
+            questions,
+            mask.bool(),
+            q_features.skill_ids,
+            q_features.skill_mask,
+            kc_order,
         )
-        skill_change = self.skill_change(q_features.skill_ids)
-        pooled_change = self._masked_mean(skill_change, q_features.skill_mask)
+        counts = torch.scatter_reduce(
+            torch.zeros(
+                questions.shape[0], questions.shape[1], device=questions.device
+            ),
+            1,
+            packed_pos,
+            packed_valid.float(),
+            reduce="sum",
+        )
+        denom = counts.clamp_min(1.0).unsqueeze(-1)
+        pos_index = packed_pos.unsqueeze(-1).expand(-1, -1, self.hidden_dim)
+        pooled_skill = (
+            torch.scatter_reduce(
+                packed_valid.new_zeros(
+                    questions.shape[0], questions.shape[1], self.hidden_dim
+                ).float(),
+                1,
+                pos_index,
+                self.skill_embed(packed_skill),
+                reduce="sum",
+            )
+            / denom
+        )
+        pooled_change = (
+            torch.scatter_reduce(
+                packed_valid.new_zeros(
+                    questions.shape[0], questions.shape[1], self.hidden_dim
+                ).float(),
+                1,
+                pos_index,
+                self.skill_change(packed_skill),
+                reduce="sum",
+            )
+            / denom
+        )
         return (
             q_features.question_vector
             + pooled_skill
@@ -523,7 +608,9 @@ class ReKTP(nn.Module):
         times = times - first_time
         times = times.masked_fill(~mask, 0.0)
         q_features = self._resolve_question_features(questions)
-        event_embedding = self._event_embeddings(questions, q_features)
+        event_embedding = self._event_embeddings(
+            questions, q_features, mask=mask, kc_order=kc_order
+        )
         global_state = self._global_history_states(event_embedding, responses, mask)
         local_pre_state = self._local_pre_states(
             questions,
