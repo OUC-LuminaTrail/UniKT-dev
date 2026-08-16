@@ -65,8 +65,14 @@ class SparseKTConfig(ModelConfig):
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
     emb_type: str = "qid_sparseattn"
-    sparse_ratio: float = 0.8
-    k_index: int = 5
+    sparse_ratio: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 0.9}},
+    )
+    k_index: int = field(
+        default=5,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 10}},
+    )
     epochs: int = 100
     learning_rate: float = field(
         default=1e-4,

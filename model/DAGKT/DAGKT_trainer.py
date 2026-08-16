@@ -46,7 +46,6 @@ class DAGKTConfig(ModelConfig):
         default=3,
         metadata={"optuna": {"type": "int", "low": 1, "high": 5}},
     )
-    # powers of two so 100 % heads == 0 for every combination
     heads: int = field(
         default=2,
         metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},

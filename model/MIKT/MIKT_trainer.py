@@ -31,10 +31,8 @@ class MIKTConfig(ModelConfig):
         default=64,
         metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
     )
-    state_dim: int = field(
-        default=64,
-        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
-    )
+    # must equal embed_dim (assert in MIKT_model), so it follows embed_dim
+    state_dim: int = field(default=64)
     dropout: float = field(
         default=0.4,
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
@@ -69,7 +67,7 @@ class MIKTTrainer(BaseTrainer):
         metadata = data_src.get_metadata()
         model = MIKT(
             embed_dim=m.embed_dim,
-            state_dim=m.state_dim,
+            state_dim=m.embed_dim,
             dropout=m.dropout,
             data_metadata=metadata,
         )

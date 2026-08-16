@@ -44,7 +44,7 @@ class DKVMNConfig(ModelConfig):
         },
     )
     lr_decay: float | None = None
-    # log float cannot include 0, so categorical for the default of 0.0
+    # categorical so the default 0.0 stays inside the space
     weight_decay: float = field(
         default=0.0,
         metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},

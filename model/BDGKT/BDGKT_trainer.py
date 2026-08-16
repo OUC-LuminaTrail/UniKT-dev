@@ -40,7 +40,10 @@ class BDGKTConfig(ModelConfig):
         default=0.3,
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
-    drop2: float = 0.3
+    drop2: float = field(
+        default=0.3,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     question_max_length: int = 20
     student_max_length: int = 5
     learning_rate: float = field(

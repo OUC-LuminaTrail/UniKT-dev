@@ -50,8 +50,14 @@ class MCKTConfig(ModelConfig):
         default=0.1,
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
-    temperature: float = 0.8
-    sim_threshold: float = 0.8
+    temperature: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.1, "high": 1.0}},
+    )
+    sim_threshold: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 0.95}},
+    )
     cl_batch_size: int = 10000
     cl_exp_mode: Literal["paper", "source"] = "source"
     pro_loss_weight: float = 1.0

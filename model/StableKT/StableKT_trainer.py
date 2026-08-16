@@ -69,6 +69,7 @@ class StableKTConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
     )
     lr_decay: float | None = None
+    # categorical so the default 0.0 stays inside the space
     weight_decay: float = field(
         default=0.0,
         metadata={

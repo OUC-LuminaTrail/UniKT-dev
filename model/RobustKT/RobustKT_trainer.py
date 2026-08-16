@@ -65,7 +65,7 @@ class RobustKTConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
     )
     lr_decay: float | None = None
-    # log sampling cannot cover 0.0, so use choices instead
+    # categorical so the default 0.0 stays inside the space
     weight_decay: float = field(
         default=0.0,
         metadata={

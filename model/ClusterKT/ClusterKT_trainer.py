@@ -53,7 +53,10 @@ class ClusterKTConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
     d_ff: int = 1024
-    cluster_size: int = 10
+    cluster_size: int = field(
+        default=10,
+        metadata={"optuna": {"type": "int", "low": 5, "high": 20}},
+    )
     final_fc_dim: int = 512
     kq_same: int = 1
     separate_qa: int = 0

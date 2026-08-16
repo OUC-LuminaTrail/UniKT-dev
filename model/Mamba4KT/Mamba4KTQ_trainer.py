@@ -61,7 +61,7 @@ class Mamba4KTQConfig(ModelConfig):
         default=1e-3,
         metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
     )
-    # log space excludes the default 0.0
+    # linear range: log sampling requires low > 0, default is 0.0
     weight_decay: float = field(
         default=0.0,
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 1e-3}},

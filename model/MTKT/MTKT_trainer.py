@@ -43,7 +43,10 @@ class MTKTConfig(ModelConfig):
         default=256,
         metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
     )
-    n_blocks: int = 2
+    n_blocks: int = field(
+        default=2,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
     num_attn_heads: int = field(
         default=8,
         metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
@@ -69,7 +72,7 @@ class MTKTConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
     )
     lr_decay: float | None = None
-    # log space excludes the default 0.0
+    # linear range: log sampling requires low > 0, default is 0.0
     weight_decay: float = field(
         default=0.0,
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 1e-3}},

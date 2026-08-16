@@ -30,7 +30,7 @@ class ReKTKCConfig(ModelConfig):
     )
     dropout: float = field(
         default=0.4,
-        metadata={"optuna": {"type": "float", "low": 0.1, "high": 0.6}},
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
     epochs: int = 70
     learning_rate: float = field(

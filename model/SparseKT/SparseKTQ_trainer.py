@@ -45,7 +45,10 @@ class SparseKTQConfig(ModelConfig):
         default=256,
         metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
     )
-    n_blocks: int = 2
+    n_blocks: int = field(
+        default=2,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
     n_heads: int = field(
         default=8,
         metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
@@ -68,6 +71,7 @@ class SparseKTQConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
     )
     lr_decay: float | None = None
+    # categorical so the default 0.0 stays inside the space
     weight_decay: float = field(
         default=0.0,
         metadata={
