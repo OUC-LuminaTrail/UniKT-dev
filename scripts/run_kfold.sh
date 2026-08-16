@@ -60,7 +60,7 @@ run_kfold_for_model() {
         echo "Running Fold $fold for $model"
         echo "----------------------------------------"
 
-        $PYTHON train.py -m "$model" --data.fold "$fold" $ARGS
+        $PYTHON train.py -m "$model" $ARGS --data.fold "$fold"
         local rc=$?
         if [ $rc -ne 0 ]; then
             echo "Error: Fold $fold failed for $model (exit code $rc)."
