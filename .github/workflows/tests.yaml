@@ -1,12 +1,13 @@
----
-name: Ruff
+name: Tests
 
 on:
     pull_request:
         types: [opened, synchronize]
+    push:
+        branches: [main]
 
 jobs:
-    ruff:
+    test:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -16,5 +17,4 @@ jobs:
                   environments: cpu
                   activate-environment: true
                   locked: true
-            - run: pixi run --environment cpu lint
-            - run: pixi run --environment cpu fmt -- --check --diff
+            - run: pixi run --environment cpu pytest tests/ -v
