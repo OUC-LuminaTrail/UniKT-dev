@@ -42,7 +42,7 @@ class ConcatAggregator(nn.Module):
         neighbors_agg = torch.mean(neighbor_vectors, dim=-2)
         output = torch.cat([self_vectors, neighbors_agg], dim=-1)
         output = output.reshape(-1, self.dim * 2)
-        output = F.dropout(output, p=1.0 - self.dropout, training=self.training)
+        output = F.dropout(output, p=self.dropout, training=self.training)
         output = output @ self.weights + self.bias
         output = output.reshape(batch_size, seq_len, -1, self.dim)
         return self.act(output)
@@ -57,7 +57,7 @@ class HRGEmbedding(nn.Module):
         question_neighbor_num,
         skill_neighbor_num,
         n_hop=3,
-        dropout_keep_probs=None,
+        keep_prob_gnn=0.8,
         aggregator="sum",
     ):
         super().__init__()
@@ -67,8 +67,7 @@ class HRGEmbedding(nn.Module):
         self.question_neighbor_num = question_neighbor_num
         self.skill_neighbor_num = skill_neighbor_num
         self.n_hop = n_hop
-        self.dropout_keep_probs = dropout_keep_probs or [0.8, 0.8, 1]
-        self.keep_prob_gnn = self.dropout_keep_probs[1]
+        self.keep_prob_gnn = keep_prob_gnn
 
         if aggregator not in {"sum", "concat"}:
             raise ValueError("aggregator must be 'sum' or 'concat'")
@@ -141,7 +140,6 @@ class HRGEmbedding(nn.Module):
 
     def forward(self, hrg_data, question_indices, next_question_indices):
         self.batch_size, self.max_step = question_indices.shape
-        self.keep_prob_gnn = self.dropout_keep_probs[1]
 
         input_neighbors = self.get_neighbors(
             self.n_hop, question_indices, hrg_data["question_neighbors"]
@@ -392,7 +390,7 @@ class SGKT(nn.Module):
         data_metadata,
         embedding_dim: int,
         hidden_dim: int,
-        dropout_keep_probs,
+        keep_prob_gnn: float,
         question_neighbor_num: int,
         skill_neighbor_num: int,
         n_hop: int,
@@ -407,7 +405,7 @@ class SGKT(nn.Module):
         self.max_seq_len = data_metadata["max_seq_len"] - 1
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
-        self.dropout_keep_probs = dropout_keep_probs
+        self.keep_prob_gnn = keep_prob_gnn
 
         assert self.embedding_dim == self.hidden_dim, (
             f"SGKT requires embedding_dim == hidden_dim for dimension consistency "
@@ -426,7 +424,7 @@ class SGKT(nn.Module):
             question_neighbor_num=question_neighbor_num,
             skill_neighbor_num=skill_neighbor_num,
             n_hop=n_hop,
-            dropout_keep_probs=self.dropout_keep_probs,
+            keep_prob_gnn=self.keep_prob_gnn,
             aggregator=aggregator,
         )
 

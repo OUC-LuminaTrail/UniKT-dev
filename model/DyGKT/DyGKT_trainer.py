@@ -1,5 +1,6 @@
 """DyGKT model trainer."""
 
+from dataclasses import field
 from typing import Literal
 
 import torch
@@ -40,11 +41,20 @@ class DyGKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    edge_dim: int = 64
-    node_dim: int = 64
+    edge_dim: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
+    node_dim: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
     dim_time: int = 16
     ablation: str = "-1"
-    num_neighbor: int = 50
+    num_neighbor: int = field(
+        default=50,
+        metadata={"optuna": {"type": "int", "low": 10, "high": 100}},
+    )
     neighbor_sampling_strategy: Literal["recent", "time_decay"] = "time_decay"
     time_decay_factor: float = 1e-5
     neighbor_candidate_pool: int = 200
@@ -53,12 +63,24 @@ class DyGKTConfig(ModelConfig):
     graph_neg_num_samples: int = 2
     graph_neg_temperature: float = 0.2
     graph_neg_loss_weight: float = 0.05
-    dropout: float = 0.1
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 100
-    learning_rate: float = 5e-4
+    learning_rate: float = field(
+        default=5e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-4
-    batch_size: int = 2000
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=2000,
+        metadata={"optuna": {"type": "categorical", "choices": [1000, 2000, 4000]}},
+    )
 
 
 @register_trainer("DyGKT")

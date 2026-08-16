@@ -1,5 +1,6 @@
 """GKT (Graph-based Knowledge Tracing) 训练器模块"""
 
+from dataclasses import field
 from typing import Literal
 
 import numpy as np
@@ -79,15 +80,37 @@ class GKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    hidden_dim: int = 64
-    embedding_dim: int = 64
-    dropout: float = 0.5
+    hidden_dim: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
+    embedding_dim: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
+    dropout: float = field(
+        default=0.5,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     graph_type: Literal["dense", "transition"] = "dense"
     epochs: int = 150
-    learning_rate: float = 0.001
+    learning_rate: float = field(
+        default=0.001,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0001
-    batch_size: int = 128
+    weight_decay: float = field(
+        default=0.0001,
+        metadata={
+            "optuna": {"type": "float", "low": 1e-06, "high": 0.001, "log": True}
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("GKT")

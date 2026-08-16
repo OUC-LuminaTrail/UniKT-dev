@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from dataclasses import field
+
 import numpy as np
 import torch
 from torch import nn
@@ -50,24 +52,45 @@ class TCKTConfig(ModelConfig):
         batch_size: Batch size.
     """
 
-    d_k: int = 128
+    # powers of two so d_k % num_heads == 0 for every combination
+    d_k: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
     d_a: int = 64
     d_e: int = 128
-    num_heads: int = 8
-    dropout: float = 0.2
+    num_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     q_gamma: float = 0.03
     global_dict_size: int = 400
     max_rt_seconds: int = 300
     max_it_minutes: int = 120
     cluster_sample_size: int = 300000
-    learning_rate: float = 0.002
+    learning_rate: float = field(
+        default=0.002,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0005, "high": 0.005, "log": True}
+        },
+    )
     adam_beta1: float = 0.1
-    weight_decay: float = 1e-6
+    weight_decay: float = field(
+        default=1e-6,
+        metadata={"optuna": {"type": "float", "low": 1e-7, "high": 1e-3, "log": True}},
+    )
     max_grad_norm: float = 1.0
     lr_decay_step: int = 10
     lr_decay_rate: float = 0.5
     epochs: int = 100
-    batch_size: int = 32
+    batch_size: int = field(
+        default=32,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 class GlobalDictRefreshCallback(Callback):

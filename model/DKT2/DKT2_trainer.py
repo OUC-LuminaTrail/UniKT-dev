@@ -36,20 +36,42 @@ class DKT2Config(ModelConfig):
     """
 
     factor: float = 1.3
-    num_blocks: int = 1
-    num_heads: int = 2
+    num_blocks: int = field(
+        default=1,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 3}},
+    )
+    # powers of two so embedding_size (64) % num_heads == 0 for every choice
+    num_heads: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
+    )
     slstm_at: list[int] = field(default_factory=lambda: [0])
     slstm_backend: str = "cuda"
     conv1d_kernel_size: int = 4
     qkv_proj_blocksize: int = 4
     embedding_size: int = 64
-    dropout: float = 0.2
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     length: int = 1
     epochs: int = 300
-    learning_rate: float = 1e-3
-    weight_decay: float = 0.0
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},
+    )
     max_grad_norm: float = 2.0
-    batch_size: int = 512
+    batch_size: int = field(
+        default=512,
+        metadata={"optuna": {"type": "categorical", "choices": [256, 512, 1024]}},
+    )
 
 
 @register_trainer("DKT2")

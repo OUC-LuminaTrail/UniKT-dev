@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -22,12 +24,27 @@ class ReKTKCConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    hidden_dim: int = 128
-    dropout: float = 0.4
+    hidden_dim: int = field(
+        default=128,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
+    dropout: float = field(
+        default=0.4,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 70
-    learning_rate: float = 0.002
-    weight_decay: float = 1e-5
-    batch_size: int = 80
+    learning_rate: float = field(
+        default=0.002,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=80,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 80, 128]}},
+    )
 
 
 @register_trainer("ReKTKC")

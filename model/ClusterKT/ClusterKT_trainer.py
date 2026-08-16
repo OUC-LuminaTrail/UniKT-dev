@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -33,12 +35,28 @@ class ClusterKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
-    n_blocks: int = 4
-    n_heads: int = 8
-    dropout: float = 0.05
+    # powers of two so d_model % n_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
+    n_blocks: int = field(
+        default=4,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 6}},
+    )
+    n_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.05,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     d_ff: int = 1024
-    cluster_size: int = 10
+    cluster_size: int = field(
+        default=10,
+        metadata={"optuna": {"type": "int", "low": 5, "high": 20}},
+    )
     final_fc_dim: int = 512
     kq_same: int = 1
     separate_qa: int = 0
@@ -46,10 +64,22 @@ class ClusterKTConfig(ModelConfig):
     n_et: int = 1440
     cluster_loss_weight: float = 0.001
     epochs: int = 100
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 64
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("ClusterKT")

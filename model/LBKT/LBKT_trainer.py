@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -27,17 +29,35 @@ class LBKTConfig(ModelConfig):
         batch_size: Batch size for training (default: 16).
     """
 
-    dim_tp: int = 128
+    dim_tp: int = field(
+        default=128,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
     dim_hidden: int = 50
-    num_units: int = 128
-    dropout: float = 0.2
+    num_units: int = field(
+        default=128,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     q_gamma: float = 0.1
     epochs: int = 100
-    learning_rate: float = 0.001
+    learning_rate: float = field(
+        default=0.001,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay_step: int = 1
     lr_decay_rate: float = 0.5
-    weight_decay: float = 1e-6
-    batch_size: int = 16
+    weight_decay: float = field(
+        default=1e-6,
+        metadata={"optuna": {"type": "float", "low": 1e-7, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=16,
+        metadata={"optuna": {"type": "categorical", "choices": [16, 32, 64]}},
+    )
 
 
 @register_trainer("LBKT")

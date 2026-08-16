@@ -79,9 +79,7 @@ class GIKTConfig(ModelConfig):
     lr_decay: float | None = None
     weight_decay: float = field(
         default=1e-8,
-        metadata={
-            "optuna": {"type": "float", "low": 0.000001, "high": 0.001, "log": True}
-        },
+        metadata={"optuna": {"type": "float", "low": 1e-9, "high": 0.001, "log": True}},
     )
     batch_size: int = field(
         default=32,

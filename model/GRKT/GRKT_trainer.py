@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -27,17 +29,40 @@ class GRKTConfig(ModelConfig):
         batch_size: Batch size.
     """
 
-    d_hidden: int = 128
-    k_hidden: int = 16
+    d_hidden: int = field(
+        default=128,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
+    k_hidden: int = field(
+        default=16,
+        metadata={"optuna": {"type": "int", "low": 8, "high": 32}},
+    )
     pos_mode: str = "softmax"
-    k_hop: int = 1
-    thresh: float = 0.6
+    k_hop: int = field(
+        default=1,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 3}},
+    )
+    thresh: float = field(
+        default=0.6,
+        metadata={"optuna": {"type": "float", "low": 0.3, "high": 0.8}},
+    )
     tau: float = 0.2
     alpha: float = 0.01
     epochs: int = 200
-    learning_rate: float = 0.001
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    learning_rate: float = field(
+        default=0.001,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("GRKT")

@@ -30,7 +30,8 @@ class SQGKT(nn.Module):
         *,
         embedding_dim: int,
         hidden_neurons: list[int],
-        dropout_probs: list[float],
+        lstm_dropout: float,
+        gnn_dropout: float,
         n_hop: int,
         skill_neighbor_num: int,
         question_neighbor_num: int,
@@ -49,8 +50,7 @@ class SQGKT(nn.Module):
         self.embedding_dim = embedding_dim
         self.hidden_neurons = list(hidden_neurons)
         self.hidden_size = self.hidden_neurons[-1]
-        dropout_probs = list(dropout_probs)
-        self.dropout_prob = dropout_probs[0]
+        self.dropout_prob = lstm_dropout
         self.model_name = variant
         self.sim_emb = sim_emb
         self.hist_neighbor_num = hist_neighbor_num
@@ -70,7 +70,7 @@ class SQGKT(nn.Module):
             question_neighbor_num,
             skill_neighbor_num,
             self.n_hop,
-            dropout_probs,
+            [lstm_dropout, gnn_dropout, 0.0],
             aggregator,
         )
 

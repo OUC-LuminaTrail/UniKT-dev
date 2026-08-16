@@ -1,5 +1,7 @@
 """DenoiseKT 模型训练器。"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -31,10 +33,23 @@ class DenoiseKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
-    n_blocks: int = 1
-    num_attn_heads: int = 8
-    dropout: float = 0.1
+    # powers of two so d_model % num_attn_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256, 512]}},
+    )
+    n_blocks: int = field(
+        default=1,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
+    num_attn_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     dropout1: float = 0.1
     d_ff: int = 64
     final_fc_dim: int = 256
@@ -42,10 +57,20 @@ class DenoiseKTConfig(ModelConfig):
     bf: float = 0.9
     kq_same: int = 1
     epochs: int = 200
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 64
+    # linear range: log sampling requires low > 0, default is 0.0
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 1e-2}},
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128, 256]}},
+    )
 
 
 @register_trainer("DenoiseKT")

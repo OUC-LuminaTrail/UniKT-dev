@@ -1,5 +1,7 @@
 """ATKT 模型训练器"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -28,18 +30,42 @@ class ATKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    skill_emb_dim: int = 256
-    answer_emb_dim: int = 96
-    hidden_dim: int = 80
-    attention_dim: int = 80
+    skill_emb_dim: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
+    answer_emb_dim: int = field(
+        default=96,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 96, 128]}},
+    )
+    hidden_dim: int = field(
+        default=80,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 80, 128]}},
+    )
+    attention_dim: int = field(
+        default=80,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 80, 128]}},
+    )
     adversarial_beta: float = 0.2
     adversarial_epsilon: float = 10.0
     epochs: int = 150
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay_step: int = 50
     lr_decay_rate: float = 0.5
-    weight_decay: float = 0.0
-    batch_size: int = 24
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=24,
+        metadata={"optuna": {"type": "categorical", "choices": [16, 24, 32, 64]}},
+    )
 
 
 def _l2_normalize_adv(d: torch.Tensor) -> torch.Tensor:

@@ -1,5 +1,7 @@
 """CIKT 模型训练器模块。"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -28,18 +30,33 @@ class CIKTConfig(ModelConfig):
         batch_size: Batch size.
     """
 
-    d_model: int = 64
-    dropout: float = 0.5
+    d_model: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
+    dropout: float = field(
+        default=0.5,
+        metadata={"optuna": {"type": "float", "low": 0.2, "high": 0.5}},
+    )
     num_difficulty_levels: int = 10
     loss_w_causal: float = 0.1
     loss_w_intervention: float = 0.2
     loss_w_trivial: float = 0.6
     loss_w_replace: float = 0.3
     epochs: int = 100
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-5
-    batch_size: int = 8
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [8, 16, 32, 64]}},
+    )
 
 
 @register_trainer("CIKT")

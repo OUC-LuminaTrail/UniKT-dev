@@ -1,5 +1,7 @@
 """DKT+ 模型训练器模块"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -26,16 +28,34 @@ class DKTPlusConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    emb_size: int = 200
-    dropout: float = 0.1
+    emb_size: int = field(
+        default=200,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 200, 256]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     lambda_r: float = 0.2
     lambda_w1: float = 1.0
     lambda_w2: float = 10.0
     epochs: int = 150
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("DKTPlus")
