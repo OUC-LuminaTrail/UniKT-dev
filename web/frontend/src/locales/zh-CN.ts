@@ -366,7 +366,8 @@ export default {
   },
   resources: {
     pageSub: 'CPU · 内存 · 网络 · 磁盘 · GPU 实时监控',
-    liveBadge: '实时 · 2s',
+    liveBadge: '实时',
+    offline: '连接中断',
     collecting: '数据采集中…',
     cpu: 'CPU',
     load: '平均负载',

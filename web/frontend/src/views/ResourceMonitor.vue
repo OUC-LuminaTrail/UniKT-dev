@@ -5,9 +5,9 @@
         <h2 class="page-title">{{ t('route.title.resources') }}</h2>
         <span class="page-sub">{{ t('resources.pageSub') }}</span>
       </div>
-      <div class="live-badge">
+      <div class="live-badge" :class="{ offline: !live }">
         <span class="live-dot"></span>
-        <span class="live-text">{{ t('resources.liveBadge') }}</span>
+        <span class="live-text">{{ live ? t('resources.liveBadge') : t('resources.offline') }}</span>
       </div>
     </div>
 
@@ -221,7 +221,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDark } from '@vueuse/core'
 import { useQuery } from '@tanstack/vue-query'
@@ -249,11 +249,29 @@ const sys = reactive({
 const gpuHist = reactive<Record<number, { util: (number | null)[]; vram: (number | null)[] }>>({})
 const snapshot = shallowRef<ResourceSnapshot | null>(null)
 
-const { data: history, isPending: historyPending } = useQuery({
+const { data: history, isPending: historyPending, isError, dataUpdatedAt } = useQuery({
   queryKey: ['resource-history'],
   queryFn: () => getResourceHistory(lastTs.value),
   refetchInterval: 2000,
 })
+
+// A poll failing OR no fresh data for ~4 intervals means the feed is down.
+const STALE_MS = 8000
+const now = ref(Date.now())
+let nowTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  nowTimer = setInterval(() => {
+    now.value = Date.now()
+  }, 1000)
+})
+onUnmounted(() => {
+  if (nowTimer) clearInterval(nowTimer)
+})
+const live = computed(
+  () =>
+    !isError.value &&
+    (dataUpdatedAt.value === 0 || now.value - dataUpdatedAt.value < STALE_MS),
+)
 
 watch(history, (d) => {
   if (!d) return
@@ -546,6 +564,15 @@ const tempColor = (temp: number) => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-family: var(--font-mono);
+}
+
+.live-badge.offline .live-dot {
+  background: var(--accent-red);
+  animation: none;
+}
+
+.live-badge.offline .live-text {
+  color: var(--accent-red);
 }
 
 .sys-grid {

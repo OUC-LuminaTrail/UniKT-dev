@@ -366,7 +366,8 @@ export default {
   },
   resources: {
     pageSub: 'Live CPU · memory · network · disk · GPU monitoring',
-    liveBadge: 'Live · 2s',
+    liveBadge: 'Live',
+    offline: 'Offline',
     collecting: 'Collecting data…',
     cpu: 'CPU',
     load: 'Load avg',
