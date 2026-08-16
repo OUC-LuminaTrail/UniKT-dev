@@ -5,9 +5,17 @@
         <h2 class="page-title">{{ t('route.title.resources') }}</h2>
         <span class="page-sub">{{ t('resources.pageSub') }}</span>
       </div>
-      <div class="live-badge">
-        <span class="live-dot"></span>
-        <span class="live-text">{{ t('resources.liveBadge') }}</span>
+      <div class="header-controls">
+        <el-segmented
+          v-model="windowMinutes"
+          :options="windowOptions"
+          size="small"
+          :aria-label="t('resources.windowLabel')"
+        />
+        <div class="live-badge">
+          <span class="live-dot"></span>
+          <span class="live-text">{{ t('resources.liveBadge') }}</span>
+        </div>
       </div>
     </div>
 
@@ -43,10 +51,12 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                class="trend-chart sys-chart"
+                :key="`cpu-${windowMinutes}`"
+                :ref="setChart('cpu')"
+                class="trend-chart"
                 :option="cpuOption"
                 :autoresize="true"
-                :update-options="{ notMerge: true }"
+                @zr:dblclick="resetZoom('cpu')"
               />
               <div v-else class="trend-placeholder">{{ t('resources.collecting') }}</div>
             </div>
@@ -66,10 +76,12 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                class="trend-chart sys-chart"
+                :key="`mem-${windowMinutes}`"
+                :ref="setChart('mem')"
+                class="trend-chart"
                 :option="memOption"
                 :autoresize="true"
-                :update-options="{ notMerge: true }"
+                @zr:dblclick="resetZoom('mem')"
               />
               <div v-else class="trend-placeholder">{{ t('resources.collecting') }}</div>
             </div>
@@ -91,10 +103,12 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                class="trend-chart sys-chart"
+                :key="`net-${windowMinutes}`"
+                :ref="setChart('net')"
+                class="trend-chart"
                 :option="netOption"
                 :autoresize="true"
-                :update-options="{ notMerge: true }"
+                @zr:dblclick="resetZoom('net')"
               />
               <div v-else class="trend-placeholder">{{ t('resources.collecting') }}</div>
             </div>
@@ -110,10 +124,12 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                class="trend-chart sys-chart"
+                :key="`disk-${windowMinutes}`"
+                :ref="setChart('disk')"
+                class="trend-chart"
                 :option="diskOption"
                 :autoresize="true"
-                :update-options="{ notMerge: true }"
+                @zr:dblclick="resetZoom('disk')"
               />
               <div v-else class="trend-placeholder">{{ t('resources.collecting') }}</div>
             </div>
@@ -181,10 +197,12 @@
             <div class="gpu-trend">
               <VChart
                 v-if="trendReady"
+                :key="`gpu-${gpu.index}-${windowMinutes}`"
+                :ref="setChart(`gpu-${gpu.index}`)"
                 class="trend-chart"
                 :option="gpuOption(gpu.index)"
                 :autoresize="true"
-                :update-options="{ notMerge: true }"
+                @zr:dblclick="resetZoom(`gpu-${gpu.index}`)"
               />
             </div>
 
@@ -314,6 +332,22 @@ const tokens = computed(() => {
 
 const last = (arr: number[]): number => (arr.length ? arr[arr.length - 1] : 0)
 
+const windowMinutes = ref(15)
+const windowOptions = computed(() => [
+  { label: t('resources.win5'), value: 5 },
+  { label: t('resources.win15'), value: 15 },
+])
+
+type ChartLike = { dispatchAction: (opt: Record<string, unknown>) => void }
+const charts = new Map<string, ChartLike>()
+const setChart = (key: string) => (el: unknown) => {
+  if (el) charts.set(key, el as ChartLike)
+  else charts.delete(key)
+}
+const resetZoom = (key: string) => {
+  charts.get(key)?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 })
+}
+
 // Aggregate per-core bars into at most CORE_SLOTS groups so machines with
 // 64+ cores keep readable bars instead of sub-pixel slivers.
 const CORE_SLOTS = 48
@@ -354,6 +388,12 @@ const buildOption = (
   fmt: (v: number) => string = (v) => `${v.toFixed(0)}%`,
 ) => {
   const tk = tokens.value
+  // Slice all series to the selected window, anchored on the newest sample so
+  // the view stays stable even if polling pauses.
+  const cutoff = sys.ts.length ? sys.ts[sys.ts.length - 1] - windowMinutes.value * 60_000 : 0
+  let start = sys.ts.findIndex((t) => t >= cutoff)
+  if (start < 0) start = 0
+  const ts = sys.ts.slice(start)
   return {
     animation: false,
     grid: { left: 44, right: 8, top: 20, bottom: 20 },
@@ -385,14 +425,30 @@ const buildOption = (
       icon: 'roundRect',
       textStyle: { color: tk.textTertiary, fontSize: 10 },
     },
+    dataZoom: [
+      {
+        type: 'inside',
+        zoomOnMouseWheel: true,
+        moveOnMouseWheel: true,
+      },
+    ],
     tooltip: {
       trigger: 'axis',
       confine: true,
+      axisPointer: { type: 'line', snap: true, lineStyle: { color: tk.borderDefault } },
       backgroundColor: tk.bgElevated,
       borderColor: tk.borderDefault,
       borderWidth: 1,
       textStyle: { color: tk.textPrimary, fontSize: 11 },
-      valueFormatter: (v: unknown) => (v == null ? '-' : fmt(Number(v))),
+      formatter: (params: unknown) => {
+        const list = params as { marker: string; seriesName: string; value: [number, number | null] }[]
+        if (!list.length) return ''
+        const head = new Date(list[0].value[0]).toLocaleTimeString('en-GB', { hour12: false })
+        const rows = list.map(
+          (p) => `${p.marker} ${p.seriesName} ${p.value[1] == null ? '-' : fmt(Number(p.value[1]))}`,
+        )
+        return [head, ...rows].join('<br/>')
+      },
     },
     series: series.map((s) => ({
       name: s.name,
@@ -401,7 +457,9 @@ const buildOption = (
       symbol: 'none',
       lineStyle: { width: 1.5, color: s.color },
       areaStyle: s.fill ? { opacity: 0.14, color: s.color } : undefined,
-      data: sys.ts.map((ts, i) => [ts, s.values[i]]),
+      emphasis: { focus: 'series', blurScope: 'coordinateSystem' },
+      blur: { lineStyle: { opacity: 0.25 } },
+      data: ts.map((t, i) => [t, s.values[start + i]]),
     })),
   }
 }
@@ -484,6 +542,13 @@ const tempColor = (temp: number) => {
 .page-sub {
   font-size: 12px;
   color: var(--text-tertiary);
+}
+
+.header-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
 }
 
 .live-badge {
