@@ -77,16 +77,18 @@ def cmd_inference(args):
     model_name = rc.experiment.model_name
     dataset_name = rc.data.dataset
 
-    AnalyzerClass = ANALYZERS.get(model_name)
-    if AnalyzerClass is None:
+    if model_name not in ANALYZERS:
         sys.exit(
             f"Model '{model_name}' has no registered case analyzer. "
             f"Available: {sorted(ANALYZERS.keys())}"
         )
+    AnalyzerClass = ANALYZERS.get(model_name)
 
     logger.info(f"Starting inference for {model_name} on {dataset_name}...")
 
     data_src = get_data_source(rc)
+    if args.sink not in CASE_SINKS:
+        sys.exit(f"Unknown sink '{args.sink}'. Available: {sorted(CASE_SINKS.keys())}")
     sink = CASE_SINKS.get(args.sink)()
     analyzer = AnalyzerClass(
         rc=rc,
@@ -135,12 +137,12 @@ def cmd_select(args):
 
     df = load_case_results(str(predictions_path))
 
-    SelectorClass = CASE_SELECTORS.get(args.selector)
-    if SelectorClass is None:
+    if args.selector not in CASE_SELECTORS:
         sys.exit(
             f"Unknown selector '{args.selector}'. "
             f"Available: {sorted(CASE_SELECTORS.keys())}"
         )
+    SelectorClass = CASE_SELECTORS.get(args.selector)
 
     options = _filter_supported_options(
         SelectorClass,
@@ -207,12 +209,12 @@ def cmd_plot(args):
     selected_data = json.loads(selected_users_path.read_text())
     selected_users = [u["user_id"] for u in selected_data]
 
-    VisualizerClass = CASE_VISUALIZERS.get(args.visualizer)
-    if VisualizerClass is None:
+    if args.visualizer not in CASE_VISUALIZERS:
         sys.exit(
             f"Unknown visualizer '{args.visualizer}'. "
             f"Available: {sorted(CASE_VISUALIZERS.keys())}"
         )
+    VisualizerClass = CASE_VISUALIZERS.get(args.visualizer)
 
     logger.info(f"Generating plots for {len(selected_users)} users...")
 
