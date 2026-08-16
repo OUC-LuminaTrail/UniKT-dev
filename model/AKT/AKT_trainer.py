@@ -22,6 +22,7 @@ class AKTConfig(ModelConfig):
         final_fc_dim: Final fully connected layer dimension.
         kq_same: Whether key and query share the linear transformation (1=yes, 0=no).
         separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         l2: L2 regularization coefficient.
         epochs: Number of training epochs.
         learning_rate: Learning rate for optimizer.
@@ -38,6 +39,7 @@ class AKTConfig(ModelConfig):
     final_fc_dim: int = 512
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     l2: float = 1e-5
     epochs: int = 150
     learning_rate: float = 1e-4
@@ -68,12 +70,12 @@ class AKTTrainer(BaseTrainer):
 
         logger.info("Initializing AKT model...")
         metadata = data_src.get_metadata()
-        n_pid = metadata.get("num_questions", 0)
+        n_pid = metadata.get("num_questions", 0) if rc.model.use_rasch else 0
 
         if n_pid > 0:
             logger.info(f"AKT: Using Problem ID (Rasch model) with {n_pid} questions")
         else:
-            logger.info("AKT: Problem ID not available, using skill-only model")
+            logger.info("AKT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = AKT(

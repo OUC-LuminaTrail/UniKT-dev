@@ -13,7 +13,7 @@ from utils.model_data import QuestionModelData
 logger = get_logger(__name__)
 
 
-class ReKT_QDataset(Dataset):
+class ReKTDataset(Dataset):
     def __init__(self, questions, skills, responses, masks):
         self.questions = questions
         self.skills = skills
@@ -63,7 +63,7 @@ def build_combined_skill_mapping(data_src: DataSource):
     return question_to_combined, num_combined_skills
 
 
-class ReKT_QModelData(QuestionModelData):
+class ReKTModelData(QuestionModelData):
     def __init__(self, data_src: DataSource):
         super().__init__(data_src)
 
@@ -97,11 +97,11 @@ class ReKT_QModelData(QuestionModelData):
         else:
             raise ValueError("fold_idx must be specified for K-fold cross-validation")
 
-        train_dataset = ReKT_QDataset(
+        train_dataset = ReKTDataset(
             train_data[0], train_data[1], train_data[2], train_data[3]
         )
-        val_dataset = ReKT_QDataset(val_data[0], val_data[1], val_data[2], val_data[3])
-        test_dataset = ReKT_QDataset(
+        val_dataset = ReKTDataset(val_data[0], val_data[1], val_data[2], val_data[3])
+        test_dataset = ReKTDataset(
             test_data[0], test_data[1], test_data[2], test_data[3]
         )
 

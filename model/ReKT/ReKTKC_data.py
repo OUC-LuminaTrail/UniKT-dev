@@ -11,7 +11,7 @@ from utils.model_data import SkillModelData
 logger = get_logger(__name__)
 
 
-class ReKT_KCDataset(Dataset):
+class ReKTKCDataset(Dataset):
     def __init__(self, questions, skills, responses, masks):
         self.questions = questions
         self.skills = skills
@@ -30,10 +30,10 @@ class ReKT_KCDataset(Dataset):
         return len(self.questions)
 
 
-class ReKT_KCModelData(SkillModelData):
+class ReKTKCModelData(SkillModelData):
     """ReKT 的 skill-level 数据变体。
 
-    与 ReKT_QModelData 的差异：继承 SkillModelData，skill 序列直接取自
+    与 ReKTModelData 的差异：继承 SkillModelData，skill 序列直接取自
     数据源的 split_skill_sequence，而非问题→组合技能映射。
     """
 
@@ -72,10 +72,10 @@ class ReKT_KCModelData(SkillModelData):
         else:
             raise ValueError("fold_idx must be specified for K-fold cross-validation")
 
-        train_dataset = ReKT_KCDataset(
+        train_dataset = ReKTKCDataset(
             train_data[0], train_data[1], train_data[2], train_data[3]
         )
-        val_dataset = ReKT_KCDataset(val_data[0], val_data[1], val_data[2], val_data[3])
+        val_dataset = ReKTKCDataset(val_data[0], val_data[1], val_data[2], val_data[3])
 
         window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
         test_dataset = DataLoader(

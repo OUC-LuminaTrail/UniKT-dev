@@ -22,6 +22,7 @@ class extraKTConfig(ModelConfig):
         final_fc_dim: Final fully connected layer dimension.
         kq_same: Whether key and query use the same linear transformation (1=yes, 0=no).
         separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         l2: L2 regularization coefficient for Rasch model.
         num_buckets: Number of buckets for ALiBi relative position.
         max_distance: Maximum distance for ALiBi relative position.
@@ -40,6 +41,7 @@ class extraKTConfig(ModelConfig):
     final_fc_dim: int = 512
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     l2: float = 1e-5
     num_buckets: int = 32
     max_distance: int = 100
@@ -72,14 +74,14 @@ class extraKTTrainer(BaseTrainer):
 
         logger.info("Initializing extraKT model...")
         metadata = data_src.get_metadata()
-        n_pid = metadata.get("num_questions", 0)
+        n_pid = metadata.get("num_questions", 0) if rc.model.use_rasch else 0
 
         if n_pid > 0:
             logger.info(
                 f"extraKT: Using Problem ID (Rasch model) with {n_pid} questions"
             )
         else:
-            logger.info("extraKT: Problem ID not available, using skill-only model")
+            logger.info("extraKT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = extraKT(

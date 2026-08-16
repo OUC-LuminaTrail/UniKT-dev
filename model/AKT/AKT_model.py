@@ -46,8 +46,7 @@ def attention(
         )
         dist_scores = dist_scores.sqrt().detach()
 
-    m = nn.Softplus()
-    gamma = -1.0 * m(gamma).unsqueeze(0)
+    gamma = -1.0 * F.softplus(gamma).unsqueeze(0)
 
     if pdiff is None:
         total_effect = torch.clamp(
@@ -66,7 +65,7 @@ def attention(
     scores.masked_fill_(mask == 0, -1e32)
     scores = F.softmax(scores, dim=-1)
     if zero_pad:
-        pad_zero = torch.zeros(bs, head, 1, seqlen).to(device)
+        pad_zero = torch.zeros(bs, head, 1, seqlen, device=device)
         scores = torch.cat([pad_zero, scores[:, :, 1:, :]], dim=2)
     scores = dropout(scores)
     output = torch.matmul(scores, v)

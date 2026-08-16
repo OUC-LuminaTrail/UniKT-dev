@@ -23,6 +23,7 @@ class UKTConfig(ModelConfig):
         final_fc_dim2: Second fully connected layer dimension.
         kq_same: Whether key and query use the same linear transformation (1=yes, 0=no).
         separate_qa: Whether to use separate QA embeddings (1=yes, 0=no).
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         use_CL: Enable contrastive learning (1=yes, 0=no).
         cl_weight: Weight for contrastive learning loss.
         l2: L2 regularization coefficient for Rasch difficulty.
@@ -43,6 +44,7 @@ class UKTConfig(ModelConfig):
     final_fc_dim2: int = 256
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     use_CL: int = 1
     cl_weight: float = 0.02
     l2: float = 1e-5
@@ -77,11 +79,11 @@ class UKTTrainer(BaseTrainer):
 
         logger.info("Initializing UKT model...")
         metadata = data_src.get_metadata()
-        n_pid = metadata.get("num_questions", 0)
+        n_pid = metadata.get("num_questions", 0) if rc.model.use_rasch else 0
         if n_pid > 0:
             logger.info(f"UKT: Using Problem ID (Rasch model) with {n_pid} questions")
         else:
-            logger.warning("UKT: Problem ID not available, using skill-only model")
+            logger.info("UKT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = UKT(

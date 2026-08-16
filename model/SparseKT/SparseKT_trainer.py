@@ -26,6 +26,7 @@ class SparseKTConfig(ModelConfig):
         d_ff: Dimension of feed-forward network.
         kq_same: Whether to share key and query weights (1 yes, 0 no).
         separate_qa: Whether to use separate interaction embedding (1 yes, 0 no).
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         final_fc_dim: First fully connected layer dimension in output.
         final_fc_dim2: Second fully connected layer dimension in output.
         emb_type: Embedding/attention type. 'qid_sparseattn' (top-k sparse), 'qid_accumulative' (cumulative-threshold sparse), 'qid' (dense).
@@ -45,6 +46,7 @@ class SparseKTConfig(ModelConfig):
     d_ff: int = 256
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
     emb_type: str = "qid_sparseattn"
@@ -83,8 +85,13 @@ class SparseKTTrainer(BaseTrainer):
             f"k_index={m.k_index}, sparse_ratio={m.sparse_ratio})..."
         )
         metadata = data_src.get_metadata()
-        n_pid = metadata["num_questions"]
-        logger.info(f"SparseKT: Using Problem ID (Rasch model) with {n_pid} questions")
+        n_pid = metadata["num_questions"] if rc.model.use_rasch else 0
+        if n_pid > 0:
+            logger.info(
+                f"SparseKT: Using Problem ID (Rasch model) with {n_pid} questions"
+            )
+        else:
+            logger.info("SparseKT: Using skill-only model (Rasch disabled)")
 
         model = SparseKT(
             num_skills=metadata["num_skills"],
@@ -155,7 +162,8 @@ class SparseKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask)
         question = self._move_tensor_to_device(question)
 
-        pid_data = self._build_pid_data(question, mask)
+        use_pid = self.model.n_pid > 0
+        pid_data = self._build_pid_data(question, mask) if use_pid else None
 
         y_hat_full = self.model(sequence, response, mask, pid_data)
 
@@ -201,7 +209,8 @@ class SparseKTTrainer(BaseTrainer):
         question = self._move_tensor_to_device(question)
 
         valid_mask = late_group_id >= 0
-        pid_data = self._build_pid_data(question, valid_mask)
+        use_pid = self.model.n_pid > 0
+        pid_data = self._build_pid_data(question, valid_mask) if use_pid else None
 
         y_hat_full = self.model(sequence, response, mask, pid_data)
 

@@ -20,6 +20,7 @@ class Mamba4KTConfig(ModelConfig):
         d_conv: Conv1D kernel width in Mamba block.
         expand: Mamba internal expansion factor (Conv1D out channels = expand*d_model).
         dropout: Dropout probability.
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         l2: L2 regularization coefficient for Rasch difficulty parameter (lambda in Eq.11).
         epochs: Number of training epochs.
         learning_rate: Learning rate (paper: {0.003,0.002,0.001,0.0001}).
@@ -33,6 +34,7 @@ class Mamba4KTConfig(ModelConfig):
     d_conv: int = 4
     expand: int = 2
     dropout: float = 0.1
+    use_rasch: bool = True
     l2: float = 1e-5
     epochs: int = 150
     learning_rate: float = 1e-3
@@ -54,11 +56,11 @@ class Mamba4KTTrainer(BaseTrainer):
 
         logger.info("Initializing Mamba4KT model...")
         metadata = data_src.get_metadata()
-        n_pid = metadata.get("num_questions", 0)
+        n_pid = metadata.get("num_questions", 0) if rc.model.use_rasch else 0
         if n_pid > 0:
             logger.info(f"Mamba4KT: Using Rasch embeddings with {n_pid} questions")
         else:
-            logger.warning("Mamba4KT: Problem ID not available, using skill-only model")
+            logger.info("Mamba4KT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = Mamba4KT(
