@@ -42,7 +42,7 @@ class ConcatAggregator(nn.Module):
         neighbors_agg = torch.mean(neighbor_vectors, dim=-2)
         output = torch.cat([self_vectors, neighbors_agg], dim=-1)
         output = output.reshape(-1, self.dim * 2)
-        output = F.dropout(output, p=1.0 - self.dropout, training=self.training)
+        output = F.dropout(output, p=self.dropout, training=self.training)
         output = output @ self.weights + self.bias
         output = output.reshape(batch_size, seq_len, -1, self.dim)
         return self.act(output)
