@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import i18n from '@/plugins/i18n'
-import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -51,15 +50,12 @@ const router = createRouter({
       },
     },
     {
-      path: '/gpu',
-      name: 'gpu',
-      component: () => import('@/views/GPUMonitor.vue'),
-      meta: { title: 'route.title.gpu' },
-      beforeEnter: () => {
-        const { hasGpu } = useSystemCapabilities()
-        if (!hasGpu.value) return { name: 'tasks' }
-      },
+      path: '/resources',
+      name: 'resources',
+      component: () => import('@/views/ResourceMonitor.vue'),
+      meta: { title: 'route.title.resources' },
     },
+    { path: '/gpu', redirect: '/resources' },
     {
       path: '/preprocess',
       name: 'preprocess',

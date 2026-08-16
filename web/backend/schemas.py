@@ -278,6 +278,82 @@ class SystemStatusResponse(BaseModel):
     updated_at: str
 
 
+class ResourceSnapshot(BaseModel):
+    """Latest scalar gauges accompanying a resource history response.
+
+    Attributes:
+        cpu_percent: Overall CPU usage percentage.
+        cpu_cores: Per-core usage percentages of the latest sample.
+        load_1m: System load average over 1 minute.
+        load_5m: System load average over 5 minutes.
+        load_15m: System load average over 15 minutes.
+        memory_used_gb: Used system memory in gigabytes.
+        memory_total_gb: Total system memory in gigabytes.
+        memory_percent: Memory usage percentage.
+        swap_used_gb: Used swap space in gigabytes.
+        swap_total_gb: Total swap space in gigabytes.
+        swap_percent: Swap usage percentage.
+    """
+
+    cpu_percent: float
+    cpu_cores: list[float]
+    load_1m: float
+    load_5m: float
+    load_15m: float
+    memory_used_gb: float
+    memory_total_gb: float
+    memory_percent: float
+    swap_used_gb: float
+    swap_total_gb: float
+    swap_percent: float
+
+
+class GpuHistorySeries(BaseModel):
+    """Per-GPU utilization and memory percent series aligned to history timestamps.
+
+    Attributes:
+        index: GPU device index.
+        name: GPU model name.
+        utilization_percent: Utilization samples; null marks a missed query.
+        memory_percent: Memory usage percent samples; null marks a missed query.
+    """
+
+    index: int
+    name: str
+    utilization_percent: list[float | None]
+    memory_percent: list[float | None]
+
+
+class ResourceHistoryResponse(BaseModel):
+    """Column-oriented metric history with a shared epoch-millisecond axis.
+
+    Attributes:
+        timestamps: Epoch-millisecond timestamps, strictly increasing.
+        cpu_percent: Overall CPU usage percentage per sample.
+        memory_percent: RAM usage percentage per sample.
+        swap_percent: Swap usage percentage per sample.
+        net_up_bps: Network send rate in bytes per second.
+        net_down_bps: Network receive rate in bytes per second.
+        disk_read_bps: Disk read rate in bytes per second.
+        disk_write_bps: Disk write rate in bytes per second.
+        gpus: Per-GPU utilization and memory history series.
+        snapshot: Latest scalar gauges (always the global latest, unfiltered).
+        interval_seconds: Sampler interval in seconds.
+    """
+
+    timestamps: list[int]
+    cpu_percent: list[float]
+    memory_percent: list[float]
+    swap_percent: list[float]
+    net_up_bps: list[float]
+    net_down_bps: list[float]
+    disk_read_bps: list[float]
+    disk_write_bps: list[float]
+    gpus: list[GpuHistorySeries]
+    snapshot: ResourceSnapshot
+    interval_seconds: float
+
+
 class SearchCreate(BaseModel):
     """Request model for creating a hyperparameter search task.
 
