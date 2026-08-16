@@ -30,7 +30,8 @@ class SQGKTConfig(ModelConfig):
         sim_emb: Similarity embedding: skill_emb/question_emb/feature.
         embedding_dim: Embedding dimension.
         hidden_neurons: Hidden sizes for each LSTM layer; last layer must equal embedding_dim.
-        dropout_probs: Dropout probabilities for [LSTM, GNN, eval].
+        lstm_dropout: Dropout probability on LSTM outputs (default: 0.2).
+        gnn_dropout: Dropout probability of the GNN graph aggregators (default: 0.2).
         epochs: Number of training epochs.
         learning_rate: Learning rate.
         lr_decay: Learning rate decay factor per epoch.
@@ -59,7 +60,14 @@ class SQGKTConfig(ModelConfig):
     sim_emb: str = "question_emb"
     embedding_dim: int = 100
     hidden_neurons: list[int] = field(default_factory=lambda: [200, 100])
-    dropout_probs: list[float] = field(default_factory=lambda: [0.2, 0.2, 0.0])
+    lstm_dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
+    gnn_dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 100
     learning_rate: float = field(
         default=1e-3,
@@ -105,7 +113,8 @@ class SQGKTTrainer(BaseTrainer):
             data_metadata=metadata,
             embedding_dim=m.embedding_dim,
             hidden_neurons=list(m.hidden_neurons),
-            dropout_probs=list(m.dropout_probs),
+            lstm_dropout=m.lstm_dropout,
+            gnn_dropout=m.gnn_dropout,
             n_hop=m.n_hop,
             skill_neighbor_num=m.skill_neighbor_num,
             question_neighbor_num=m.question_neighbor_num,
