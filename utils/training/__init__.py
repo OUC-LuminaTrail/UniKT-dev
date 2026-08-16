@@ -15,6 +15,7 @@ from .callbacks import (
     TestEvaluationCallback,
 )
 from .early_stopping import EarlyStopping
+from .inference_ops import InferenceOpsMixin
 from .metric_logger import (
     LocalMetricLogger,
     MetricLogger,
@@ -35,6 +36,7 @@ __all__ = [
     "EarlyStopping",
     "EarlyStoppingCallback",
     "FunctionCallback",
+    "InferenceOpsMixin",
     "LocalMetricLogger",
     "MemoryCleanupCallback",
     "MetricLogger",
