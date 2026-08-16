@@ -20,6 +20,9 @@ from .logger import (
 from .random import seed_everything
 from .registry import (
     ANALYZERS,
+    CASE_SELECTORS,
+    CASE_SINKS,
+    CASE_VISUALIZERS,
     DATA_SOURCES,
     EFFICIENCY_STAGES,
     METRIC_LOGGERS,
@@ -28,6 +31,9 @@ from .registry import (
     TRAINERS,
     UniversalRegistry,
     register_analyzer,
+    register_case_selector,
+    register_case_sink,
+    register_case_visualizer,
     register_data_source,
     register_efficiency_stage,
     register_metric,
@@ -87,6 +93,9 @@ def get_supported_stages() -> list[str]:
 
 __all__ = [
     "ANALYZERS",
+    "CASE_SELECTORS",
+    "CASE_SINKS",
+    "CASE_VISUALIZERS",
     "DATA_SOURCES",
     "EFFICIENCY_STAGES",
     "METRICS",
@@ -106,6 +115,9 @@ __all__ = [
     "get_supported_stages",
     "load_env",
     "register_analyzer",
+    "register_case_selector",
+    "register_case_sink",
+    "register_case_visualizer",
     "register_data_source",
     "register_efficiency_stage",
     "register_metric",

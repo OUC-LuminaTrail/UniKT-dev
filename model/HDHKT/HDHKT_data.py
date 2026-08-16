@@ -12,12 +12,24 @@ logger = get_logger(__name__)
 
 
 class HDHKTDataset(Dataset):
-    def __init__(self, sequences, responses, masks):
+    def __init__(self, sequences, responses, masks, user_ids=None):
         self.sequences = torch.as_tensor(sequences, dtype=torch.long)
         self.responses = torch.as_tensor(responses, dtype=torch.long)
         self.masks = torch.as_tensor(masks, dtype=torch.bool)
+        self.user_ids = (
+            torch.as_tensor(user_ids, dtype=torch.long)
+            if user_ids is not None
+            else None
+        )
 
     def __getitem__(self, index):
+        if self.user_ids is not None:
+            return (
+                self.user_ids[index],
+                self.sequences[index],
+                self.responses[index],
+                self.masks[index],
+            )
         return (
             self.sequences[index],
             self.responses[index],
@@ -33,14 +45,20 @@ class HDHKTModelData(QuestionModelData):
         super().__init__(data_src)
 
     @override
-    def prepare_data(self, rc: Any):
+    def prepare_data(self, rc: Any, with_user_ids: bool = False):
         r"""
         准备HDHKT模型所需的数据
+
+        When ``with_user_ids=True``, each Dataset additionally returns the
+        user id per sample (for case analysis); the training path keeps
+        the 3-tuple layout unchanged.
         """
         fold_idx = rc.data.fold if rc.data.fold >= 0 else None
         kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
 
-        user_sequence, user_response, user_mask, _ = self.load_sequence_data()
+        user_sequence, user_response, user_mask, user_id_sequence = (
+            self.load_sequence_data()
+        )
 
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
@@ -84,17 +102,41 @@ class HDHKTModelData(QuestionModelData):
             logger.info(
                 f"Using K-fold cross-validation: fold {fold_idx + 1}/{kfold_n_splits}"
             )
-            train_data, val_data, test_data = self.split_kfold_data(
-                user_sequence, user_response, user_mask, fold_idx=fold_idx
-            )
+            if with_user_ids:
+                train_data, val_data, test_data = self.split_kfold_data(
+                    user_sequence,
+                    user_response,
+                    user_mask,
+                    user_id_sequence,
+                    fold_idx=fold_idx,
+                )
+            else:
+                train_data, val_data, test_data = self.split_kfold_data(
+                    user_sequence, user_response, user_mask, fold_idx=fold_idx
+                )
         else:
             raise ValueError(
                 "K-fold cross-validation is required for HDHKT. Please specify a valid fold index."
             )
 
-        train_dataset = HDHKTDataset(train_data[0], train_data[1], train_data[2])
-        val_dataset = HDHKTDataset(val_data[0], val_data[1], val_data[2])
-        test_dataset = HDHKTDataset(test_data[0], test_data[1], test_data[2])
+        train_dataset = HDHKTDataset(
+            train_data[0],
+            train_data[1],
+            train_data[2],
+            user_ids=train_data[3] if with_user_ids else None,
+        )
+        val_dataset = HDHKTDataset(
+            val_data[0],
+            val_data[1],
+            val_data[2],
+            user_ids=val_data[3] if with_user_ids else None,
+        )
+        test_dataset = HDHKTDataset(
+            test_data[0],
+            test_data[1],
+            test_data[2],
+            user_ids=test_data[3] if with_user_ids else None,
+        )
 
         return_data = {
             "train_dataset": train_dataset,

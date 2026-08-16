@@ -11,12 +11,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from ...core import get_logger
+from ...core import get_logger, register_case_visualizer
+from ..interfaces import CaseVisualizer
 
 logger = get_logger(__name__)
 
 
-class HeatmapVisualizer:
+@register_case_visualizer("heatmap")
+class HeatmapVisualizer(CaseVisualizer):
     """Generates knowledge state heatmap visualizations for case analysis.
 
     Creates a visual representation of a student's answer sequence showing:
@@ -34,6 +36,16 @@ class HeatmapVisualizer:
         plt.rcParams["figure.dpi"] = 100
         plt.rcParams["savefig.dpi"] = 300
         plt.rcParams["font.size"] = 10
+
+    def plot_user(
+        self,
+        user_data: pd.DataFrame,
+        user_id: int,
+        *,
+        output_path: str | None = None,
+    ) -> plt.Figure:
+        """Plot a knowledge state heatmap for one user (plugin entrypoint)."""
+        return self.plot_user_heatmap(user_data, user_id, output_path=output_path)
 
     def plot_user_heatmap(
         self,
