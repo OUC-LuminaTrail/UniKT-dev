@@ -194,6 +194,13 @@ EFFICIENCY_STAGES = UniversalRegistry(
     "efficiency_stages", decorator_name="register_efficiency_stage"
 )
 METRICS = UniversalRegistry("metrics", decorator_name="register_metric")
+CASE_SINKS = UniversalRegistry("case_sinks", decorator_name="register_case_sink")
+CASE_SELECTORS = UniversalRegistry(
+    "case_selectors", decorator_name="register_case_selector"
+)
+CASE_VISUALIZERS = UniversalRegistry(
+    "case_visualizers", decorator_name="register_case_visualizer"
+)
 
 
 # ============================================================================
@@ -299,3 +306,39 @@ def register_metric(name: str | None = None):
         A decorator that registers the class with ``METRICS``.
     """
     return METRICS.register(name)
+
+
+def register_case_sink(name: str | None = None):
+    """Register a case analysis result sink into ``CASE_SINKS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``CASE_SINKS``.
+    """
+    return CASE_SINKS.register(name)
+
+
+def register_case_selector(name: str | None = None):
+    """Register a case analysis user selector into ``CASE_SELECTORS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``CASE_SELECTORS``.
+    """
+    return CASE_SELECTORS.register(name)
+
+
+def register_case_visualizer(name: str | None = None):
+    """Register a case analysis visualizer into ``CASE_VISUALIZERS``.
+
+    Args:
+        name: Optional registration name. Defaults to the class name.
+
+    Returns:
+        A decorator that registers the class with ``CASE_VISUALIZERS``.
+    """
+    return CASE_VISUALIZERS.register(name)
