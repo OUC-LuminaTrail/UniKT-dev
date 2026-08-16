@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import i18n from '@/plugins/i18n'
-import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -29,15 +28,34 @@ const router = createRouter({
       },
     },
     {
-      path: '/gpu',
-      name: 'gpu',
-      component: () => import('@/views/GPUMonitor.vue'),
-      meta: { title: 'route.title.gpu' },
-      beforeEnter: () => {
-        const { hasGpu } = useSystemCapabilities()
-        if (!hasGpu.value) return { name: 'tasks' }
+      path: '/search',
+      name: 'searches',
+      component: () => import('@/views/SearchList.vue'),
+      meta: { title: 'route.title.searches' },
+    },
+    {
+      path: '/search/new',
+      name: 'search-new',
+      component: () => import('@/views/SearchLaunch.vue'),
+      meta: { title: 'route.title.search-new', parent: 'searches', flush: true },
+    },
+    {
+      path: '/search/:id',
+      name: 'search-detail',
+      component: () => import('@/views/SearchDetail.vue'),
+      meta: { title: 'route.title.search-detail', parent: 'searches' },
+      beforeEnter: (to) => {
+        const id = Number(to.params.id)
+        if (isNaN(id) || id <= 0) return { name: 'searches' }
       },
     },
+    {
+      path: '/resources',
+      name: 'resources',
+      component: () => import('@/views/ResourceMonitor.vue'),
+      meta: { title: 'route.title.resources' },
+    },
+    { path: '/gpu', redirect: '/resources' },
     {
       path: '/preprocess',
       name: 'preprocess',

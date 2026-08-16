@@ -23,6 +23,7 @@ class CSKTConfig(ModelConfig):
         gamma: Cone attention temperature parameter.
         kq_same: Whether key and query share the linear projection (1=yes, 0=no).
         separate_qa: Whether to use a separate interaction embedding (1=yes, 0=no).
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         final_fc_dim: First fully connected layer dimension in output head.
         final_fc_dim2: Second fully connected layer dimension in output head.
         emb_type: Embedding type ('qid' vector difficulty, 'qid_scalar' scalar).
@@ -42,6 +43,7 @@ class CSKTConfig(ModelConfig):
     gamma: float = 1.0
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
     emb_type: str = "qid"
@@ -75,12 +77,12 @@ class CSKTTrainer(BaseTrainer):
         logger.info("Initializing CSKT model...")
         metadata = data_src.get_metadata()
         # Question count feeds the Rasch question-difficulty term (n_pid)
-        n_pid = metadata.get("num_questions", 0)
+        n_pid = metadata.get("num_questions", 0) if rc.model.use_rasch else 0
 
         if n_pid > 0:
             logger.info(f"CSKT: Using Rasch question difficulty with {n_pid} questions")
         else:
-            logger.info("CSKT: Question ID not available, using skill-only model")
+            logger.info("CSKT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = CSKT(

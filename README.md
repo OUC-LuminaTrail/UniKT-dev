@@ -101,13 +101,17 @@ Each experiment is saved under `runs/` with its resolved configuration, checkpoi
 
 ### Tracking experiments
 
-Metrics are always written locally. SwanLab tracking is enabled by default; sign in once before logging runs to the service:
+Metrics are always written locally. Cloud tracking is enabled by default (`--general.cloud_tracking`, on by default); the backend is chosen by the `KT_TRACKING_BACKEND` env var (`swanlab` | `wandb`, default `swanlab`), and the two are mutually exclusive.
+
+For SwanLab, sign in once before logging runs:
 
 ```bash
 pixi run swanlab login
 ```
 
-For a local-only run, pass `--general.swanlab false`. Optional `SWANLAB_WORKSPACE`, `SWANLAB_MODE`, and `LARK_WEBHOOK_URL` settings belong in `.env`.
+For W&B, set `WANDB_API_KEY` (or `pixi run wandb login`) and `export KT_TRACKING_BACKEND=wandb`.
+
+For a local-only run, pass `--general.cloud_tracking false`. Backend settings (`KT_SWANLAB_*`, `KT_WANDB_*`, `SWANLAB_MODE`, `LARK_WEBHOOK_URL`) belong in `.env`.
 
 ## Web manager
 

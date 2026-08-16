@@ -54,6 +54,7 @@ autodoc_mock_imports = [
     "causal_conv1d",
     "xlstm",
     "swanlab",
+    "wandb",
     "optuna",
     "pandas",
     "matplotlib",

@@ -8,6 +8,7 @@ export interface ParamField {
   choices: string[] | null
   short: string | null
   nargs: string | null
+  optuna: Record<string, any> | null
 }
 
 export interface ParamGroup {

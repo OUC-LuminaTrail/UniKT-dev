@@ -397,20 +397,39 @@ class ProcessManager:
         model_name: str,
         params: dict,
     ) -> list[str]:
-        """Build a ``train.py`` invocation directly from frontend form values.
+        """Build a CLI invocation from frontend form values.
 
-        Routes flat params into dotted ``--node.field=value`` flags via cached
-        schema routes; ``-m``/``-d`` short flags for model and dataset;
-        default-equal params are omitted.
+        Dispatches on ``params["task_kind"]``: ``"optuna"`` launches a
+        hyperparameter search via ``optuna_search.py`` (emitting
+        ``--optuna_config``/``--metric``/``--output_dir``), anything else runs
+        ``train.py``. Both scripts share the same RunConfig flag contract, so
+        model/data/general params are routed identically via the cached schema
+        routes; default-equal params are omitted.
         """
         routes = self._schema_extractor.get_field_routes(model_name)
         defaults = self._schema_extractor.get_field_defaults(model_name)
-        args = ["train.py", "-m", model_name]
+
+        is_search = params.get("task_kind") == "optuna"
+        script = "optuna_search.py" if is_search else "train.py"
+        args = [script, "-m", model_name]
+
+        if is_search:
+            config_path = params.get("optuna_config_path")
+            if config_path:
+                args.extend(["--optuna_config", str(config_path)])
+            metric = params.get("metric")
+            if metric:
+                args.extend(["--metric", str(metric)])
+            output_dir = params.get("output_dir")
+            if output_dir:
+                args.extend(["--output_dir", str(output_dir)])
 
         dataset = params.get("dataset")
         if dataset:
             args.extend(["-d", str(dataset)])
 
+        # build_param_flags skips fields without a RunConfig route, so optuna-only
+        # keys (task_kind/metric/optuna_config_path/output_dir) are excluded.
         form_params = {k: v for k, v in params.items() if k != "dataset"}
         args.extend(build_param_flags(form_params, routes, defaults))
         return args

@@ -10,10 +10,19 @@ from .env import load_env
 # isort: on
 
 from .discovery import discover_registrations
-from .logger import get_logger, reset_loggers, set_log_level
+from .logger import (
+    add_file_handler,
+    get_logger,
+    remove_file_handler,
+    reset_loggers,
+    set_log_level,
+)
 from .random import seed_everything
 from .registry import (
     ANALYZERS,
+    CASE_SELECTORS,
+    CASE_SINKS,
+    CASE_VISUALIZERS,
     DATA_SOURCES,
     EFFICIENCY_STAGES,
     METRIC_LOGGERS,
@@ -22,6 +31,9 @@ from .registry import (
     TRAINERS,
     UniversalRegistry,
     register_analyzer,
+    register_case_selector,
+    register_case_sink,
+    register_case_visualizer,
     register_data_source,
     register_efficiency_stage,
     register_metric,
@@ -81,6 +93,9 @@ def get_supported_stages() -> list[str]:
 
 __all__ = [
     "ANALYZERS",
+    "CASE_SELECTORS",
+    "CASE_SINKS",
+    "CASE_VISUALIZERS",
     "DATA_SOURCES",
     "EFFICIENCY_STAGES",
     "METRICS",
@@ -89,6 +104,7 @@ __all__ = [
     # Registries
     "TRAINERS",
     "UniversalRegistry",
+    "add_file_handler",
     # Discovery
     "discover_registrations",
     # Logger
@@ -99,6 +115,9 @@ __all__ = [
     "get_supported_stages",
     "load_env",
     "register_analyzer",
+    "register_case_selector",
+    "register_case_sink",
+    "register_case_visualizer",
     "register_data_source",
     "register_efficiency_stage",
     "register_metric",
@@ -106,6 +125,7 @@ __all__ = [
     "register_model_config",
     # Decorators
     "register_trainer",
+    "remove_file_handler",
     "reset_loggers",
     # Random
     "seed_everything",

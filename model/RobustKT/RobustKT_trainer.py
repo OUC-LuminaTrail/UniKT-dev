@@ -23,6 +23,7 @@ class RobustKTConfig(ModelConfig):
         dropout: Dropout probability.
         kq_same: Whether key and query use the same linear transformation.
         separate_qa: Whether to use separate QA embeddings.
+        use_rasch: Whether to enable the Rasch problem-id difficulty model (True=yes).
         l2: Rasch difficulty regularization coefficient.
         epochs: Number of training epochs.
         learning_rate: Learning rate for optimizer.
@@ -41,6 +42,7 @@ class RobustKTConfig(ModelConfig):
     dropout: float = 0.2
     kq_same: int = 1
     separate_qa: int = 0
+    use_rasch: bool = True
     l2: float = 1e-5
     epochs: int = 150
     learning_rate: float = 1e-4
@@ -64,18 +66,18 @@ class RobustKTTrainer(BaseTrainer):
 
         metadata = data_src.get_metadata()
         logger.info("Initializing RobustKT model...")
-        if metadata.get("num_questions", 0) > 0:
+        num_questions = metadata.get("num_questions", 0) if rc.model.use_rasch else 0
+        if num_questions > 0:
             logger.info(
-                "RobustKT: Using Problem ID (Rasch model) with "
-                f"{metadata['num_questions']} questions"
+                f"RobustKT: Using Problem ID (Rasch model) with {num_questions} questions"
             )
         else:
-            logger.warning("RobustKT: Problem ID not available, using skill-only model")
+            logger.info("RobustKT: Using skill-only model (Rasch disabled)")
 
         m = rc.model
         model = RobustKT(
             num_skills=metadata["num_skills"],
-            num_questions=metadata["num_questions"],
+            num_questions=num_questions,
             dropout=m.dropout,
             kq_same=m.kq_same,
             l2=m.l2,

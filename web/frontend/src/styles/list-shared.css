@@ -1,0 +1,227 @@
+/* Shared list-page styles (TaskList / SearchList).
+   Extracted from TaskList so both lists render identically. */
+
+.list-view .page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.list-view .page-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.list-view .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  background: var(--accent-blue);
+  color: #fff;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  border: 1px solid var(--accent-blue);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.btn-primary:hover {
+  background: #388bfd;
+  border-color: #388bfd;
+}
+
+html.dark .list-view .btn-primary:hover {
+  background: #1f6feb;
+  border-color: #1f6feb;
+}
+
+.list-view .task-table {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.list-view .table-pagination {
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+.list-view .task-name-link {
+  color: var(--text-primary);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s;
+}
+
+.task-name-link:hover {
+  color: var(--accent-blue);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.list-view .task-name-text {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.list-view .env-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-elevated);
+  border-radius: 20px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-muted);
+}
+
+.list-view .gpu-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--soft-green);
+  border-radius: 20px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--accent-green);
+  border: 1px solid var(--border-muted);
+}
+
+.list-view .mono-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.list-view .action-group {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.list-view .action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  text-decoration: none;
+}
+
+.action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+}
+
+.action-stop:hover {
+  color: var(--accent-orange);
+  background: var(--soft-orange);
+}
+
+.action-delete:hover {
+  color: var(--accent-red);
+  background: var(--soft-red);
+}
+
+.list-view .batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.list-view .batch-info {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.batch-info strong {
+  color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.list-view .batch-delete-btn,
+.list-view .batch-cancel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  background: var(--soft-red);
+  color: var(--accent-red);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.list-view .batch-delete-btn:hover,
+.batch-cancel-btn:hover {
+  background: var(--accent-red);
+  border-color: var(--accent-red);
+  color: #fff;
+}
+
+.list-view .batch-stop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 14px;
+  background: var(--soft-orange);
+  color: var(--accent-orange);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.batch-stop-btn:hover {
+  background: var(--accent-orange);
+  border-color: var(--accent-orange);
+  color: #fff;
+}
+
+.list-view .batch-clear-btn {
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--text-tertiary);
+  border: 1px solid var(--border-muted);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font-sans);
+}
+
+.batch-clear-btn:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+
+.list-view .batch-bar-enter-active,
+.list-view .batch-bar-leave-active {
+  transition: all 0.2s ease;
+}
+
+.list-view .batch-bar-enter-from,
+.list-view .batch-bar-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}

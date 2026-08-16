@@ -1,6 +1,8 @@
 """Optuna tuner wrapper and utility tools."""
 
 import os
+import shutil
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
@@ -48,6 +50,7 @@ class OptunaTuner:
         # Create study
         self.study: optuna.Study | None = None
         self._param_importances: dict[str, float] | None = None
+        self._pareto_front: list[optuna.trial.FrozenTrial] | None = None
         self._setup_logging()
 
     def _setup_logging(self):
@@ -102,6 +105,9 @@ class OptunaTuner:
             self.config.study_name
             or f"study_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         )
+        # Persist so --resume reuses the name; otherwise a fresh timestamp
+        # creates an empty study and the prior trials are lost.
+        self.config.study_name = study_name
 
         study_kwargs = {
             "sampler": sampler,
@@ -151,9 +157,18 @@ class OptunaTuner:
         # Assess fANOVA parameter importances (best-effort)
         self._param_importances = self._compute_param_importances()
 
+        # Resolve the Pareto front once; reused by _best_trial / _best_params /
+        # print_summary so the non-dominated sort is not repeated each call.
+        if len(self.study.directions) > 1:
+            self._pareto_front = self.study.best_trials
+
         # Save results
         if self.config.save_dir:
             self._save_results()
+
+        # Surface a clear error if nothing completed; done after _save_results so
+        # failure details (recorded via trial user_attrs) are still persisted.
+        self._raise_if_all_failed()
 
         return self._best_params()
 
@@ -161,8 +176,11 @@ class OptunaTuner:
         """Enqueue declared defaults as a startup trial.
 
         Speeds up sampler convergence. Parameters without declared defaults
-        are sampled normally during the trial.
+        are sampled normally during the trial. Skipped on resume so the
+        enqueued trial does not eat into ``n_trials`` a second time.
         """
+        if self.study.trials:
+            return
         defaults = {
             space.name: space.default
             for space in self.param_space
@@ -176,19 +194,127 @@ class OptunaTuner:
     def _best_params(self) -> dict[str, Any]:
         """Return the best parameters.
 
-        Compatible with multi-objective studies and studies with no completed trials.
+        Delegates to :meth:`_best_trial`, so single- and multi-objective share a
+        single selection path.
 
         Returns:
             Dictionary of best parameters, or empty dict if unavailable.
         """
+        best = self._best_trial()
+        return best.params if best is not None else {}
+
+    def _best_trial(self) -> optuna.trial.FrozenTrial | None:
+        """Return the best trial, or None if unavailable.
+
+        Single-objective returns ``study.best_trial``. Multi-objective picks one
+        trial from the Pareto front via :meth:`_pick_pareto_representative` (a
+        deterministic tie-break) so the choice is stable across resumes. The
+        result is always a COMPLETE trial.
+        """
         if len(self.study.directions) > 1:
-            pareto = self.study.best_trials
-            return pareto[0].params if pareto else {}
+            pareto = self._pareto_front
+            if pareto is None:
+                pareto = self.study.best_trials
+            if not pareto:
+                return None
+            return self._pick_pareto_representative(pareto)
         try:
-            return self.study.best_params
+            return self.study.best_trial
         except ValueError:
-            logger.warning("No completed trials; cannot determine best params")
-            return {}
+            logger.warning("No completed trials; cannot determine best trial")
+            return None
+
+    def _pick_pareto_representative(
+        self, pareto: list[optuna.trial.FrozenTrial]
+    ) -> optuna.trial.FrozenTrial:
+        """Deterministically pick one trial from a Pareto front.
+
+        Front members are all non-dominated, so the pick is conventional: best on
+        the first objective (in its optimisation direction), ties broken by
+        lowest trial number. This makes the representative stable and
+        reproducible across resumes and optuna versions.
+        """
+        first_dir = self.study.directions[0]
+        if first_dir == optuna.study.StudyDirection.MAXIMIZE:
+            return min(pareto, key=lambda t: (-t.values[0], t.number))
+        return min(pareto, key=lambda t: (t.values[0], t.number))
+
+    def _raise_if_all_failed(self) -> None:
+        """Log trial-outcome counts and raise only when trials actually failed.
+
+        On total failure, attach the last recorded traceback (stored on the trial
+        by ``TrainerObjectiveWrapper``) so the root cause surfaces instead of a
+        silent empty ``best_params``. An all-pruned run is not a failure.
+        """
+        counts = Counter(t.state for t in self.study.trials)
+        n_complete = counts.get(optuna.trial.TrialState.COMPLETE, 0)
+        n_fail = counts.get(optuna.trial.TrialState.FAIL, 0)
+        n_pruned = counts.get(optuna.trial.TrialState.PRUNED, 0)
+        # Enqueued defaults sit in WAITING; exclude them from the evaluated total.
+        n_total = sum(
+            1 for t in self.study.trials if t.state != optuna.trial.TrialState.WAITING
+        )
+        logger.info(
+            f"Trial outcomes: {n_complete} COMPLETE, {n_fail} FAIL, {n_pruned} PRUNED"
+        )
+        if n_complete > 0:
+            return
+        if n_fail == 0:
+            logger.warning(
+                f"No trial completed out of {n_total} (0 COMPLETE, 0 FAIL, "
+                f"{n_pruned} PRUNED); all evaluated trials were pruned."
+            )
+            return
+
+        detail = ""
+        failed = next(
+            (t for t in self.study.trials if t.state == optuna.trial.TrialState.FAIL),
+            None,
+        )
+        if failed is not None:
+            err = failed.user_attrs.get("error", "unknown")
+            tb = failed.user_attrs.get("traceback")
+            detail = (
+                f"\nLast failure ({err}):\n{tb}" if tb else f"\nLast failure: {err}"
+            )
+        raise RuntimeError(
+            f"All {n_total} trial(s) failed "
+            f"(0 COMPLETE, {n_fail} FAIL, {n_pruned} PRUNED).{detail}"
+        )
+
+    def _save_best_run_config(self) -> None:
+        """Copy the best trial's full ``run_config.yaml`` for reproduction.
+
+        Each trial archives its complete RunConfig under ``trial_<N>/``. Copying
+        the best trial's archive to ``best_run_config.yaml`` lets the result be
+        reproduced with ``python train.py --config best_run_config.yaml``.
+        """
+        best = self._best_trial()
+        if best is None:
+            logger.warning("No best trial; skipping best_run_config.yaml")
+            return
+
+        trial_dir = best.user_attrs.get("trial_dir")
+        if trial_dir is None:
+            trial_dir = os.path.join(self.config.save_dir, f"trial_{best.number}")
+        src = os.path.join(trial_dir, "run_config.yaml")
+        if not os.path.isfile(src):
+            logger.warning(
+                f"Best trial run_config not found at {src}; "
+                "skipping best_run_config.yaml"
+            )
+            return
+
+        dst = os.path.join(self.config.save_dir, "best_run_config.yaml")
+        shutil.copy2(src, dst)
+        # Multi-objective: this is one representative of the Pareto front, not a
+        # unique optimum (see _pick_pareto_representative).
+        is_multi = len(self.study.directions) > 1
+        note = " (representative of the Pareto front)" if is_multi else ""
+        logger.info(
+            f"Best run config saved to {dst}{note}\n"
+            f"Reproduce with: python train.py --config {dst}"
+        )
 
     def _compute_param_importances(self) -> dict[str, float] | None:
         """Assess fANOVA parameter importances from completed trials.
@@ -223,7 +349,9 @@ class OptunaTuner:
         except Exception as e:
             logger.warning(f"Param importance evaluation failed: {e}")
             return None
-        return dict(importances)
+        # Optuna's fANOVA evaluator returns numpy float64 values, which yaml
+        # cannot serialize; coerce to plain floats.
+        return {name: float(value) for name, value in importances.items()}
 
     def _save_results(self):
         """Save search results to disk as yaml."""
@@ -239,14 +367,25 @@ class OptunaTuner:
             encoding="utf-8",
         )
 
+        # Best trial's full run_config.yaml for one-command reproduction
+        try:
+            self._save_best_run_config()
+        except Exception as e:
+            logger.warning(f"Failed to save best_run_config.yaml: {e}")
+
         # Search history
         history_path = os.path.join(self.config.save_dir, "search_history.yaml")
         trials_data = [
             {
                 "number": trial.number,
-                "value": trial.value,
+                # trial.value is None for multi-objective trials; fall back to
+                # the full values list so the history stays serialisable.
+                "value": trial.value if trial.value is not None else trial.values,
                 "params": trial.params,
                 "state": trial.state.name,
+                "error": trial.user_attrs.get("error"),
+                "best_epoch": trial.user_attrs.get("best_epoch"),
+                "duration_sec": trial.user_attrs.get("duration_sec"),
             }
             for trial in self.study.trials
         ]
@@ -280,31 +419,27 @@ class OptunaTuner:
 
         logger.info(f"Results saved to {self.config.save_dir}")
 
-    def get_best_trial(self) -> optuna.Trial | None:
-        """Retrieve the best trial from the study.
-
-        Returns:
-            The best Trial, or None if no study exists.
-        """
-        if not self.study:
-            return None
-        return self.study.best_trial
-
     def print_summary(self):
         """Print a summary of the search results."""
         if not self.study:
             logger.warning("No study found. Run search() first.")
             return
 
+        state_counts = Counter(t.state.name for t in self.study.trials)
         log = [
             "=" * 60,
             "Optuna Hyperparameter Search Summary",
             "=" * 60,
             f"Study Name: {self.study.study_name}",
             f"Total Trials: {len(self.study.trials)}",
+            (
+                f"COMPLETE: {state_counts.get('COMPLETE', 0)}, "
+                f"FAIL: {state_counts.get('FAIL', 0)}, "
+                f"PRUNED: {state_counts.get('PRUNED', 0)}"
+            ),
         ]
         if len(self.study.directions) > 1:
-            pareto = self.study.best_trials
+            pareto = self._pareto_front or self.study.best_trials
             log.append(f"Pareto-optimal trials: {len(pareto)}")
             for t in pareto[:5]:
                 log.append(f"  trial {t.number}: values={t.values}")

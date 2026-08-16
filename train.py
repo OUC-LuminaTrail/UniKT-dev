@@ -1,8 +1,10 @@
 """Unified knowledge tracing training script."""
 
+from pathlib import Path
+
 import model  # noqa: F401
 from utils.config import ConfigParser
-from utils.core import TRAINERS, get_logger, seed_everything
+from utils.core import TRAINERS, add_file_handler, get_logger, seed_everything
 from utils.data_process import get_data_source
 from utils.experiment_manager import ExperimentManager, ExperimentType
 
@@ -19,6 +21,7 @@ def main():
     # Seed as early as possible so init, data loading, and training RNG are reproducible.
     seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
     exp_manager = ExperimentManager.from_run_config(rc, ExperimentType.NORMAL)
+    add_file_handler(Path(exp_manager.get_log_dir()) / "run.log")
     logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")
 
     logger.info(f"Building dataset: {rc.data.dataset}...")

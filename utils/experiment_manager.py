@@ -138,7 +138,7 @@ class ExperimentManager:
         sub_dir = self.exp_dir / sub_name
         sub_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create a new ExperimentManager reusing the parent's timestamp and config
+        # Bypass __init__: reuse the parent's attributes and point at a sub-directory.
         sub_manager = ExperimentManager.__new__(ExperimentManager)
         sub_manager.exp_type = self.exp_type
         sub_manager.model_name = self.model_name
@@ -146,6 +146,7 @@ class ExperimentManager:
         sub_manager.base_dir = self.base_dir
         sub_manager.tags = [*self.tags, sub_name]
         sub_manager.exp_dir = sub_dir
+        sub_manager.is_existing_run = self.is_existing_run
 
         logger.debug(f"Sub-experiment created: {sub_dir}")
         return sub_manager

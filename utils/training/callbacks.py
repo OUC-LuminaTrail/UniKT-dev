@@ -80,7 +80,7 @@ class Callback(ABC):
         Args:
             epoch: Current epoch number.
             phase: Phase name, e.g. ``"train"`` or ``"val"``.
-            loss: Total loss for this phase.
+            loss: Mean loss per batch for this phase.
             metrics: Metric dictionary for this phase.
             **kwargs: Additional keyword arguments (e.g. trainer).
         """
@@ -294,7 +294,7 @@ class CallbackManager:
         Args:
             epoch: Current epoch number.
             phase: Phase name.
-            loss: Total loss for this phase.
+            loss: Mean loss per batch for this phase.
             metrics: Metric dictionary for this phase.
             **kwargs: Additional keyword arguments.
         """
@@ -369,7 +369,7 @@ class EarlyStoppingCallback(Callback):
         Args:
             epoch: Current epoch number.
             phase: Phase name (only ``"val"`` triggers the check).
-            loss: Total loss for this phase.
+            loss: Mean loss per batch for this phase.
             metrics: Metric dictionary for this phase.
             **kwargs: Additional keyword arguments (e.g. trainer).
         """
@@ -514,7 +514,7 @@ class CheckpointCallback(Callback):
         Args:
             epoch: Current epoch number.
             phase: Phase name (only ``"val"`` triggers saving).
-            loss: Total loss for this phase.
+            loss: Mean loss per batch for this phase.
             metrics: Metric dictionary for this phase.
             **kwargs: Additional keyword arguments (e.g. trainer).
         """
@@ -649,7 +649,7 @@ class MemoryCleanupCallback(Callback):
         Args:
             epoch: Current epoch number.
             phase: Phase name.
-            loss: Total loss for this phase.
+            loss: Mean loss per batch for this phase.
             metrics: Metric dictionary for this phase.
             **kwargs: Additional keyword arguments.
         """

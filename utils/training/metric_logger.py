@@ -6,7 +6,12 @@ DATA_SOURCES / get_data_source).
 
 Backends:
 - LocalMetricLogger: Local CSV logging, always enabled.
-- SwanLabMetricLogger: SwanLab remote logging, enabled by default, disabled via ``--general.swanlab false``.
+- SwanLabMetricLogger: SwanLab remote logging.
+- WandbMetricLogger: Weights & Biases remote logging.
+
+Cloud tracking (SwanLab or W&B) is enabled by ``--general.cloud_tracking``
+(default on); the two are mutually exclusive — ``KT_TRACKING_BACKEND``
+selects which (``swanlab`` | ``wandb``, default ``swanlab``).
 """
 
 import atexit
@@ -332,6 +337,7 @@ class SwanLabMetricLogger(MetricLogger):
             config: Experiment configuration dict.
         """
         import swanlab
+        from swanlab.exceptions import AuthenticationError
         from swanlab.plugin.notification import LarkCallback
 
         callbacks = []
@@ -342,8 +348,18 @@ class SwanLabMetricLogger(MetricLogger):
 
         # Re-authenticate per run: SwanLab revokes the session token on
         # finish() but the SDK reuses the now-invalid client, so the next run
-        # in the same process would 401 on every request.
-        swanlab.login(relogin=True)
+        # in the same process would 401 on every request. Only re-authenticate
+        # when a stored key exists — without one, login() raises
+        # AuthenticationError and would short-circuit swanlab.init's own
+        # interactive login prompt (prompt_init_mode), the only path that
+        # actually surfaces an API-key input box.
+        try:
+            swanlab.login(relogin=True)
+        except AuthenticationError:
+            logger.info(
+                "No stored SwanLab API key; deferring to interactive login "
+                "inside swanlab.init."
+            )
         # reinit finalizes any still-active run (e.g. a prior trial that raised
         # before finishing) before starting this one, instead of erroring out.
         swanlab.init(
@@ -466,6 +482,163 @@ class SwanLabMetricLogger(MetricLogger):
         import swanlab
 
         swanlab.finish()
+        self._initialized = False
+
+
+@register_metric_logger("wandb")
+class WandbMetricLogger(MetricLogger):
+    """Weights & Biases metric logging backend.
+
+    ``wandb`` is lazily imported inside each method to keep it an
+    optional dependency at import time.
+
+    Step handling: W&B rejects non-monotonic ``step`` values (it drops the
+    offending log call), but our callers pass two incompatible scales —
+    ``log_metrics``/``log_timing``/test use an epoch-based step while
+    ``log_early_stopping`` (callbacks.py) uses the batch-level
+    ``_global_step``. Interleaving them makes the step jump backward every
+    epoch, so W&B would silently drop almost every record. We therefore
+    ignore the external ``step`` and advance our own counter on every
+    commit. (SwanLab tolerates non-monotonic steps, so SwanLabMetricLogger
+    forwards the raw value unchanged.)
+    """
+
+    def __init__(self):
+        """Initialize the W&B logger with uninitialized state."""
+        self._initialized = False
+        self._step = 0
+
+    def init_run(self, *, log_dir, experiment_name, group, tags, config) -> None:
+        """Initialize the W&B run.
+
+        Authentication is handled by the wandb SDK itself (``WANDB_API_KEY``
+        env var or previously configured credentials), so unlike SwanLab no
+        per-run relogin is needed.
+
+        Args:
+            log_dir: Log directory (wandb local files land here).
+            experiment_name: Name of this run.
+            group: Experiment group (model class name).
+            tags: Tags for the run.
+            config: Experiment configuration dict.
+        """
+        import wandb
+
+        wandb.init(
+            project=os.getenv("KT_WANDB_PROJECT") or "UniKT",
+            entity=os.getenv("KT_WANDB_ENTITY") or None,
+            name=experiment_name,
+            dir=log_dir,
+            config=config,
+            group=group,
+            tags=tags,
+            reinit="finish_previous",
+        )
+        self._initialized = True
+
+    def _commit(self, payload: dict[str, Any]) -> None:
+        """Log a payload on the next self-managed monotonic step."""
+        import wandb
+
+        wandb.log(payload, step=self._step)
+        self._step += 1
+
+    @staticmethod
+    def _prefix(phase: str, stage: str | None) -> str:
+        """Build a W&B metric prefix from phase and optional stage."""
+        return f"{stage}/{phase}/" if stage else f"{phase}/"
+
+    def log_metrics(self, *, phase, metrics, step, epoch, stage=None) -> None:
+        """Log epoch-level metrics to W&B.
+
+        Metric names are grouped as ``{stage/}{phase}/{name}`` (e.g.
+        ``train/acc``, ``km/val/auc``) so wandb auto-groups panels by slash.
+
+        Args:
+            phase: Phase name (e.g. ``"train"``, ``"val"``).
+            metrics: Metric name to value mapping.
+            step: Ignored — see class docstring (callers pass a non-monotonic
+                mix of epoch- and batch-based steps).
+            epoch: Current epoch number (unused in W&B).
+            stage: Stage name (optional).
+        """
+        if not self._initialized:
+            return
+        prefix = self._prefix(phase, stage)
+        payload = {f"{prefix}{name}": v for name, v in metrics.items() if v is not None}
+        if payload:
+            self._commit(payload)
+
+    def log_early_stopping(
+        self,
+        *,
+        phase,
+        best_score,
+        num_bad_epochs,
+        best_metrics,
+        step,
+        epoch,
+        stage=None,
+    ) -> None:
+        """Log early stopping trajectory to W&B.
+
+        Args:
+            phase: Phase name.
+            best_score: Best monitored score.
+            num_bad_epochs: Consecutive epochs without improvement.
+            best_metrics: Best metric values (optional).
+            step: Ignored — see class docstring.
+            epoch: Current epoch number (unused in W&B).
+            stage: Stage name (optional).
+        """
+        if not self._initialized:
+            return
+        sp = f"{stage}/" if stage else ""
+        data = {
+            f"{sp}early_stopping/best_score": best_score,
+            f"{sp}early_stopping/num_bad_epochs": num_bad_epochs,
+        }
+        if best_metrics:
+            data.update(
+                {f"{sp}early_stopping/best_{k}": v for k, v in best_metrics.items()}
+            )
+        self._commit(data)
+
+    def log_batch(self, **kwargs) -> None:
+        """No-op: W&B does not log per-batch metrics to avoid noise."""
+
+    def log_final(self, *, metrics, step) -> None:
+        """Log final summary metrics to W&B.
+
+        Args:
+            metrics: Final metric values (keys already carry a ``Final/``
+                prefix from the caller).
+            step: Ignored — see class docstring.
+        """
+        if not self._initialized or not metrics:
+            return
+        self._commit(metrics)
+
+    def log_timing(self, *, step, epoch, timings, stage=None) -> None:
+        """Log per-epoch timing breakdown to W&B for a stage."""
+        if not self._initialized:
+            return
+        sp = f"{stage}/" if stage else ""
+        data = {
+            f"{sp}time/{k.replace('_time', '')}": v
+            for k, v in timings.items()
+            if v is not None
+        }
+        if data:
+            self._commit(data)
+
+    def finish(self) -> None:
+        """Finish the W&B run and clean up."""
+        if not self._initialized:
+            return
+        import wandb
+
+        wandb.finish()
         self._initialized = False
 
 
@@ -671,24 +844,43 @@ def _async_enabled() -> bool:
     return val not in ("0", "false", "no", "")
 
 
+def _select_tracking_backend() -> str:
+    """Read the ``KT_TRACKING_BACKEND`` env var (default ``swanlab``).
+
+    Returns ``"swanlab"`` or ``"wandb"``. An unrecognized value raises
+    ``ValueError`` rather than silently rerouting to the wrong backend — a
+    typo would otherwise push every run to SwanLab while the user watches
+    the W&B dashboard. Treated as infrastructure (like ``LOG_LEVEL``), not
+    an experiment parameter, so no CLI plumbing.
+    """
+    backend = os.getenv("KT_TRACKING_BACKEND", "swanlab").strip().lower() or "swanlab"
+    if backend not in ("swanlab", "wandb"):
+        raise ValueError(
+            f"Unknown KT_TRACKING_BACKEND={backend!r}. Valid: swanlab | wandb."
+        )
+    return backend
+
+
 def build_default_metric_loggers(
     *,
     log_dir: str,
     log_batch_metrics: bool,
-    swanlab: bool,
+    cloud_tracking: bool,
     async_io: bool | None = None,
 ) -> MetricLogger:
     """Build the default metric logger composite.
 
-    Local CSV logging is always enabled; SwanLab is included unless
-    ``swanlab`` is ``False``. Each backend is wrapped in
-    :class:`AsyncMetricLoggerProxy` when async I/O is enabled (default), so a
-    slow SwanLab upload cannot serialize the local CSV write.
+    Local CSV logging is always enabled. When ``cloud_tracking`` is ``True``,
+    exactly one remote backend is added, selected by ``KT_TRACKING_BACKEND``
+    (``swanlab`` | ``wandb``, default ``swanlab``) — the two are mutually
+    exclusive. Each backend is wrapped in :class:`AsyncMetricLoggerProxy`
+    when async I/O is enabled (default), so a slow remote upload cannot
+    serialize the local CSV write.
 
     Args:
         log_dir: Directory for local CSV logs.
         log_batch_metrics: Whether to log per-batch loss.
-        swanlab: If False, skip SwanLab backend.
+        cloud_tracking: If False, skip the remote backend entirely.
         async_io: Override async I/O. ``None`` reads ``METRIC_LOGGING_ASYNC``
             (default enabled).
 
@@ -701,8 +893,9 @@ def build_default_metric_loggers(
     loggers: list[MetricLogger] = [
         get_metric_logger("local", log_dir=log_dir, log_batch_metrics=log_batch_metrics)
     ]
-    if swanlab:
-        loggers.append(get_metric_logger("swanlab"))
+    if cloud_tracking:
+        backend = _select_tracking_backend()
+        loggers.append(get_metric_logger(backend))
 
     if async_io:
         logger.debug(
@@ -718,6 +911,7 @@ __all__ = [
     "MetricLogger",
     "MetricLoggerComposite",
     "SwanLabMetricLogger",
+    "WandbMetricLogger",
     "build_default_metric_loggers",
     "get_metric_logger",
 ]

@@ -30,6 +30,7 @@ from .callbacks import (
 )
 from .checkpoint import CheckpointManager
 from .early_stopping import EarlyStopping
+from .inference_ops import InferenceOpsMixin
 from .metric_logger import build_default_metric_loggers
 from .metrics import MetricsAccumulator
 from .runtime_components import RuntimeComponents
@@ -57,7 +58,7 @@ class StageResult:
     monitor: str = "auc"
 
 
-class BaseTrainer(ABC):
+class BaseTrainer(InferenceOpsMixin, ABC):
     r"""Abstract base class for trainers.
 
     A single-stage trainer is constructed in one step::
@@ -156,6 +157,19 @@ class BaseTrainer(ABC):
         """Return extra callbacks for this run (default: none)."""
         return []
 
+    def add_callback(self, callback: Callback) -> None:
+        """Append a callback to the active run after construction.
+
+        Single-stage trainers already have a live callback list (built in
+        :meth:`build`). Multi-stage trainers build their per-stage callback
+        manager lazily from ``_custom_callbacks`` — registering there ensures the
+        callback runs in every stage.
+        """
+        if self.callback_manager is not None:
+            self.callback_manager.callbacks.append(callback)
+        else:
+            self._custom_callbacks.append(callback)
+
     # ==================== Build ====================
 
     def build(self) -> "BaseTrainer":
@@ -210,7 +224,7 @@ class BaseTrainer(ABC):
         self.metric_logger = build_default_metric_loggers(
             log_dir=self.log_dir,
             log_batch_metrics=self.run_config.general.log_batch_metrics,
-            swanlab=self.run_config.general.swanlab,
+            cloud_tracking=self.run_config.general.cloud_tracking,
         )
 
         # 8. Callbacks
@@ -370,136 +384,6 @@ class BaseTrainer(ABC):
         """
         return self.forward_pass(batch_data)
 
-    @staticmethod
-    def _try_gpu() -> torch.device:
-        """Get the best available GPU device, falling back to CPU.
-
-        Returns:
-            A torch.device, ``"cuda"`` if available else ``"cpu"``.
-        """
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    def _move_tensor_to_device(
-        self, tensor: torch.Tensor, dtype: torch.dtype = None
-    ) -> torch.Tensor:
-        """Move a tensor to the trainer's device, optionally casting dtype.
-
-        Args:
-            tensor: Input tensor.
-            dtype: Target dtype (e.g. ``torch.bool``), optional.
-
-        Returns:
-            Tensor moved to device and optionally cast.
-        """
-        result = tensor.to(self.device_)
-        if dtype is not None:
-            result = result.to(dtype)
-        return result
-
-    def _extract_valid_predictions(
-        self,
-        y_hat_full: torch.Tensor,
-        response: torch.Tensor,
-        mask: torch.Tensor,
-        same_position: bool = False,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Extract predictions and labels at valid positions.
-
-        Convention: ``y_hat_full[t]`` predicts ``response[t+1]``
-        (next-item). Extraction always follows next-item alignment:
-        ``y_hat_full[:, :-1]`` paired with ``response[:, 1:]``, with
-        valid mask ``mask[:, :-1] & mask[:, 1:]``.
-
-        When ``same_position=True``, the input uses same-position
-        convention (``out[t]`` predicts ``response[t]``). The output
-        is left-shifted by one and padded with a placeholder column
-        to normalize into next-item view before extraction — no second
-        alignment is introduced.
-
-        Args:
-            y_hat_full: Model output tensor ``[B, S]``.
-            response: Response label tensor ``[B, S]``.
-            mask: Valid position mask ``[B, S]``.
-            same_position: Whether input uses same-position convention
-                (``out[t]`` predicts ``response[t]``).
-
-        Returns:
-            Tuple ``(y_hat, y_label, valid_mask)`` where:
-                y_hat: Predictions at valid positions.
-                y_label: Labels at valid positions.
-                valid_mask: Mask of valid adjacent pairs.
-        """
-        # Normalize same-position input to next-item view
-        if same_position:
-            y_hat_full = self._pad_to_full_sequence(y_hat_full[:, 1:])
-
-        # Next-item alignment: t-th prediction corresponds to (t+1)-th label
-        y_hat_seq = y_hat_full[:, :-1]
-        y_label_seq = response.float()[:, 1:]
-        mask_curr = mask[:, :-1]
-        mask_next = mask[:, 1:]
-        valid_mask = mask_curr & mask_next
-
-        # Select valid positions with masking
-        y_hat = torch.masked_select(y_hat_seq, valid_mask)
-        y_label = torch.masked_select(y_label_seq, valid_mask)
-
-        return y_hat, y_label, valid_mask
-
-    def _pad_to_full_sequence(self, y_hat: torch.Tensor) -> torch.Tensor:
-        """Pad a tensor with a trailing zero column, extending ``[B, L]`` to ``[B, L+1]``.
-
-        Used for models (GKT, SAKT, SGKT, MIKT, KQN) whose output
-        length is ``S-1`` under next-item convention. The trailing
-        placeholder is discarded by ``_extract_valid_predictions``'s
-        ``[:, :-1]`` slice.
-
-        Args:
-            y_hat: Model output ``[B, L]``.
-
-        Returns:
-            Tensor ``[B, L+1]`` with a zero placeholder at the last column.
-        """
-        dummy = torch.zeros(y_hat.size(0), 1, device=y_hat.device)
-        return torch.cat([y_hat, dummy], dim=1)
-
-    def _handle_empty_batch(
-        self, y_hat: torch.Tensor, y_label: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Handle an empty batch by raising a descriptive error.
-
-        Args:
-            y_hat: Prediction tensor.
-            y_label: Label tensor.
-
-        Returns:
-            The input ``(y_hat, y_label)`` tuple unchanged.
-
-        Raises:
-            ValueError: If the label tensor is empty.
-        """
-        if y_label.numel() == 0:
-            raise ValueError(
-                "Empty valid targets in current batch: no positions satisfy "
-                "the training mask alignment. Please check data preprocessing/sampling "
-                "settings (e.g., min_seq_len, sample_users, batch_size)."
-            )
-        return y_hat, y_label
-
-    def _generate_binary_predictions(
-        self, y_hat: torch.Tensor, threshold: float = 0.0
-    ) -> torch.Tensor:
-        """Generate binary predictions from logits using a threshold.
-
-        Args:
-            y_hat: Prediction logits.
-            threshold: Classification threshold (default 0.0).
-
-        Returns:
-            Binary prediction tensor (0 or 1).
-        """
-        return torch.ge(y_hat, torch.tensor(threshold).to(self.device_)).to(torch.int)
-
     def _get_device_info(self):
         """Get device information including CUDA device details.
 
@@ -559,8 +443,8 @@ class BaseTrainer(ABC):
     def _init_metric_logger(self):
         """Initialize the metric logging backend.
 
-        Local CSV logging is always enabled; SwanLab is included unless
-        ``--general.swanlab false`` was set.
+        Local CSV logging is always enabled; cloud tracking (SwanLab or
+        W&B) is included unless ``--general.cloud_tracking false`` was set.
         """
         from utils.config import config_to_dict
 
@@ -778,7 +662,7 @@ class BaseTrainer(ABC):
             task_id: Progress task ID (optional).
 
         Returns:
-            Total loss for this epoch.
+            Sample-weighted mean loss for this epoch.
         """
         phase = "train" if is_train else "val"
         data_loader = self.train_data if is_train else self.val_data
@@ -787,17 +671,22 @@ class BaseTrainer(ABC):
         self.model.train() if is_train else self.model.eval()
         self.callback_manager.on_phase_begin(epoch, phase, trainer=self)
 
-        total_loss = 0.0
+        weighted_loss_sum = 0.0
+        total_samples = 0
         for batch_idx, batch_data in enumerate(data_loader):
             self.callback_manager.on_batch_begin(epoch, batch_idx, phase, trainer=self)
 
             with torch.set_grad_enabled(is_train):
                 if is_train:
-                    loss = self._run_train_batch(batch_data)
+                    loss, n_samples = self._run_train_batch(batch_data)
                 else:
-                    loss = self._run_eval_batch(batch_data)
+                    loss, n_samples = self._run_eval_batch(batch_data)
 
-            total_loss += loss
+            # Weight by valid element count so a short final partial batch
+            # cannot dominate the epoch average (and skew cross-batch-size
+            # Optuna loss comparison).
+            weighted_loss_sum += loss * n_samples
+            total_samples += n_samples
 
             # Log per-batch loss (optional) and update global step
             if self.run_config.general.log_batch_metrics:
@@ -821,6 +710,10 @@ class BaseTrainer(ABC):
 
         # Aggregate and log metrics
         metrics = self.metrics_accumulator.compute(phase)
+        # Sample-weighted mean is comparable across batch sizes; expose via
+        # metrics["loss"] for logging + callbacks.
+        mean_loss = weighted_loss_sum / total_samples if total_samples > 0 else 0.0
+        metrics["loss"] = mean_loss
         self.metric_logger.log_metrics(
             phase=phase,
             metrics=metrics,
@@ -830,10 +723,10 @@ class BaseTrainer(ABC):
         )
 
         self.callback_manager.on_phase_end(
-            epoch, phase, total_loss, metrics, trainer=self
+            epoch, phase, mean_loss, metrics, trainer=self
         )
 
-        return total_loss
+        return mean_loss
 
     def compute_train_step(
         self, batch_data: tuple[Any, ...]
@@ -857,7 +750,7 @@ class BaseTrainer(ABC):
         self.opt.step()
         return output, loss
 
-    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> float:
+    def _run_train_batch(self, batch_data: tuple[Any, ...]) -> tuple[float, int]:
         """Execute a single training batch.
 
         Performs forward pass, loss computation, backpropagation, gradient
@@ -868,28 +761,31 @@ class BaseTrainer(ABC):
             batch_data: A batch of training data.
 
         Returns:
-            Loss value for this batch (Python scalar).
+            ``(loss, n_samples)``: the per-batch mean loss (Python scalar) and
+            the number of valid elements it was averaged over, so the epoch
+            loop can weight by sample count.
         """
         output, loss = self.compute_train_step(batch_data)
         self.metrics_accumulator.update("train", output)
-        return loss.item()
+        return loss.item(), output["y_label"].numel()
 
     @torch.inference_mode()
-    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> float:
+    def _run_eval_batch(self, batch_data: tuple[Any, ...]) -> tuple[float, int]:
         """Execute a single evaluation (validation) batch.
 
         Args:
             batch_data: A batch of validation data.
 
         Returns:
-            Loss value for this batch (Python scalar).
+            ``(loss, n_samples)``: the per-batch mean loss (Python scalar) and
+            the number of valid elements it was averaged over.
         """
         output = self.forward_pass(batch_data)
         loss = self._compute_loss(output)
 
         self.metrics_accumulator.update("val", output)
 
-        return loss.item()
+        return loss.item(), output["y_label"].numel()
 
     @torch.inference_mode()
     def _run_test_batch(self, batch_data: tuple[Any, ...]) -> float:

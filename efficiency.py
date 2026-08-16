@@ -20,7 +20,7 @@ from pathlib import Path
 
 import model  # noqa: F401  — triggers trainer/model-config discovery
 from utils.config import ConfigParser, build_node
-from utils.core import get_logger
+from utils.core import add_file_handler, get_logger
 from utils.data_process import get_data_source
 from utils.efficiency import EfficiencySession, EfficiencySweep
 from utils.efficiency.config import get_efficiency_config_cls
@@ -34,7 +34,7 @@ def main() -> None:
     """Build the model, run all enabled efficiency stages, and print the report."""
     rc, eff_cfg = _parse()
     # Suppress trainer side effects irrelevant to benchmarking.
-    rc.general.swanlab = False
+    rc.general.cloud_tracking = False
     rc.general.checkpoint_path = None
     rc.general.skip_test = True
 
@@ -53,6 +53,7 @@ def main() -> None:
 def _run_single_efficiency(rc, eff_cfg, weights_path: str | None) -> None:
     """Build one trainer and run a single efficiency session."""
     exp_manager = ExperimentManager.from_run_config(rc, ExperimentType.EFFICIENCY)
+    add_file_handler(Path(exp_manager.get_log_dir()) / "run.log")
     output_dir = eff_cfg.general.output_dir or exp_manager.get_log_dir()
     logger.info(f"[Benchmark] output_dir={output_dir}")
 

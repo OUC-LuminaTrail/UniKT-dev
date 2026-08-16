@@ -4,12 +4,11 @@ Provides endpoints to create, list, get, stop, kill, delete, and resize tasks,
 as well as managing the task execution queue (list and reorder).
 """
 
-import contextlib
 import json
 import logging
 from datetime import datetime
 
-from config import TASK_LOGS_DIR
+from config import SEARCH_TASK_MARKER, TASK_LOGS_DIR
 from database import SessionLocal
 from dependencies import get_line_cache, get_process_manager
 from errors import AppError
@@ -21,6 +20,11 @@ from schemas import TaskCreate, TaskResponse
 from services.line_render import LineRenderCache
 from services.process_manager import ProcessManager
 from services.python_env import EnvironmentNotConfigured
+from services.task_lifecycle import (
+    delete_task_handler,
+    kill_task_handler,
+    stop_task_handler,
+)
 from services.task_state import transition
 from sqlalchemy import desc, select
 
@@ -123,6 +127,9 @@ def list_tasks(
             Task.finished_at.is_(None).desc(),
             desc(Task.finished_at),
         )
+        # Exclude optuna search tasks (owned by the search router) so the training
+        # list only shows train.py runs.
+        stmt = stmt.where(Task.extra_params.notlike(SEARCH_TASK_MARKER))
         if status:
             stmt = stmt.where(Task.status == status)
         return paginate(session, stmt, params=params)
@@ -152,18 +159,10 @@ def get_task(task_id: int):
 def stop_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     """Request a graceful stop of a running task.
 
-    Args:
-        task_id: The task identifier.
-        pm: Injected ProcessManager singleton.
-
-    Returns:
-        A dict with ``status`` set to ``stopping``.
-
     Raises:
         AppError: 400 if the task cannot be stopped.
     """
-    if not pm.stop_task(task_id):
-        raise AppError("cannot_stop_task")
+    stop_task_handler(pm, task_id)
     return {"status": "stopping"}
 
 
@@ -171,18 +170,10 @@ def stop_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
 def kill_task(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     """Force-kill a running task.
 
-    Args:
-        task_id: The task identifier.
-        pm: Injected ProcessManager singleton.
-
-    Returns:
-        A dict with ``status`` set to ``killed``.
-
     Raises:
         AppError: 400 if the task cannot be killed.
     """
-    if not pm.kill_task(task_id):
-        raise AppError("cannot_kill_task")
+    kill_task_handler(pm, task_id)
     return {"status": "killed"}
 
 
@@ -194,39 +185,11 @@ def delete_task(
 ):
     """Delete a task and its associated logs.
 
-    Args:
-        task_id: The task identifier.
-        pm: Injected ProcessManager singleton.
-        cache: Injected LineRenderCache singleton.
-
-    Returns:
-        A dict with ``status`` set to ``deleted``.
-
     Raises:
         AppError: 404 if the task does not exist,
             400 if the task is still active (running or stopping).
     """
-    with SessionLocal() as session:
-        task = session.get(Task, task_id)
-        if not task:
-            raise AppError("task_not_found", 404)
-        if task.status in ("running", "stopping"):
-            raise AppError("cannot_delete_active_task")
-        if task.status == "interrupted":
-            # Kill the orphan pid and drop the recover monitor before the row
-            # goes away, so neither outlives the delete.
-            pm.force_cleanup_interrupted(task_id)
-        if task.status == "pending":
-            pm.remove_from_queue(task_id)
-        session.delete(task)
-        session.commit()
-
-    log_path = TASK_LOGS_DIR / f"{task_id}.log"
-    if log_path.is_file():
-        with contextlib.suppress(OSError):
-            log_path.unlink()
-    cache.evict(log_path)
-    return {"status": "deleted"}
+    return delete_task_handler(pm, cache, task_id, TASK_LOGS_DIR)
 
 
 @router.get("/queue/list")

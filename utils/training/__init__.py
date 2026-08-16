@@ -15,10 +15,12 @@ from .callbacks import (
     TestEvaluationCallback,
 )
 from .early_stopping import EarlyStopping
+from .inference_ops import InferenceOpsMixin
 from .metric_logger import (
     LocalMetricLogger,
     MetricLogger,
     SwanLabMetricLogger,
+    WandbMetricLogger,
     build_default_metric_loggers,
     get_metric_logger,
 )
@@ -34,6 +36,7 @@ __all__ = [
     "EarlyStopping",
     "EarlyStoppingCallback",
     "FunctionCallback",
+    "InferenceOpsMixin",
     "LocalMetricLogger",
     "MemoryCleanupCallback",
     "MetricLogger",
@@ -45,6 +48,7 @@ __all__ = [
     "StageResult",
     "SwanLabMetricLogger",
     "TestEvaluationCallback",
+    "WandbMetricLogger",
     "build_default_metric_loggers",
     "get_metric_logger",
 ]

@@ -82,3 +82,22 @@ class EfficiencyStage(ABC):
         table.add_column("Key", style="yellow", no_wrap=True)
         table.add_column("Value", style="white")
         return table
+
+    @classmethod
+    def add_latency_rows(cls, table: Table, result: Any) -> None:
+        """Render the latency/peak rows shared by the forward-benchmark stages."""
+        table.add_row("Latency mean", f"{result.latency_mean_ms:.3f} ms")
+        table.add_row(
+            "Latency p50 / p95 / p99",
+            f"{result.latency_p50_ms:.3f} / {result.latency_p95_ms:.3f} / {result.latency_p99_ms:.3f} ms",
+        )
+        table.add_row("Latency cv", f"{result.latency_cv:.3f}")
+        table.add_row("Repeat cv (stability)", f"{result.latency_repeat_cv:.3f}")
+        if result.gpu_peak_allocated_mib is not None:
+            table.add_row(
+                "GPU peak (allocated)", f"{result.gpu_peak_allocated_mib:,.0f} MiB"
+            )
+        if result.gpu_peak_reserved_mib is not None:
+            table.add_row(
+                "GPU peak (reserved)", f"{result.gpu_peak_reserved_mib:,.0f} MiB"
+            )
