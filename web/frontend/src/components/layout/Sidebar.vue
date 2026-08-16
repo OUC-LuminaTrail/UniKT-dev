@@ -62,7 +62,6 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useDark, useToggle } from '@vueuse/core'
 import { Upload, Monitor, Grid, Setting, Sunny, Moon, Expand, Fold, Aim } from '@element-plus/icons-vue'
-import { useSystemCapabilities } from '@/composables/useSystemCapabilities'
 
 defineProps<{
   collapsed: boolean
@@ -79,19 +78,12 @@ const toggleDark = useToggle(isDark)
 
 const { t } = useI18n()
 
-const { hasGpu } = useSystemCapabilities()
-
-const navItems = computed(() => {
-  const items = [
-    { path: '/preprocess', label: t('nav.preprocess'), icon: Upload },
-    { path: '/tasks', label: t('nav.tasks'), icon: Monitor },
-    { path: '/search', label: t('nav.search'), icon: Aim },
-  ]
-  if (hasGpu.value) {
-    items.push({ path: '/gpu', label: t('nav.gpu'), icon: Grid })
-  }
-  return items
-})
+const navItems = computed(() => [
+  { path: '/preprocess', label: t('nav.preprocess'), icon: Upload },
+  { path: '/tasks', label: t('nav.tasks'), icon: Monitor },
+  { path: '/search', label: t('nav.search'), icon: Aim },
+  { path: '/resources', label: t('nav.resources'), icon: Grid },
+])
 
 const activeIndex = computed(() => {
   const path = route.path
