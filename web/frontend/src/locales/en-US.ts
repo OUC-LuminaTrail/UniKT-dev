@@ -367,9 +367,6 @@ export default {
   resources: {
     pageSub: 'Live CPU · memory · network · disk · GPU monitoring',
     liveBadge: 'Live · 2s',
-    windowLabel: 'Time window',
-    win5: '5m',
-    win15: '15m',
     collecting: 'Collecting data…',
     cpu: 'CPU',
     load: 'Load avg',

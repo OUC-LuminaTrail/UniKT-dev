@@ -5,17 +5,9 @@
         <h2 class="page-title">{{ t('route.title.resources') }}</h2>
         <span class="page-sub">{{ t('resources.pageSub') }}</span>
       </div>
-      <div class="header-controls">
-        <el-segmented
-          v-model="windowMinutes"
-          :options="windowOptions"
-          size="small"
-          :aria-label="t('resources.windowLabel')"
-        />
-        <div class="live-badge">
-          <span class="live-dot"></span>
-          <span class="live-text">{{ t('resources.liveBadge') }}</span>
-        </div>
+      <div class="live-badge">
+        <span class="live-dot"></span>
+        <span class="live-text">{{ t('resources.liveBadge') }}</span>
       </div>
     </div>
 
@@ -51,7 +43,6 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                :key="`cpu-${windowMinutes}`"
                 :ref="setChart('cpu')"
                 class="trend-chart"
                 :option="cpuOption"
@@ -76,7 +67,6 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                :key="`mem-${windowMinutes}`"
                 :ref="setChart('mem')"
                 class="trend-chart"
                 :option="memOption"
@@ -103,7 +93,6 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                :key="`net-${windowMinutes}`"
                 :ref="setChart('net')"
                 class="trend-chart"
                 :option="netOption"
@@ -124,7 +113,6 @@
             <div class="chart-wrap">
               <VChart
                 v-if="trendReady"
-                :key="`disk-${windowMinutes}`"
                 :ref="setChart('disk')"
                 class="trend-chart"
                 :option="diskOption"
@@ -197,7 +185,6 @@
             <div class="gpu-trend">
               <VChart
                 v-if="trendReady"
-                :key="`gpu-${gpu.index}-${windowMinutes}`"
                 :ref="setChart(`gpu-${gpu.index}`)"
                 class="trend-chart"
                 :option="gpuOption(gpu.index)"
@@ -332,12 +319,6 @@ const tokens = computed(() => {
 
 const last = (arr: number[]): number => (arr.length ? arr[arr.length - 1] : 0)
 
-const windowMinutes = ref(15)
-const windowOptions = computed(() => [
-  { label: t('resources.win5'), value: 5 },
-  { label: t('resources.win15'), value: 15 },
-])
-
 type ChartLike = { dispatchAction: (opt: Record<string, unknown>) => void }
 const charts = new Map<string, ChartLike>()
 const setChart = (key: string) => (el: unknown) => {
@@ -388,12 +369,6 @@ const buildOption = (
   fmt: (v: number) => string = (v) => `${v.toFixed(0)}%`,
 ) => {
   const tk = tokens.value
-  // Slice all series to the selected window, anchored on the newest sample so
-  // the view stays stable even if polling pauses.
-  const cutoff = sys.ts.length ? sys.ts[sys.ts.length - 1] - windowMinutes.value * 60_000 : 0
-  let start = sys.ts.findIndex((t) => t >= cutoff)
-  if (start < 0) start = 0
-  const ts = sys.ts.slice(start)
   return {
     animation: false,
     grid: { left: 44, right: 8, top: 20, bottom: 20 },
@@ -459,7 +434,7 @@ const buildOption = (
       areaStyle: s.fill ? { opacity: 0.14, color: s.color } : undefined,
       emphasis: { focus: 'series', blurScope: 'coordinateSystem' },
       blur: { lineStyle: { opacity: 0.25 } },
-      data: ts.map((t, i) => [t, s.values[start + i]]),
+      data: sys.ts.map((t, i) => [t, s.values[i]]),
     })),
   }
 }
@@ -544,13 +519,6 @@ const tempColor = (temp: number) => {
   color: var(--text-tertiary);
 }
 
-.header-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
 .live-badge {
   display: flex;
   align-items: center;
@@ -582,14 +550,8 @@ const tempColor = (temp: number) => {
 
 .sys-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 16px;
-}
-
-@media (max-width: 1100px) {
-  .sys-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .res-card {
@@ -645,7 +607,7 @@ const tempColor = (temp: number) => {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 36px;
+  height: 44px;
 }
 
 .core-bar {
@@ -666,12 +628,12 @@ const tempColor = (temp: number) => {
 }
 
 .chart-wrap {
-  height: 110px;
+  height: 200px;
 }
 
 .trend-chart {
   width: 100%;
-  height: 110px;
+  height: 200px;
 }
 
 .trend-placeholder {
@@ -697,14 +659,8 @@ const tempColor = (temp: number) => {
 
 .gpu-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: 1fr;
   gap: 16px;
-}
-
-@media (max-width: 900px) {
-  .gpu-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .gpu-card {
@@ -797,11 +753,11 @@ const tempColor = (temp: number) => {
 }
 
 .gpu-trend {
-  height: 140px;
+  height: 200px;
 }
 
 .gpu-trend .trend-chart {
-  height: 140px;
+  height: 200px;
 }
 
 .empty-state {

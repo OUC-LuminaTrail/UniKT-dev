@@ -367,9 +367,6 @@ export default {
   resources: {
     pageSub: 'CPU · 内存 · 网络 · 磁盘 · GPU 实时监控',
     liveBadge: '实时 · 2s',
-    windowLabel: '时间窗口',
-    win5: '5 分钟',
-    win15: '15 分钟',
     collecting: '数据采集中…',
     cpu: 'CPU',
     load: '平均负载',
