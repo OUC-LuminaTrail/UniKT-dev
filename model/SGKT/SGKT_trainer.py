@@ -42,13 +42,22 @@ class SGKTConfig(ModelConfig):
         batch_size: Batch size for training (default: 6).
     """
 
-    n_hop: int = 3
+    n_hop: int = field(
+        default=3,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 5}},
+    )
     sg_layers: int = 2
     hist_neighbor_num: int = 3
     next_neighbor_num: int = 4
-    att_bound: float = 0.7
+    att_bound: float = field(
+        default=0.7,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.8}},
+    )
     cooc_neighbor_num: int = 0
-    skill_neighbor_num: int = 4
+    skill_neighbor_num: int = field(
+        default=4,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 10}},
+    )
     question_neighbor_num: int = 4
     aggregator: str = "sum"
     select_index: list[int] = field(default_factory=lambda: [0, 1, 2])
@@ -57,10 +66,19 @@ class SGKTConfig(ModelConfig):
     hidden_dim: int = 100
     dropout_keep_probs: list[float] = field(default_factory=lambda: [0.8, 0.8, 1.0])
     epochs: int = 100
-    learning_rate: float = 0.00025
+    learning_rate: float = field(
+        default=0.00025,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     lr_decay: float = 0.92
-    weight_decay: float = 1e-8
-    batch_size: int = 6
+    weight_decay: float = field(
+        default=1e-8,
+        metadata={"optuna": {"type": "float", "low": 1e-8, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=6,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 6, 8, 16]}},
+    )
 
 
 @register_trainer("SGKT")

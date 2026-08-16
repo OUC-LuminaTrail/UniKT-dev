@@ -1,5 +1,7 @@
 """SimpleKT 模型训练器模块"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -31,10 +33,23 @@ class SimpleKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
-    n_blocks: int = 2
-    n_heads: int = 4
-    dropout: float = 0.1
+    # powers of two so d_model % n_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
+    n_blocks: int = field(
+        default=2,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
+    n_heads: int = field(
+        default=4,
+        metadata={"optuna": {"type": "categorical", "choices": [2, 4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     d_ff: int = 256
     kq_same: int = 1
     separate_qa: int = 0
@@ -42,10 +57,22 @@ class SimpleKTConfig(ModelConfig):
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
     epochs: int = 100
-    learning_rate: float = 1e-4
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("SimpleKT")

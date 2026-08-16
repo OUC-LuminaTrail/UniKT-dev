@@ -1,5 +1,7 @@
 """MIKT 模型训练器"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -25,14 +27,32 @@ class MIKTConfig(ModelConfig):
         lr_decay: Learning rate decay factor per epoch.
     """
 
-    embed_dim: int = 64
-    state_dim: int = 64
-    dropout: float = 0.4
+    embed_dim: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
+    state_dim: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
+    dropout: float = field(
+        default=0.4,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     grad_clip: float = 15.0
     epochs: int = 200
-    learning_rate: float = 0.002
-    weight_decay: float = 1e-5
-    batch_size: int = 80
+    learning_rate: float = field(
+        default=0.002,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=80,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 80, 128]}},
+    )
     lr_decay: float | None = None
 
 

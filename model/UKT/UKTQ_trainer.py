@@ -1,5 +1,7 @@
 """UKTQ trainer: question-level UKT for the skill-vs-question ablation."""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -37,10 +39,20 @@ class UKTQConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
+    # powers of two so d_model % num_attn_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
     n_blocks: int = 4
-    num_attn_heads: int = 8
-    dropout: float = 0.2
+    num_attn_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     d_ff: int = 512
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
@@ -51,9 +63,18 @@ class UKTQConfig(ModelConfig):
     no_uncertainty_aug: bool = False
     atten_type: str = "w2"
     epochs: int = 200
-    learning_rate: float = 1e-4
-    weight_decay: float = 1e-5
-    batch_size: int = 64
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("UKTQ")

@@ -1,5 +1,7 @@
 """DKT-Forget 模型训练器模块"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -23,13 +25,31 @@ class DKTForgetConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    emb_size: int = 100
-    dropout: float = 0.1
+    emb_size: int = field(
+        default=100,
+        metadata={"optuna": {"type": "categorical", "choices": [50, 100, 200]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 100
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    # log float cannot include 0, so categorical for the default of 0.0
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("DKTForget")

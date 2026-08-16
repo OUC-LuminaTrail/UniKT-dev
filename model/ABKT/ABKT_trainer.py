@@ -1,3 +1,4 @@
+from dataclasses import field
 from typing import Any, Literal
 
 import torch
@@ -45,20 +46,41 @@ class ABKTConfig(ModelConfig):
         use_adj: Whether to use learnable adjacency weights in GMF.
     """
 
-    km_hidden_dim: int = 5
-    km_guess: float = 0.25
-    km_lr: float = 0.001
+    km_hidden_dim: int = field(
+        default=5,
+        metadata={"optuna": {"type": "int", "low": 3, "high": 8}},
+    )
+    km_guess: float = field(
+        default=0.25,
+        metadata={"optuna": {"type": "float", "low": 0.1, "high": 0.4}},
+    )
+    km_lr: float = field(
+        default=0.001,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     km_epochs: int = 100
     km_patience: int = 10
-    am_embedding_dim: int = 50
+    am_embedding_dim: int = field(
+        default=50,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
     am_lambda: float = 0.1
-    am_layer: int = 1
-    am_lr: float = 0.0001
+    am_layer: int = field(
+        default=1,
+        metadata={"optuna": {"type": "categorical", "choices": [0, 1, 2]}},
+    )
+    am_lr: float = field(
+        default=0.0001,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     am_epochs: int = 500
     am_patience: int = 10
     pretrain_clip: float = 0.4
     combine_mode: Literal["add", "mul"] = "add"
-    batch_size: int = 128
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
     use_adj: bool = True
 
 

@@ -3,6 +3,8 @@
 定义 DAGKT 模型特定的训练逻辑，包括组合损失函数。
 """
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -40,19 +42,42 @@ class DAGKTConfig(ModelConfig):
     hidden_dim: int = 100
     embedding_dim: int = 100
     lstm_layers: int = 2
-    n_hop: int = 3
-    heads: int = 2
+    n_hop: int = field(
+        default=3,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 5}},
+    )
+    # powers of two so 100 % heads == 0 for every combination
+    heads: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [1, 2, 4]}},
+    )
     history_neighbour: int = 5
     att_bound: float = 0.2
-    dropout: float = 0.4
+    dropout: float = field(
+        default=0.4,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     ae_hidden_dim: int = 50
     loss_diff_weight: float = 1.0
     loss_attempt_weight: float = 1.0
     epochs: int = 150
-    learning_rate: float = 0.001
+    learning_rate: float = field(
+        default=0.001,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-4
-    batch_size: int = 128
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={
+            "optuna": {"type": "float", "low": 0.000001, "high": 0.001, "log": True}
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("DAGKT")

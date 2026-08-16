@@ -1,5 +1,6 @@
 """DeepIRT trainer."""
 
+from dataclasses import field
 from typing import Literal
 
 import torch
@@ -33,16 +34,38 @@ class DeepIRTConfig(ModelConfig):
         max_grad_norm: Max gradient norm for clipping; None disables clipping.
     """
 
-    dim_s: int = 200
-    size_m: int = 50
-    dropout: float = 0.2
+    dim_s: int = field(
+        default=200,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 512}},
+    )
+    size_m: int = field(
+        default=50,
+        metadata={"optuna": {"type": "int", "low": 16, "high": 100}},
+    )
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     emb_type: Literal["qid"] = "qid"
-    irt_scale: float = 3.0
+    irt_scale: float = field(
+        default=3.0,
+        metadata={"optuna": {"type": "float", "low": 1.0, "high": 6.0}},
+    )
     epochs: int = 200
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 64
+    # linear range: log sampling requires low > 0, default is 0.0
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 1e-2}},
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128, 256]}},
+    )
     test_batch_size: int = 64
     test_num_workers: int = 0
     test_pin_memory: bool = False

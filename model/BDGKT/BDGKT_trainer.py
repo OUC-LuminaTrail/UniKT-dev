@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -26,15 +28,33 @@ class BDGKTConfig(ModelConfig):
         epochs: Number of training epochs.
     """
 
-    hidden_dim: int = 128
-    layer_num: int = 2
-    drop1: float = 0.3
+    hidden_dim: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
+    layer_num: int = field(
+        default=2,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
+    drop1: float = field(
+        default=0.3,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     drop2: float = 0.3
     question_max_length: int = 20
     student_max_length: int = 5
-    learning_rate: float = 0.001
-    weight_decay: float = 1e-4
-    batch_size: int = 2000
+    learning_rate: float = field(
+        default=0.001,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=2000,
+        metadata={"optuna": {"type": "categorical", "choices": [1000, 2000, 4000]}},
+    )
     epochs: int = 100
 
 

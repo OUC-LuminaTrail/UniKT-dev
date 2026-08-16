@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -39,10 +41,20 @@ class FAKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
+    # powers of two so d_model % num_attn_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256, 512]}},
+    )
     n_blocks: int = 2
-    num_attn_heads: int = 4
-    dropout: float = 0.1
+    num_attn_heads: int = field(
+        default=4,
+        metadata={"optuna": {"type": "categorical", "choices": [2, 4, 8]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     d_ff: int = 256
     final_fc_dim: int = 256
     final_fc_dim2: int = 256
@@ -56,14 +68,27 @@ class FAKTConfig(ModelConfig):
     confidence_thresholds: str = "[0.8, 0.6, 0.4]"
     mamba_d_state: int = 16
     mamba_d_conv: int = 4
-    mamba_expand: int = 2
+    mamba_expand: int = field(
+        default=2,
+        metadata={"optuna": {"type": "categorical", "choices": [2, 4]}},
+    )
     min_experts: int = 1
     max_experts: int | None = None
     epochs: int = 200
-    learning_rate: float = 1e-4
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    # linear range: log sampling requires low > 0, default is 0.0
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 1e-2}},
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128, 256]}},
+    )
 
 
 @register_trainer("FAKT")

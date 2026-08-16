@@ -1,5 +1,6 @@
 """KQN baseline trainer."""
 
+from dataclasses import field
 from typing import Literal
 
 import torch
@@ -30,17 +31,37 @@ class KQNConfig(ModelConfig):
         max_grad_norm: Optional max gradient norm for clipping.
     """
 
-    n_hidden: int = 128
-    n_rnn_hidden: int = 128
+    n_hidden: int = field(
+        default=128,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
+    n_rnn_hidden: int = field(
+        default=128,
+        metadata={"optuna": {"type": "int", "low": 64, "high": 256}},
+    )
     n_mlp_hidden: int = 128
     n_rnn_layers: int = 1
     rnn_type: Literal["lstm", "gru"] = "lstm"
-    dropout: float = 0.4
+    dropout: float = field(
+        default=0.4,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 150
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
     max_grad_norm: float | None = None
 
 
