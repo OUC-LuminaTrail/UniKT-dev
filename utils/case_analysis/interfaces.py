@@ -19,7 +19,7 @@ class CaseDataSink(ABC):
     """Receives extracted case data batches during inference."""
 
     @abstractmethod
-    def add_batch(self, case_data: dict) -> None:
+    def add_batch(self, case_data: dict[str, Any]) -> None:
         """Accumulate one batch of extracted case data.
 
         Args:
