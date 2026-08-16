@@ -11,6 +11,7 @@ import torch
 from utils.case_analysis.base_analyzer import BaseCaseAnalyzer
 from utils.core import register_analyzer
 from utils.data_process import DataSource
+from utils.training.runtime_components import RuntimeComponents
 
 from .HDHKT_data import HDHKTModelData
 from .HDHKT_model import HDHKT
@@ -20,19 +21,22 @@ from .HDHKT_model import HDHKT
 class HDHKTAnalyzer(BaseCaseAnalyzer):
     """HDHKT-specific case analyzer for inference and visualization."""
 
-    def __init__(self, rc, data_src: DataSource, checkpoint_path: str):
+    def __init__(self, rc, data_src: DataSource, checkpoint_path: str, **kwargs):
         """Initialize HDHKT analyzer.
 
         Args:
             rc: RunConfig (OmegaConf DictConfig)
             data_src: Data source instance
             checkpoint_path: Path to model checkpoint
+            **kwargs: Forwarded to ``BaseCaseAnalyzer`` (sink, device,
+                batch_size).
         """
-        self.rc = rc
-        self.data_src = data_src
+        super().__init__(rc, data_src, checkpoint_path, **kwargs)
 
+    def build_components(self, rc, data_src) -> RuntimeComponents:
+        """Assemble the HDHKT model and user-annotated val dataset."""
         model_data = HDHKTModelData(data_src)
-        data_dict = model_data.prepare_data(rc)
+        data_dict = model_data.prepare_data(rc, with_user_ids=True)
 
         val_dataset = data_dict["val_dataset"]
         hypergraph = data_dict["skill_hypergraph"]
@@ -70,33 +74,34 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             att_bound=m.att_bound,
         )
 
-        super().__init__(model, checkpoint_path)
-
-        self.configure_inference(
-            rc, val_dataset, rc.model.batch_size, device=rc.general.device
-        ).build()
-
         self.hetero_graph = hetero_graph
         self.hypergraph = hypergraph
         self.question_skill_matrix = question_skill_matrix
 
-        self.hetero_graph = self.hetero_graph.to(self.device_)
-        self.hypergraph = self.hypergraph.to(self.device_)
-        self.question_skill_matrix = self.question_skill_matrix.to(self.device_)
+        return RuntimeComponents(model=model, val_data=val_dataset)
+
+    def on_device(self, device: torch.device) -> None:
+        """Move graph structures and matrices to the inference device."""
+        self.hetero_graph = self.hetero_graph.to(device)
+        self.hypergraph = self.hypergraph.to(device)
+        self.question_skill_matrix = self.question_skill_matrix.to(device)
 
     def forward_pass(
-        self, batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        self,
+        batch_data: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
     ) -> dict[str, torch.Tensor]:
         """HDHKT forward pass for inference.
 
         Args:
-            batch_data: Tuple of (sequence, response, mask)
+            batch_data: Tuple of (user_ids, sequence, response, mask);
+                user ids are ignored here and consumed by
+                ``extract_case_data``.
 
         Returns:
             Dictionary with y_hat (flattened), y_label (flattened), y_predict,
             full_y_hat (unflattened), and knowledge_states (for visualization)
         """
-        sequence, response, mask = batch_data
+        _, sequence, response, mask = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
@@ -286,7 +291,7 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         """Extract case data from batch outputs.
 
         Args:
-            batch_data: Raw batch data (users, sequences, responses, masks tuple)
+            batch_data: Raw batch data (user_ids, sequences, responses, masks tuple)
             outputs: Output dict from forward_pass
 
         Returns:
@@ -324,7 +329,7 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             "labels": y_label.cpu().numpy(),
             "predictions": y_predict.cpu().numpy(),
             "logits": y_hat.cpu().numpy(),
-            "masks": masks_bool.view(-1)[valid_indices].cpu().numpy(),
+            "mask": masks_bool.view(-1)[valid_indices].cpu().numpy(),
             "knowledge_states": knowledge_states_flat,
         }
 
