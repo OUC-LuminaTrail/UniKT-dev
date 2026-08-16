@@ -24,6 +24,15 @@ def _first_tensor(batch) -> torch.Tensor | None:
     return None
 
 
+def _count_scored(forward, device) -> int:
+    """``numel`` of the forward's aligned 1D ``y_label``, synchronized."""
+    with torch.inference_mode():
+        out = forward()
+        n = int(out["y_label"].numel())
+    synchronize(device)
+    return n
+
+
 def count_valid_interactions(target, sample_batch) -> int:
     """Valid interactions per forward pass that participate in the loss.
 
@@ -32,11 +41,7 @@ def count_valid_interactions(target, sample_batch) -> int:
     ``_extract_valid_predictions`` after the adjacent-pair mask, i.e. the samples
     ``_compute_loss`` actually consumes.
     """
-    with torch.inference_mode():
-        out = target.forward(sample_batch)
-        n = int(out["y_label"].numel())
-    synchronize(target.device)
-    return n
+    return _count_scored(lambda: target.forward(sample_batch), target.device)
 
 
 def count_test_predictions(target, sample_batch) -> int:
@@ -47,11 +52,7 @@ def count_test_predictions(target, sample_batch) -> int:
     training count — each window scores only its final position — so the two
     must never share a denominator.
     """
-    with torch.inference_mode():
-        out = target.test_forward(sample_batch)
-        n = int(out["y_label"].numel())
-    synchronize(target.device)
-    return n
+    return _count_scored(lambda: target.test_forward(sample_batch), target.device)
 
 
 def to_device(batch, device: torch.device):

@@ -131,7 +131,10 @@ class _StubTarget:
 
 
 def _run_stage(
-    target: _StubTarget, batch_size: int = 8, valid_tokens: int = 80
+    target: _StubTarget,
+    batch_size: int = 8,
+    valid_tokens: int = 80,
+    cfg: Any = None,
 ) -> WindowlateMetrics:
     ctx = StageContext(
         target=target,
@@ -140,7 +143,8 @@ def _run_stage(
         batch_size=batch_size,
         valid_tokens=valid_tokens,
         seq_len=4,
-        cfg=SimpleNamespace(
+        cfg=cfg
+        or SimpleNamespace(
             general=SimpleNamespace(warmup_iters=2),
             windowlate=WindowlateStageConfig(iters=3, repeats=2),
         ),
@@ -206,6 +210,35 @@ def test_benchmark_failure_does_not_raise():
     result = _run_stage(target)
     assert result.supported is False
     assert result.skip_reason.startswith("benchmark failed:")
+
+
+def test_missing_stage_config_skips_not_crashes():
+    loader = DataLoader(_StubWindowlateDataset(), batch_size=4)
+    # Hand-built cfg whose schema predates the windowlate node.
+    cfg = SimpleNamespace(general=SimpleNamespace(warmup_iters=2))
+    result = _run_stage(_StubTarget(loader), cfg=cfg)
+    assert result.supported is False
+    assert result.skip_reason.startswith("benchmark failed:")
+
+
+class _ExplodingLoader:
+    """Real-loader stand-in: exposes the dataset but must never be iterated."""
+
+    batch_size = 4
+
+    def __init__(self, dataset) -> None:
+        self.dataset = dataset
+
+    def __iter__(self):
+        raise AssertionError("original test loader iterated")
+
+
+def test_fetches_via_probe_loader_not_the_real_one():
+    target = _StubTarget(_ExplodingLoader(_StubWindowlateDataset()))
+    result = _run_stage(target)
+    assert result.supported is True
+    assert result.test_batch_size == 4
+    assert result.predictions_per_batch == 4
 
 
 # ---------------------------------------------------------------------------
@@ -302,3 +335,19 @@ def test_benchmark_inference_throughput_ns_reciprocal():
         result.throughput_interactions_per_sec * result.ns_per_interaction
         == pytest.approx(1e9, rel=1e-6)
     )
+
+
+def test_benchmark_inference_enforces_eval_mode():
+    target = _StubTarget(test_data=None)
+    target.model.train()
+    benchmark_inference(
+        target,
+        _SAMPLE_TUPLE,
+        batch_size=4,
+        valid_tokens=16,
+        warmup_iters=1,
+        iters=2,
+        repeats=1,
+        device=torch.device("cpu"),
+    )
+    assert target.model.training is False

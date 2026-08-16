@@ -16,10 +16,11 @@ question-level models score dense sequences and are already covered by
 ``inference`` — or the test path fails.
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 import torch
 from rich.table import Table
+from torch.utils.data import DataLoader
 
 from utils.core import get_logger, register_efficiency_stage
 from utils.model_data.skill_model_data import WindowlateIterableDataset
@@ -77,6 +78,7 @@ def benchmark_windowlate(
     ``benchmark_forward_loop``); the stages differ only in which path they
     exercise and what the throughput denominator counts.
     """
+    target.model.eval()
     stats = benchmark_forward_loop(
         lambda: target.test_forward(test_batch),
         warmup_iters,
@@ -111,9 +113,6 @@ def benchmark_windowlate(
         )
     )
 
-    latency_fields = {
-        f.name: getattr(stats, f.name) for f in fields(LatencyMetricsBase)
-    }
     return WindowlateMetrics(
         iters=iters,
         repeats=repeats,
@@ -124,7 +123,7 @@ def benchmark_windowlate(
         amortization_ratio=amortization,
         throughput_predictions_per_sec=throughput,
         us_per_prediction=us_per,
-        **latency_fields,
+        **LatencyMetricsBase.stats_kwargs(stats),
     )
 
 
@@ -149,8 +148,16 @@ class WindowlateStage(EfficiencyStage):
                 f"test dataset is {type(dataset).__name__}, not windowlate "
                 "(question-level models are covered by the inference stage)"
             )
+        # A single-batch probe loader: iterating the real test loader would
+        # fork its persistent workers (each scanning the parquet) and leave
+        # them resident, polluting later stages' resource sampling.
+        probe = DataLoader(
+            dataset,
+            batch_size=getattr(loader, "batch_size", None) or 1,
+            num_workers=0,
+        )
         try:
-            batch = to_device(next(iter(loader)), ctx.device)
+            batch = to_device(next(iter(probe)), ctx.device)
         except StopIteration:
             return self._skip("test loader is empty")
         except Exception as exc:
@@ -166,8 +173,8 @@ class WindowlateStage(EfficiencyStage):
         if predictions <= 0:
             return self._skip("test forward produced no scored predictions")
 
-        cfg = ctx.stage_cfg(self.name)
         try:
+            cfg = ctx.stage_cfg(self.name)
             return benchmark_windowlate(
                 ctx.target,
                 batch,

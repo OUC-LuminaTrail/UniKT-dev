@@ -2,7 +2,7 @@
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 import numpy as np
@@ -28,6 +28,11 @@ class LatencyMetricsBase:
     per_repeat_mean_ms: list[float] = field(default_factory=list)
     gpu_peak_allocated_mib: float | None = None
     gpu_peak_reserved_mib: float | None = None
+
+    @classmethod
+    def stats_kwargs(cls, stats: "ForwardLoopStats") -> dict:
+        """Kwargs copying the shared fields off a ``benchmark_forward_loop`` result."""
+        return {f.name: getattr(stats, f.name) for f in fields(cls)}
 
 
 @dataclass

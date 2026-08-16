@@ -1,6 +1,6 @@
 """Inference stage: latency distribution, throughput, peak memory."""
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
 import torch
 from rich.table import Table
@@ -52,6 +52,9 @@ def benchmark_inference(
     Event per iteration reads elapsed_time after ``end.synchronize()``, covering
     host launch through kernel completion.
     """
+    # Explicit so the exported benchmark keeps its eval-mode contract even for
+    # targets whose forward does not enforce it.
+    target.model.eval()
     stats = benchmark_forward_loop(
         lambda: target.forward(sample_batch),
         warmup_iters,
@@ -78,9 +81,6 @@ def benchmark_inference(
         )
     )
 
-    latency_fields = {
-        f.name: getattr(stats, f.name) for f in fields(LatencyMetricsBase)
-    }
     return InferenceMetrics(
         iters=iters,
         repeats=repeats,
@@ -88,7 +88,7 @@ def benchmark_inference(
         valid_tokens_per_batch=valid_tokens,
         throughput_interactions_per_sec=throughput,
         ns_per_interaction=ns_per,
-        **latency_fields,
+        **LatencyMetricsBase.stats_kwargs(stats),
     )
 
 
