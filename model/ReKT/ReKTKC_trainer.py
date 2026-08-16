@@ -6,12 +6,12 @@ from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
-__all__ = ["ReKT_KCTrainer", "ReKT_KCConfig"]
+__all__ = ["ReKTKCTrainer", "ReKTKCConfig"]
 
 
-@register_model_config("ReKT_KC")
-class ReKT_KCConfig(ModelConfig):
-    """ReKT_KC model configuration (skill-level variant of ReKT).
+@register_model_config("ReKTKC")
+class ReKTKCConfig(ModelConfig):
+    """ReKTKC model configuration (skill-level variant of ReKT).
 
     Args:
         hidden_dim: Hidden layer dimension.
@@ -30,13 +30,13 @@ class ReKT_KCConfig(ModelConfig):
     batch_size: int = 80
 
 
-@register_trainer("ReKT_KC")
-class ReKT_KCTrainer(BaseTrainer):
+@register_trainer("ReKTKC")
+class ReKTKCTrainer(BaseTrainer):
     def build_components(self, rc, data_src) -> RuntimeComponents:
-        from model.ReKT.ReKT_KC_data import ReKT_KCModelData
         from model.ReKT.ReKT_model import ReKT
+        from model.ReKT.ReKTKC_data import ReKTKCModelData
 
-        model_data = ReKT_KCModelData(data_src)
+        model_data = ReKTKCModelData(data_src)
         (
             train_dataset,
             val_dataset,
@@ -48,7 +48,7 @@ class ReKT_KCTrainer(BaseTrainer):
         metadata.update(extra_metadata)
 
         m = rc.model
-        logger.info("Initializing ReKT_KC model...")
+        logger.info("Initializing ReKTKC model...")
         model = ReKT(metadata, hidden_dim=m.hidden_dim, dropout=m.dropout)
 
         loss_fn = torch.nn.BCEWithLogitsLoss()

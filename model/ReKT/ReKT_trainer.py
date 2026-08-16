@@ -6,12 +6,12 @@ from utils.training import BaseTrainer, RuntimeComponents
 
 logger = get_logger(__name__)
 
-__all__ = ["ReKT_QTrainer", "ReKT_QConfig"]
+__all__ = ["ReKTTrainer", "ReKTConfig"]
 
 
-@register_model_config("ReKT_Q")
-class ReKT_QConfig(ModelConfig):
-    """ReKT_Q model configuration (question-level, original ReKT).
+@register_model_config("ReKT")
+class ReKTConfig(ModelConfig):
+    """ReKT model configuration (question-level, original ReKT).
 
     Args:
         hidden_dim: Hidden layer dimension.
@@ -30,13 +30,13 @@ class ReKT_QConfig(ModelConfig):
     batch_size: int = 80
 
 
-@register_trainer("ReKT_Q")
-class ReKT_QTrainer(BaseTrainer):
+@register_trainer("ReKT")
+class ReKTTrainer(BaseTrainer):
     def build_components(self, rc, data_src) -> RuntimeComponents:
+        from model.ReKT.ReKT_data import ReKTModelData
         from model.ReKT.ReKT_model import ReKT
-        from model.ReKT.ReKT_Q_data import ReKT_QModelData
 
-        model_data = ReKT_QModelData(data_src)
+        model_data = ReKTModelData(data_src)
         (
             train_dataset,
             val_dataset,
@@ -48,7 +48,7 @@ class ReKT_QTrainer(BaseTrainer):
         metadata.update(extra_metadata)
 
         m = rc.model
-        logger.info("Initializing ReKT_Q model...")
+        logger.info("Initializing ReKT model...")
         model = ReKT(metadata, hidden_dim=m.hidden_dim, dropout=m.dropout)
 
         loss_fn = torch.nn.BCEWithLogitsLoss()
