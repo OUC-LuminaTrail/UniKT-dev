@@ -41,6 +41,10 @@ class SQGKT(nn.Module):
         aggregator: str = "sum",
         variant: str = "hsei",
         sim_emb: str = "question_emb",
+        question_neighbors: torch.Tensor,
+        skill_neighbors: torch.Tensor,
+        q_neighbors_2: torch.Tensor,
+        uq_stat_q: torch.Tensor,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -64,6 +68,11 @@ class SQGKT(nn.Module):
         self.feature_embedding = nn.Embedding(
             self.num_skills + self.num_questions + 2, self.embedding_dim
         )
+
+        self.register_buffer("question_neighbors", question_neighbors)
+        self.register_buffer("skill_neighbors", skill_neighbors)
+        self.register_buffer("q_neighbors_2", q_neighbors_2)
+        self.register_buffer("uq_stat_q", uq_stat_q)
 
         self.graph_aggregator = GIKTGraphAggregator(
             self.embedding_dim,
@@ -148,7 +157,6 @@ class SQGKT(nn.Module):
         user_mask,
         user_ids,
         skills,
-        graph_data,
         hist_neighbor_index,
     ):
         max_step = user_sequence.size(1) - 1
@@ -160,13 +168,16 @@ class SQGKT(nn.Module):
         next_questions_embedding = self.feature_embedding(next_question_indices)
         input_answers_embedding = self.feature_embedding(answer_indices)
 
+        graph_data = {
+            "question_neighbors": self.question_neighbors,
+            "skill_neighbors": self.skill_neighbors,
+            "feature_embedding": self.feature_embedding.weight,
+        }
         aggregate_embedding, next_aggregate_embedding = self.graph_aggregator(
             question_indices, next_question_indices, graph_data
         )
 
         # Aggregate student-question q̃ and fuse with question-skill graph q into q̂ (Eq.16)
-        self.q_neighbors_2 = graph_data["q_neighbors_2"]
-        self.uq_stat_q = graph_data["uq_stat_q"]
         q_tilde_in = self._aggregate_sq(user_sequence[:, :-1])
         q_tilde_next = self._aggregate_sq(user_sequence[:, 1:])
         qhat_in = self.w_q1 * q_tilde_in + self.w_q2 * aggregate_embedding[0].squeeze(2)

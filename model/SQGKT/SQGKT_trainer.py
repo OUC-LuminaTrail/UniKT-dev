@@ -97,7 +97,7 @@ class SQGKTTrainer(BaseTrainer):
             train_dataset,
             val_dataset,
             test_dataset,
-            self.graph_data,
+            graph_data,
             self.num_skills,
             self.num_questions,
             self.num_users,
@@ -124,6 +124,10 @@ class SQGKTTrainer(BaseTrainer):
             aggregator=m.aggregator,
             variant=m.variant,
             sim_emb=m.sim_emb,
+            question_neighbors=graph_data["question_neighbors"],
+            skill_neighbors=graph_data["skill_neighbors"],
+            q_neighbors_2=graph_data["q_neighbors_2"],
+            uq_stat_q=graph_data["uq_stat_q"],
         )
 
         optimizer = torch.optim.Adam(
@@ -134,16 +138,6 @@ class SQGKTTrainer(BaseTrainer):
             if m.lr_decay
             else None
         )
-
-        # Move static graph data to device and bind the shared embedding table.
-        device = (
-            torch.device(rc.general.device) if rc.general.device else self._try_gpu()
-        )
-        self.graph_data = {
-            key: value.to(device) if hasattr(value, "to") else value
-            for key, value in self.graph_data.items()
-        }
-        self.graph_data["feature_embedding"] = model.feature_embedding.weight
 
         logger.info(
             f"SQGKT Trainer: {self.num_skills} skills, {self.num_questions} questions"
@@ -179,7 +173,6 @@ class SQGKTTrainer(BaseTrainer):
                 user_mask=mask,
                 user_ids=user_id,
                 skills=skills,
-                graph_data=self.graph_data,
                 hist_neighbor_index=hist_neighbor_index,
             )
         )
