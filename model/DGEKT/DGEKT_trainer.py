@@ -121,29 +121,31 @@ class DGEKTTrainer(BaseTrainer):
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
-        # Supervised loss: per-student mean over valid steps, summed over batch.
-        labels = response.float()[:, 1:]
-        counts = valid_mask.sum(dim=1).clamp(min=1)
-        sup_loss = sum(
-            (
+        sup_loss = kd_loss = None
+        if self.model.training:
+            # Supervised loss: per-student mean over valid steps, summed over batch.
+            labels = response.float()[:, 1:]
+            counts = valid_mask.sum(dim=1).clamp(min=1)
+            sup_loss = sum(
                 (
-                    F.binary_cross_entropy(
-                        p.clamp(1e-7, 1.0 - 1e-7), labels, reduction="none"
-                    )
-                    * valid_mask
-                ).sum(dim=1)
-                / counts
-            ).sum()
-            for p in (p_c, p_t, p_e)
-        )
+                    (
+                        F.binary_cross_entropy(
+                            p.clamp(1e-7, 1.0 - 1e-7), labels, reduction="none"
+                        )
+                        * valid_mask
+                    ).sum(dim=1)
+                    / counts
+                ).sum()
+                for p in (p_c, p_t, p_e)
+            )
 
-        # Online distillation: L1 between the softened ensemble distribution
-        # and both branch distributions.
-        t = self.run_config.model.kd_temperature
-        soft_e = torch.sigmoid(logit_e / t)
-        kd_loss = (soft_e - torch.sigmoid(logit_c / t)).abs().sum() + (
-            soft_e - torch.sigmoid(logit_t / t)
-        ).abs().sum()
+            # Online distillation: L1 between the softened ensemble distribution
+            # and both branch distributions.
+            t = self.run_config.model.kd_temperature
+            soft_e = torch.sigmoid(logit_e / t)
+            kd_loss = (soft_e - torch.sigmoid(logit_c / t)).abs().sum() + (
+                soft_e - torch.sigmoid(logit_t / t)
+            ).abs().sum()
 
         return {
             "y_hat": y_hat,
