@@ -976,13 +976,17 @@ class BaseTrainer(InferenceOpsMixin, ABC):
         the logged prediction quality). Override only when eval loss should
         deliberately include extra terms.
 
+        Reduced to a per-batch mean: loss fns built with
+        ``reduction="none"`` (which reduce inside ``_compute_loss``) still
+        yield a scalar here; mean-reduced loss fns are unaffected.
+
         Args:
             outputs: Dict containing ``"y_hat"`` and ``"y_label"``.
 
         Returns:
-            Loss tensor.
+            Loss tensor (scalar).
         """
-        return self.loss(outputs["y_hat"], outputs["y_label"])
+        return self.loss(outputs["y_hat"], outputs["y_label"]).mean()
 
     def _monitor_name(self) -> str:
         """Get the name of the metric being monitored for early stopping.
