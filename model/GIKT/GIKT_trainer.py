@@ -104,7 +104,7 @@ class GIKTTrainer(BaseTrainer):
             self.num_skills,
             self.num_questions,
             train_collate_fn,
-            val_collate_fn,
+            eval_collate_fn,
         ) = model_data.prepare_data(rc)
 
         logger.info("Initializing GIKT model...")
@@ -162,7 +162,8 @@ class GIKTTrainer(BaseTrainer):
             val_data=val_dataset,
             test_data=test_dataset,
             collate_fn=train_collate_fn,
-            val_collate_fn=val_collate_fn,
+            val_collate_fn=eval_collate_fn,
+            test_collate_fn=eval_collate_fn,
         )
 
     def forward_pass(self, batch_data):

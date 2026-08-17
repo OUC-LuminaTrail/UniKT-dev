@@ -74,6 +74,7 @@ class CIKTTrainer(BaseTrainer):
             test_dataset,
             difficulty_table,
             collate_fn,
+            eval_collate_fn,
         ) = model_data.prepare_data(rc)
 
         metadata = data_src.get_metadata()
@@ -122,6 +123,8 @@ class CIKTTrainer(BaseTrainer):
             val_data=val_dataset,
             test_data=test_dataset,
             collate_fn=collate_fn,
+            val_collate_fn=eval_collate_fn,
+            test_collate_fn=eval_collate_fn,
         )
 
     def forward_pass(self, batch_data):

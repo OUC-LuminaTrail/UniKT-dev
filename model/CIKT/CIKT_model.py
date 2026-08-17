@@ -143,7 +143,15 @@ class DisentangleCausal(nn.Module):
         score = torch.cat(
             (causal_score.unsqueeze(2), trivial_score.unsqueeze(2)), dim=2
         )
-        score = F.gumbel_softmax(score, tau=self.tau, hard=self.is_hard, dim=2)
+        if self.training:
+            score = F.gumbel_softmax(score, tau=self.tau, hard=self.is_hard, dim=2)
+        elif self.is_hard:
+            # Deterministic hard argmax (no Gumbel noise) at inference.
+            score = torch.zeros_like(score).scatter_(
+                2, score.argmax(dim=2, keepdim=True), 1.0
+            )
+        else:
+            score = F.softmax(score / self.tau, dim=2)
         causal_mask = score[:, :, 0, :].masked_fill(attn_mask, 0.0)
         trivial_mask = score[:, :, 1, :].masked_fill(attn_mask, 0.0)
         return causal_mask, trivial_mask

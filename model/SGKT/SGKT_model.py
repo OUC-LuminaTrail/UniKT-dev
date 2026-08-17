@@ -172,9 +172,10 @@ class HRGEmbedding(nn.Module):
         temp_emb = next_aggregate_embedding[1]
         batch_size, seq_len, _, emb_dim = temp_emb.shape
         temp_emb = temp_emb.reshape(-1, self.question_neighbor_num, emb_dim)
-        temp_emb = temp_emb.transpose(0, 1)
-        perm = torch.randperm(temp_emb.shape[0], device=temp_emb.device)
-        temp_emb = temp_emb[perm].transpose(0, 1)
+        if self.training:
+            temp_emb = temp_emb.transpose(0, 1)
+            perm = torch.randperm(temp_emb.shape[0], device=temp_emb.device)
+            temp_emb = temp_emb[perm].transpose(0, 1)
         if self.question_neighbor_num >= num_samples:
             next_neighbors = temp_emb[:, :num_samples, :].reshape(
                 batch_size, seq_len, num_samples, emb_dim

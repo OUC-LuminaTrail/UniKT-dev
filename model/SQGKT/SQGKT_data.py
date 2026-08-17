@@ -14,9 +14,17 @@ logger = get_logger(__name__)
 
 
 def sample_hist_neighbors(
-    batch_size, max_seq_len, hist_neighbor_num, skill_index, pad_index=None
+    batch_size,
+    max_seq_len,
+    hist_neighbor_num,
+    skill_index,
+    pad_index=None,
+    deterministic=False,
 ):
-    """同技能历史采样：位置 t 在历史 [0, t-1] 中随机选 M 个技能相同的位置。"""
+    """同技能历史采样：位置 t 在历史 [0, t-1] 中选 M 个技能相同的位置。
+
+    随机模式用于训练；deterministic 模式（评估）固定取最早的前 M 个候选。
+    """
     if pad_index is None:
         pad_index = max_seq_len
     if hist_neighbor_num == 0:
@@ -39,11 +47,18 @@ def sample_hist_neighbors(
         valid = same_skill & causal
         for t in range(1, max_seq_len):
             candidates = np.where(valid[t])[0]
-            if len(candidates) >= hist_neighbor_num:
+            if len(candidates) == 0:
+                continue
+            if deterministic:
+                # Fixed earliest-M pick keeps eval reproducible.
+                result[b, t] = candidates[
+                    np.arange(hist_neighbor_num) % len(candidates)
+                ]
+            elif len(candidates) >= hist_neighbor_num:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=False
                 )
-            elif len(candidates) > 0:
+            else:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=True
                 )
@@ -104,8 +119,14 @@ class SQGKTModelData(QuestionModelData):
             test_seq, test_res, test_mask, test_uid, test_skills
         )
 
-        collate = partial(
+        train_collate = partial(
             sqgkt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
+        )
+        # Deterministic eval collate keeps val/test metrics reproducible.
+        eval_collate = partial(
+            sqgkt_collate_fn,
+            hist_neighbor_num=rc.model.hist_neighbor_num,
+            deterministic=True,
         )
 
         logger.info(
@@ -128,8 +149,8 @@ class SQGKTModelData(QuestionModelData):
             num_skills,
             num_questions,
             num_users,
-            collate,
-            collate,
+            train_collate,
+            eval_collate,
         )
 
     @staticmethod
@@ -256,7 +277,7 @@ class SQGKTDataset(Dataset):
         }
 
 
-def sqgkt_collate_fn(batch, hist_neighbor_num=3):
+def sqgkt_collate_fn(batch, hist_neighbor_num=3, deterministic=False):
     from torch.utils.data.dataloader import default_collate
 
     batched = default_collate(batch)
@@ -269,6 +290,7 @@ def sqgkt_collate_fn(batch, hist_neighbor_num=3):
             hist_neighbor_num,
             batched["skills"][:, :model_seq_len],
             pad_index=model_seq_len,
+            deterministic=deterministic,
         )
     ).long()
     return batched

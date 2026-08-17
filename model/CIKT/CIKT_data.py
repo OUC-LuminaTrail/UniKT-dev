@@ -48,19 +48,22 @@ class CIKTDataset(Dataset):
         )
 
 
-def cikt_collate_fn(batch, concept_question_table, concept_q_count):
-    """批合并 + 同概念随机替换 QR 采样。
+def cikt_collate_fn(
+    batch, concept_question_table, concept_q_count, deterministic=False
+):
+    """批合并 + 同概念替换题 QR 采样。
 
-    对每个位置从其概念对应的候选题目中均匀采样一个。
+    训练时对每个位置从其概念对应的候选题目中均匀采样一个；
+    deterministic 模式（评估）固定取候选表第一个，保证推理可复现。
     """
     q, y, mask, c = default_collate(batch)
     count = concept_q_count[c]  # [B, L]
-    rand = torch.rand(c.shape, generator=None)
-    idx = (
-        (rand * count.float())
-        .long()
-        .clamp(min=0, max=concept_question_table.size(1) - 1)
-    )
+    if deterministic:
+        idx = torch.zeros(c.shape, dtype=torch.long)
+    else:
+        rand = torch.rand(c.shape, generator=None)
+        idx = (rand * count.float()).long()
+    idx = idx.clamp(min=0, max=concept_question_table.size(1) - 1)
     row = concept_question_table[c]  # [B, L, K]
     qr = row.gather(-1, idx.unsqueeze(-1)).squeeze(-1)
     valid = count > 0
@@ -182,6 +185,13 @@ class CIKTModelData(QuestionModelData):
             concept_question_table=concept_question_table,
             concept_q_count=concept_q_count,
         )
+        # Deterministic eval collate keeps val/test metrics reproducible.
+        eval_collate_fn = partial(
+            cikt_collate_fn,
+            concept_question_table=concept_question_table,
+            concept_q_count=concept_q_count,
+            deterministic=True,
+        )
 
         logger.info(
             f"CIKT dataset sizes: train={len(train_dataset)}, "
@@ -193,4 +203,5 @@ class CIKTModelData(QuestionModelData):
             test_dataset,
             difficulty_table,
             collate_fn,
+            eval_collate_fn,
         )
