@@ -14,9 +14,18 @@ logger = get_logger(__name__)
 
 
 def sample_hist_neighbors(
-    batch_size, max_seq_len, hist_neighbor_num, skill_index, pad_index=None
+    batch_size,
+    max_seq_len,
+    hist_neighbor_num,
+    skill_index,
+    pad_index=None,
+    deterministic=False,
 ):
-    """同技能历史邻居采样：对位置 t，在历史 [0, t-1] 中找技能相同的位置随机选 M 个。"""
+    """同技能历史邻居采样：对位置 t，在历史 [0, t-1] 中找技能相同的位置选 M 个。
+
+    随机模式用于训练；deterministic 模式（评估）固定取最早的前 M 个候选，
+    不足时循环填充，保证推理可复现。
+    """
     if pad_index is None:
         pad_index = max_seq_len
     if hist_neighbor_num == 0:
@@ -39,11 +48,17 @@ def sample_hist_neighbors(
         valid = same_skill & causal
         for t in range(1, max_seq_len):
             candidates = np.where(valid[t])[0]
-            if len(candidates) >= hist_neighbor_num:
+            if len(candidates) == 0:
+                continue
+            if deterministic:
+                result[b, t] = candidates[
+                    np.arange(hist_neighbor_num) % len(candidates)
+                ]
+            elif len(candidates) >= hist_neighbor_num:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=False
                 )
-            elif len(candidates) > 0:
+            else:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=True
                 )
@@ -99,8 +114,12 @@ class GIKTModelData(QuestionModelData):
         train_collate_fn = partial(
             gikt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
         )
-        val_collate_fn = partial(
-            gikt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
+        # Eval collate samples neighbors deterministically so val/test metrics
+        # are reproducible.
+        eval_collate_fn = partial(
+            gikt_collate_fn,
+            hist_neighbor_num=rc.model.hist_neighbor_num,
+            deterministic=True,
         )
 
         logger.info(
@@ -121,7 +140,7 @@ class GIKTModelData(QuestionModelData):
             num_skills,
             num_questions,
             train_collate_fn,
-            val_collate_fn,
+            eval_collate_fn,
         )
 
     def build_qs_neighbors(
@@ -196,7 +215,7 @@ class GIKTDataset(Dataset):
         }
 
 
-def gikt_collate_fn(batch, hist_neighbor_num=3):
+def gikt_collate_fn(batch, hist_neighbor_num=3, deterministic=False):
     """批拼接并为每个 batch 计算 hist_neighbor_index。"""
     from torch.utils.data.dataloader import default_collate
 
@@ -210,6 +229,7 @@ def gikt_collate_fn(batch, hist_neighbor_num=3):
             hist_neighbor_num,
             batched["skills"][:, :model_seq_len],
             pad_index=model_seq_len,
+            deterministic=deterministic,
         )
     ).long()
     return batched

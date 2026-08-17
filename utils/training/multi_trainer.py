@@ -133,7 +133,7 @@ class MultiTrainer(BaseTrainer):
 
     3. :meth:`on_stage_begin`: Preparation before a stage (default no-op).
     4. :meth:`on_stage_complete`: Post-stage processing (default no-op), often used to pass data to the next stage.
-    5. :meth:`_compute_loss`: Custom loss computation (defaults to ``self.loss(y_hat, y_label)``).
+    5. :meth:`_compute_loss`: Custom training loss (defaults to ``self.loss(y_hat, y_label)``); auxiliary terms here do not enter val/test loss, which uses :meth:`_compute_eval_loss`.
 
     The constructor builds cross-stage infrastructure only (device, logging,
     checkpoints); per-stage model/optimizer/data are assembled lazily by each

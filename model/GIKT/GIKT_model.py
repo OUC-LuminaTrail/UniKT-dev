@@ -118,15 +118,15 @@ class GIKTGraphAggregator(nn.Module):
         return sq
 
     def sample_next_neighbors(self, next_aggregate_embedding, num_samples):
-        """从下一题的 1 跳聚合邻居中随机采样 num_samples 个。"""
+        """从下一题的 1 跳聚合邻居中采样 num_samples 个（训练随机，评估取前 num_samples）。"""
         temp_emb = next_aggregate_embedding[1]
         batch_size, seq_len, _, emb_dim = temp_emb.shape
-        temp_emb = temp_emb.reshape(-1, self.question_neighbor_num, emb_dim).transpose(
-            0, 1
-        )
-        temp_emb = temp_emb[
-            torch.randperm(temp_emb.shape[0], device=temp_emb.device)
-        ].transpose(0, 1)
+        temp_emb = temp_emb.reshape(-1, self.question_neighbor_num, emb_dim)
+        if self.training:
+            temp_emb = temp_emb.transpose(0, 1)
+            temp_emb = temp_emb[
+                torch.randperm(temp_emb.shape[0], device=temp_emb.device)
+            ].transpose(0, 1)
         if self.question_neighbor_num >= num_samples:
             return temp_emb[:, :num_samples, :].reshape(
                 batch_size, seq_len, num_samples, emb_dim

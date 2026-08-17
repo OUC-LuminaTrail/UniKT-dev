@@ -245,12 +245,17 @@ class MCKT(nn.Module):
         seq = last_problem.shape[-1]
         pro_embed = self.pro_embed
 
-        pro_loss = self.pro_loss_weight * self.batched_semi_loss(
-            pro_embed, self.cl_batch_size
-        )
-        react_loss = self.react_loss_weight * self.batched_semi_loss(
-            pro_embed + self.ans_embed[1].unsqueeze(0), self.cl_batch_size
-        )
+        # Corpus-level contrastive terms only serve the training loss; skip
+        # them at eval (they are batch-independent and costly).
+        if self.training:
+            pro_loss = self.pro_loss_weight * self.batched_semi_loss(
+                pro_embed, self.cl_batch_size
+            )
+            react_loss = self.react_loss_weight * self.batched_semi_loss(
+                pro_embed + self.ans_embed[1].unsqueeze(0), self.cl_batch_size
+            )
+        else:
+            pro_loss = react_loss = None
 
         next_pro_embed = F.embedding(next_problem, pro_embed)
         last_pro_embed = F.embedding(last_problem, pro_embed)
@@ -284,9 +289,12 @@ class MCKT(nn.Module):
         now_use = torch.cat([decoder_out, next_state, next_pro_embed], dim=-1)
         predict = torch.sigmoid(self.out(self.dropout(now_use))).squeeze(-1)
 
-        state_loss = self.contrast_state_cl(
-            next_state, decoder_out, next_mask
-        ) + self.contrast_state_cl(decoder_out, next_state, next_mask)
-        state_loss = state_loss * self.state_loss_weight
+        if self.training:
+            state_loss = self.contrast_state_cl(
+                next_state, decoder_out, next_mask
+            ) + self.contrast_state_cl(decoder_out, next_state, next_mask)
+            state_loss = state_loss * self.state_loss_weight
+        else:
+            state_loss = None
 
         return predict, state_loss, pro_loss, react_loss
