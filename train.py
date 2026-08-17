@@ -19,7 +19,7 @@ def main():
     model_name = rc.experiment.model_name
 
     # Seed as early as possible so init, data loading, and training RNG are reproducible.
-    seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
+    seed_everything(rc.general.seed, deterministic=rc.general.deterministic)
     exp_manager = ExperimentManager.from_run_config(rc, ExperimentType.NORMAL)
     add_file_handler(Path(exp_manager.get_log_dir()) / "run.log")
     logger.info(f"Experiment directory: {exp_manager.get_log_dir()}")

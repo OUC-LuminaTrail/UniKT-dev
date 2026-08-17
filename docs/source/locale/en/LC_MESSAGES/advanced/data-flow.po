@@ -76,9 +76,8 @@ msgstr ""
 "``--max_seq_len``, ``--data_base_path``, etc."
 
 #: ../../source/advanced/data-flow.md:55 8699a83ef2774cf6b194d7877a9b5816
-#, fuzzy
 msgid ""
-"**GeneralParams**（）：``--device``、``--seed``、``--log_dir``、``--no_swanlab``、``--no_deterministic``"
+"**GeneralParams**（）：``--device``、``--seed``、``--log_dir``、``--no_swanlab``、``--deterministic``"
 " 等"
 msgstr ""
 "**GeneralParams** (): ``--device``, ``--seed``, ``--log_dir``, "

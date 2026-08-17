@@ -52,7 +52,7 @@ flowchart LR
 通用参数组定义在 ``utils/config/param_config.py``：
 
 - **DataParams**（）：``--dataset``、``--fold``、``--kfold``、``--max_seq_len``、``--data_base_path`` 等
-- **GeneralParams**（）：``--device``、``--seed``、``--log_dir``、``--no_swanlab``、``--no_deterministic`` 等
+- **GeneralParams**（）：``--device``、``--seed``、``--log_dir``、``--no_swanlab``、``--deterministic`` 等
 - **EarlyStoppingParams**（）：``--es_monitor``、``--es_mode``、``--es_patience``、``--es_min_delta``
 - **CompileParams**（）：``--compile``、``--compile_mode``、``--compile_backend`` 等
 - **SamplingParams**（）：``--sample_size``、``--sample_strategy`` 等

@@ -43,7 +43,8 @@ class GeneralConfig:
         checkpoint_path: Path to a checkpoint for resuming training.
         device: Device to use ('cuda' or 'cpu'; auto-detect when null).
         seed: Random seed for reproducibility.
-        no_deterministic: Disable deterministic algorithms (on by default).
+        deterministic: Enable deterministic algorithms (on by default; may
+            reduce speed on GPU).
         cloud_tracking: Enable cloud experiment tracking (SwanLab or W&B;
             backend chosen via the ``KT_TRACKING_BACKEND`` env var, default
             SwanLab).
@@ -58,7 +59,7 @@ class GeneralConfig:
     checkpoint_path: str | None = None
     device: str | None = None
     seed: int = field(default=42, metadata={"preprocess_ui": True})
-    no_deterministic: bool = False
+    deterministic: bool = True
     cloud_tracking: bool = True
     log_batch_metrics: bool = False
     skip_test: bool = False
