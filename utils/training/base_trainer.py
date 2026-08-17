@@ -996,7 +996,10 @@ class BaseTrainer(InferenceOpsMixin, ABC):
 
     def _print_timing_summary(self) -> None:
         """Print total training time and average time per epoch."""
-        if self._run_start_time is None:
+        # When training raised before completing, _train_end_time is unset;
+        # bail out instead of throwing a TypeError from _finish that masks
+        # the original exception.
+        if self._run_start_time is None or self._train_end_time is None:
             return
         total = self._train_end_time - self._run_start_time
         n_epochs = len(self._epoch_times)
