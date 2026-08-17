@@ -147,20 +147,28 @@ class CIKTTrainer(BaseTrainer):
             y_pred_full, y, mask
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
-        a_true_full = self.model.difficulty_table[q][:, 1:]  # [B, L-1]
 
-        return {
+        outputs = {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": self._generate_binary_predictions(y_hat, threshold=0.5),
             "y_score": y_hat,
             "y_prob": y_hat,
-            "_aux_causal": out["y_causal"][valid_mask],
-            "_aux_intervention": out["y_intervention"][valid_mask],
-            "_aux_replace": out["y_replace"][valid_mask],
-            "_aux_trivial": out["y_trivial"][valid_mask],
-            "_aux_trivial_label": a_true_full[valid_mask],
         }
+        # Auxiliary branch outputs are only consumed by the training loss.
+        if self.model.training:
+            a_true_full = self.model.difficulty_table[q][:, 1:]  # [B, L-1]
+            outputs.update(
+                {
+                    "_aux_causal": out["y_causal"][valid_mask],
+                    "_aux_intervention": out["y_intervention"][valid_mask],
+                    "_aux_replace": out["y_replace"][valid_mask],
+                    "_aux_trivial": out["y_trivial"][valid_mask],
+                    "_aux_trivial_label": a_true_full[valid_mask],
+                }
+            )
+
+        return outputs
 
     def _compute_loss(self, outputs):
         """多任务损失"""

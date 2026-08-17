@@ -182,11 +182,13 @@ class MCKTTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
-        bce_loss = self.loss(outputs["y_hat"], outputs["y_label"])
-        if not self.model.training:
-            return bce_loss
+        """Total loss = BCE + training-only contrastive auxiliary terms.
+
+        Eval logging goes through the base ``_compute_eval_loss`` (pure BCE);
+        the model forward returns ``None`` aux terms in eval mode.
+        """
         return (
-            bce_loss
+            self.loss(outputs["y_hat"], outputs["y_label"])
             + outputs["_state_loss"]
             + outputs["_pro_loss"]
             + outputs["_react_loss"]

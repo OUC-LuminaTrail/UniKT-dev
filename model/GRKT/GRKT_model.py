@@ -437,6 +437,11 @@ class GRKT(nn.Module):
             score = (master - diff).sigmoid()
             scores.append(score)
 
+            # State updates below only feed later steps; skip them on the last
+            # one (their outputs are never read).
+            if i == S - 1:
+                continue
+
             # Knowledge gain & loss — shared preparation
             know_index = know_safe[:, :, None].expand(B, K, KH)
             target_h = h.gather(-2, know_index)
