@@ -140,8 +140,8 @@ class OptunaTuner:
         if self.config.n_jobs > 1:
             logger.warning(
                 "n_jobs>1 runs trials in threads sharing one GPU/process, which "
-                "can cause GPU contention and is unsafe with SwanLab. Recommended "
-                "only for CPU models or a dedicated multi-GPU setup."
+                "can cause GPU memory/compute contention. Recommended only for "
+                "CPU models or a dedicated multi-GPU setup."
             )
 
         # Optimise; failed trials are marked FAIL without stopping the search
