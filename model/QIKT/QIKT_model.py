@@ -165,8 +165,13 @@ class QIKT(nn.Module):
         # 问题 LSTM 路径
         que_h = self.dropout_layer(self.que_lstm(emb_qca_current)[0])
 
-        h_next_q = torch.cat([emb_qc_shift, que_h], dim=-1)
-        y_question_next = torch.sigmoid(self.out_question_next(h_next_q)).squeeze(-1)
+        # Question-next head only feeds the training auxiliary loss (it is not
+        # part of _fuse_predictions); skip it at eval.
+        if self.training:
+            h_next_q = torch.cat([emb_qc_shift, que_h], dim=-1)
+            y_question_next = torch.sigmoid(self.out_question_next(h_next_q)).squeeze(
+                -1
+            )
 
         y_question_all_raw = torch.sigmoid(self.out_question_all(que_h))
         q_shift = question[:, 1:]
@@ -195,7 +200,9 @@ class QIKT(nn.Module):
         # 约定：position t 预测 response[t+1]（next-item，trainer 用内置函数对齐）
         dummy = torch.zeros(B, 1, device=question.device)
         return {
-            "y_question_next": torch.cat([y_question_next, dummy], dim=1),
+            "y_question_next": (
+                torch.cat([y_question_next, dummy], dim=1) if self.training else None
+            ),
             "y_question_all": torch.cat([y_question_all, dummy], dim=1),
             "y_concept_next": torch.cat([y_concept_next, dummy], dim=1),
             "y_concept_all": torch.cat([y_concept_all, dummy], dim=1),
