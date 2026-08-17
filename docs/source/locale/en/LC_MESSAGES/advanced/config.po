@@ -89,15 +89,14 @@ msgstr ""
 "fast local iteration."
 
 #: ../../source/advanced/config.md:35 403ab40173f6447aae28c9b1454a3f6c
-#, fuzzy
 msgid ""
 "**注意：** 确定性算法默认开启，会调用 ``torch.use_deterministic_algorithms`` "
-"确保可复现性。若某个算子不支持 deterministic 模式导致训练失败，可以用 ``--no_deterministic`` 关闭。"
+"确保可复现性。若某个算子不支持 deterministic 模式导致训练失败，可以用 ``--general.deterministic false`` 关闭。"
 msgstr ""
-"**Note:** ``--deterministic`` is enabled by default (``True``) and calls "
-"``torch.use_deterministic_algorithms`` to ensure reproducibility. If a "
-"particular operator does not support deterministic mode and causes "
-"training to fail, disable it with ``--no-deterministic``."
+"**Note:** ``--general.deterministic`` is enabled by default (``True``) and "
+"calls ``torch.use_deterministic_algorithms`` to ensure reproducibility. "
+"If a particular operator does not support deterministic mode and causes "
+"training to fail, disable it with ``--general.deterministic false``."
 
 #: ../../source/advanced/config.md:39 b04d58d87bf04379bb586c448569f747
 msgid "DataParams — 数据加载"

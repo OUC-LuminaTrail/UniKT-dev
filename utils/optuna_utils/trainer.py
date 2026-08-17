@@ -76,7 +76,7 @@ class TrainerObjectiveWrapper:
             # the same RNG state (weight init, data shuffle, training RNG).
             seed_everything(
                 trial_rc.general.seed,
-                deterministic=not trial_rc.general.no_deterministic,
+                deterministic=trial_rc.general.deterministic,
             )
             trial_exp_manager = None
             if self.exp_manager is not None:

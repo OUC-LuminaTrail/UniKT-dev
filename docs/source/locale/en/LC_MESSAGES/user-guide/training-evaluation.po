@@ -279,14 +279,13 @@ msgstr "Skip test evaluation after training"
 
 #: ../../source/user-guide/training-evaluation.md:14
 #: 0bd5ff28ffde4000a572cb4a6ea22667
-#, fuzzy
-msgid "``--no_deterministic``"
-msgstr "``--deterministic``"
+msgid "``--general.deterministic``"
+msgstr "``--general.deterministic``"
 
 #: ../../source/user-guide/training-evaluation.md:14
 #: e6956c15628343ae855a3810018eb8e2
-msgid "关闭确定性算法（默认开启）"
-msgstr ""
+msgid "启用确定性算法（默认开启）"
+msgstr "Enable deterministic algorithms (on by default)"
 
 #: ../../source/user-guide/training-evaluation.md:87
 #: 8e1510d7cfca4f48a0de78ec50660e31

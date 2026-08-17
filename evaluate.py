@@ -83,7 +83,7 @@ def main():
     if args.data_base_path is not None:
         rc.data.data_base_path = args.data_base_path
 
-    seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
+    seed_everything(rc.general.seed, deterministic=rc.general.deterministic)
 
     exp_manager = ExperimentManager.from_run_dir(run_dir)
     # Route evaluate outputs into run_dir/evaluate/ to keep the training dir
