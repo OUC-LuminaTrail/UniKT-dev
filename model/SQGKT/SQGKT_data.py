@@ -83,17 +83,19 @@ class SQGKTModelData(QuestionModelData):
         num_users = user_sequence.shape[0]
 
         logger.info("Building question-skill neighbors...")
+        rng = np.random.default_rng(rc.general.seed)
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix,
             num_skills,
             num_questions,
             rc.model.question_neighbor_num,
             rc.model.skill_neighbor_num,
+            rng,
         )
 
         logger.info("Building student-question graph...")
         q_neighbors_2, uq_stat_q = self.build_sq_graph(
-            num_questions, rc.model.user_neighbor_num, rc.data.fold
+            num_questions, rc.model.user_neighbor_num, rc.data.fold, rng
         )
 
         train_data, val_data, test_data = self.split_kfold_data(
@@ -138,8 +140,6 @@ class SQGKTModelData(QuestionModelData):
             "skill_neighbors": torch.from_numpy(skill_neighbors).long(),
             "q_neighbors_2": torch.from_numpy(q_neighbors_2).long(),
             "uq_stat_q": torch.from_numpy(uq_stat_q).float(),
-            "next_neighbor_num": rc.model.next_neighbor_num,
-            "feature_embedding": None,
         }
         return (
             train_dataset,
@@ -154,7 +154,9 @@ class SQGKTModelData(QuestionModelData):
         )
 
     @staticmethod
-    def build_qs_neighbors(question_skill_matrix, num_skills, num_questions, qn, sn):
+    def build_qs_neighbors(
+        question_skill_matrix, num_skills, num_questions, qn, sn, rng
+    ):
         """问题-技能二部图邻居表（偏移节点 id，对应 GIKTGraphAggregator）。
 
         节点 id 布局：技能 [0, num_skills)，题目 [num_skills, num_skills+num_questions)。
@@ -175,18 +177,18 @@ class SQGKTModelData(QuestionModelData):
         for q_id, neighbors in enumerate(question_to_skills):
             if len(neighbors) == 0:
                 continue
-            question_neighbors[num_skills + q_id] = np.random.choice(
+            question_neighbors[num_skills + q_id] = rng.choice(
                 neighbors, qn, replace=len(neighbors) < qn
             )
         for s_id, neighbors in enumerate(skill_to_questions):
             if len(neighbors) == 0:
                 continue
-            skill_neighbors[s_id] = np.random.choice(
+            skill_neighbors[s_id] = rng.choice(
                 neighbors, sn, replace=len(neighbors) < sn
             )
         return question_neighbors, skill_neighbors
 
-    def build_sq_graph(self, num_questions, k, fold_idx):
+    def build_sq_graph(self, num_questions, k, fold_idx, rng):
         """学生-问题图（论文 §4.1–4.2）。
 
         对每个问题 q_j 采样 k 个答过它的学生，并按论文式 (6) 计算边权 g_ij 的三个分量：
@@ -233,7 +235,7 @@ class SQGKTModelData(QuestionModelData):
             if not students:
                 continue
             n = len(students)
-            idx = np.random.choice(n, k, replace=(n < k))
+            idx = rng.choice(n, k, replace=(n < k))
             sampled = np.array(students, dtype=np.int32)[idx]
             q_neighbors_2[q] = sampled
             for slot, u in enumerate(sampled):

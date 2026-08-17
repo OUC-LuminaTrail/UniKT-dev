@@ -17,6 +17,8 @@ class _RC:
 
     class general:
         device = "cpu"
+        seed = None
+        no_deterministic = False
 
     class model:
         batch_size = 2
