@@ -81,7 +81,7 @@ class LPKTModelData(QuestionModelData):
         max_seq_len = self.data_src.get_metadata("max_seq_len")
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
-        num_users = self.data_src.get_metadata("num_split_question_users")
+        num_users = self.data_src.get_metadata("num_users")
 
         _validate_required_columns(
             self.data_src.get_split_question_sequence_data().columns
@@ -97,7 +97,6 @@ class LPKTModelData(QuestionModelData):
 
         q_matrix = self.build_relationship_matrix(("question", "has", "skill"))
 
-        # Column 0 carries the row's own user index (equivalent to arange).
         uid = user_id_sequence[:, 0]
 
         logger.info(

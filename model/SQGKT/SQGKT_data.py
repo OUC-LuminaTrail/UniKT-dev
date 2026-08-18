@@ -79,8 +79,7 @@ class SQGKTModelData(QuestionModelData):
         )
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
-        # load_sequence_data returns split sequences (windows) as rows; user id is the row index.
-        num_users = user_sequence.shape[0]
+        num_users = self.data_src.get_metadata("num_users")
 
         logger.info("Building question-skill neighbors...")
         rng = np.random.default_rng(rc.general.seed)
@@ -208,8 +207,8 @@ class SQGKTModelData(QuestionModelData):
         eta, alpha, beta = 10.0, 0.3, 0.7
 
         # Per-student overall accuracy c_i (Eq.1)
-        stu_total = data.groupby("user")["label"].size()
-        stu_correct = data.groupby("user")["label"].sum()
+        stu_total = data.groupby("original_user")["label"].size()
+        stu_correct = data.groupby("original_user")["label"].sum()
         c_i = (stu_correct / stu_total.clip(lower=1)).to_dict()
 
         # Per-question Poisson λ for attempt/hint counts (MLE = mean)
@@ -217,8 +216,10 @@ class SQGKTModelData(QuestionModelData):
         lam_n = data.groupby("question")["hint_count"].mean().to_dict()
 
         # Cumulative attempt/hint per (student, question)
-        pq = data.groupby(["user", "question"])["attempt_count"].sum().to_dict()
-        nq = data.groupby(["user", "question"])["hint_count"].sum().to_dict()
+        pq = (
+            data.groupby(["original_user", "question"])["attempt_count"].sum().to_dict()
+        )
+        nq = data.groupby(["original_user", "question"])["hint_count"].sum().to_dict()
         # Students who answered each question
         q_to_students = defaultdict(list)
         for u, q in pq:
