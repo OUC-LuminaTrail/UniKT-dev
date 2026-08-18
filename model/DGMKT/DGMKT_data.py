@@ -1,0 +1,134 @@
+"""DGMKT 模型数据处理模块"""
+
+from typing import Any
+
+import numpy as np
+import scipy.sparse as sp
+import torch
+from torch.utils.data import Dataset
+from typing_extensions import override
+
+from utils.core import get_logger
+from utils.data_process import DataSource
+from utils.model_data import SkillModelData
+
+logger = get_logger(__name__)
+
+
+class DGMKTDataset(Dataset):
+    def __init__(self, sequences, responses, masks, user_ids):
+        self.sequences = sequences
+        self.responses = responses
+        self.masks = masks
+        self.user_ids = user_ids
+
+    def __len__(self) -> int:
+        return len(self.sequences)
+
+    def __getitem__(self, idx: int):
+        sequence = torch.tensor(self.sequences[idx], dtype=torch.long)
+        response = torch.tensor(self.responses[idx], dtype=torch.long)
+        mask = torch.tensor(self.masks[idx], dtype=torch.bool)
+        user_id = torch.tensor(self.user_ids[idx], dtype=torch.long)
+        return sequence, response, mask, user_id
+
+
+def _build_incidence(
+    user_sequence: np.ndarray,
+    user_mask: np.ndarray,
+    user_ids: np.ndarray,
+    num_users: int,
+    num_skills: int,
+) -> np.ndarray:
+    """Count-based student-skill incidence matrix H."""
+    users, positions = np.nonzero(user_mask)
+    skills = user_sequence[users, positions]
+    owners = user_ids[users]
+    H = np.zeros((num_users, num_skills), dtype=np.float64)
+    np.add.at(H, (owners, skills), 1.0)
+    return H
+
+
+def _generate_G_from_H(H: np.ndarray) -> torch.Tensor:
+    """Feng HGNN normalization of H"""
+    H = np.asarray(H, dtype=np.float64)
+    W = np.ones(H.shape[1])  # uniform hyperedge weights
+
+    DV = np.sum(H * W, axis=1)
+    DE = np.sum(H, axis=0)
+    DE = np.maximum(DE, 1.0)
+    DV = np.where(DV > 0, DV, 1.0)
+
+    H_sp = sp.csr_matrix(H)
+    coo = (
+        sp.diags(DV**-0.5) @ H_sp @ sp.diags(1.0 / DE) @ H_sp.T @ sp.diags(DV**-0.5)
+    ).tocoo()
+    coo.data = coo.data.astype(np.float32)
+    logger.debug(f"HGNN adjacency built (n_node={H.shape[0]}, nnz={coo.nnz})")
+
+    indices = torch.from_numpy(np.vstack((coo.row, coo.col)).astype(np.int64))
+    values = torch.from_numpy(coo.data)
+    return torch.sparse_coo_tensor(indices, values, coo.shape).coalesce()
+
+
+class DGMKTModelData(SkillModelData):
+    """DGMKT 模型数据加载器"""
+
+    def __init__(self, data_src: DataSource):
+        super().__init__(data_src)
+
+    @override
+    def prepare_data(self, rc: Any) -> tuple:
+        from torch.utils.data import DataLoader
+
+        user_sequence, user_response, user_mask, user_id_sequence, _ = (
+            self.build_sequence_data()
+        )
+
+        num_skills = self.data_src.get_metadata("num_skills")
+        orig_ids = user_id_sequence[:, 0]
+        num_original = int(self.data_src.get_metadata("num_users"))
+
+        train_data, val_data, _ = self.split_kfold_data(
+            user_sequence,
+            user_response,
+            user_mask,
+            orig_ids,
+            fold_idx=rc.data.fold,
+        )
+
+        logger.info(
+            f"Building DGMKT student hypergraph from the full dataset: "
+            f"{num_original} original users x {num_skills} skills"
+        )
+        H = _build_incidence(
+            user_sequence, user_mask, orig_ids, num_original, num_skills
+        )
+        G = _generate_G_from_H(H)
+        num_users = num_original
+
+        train_dataset = DGMKTDataset(*train_data)
+        val_dataset = DGMKTDataset(*val_data)
+        window_test_data = self.create_windowlate_iterable_dataset(rc.data.max_seq_len)
+        test_dataset = DataLoader(
+            window_test_data,
+            batch_size=rc.model.batch_size,
+            shuffle=False,
+            num_workers=4,
+            pin_memory=True,
+            prefetch_factor=2,
+        )
+
+        logger.info(
+            f"DGMKT data prepared: train={len(train_dataset)}, "
+            f"val={len(val_dataset)}, test(window)={len(test_dataset)}"
+        )
+        seq_len = user_sequence.shape[1]
+        return (
+            train_dataset,
+            val_dataset,
+            test_dataset,
+            G,
+            num_users,
+            seq_len,
+        )
