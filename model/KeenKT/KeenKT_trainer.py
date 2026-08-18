@@ -240,7 +240,7 @@ class KeenKTTrainer(BaseTrainer):
         - true_labels: [历史标签, 真实标签]  # 用于评估
         - question: [题目历史, 目标题目]  # 用于Rasch pid
         """
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

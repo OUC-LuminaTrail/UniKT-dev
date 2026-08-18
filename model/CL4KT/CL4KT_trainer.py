@@ -188,9 +188,9 @@ class CL4KTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data) -> dict:
         """Test forward pass over windowlate samples.
 
-        batch_data: (sequence, response, mask, late_group_id, true_labels, question).
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question, user_id).
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)

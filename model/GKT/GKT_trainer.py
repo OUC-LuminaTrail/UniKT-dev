@@ -246,7 +246,7 @@ class GKTTrainer(BaseTrainer):
         - 模型输出 [B, S-1]，其中 y[:, t] 预测 response[:, t+1]
         - 即 y[:, 0] 预测 response[:, 1], ..., y[:, S-2] 预测 response[:, S-1]
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

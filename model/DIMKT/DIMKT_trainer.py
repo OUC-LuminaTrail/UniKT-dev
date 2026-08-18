@@ -151,7 +151,7 @@ class DIMKTTrainer(BaseTrainer):
         self, batch_data: tuple[torch.Tensor, ...]
     ) -> dict[str, torch.Tensor]:
         """测试前向传播，支持 windowlateauc_mean 评估。"""
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)

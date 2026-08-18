@@ -146,11 +146,11 @@ class SAKTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data):
         """Run SAKT forward pass for windowlate evaluation.
 
-        batch_data: (sequence, response, mask, late_group_id, true_labels, question)
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question, user_id)
         Windowlate mask marks target positions only, so it is shifted with the
         model output by using mask[:, 1:].
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

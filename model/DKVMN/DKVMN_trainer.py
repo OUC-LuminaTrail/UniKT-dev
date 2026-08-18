@@ -152,7 +152,7 @@ class DKVMNTrainer(BaseTrainer):
         - p[:, t] 使用历史 0..t-1 预测位置 t
         - 所有位置均有有效预测
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
