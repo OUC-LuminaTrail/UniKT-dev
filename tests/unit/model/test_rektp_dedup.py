@@ -104,9 +104,10 @@ def test_forward_dedups_question_derived_lookups(golden):
         golden["mask"].to(DEVICE),
     )
 
-    # skill_embed: shared question features (event + readout) + the packed skill
-    # stream inside the KC scan. Pre-refactor this was 3.
-    assert counts["skill_embed"] == 2
+    # skill_embed: one packed-stream gather shared by the event pooling, the
+    # scan input, and the readout. Pre-refactor this was 3, then 2 with
+    # per-branch packing, 1 since forward packs once for all consumers.
+    assert counts["skill_embed"] == 1
     if model.question_embed is not None:
         # question_embed: shared question vector (event + readout + static) +
         # the packed question stream. Pre-refactor this was 4.

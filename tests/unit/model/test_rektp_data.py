@@ -140,15 +140,22 @@ def test_collate_valid_idx_matches_masked_select():
     """valid_idx gathers exactly the elements masked_select would keep."""
     dataset = _make_dataset()
     rows = [dataset[i] for i in range(len(dataset))]
-    questions, responses, times, masks, kc_order, valid_idx = rektp_packed_collate_fn(
-        rows
-    )
+    (
+        questions,
+        responses,
+        times,
+        masks,
+        kc_order,
+        kc_inverse,
+        valid_idx,
+    ) = rektp_packed_collate_fn(rows)
     assert questions.shape == (2, 4)
     assert responses.shape == (2, 4)
     assert times.shape == (2, 4)
     assert masks.shape == (2, 4)
     assert kc_order.shape[0] == 2
-    assert kc_order.shape[1] == max(int(row[5]) for row in rows)
+    assert kc_order.shape[1] == max(int(row[6]) for row in rows)
+    assert kc_inverse.ndim == 2  # full flat slot width, never trimmed
 
     valid_mask = masks[:, :-1] & masks[:, 1:]
     expected = valid_mask.flatten().nonzero().flatten()
@@ -167,9 +174,10 @@ def test_collate_valid_idx_empty_when_no_adjacent_pairs():
     # overwrite both rows' masks so no position has a valid predecessor pair
     empty_mask = torch.tensor([False, False, False, True])
     rows = [
-        (row[0], row[1], row[2], empty_mask.clone(), row[4], row[5]) for row in rows
+        (row[0], row[1], row[2], empty_mask.clone(), row[4], row[5], row[6])
+        for row in rows
     ]
-    _, _, _, masks, _, valid_idx = rektp_packed_collate_fn(rows)
+    _, _, _, masks, _, _, valid_idx = rektp_packed_collate_fn(rows)
     valid_mask = masks[:, :-1] & masks[:, 1:]
     assert valid_idx.numel() == int(valid_mask.sum())
     assert valid_idx.numel() == 0

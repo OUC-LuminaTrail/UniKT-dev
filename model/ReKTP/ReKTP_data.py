@@ -51,6 +51,15 @@ class ReKTPDataset(Dataset):
         )
         self.kc_order = torch.argsort(sort_key, dim=1, stable=True)
         self.kc_valid_counts = flat_valid.sum(dim=1)
+        # Inverse permutation over the full flat slot domain, precomputed so
+        # the fused inference readout needs no per-forward scatter chain.
+        kc_inverse = torch.empty_like(self.kc_order)
+        kc_inverse.scatter_(
+            1,
+            self.kc_order,
+            torch.arange(self.kc_order.size(1)).expand_as(self.kc_order),
+        )
+        self.kc_inverse = kc_inverse
 
     def __getitem__(self, index):
         return (
@@ -59,6 +68,7 @@ class ReKTPDataset(Dataset):
             self.times[index],
             self.masks[index],
             self.kc_order[index],
+            self.kc_inverse[index],
             self.kc_valid_counts[index],
         )
 
@@ -69,21 +79,23 @@ class ReKTPDataset(Dataset):
 def rektp_packed_collate_fn(batch):
     """Stack dense inputs and trim precomputed orders to the batch width.
 
-    The returned 6-tuple adds ``valid_idx``: the row-major indices of the
+    The returned 7-tuple adds ``valid_idx``: the row-major indices of the
     adjacent-pair valid mask ``mask[:, :-1] & mask[:, 1:]`` flattened over
     ``[B, S-1]``, computed on the CPU at collate time. The forward pass
     gathers logits/labels at these indices instead of running
     ``torch.masked_select``, which would trigger a ``nonzero`` GPU->CPU sync
     on every forward; both select the same elements in the same order, so
-    the extracted tensors are bitwise identical.
+    the extracted tensors are bitwise identical. ``kc_inverse`` keeps the
+    full flat slot width — the fused readout indexes it by (position, slot).
     """
     dense_columns = [torch.stack(column) for column in zip(*(row[:4] for row in batch))]
-    packed_length = max(int(row[5]) for row in batch)
+    packed_length = max(int(row[6]) for row in batch)
     kc_order = torch.stack([row[4][:packed_length] for row in batch])
+    kc_inverse = torch.stack([row[5] for row in batch])
     masks = dense_columns[3]
     valid_mask = masks[:, :-1] & masks[:, 1:]
     valid_idx = valid_mask.flatten().nonzero().flatten()
-    return (*dense_columns, kc_order, valid_idx)
+    return (*dense_columns, kc_order, kc_inverse, valid_idx)
 
 
 def build_question_skill_table(data_src: DataSource) -> tuple[np.ndarray, np.ndarray]:

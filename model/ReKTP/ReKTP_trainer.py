@@ -145,12 +145,13 @@ class ReKTPTrainer(BaseTrainer):
     def forward_pass(
         self, batch_data: tuple[torch.Tensor, ...]
     ) -> dict[str, torch.Tensor]:
-        questions, responses, times, mask, kc_order, valid_idx = batch_data
+        questions, responses, times, mask, kc_order, kc_inverse, valid_idx = batch_data
         questions = self._move_tensor_to_device(questions)
         responses = self._move_tensor_to_device(responses)
         times = self._move_tensor_to_device(times)
         mask = self._move_tensor_to_device(mask)
         kc_order = self._move_tensor_to_device(kc_order)
+        kc_inverse = self._move_tensor_to_device(kc_inverse)
         valid_idx = self._move_tensor_to_device(valid_idx)
 
         use_amp = bool(self.run_config.model.amp)
@@ -160,7 +161,12 @@ class ReKTPTrainer(BaseTrainer):
             enabled=use_amp,
         ):
             logits_full = self.model(
-                questions, responses, times, mask, kc_order=kc_order
+                questions,
+                responses,
+                times,
+                mask,
+                kc_order=kc_order,
+                kc_inverse=kc_inverse,
             )
         if use_amp:
             logits_full = logits_full.float()
