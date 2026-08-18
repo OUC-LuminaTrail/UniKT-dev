@@ -223,7 +223,7 @@ class StableKTTrainer(BaseTrainer):
         - y_hat[:, t] 基于 sequence[0:t+1] 和 response[0:t] 预测 response[t]
         - y_hat[:, t] 直接对应 response[t]
         """
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

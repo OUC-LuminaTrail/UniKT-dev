@@ -194,7 +194,7 @@ class UKTTrainer(BaseTrainer):
         return result
 
     def test_forward_pass(self, batch_data):
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

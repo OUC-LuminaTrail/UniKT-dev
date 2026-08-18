@@ -112,7 +112,7 @@ class ReKTKCTrainer(BaseTrainer):
 
     def test_forward_pass(self, batch_data) -> dict[str, torch.Tensor]:
         """Windowlate test forward."""
-        skill, response, mask, group_id, true_label, question = batch_data
+        skill, response, mask, group_id, true_label, question, _ = batch_data
         question = self._move_tensor_to_device(question)
         skill = self._move_tensor_to_device(skill)
         response = self._move_tensor_to_device(response)

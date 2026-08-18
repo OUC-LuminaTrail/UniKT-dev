@@ -191,14 +191,14 @@ class KQNTrainer(BaseTrainer):
         """Run a windowlate test batch.
 
         Windowlate batch format:
-            ``(concept, response, mask, late_group_id, true_labels, question)``.
+            ``(concept, response, mask, late_group_id, true_labels, question, user_id)``.
 
         In windowlate data, history positions are context only and usually have
         ``mask=False``; target positions have ``mask=True``. Therefore test
         selection uses the shifted target-side mask ``mask[:, 1:]`` instead of
         the training mask ``mask[:, :-1] & mask[:, 1:]``.
         """
-        concept, response, mask, late_group_id, true_labels, _question = batch_data
+        concept, response, mask, late_group_id, true_labels, _question, _ = batch_data
         concept = self._move_tensor_to_device(concept)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask, dtype=torch.bool)

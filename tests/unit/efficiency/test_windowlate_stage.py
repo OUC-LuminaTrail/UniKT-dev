@@ -51,11 +51,12 @@ _SAMPLE_TUPLE = (
     torch.zeros(4, dtype=torch.long),
     torch.zeros(4, dtype=torch.long),
     torch.zeros(4, dtype=torch.long),
+    torch.zeros(4, dtype=torch.long),
 )
 
 
 class _StubWindowlateDataset(WindowlateIterableDataset):
-    """Yield synthetic 6-tuple samples without touching any parquet file."""
+    """Yield synthetic 7-tuple samples without touching any parquet file."""
 
     def __init__(self, n_samples: int = 8) -> None:
         super().__init__("unused.parquet", max_seq_len=4)
@@ -83,7 +84,7 @@ class _FailingWindowlateDataset(WindowlateIterableDataset):
 
 
 class _TupleDataset(Dataset):
-    """Question-level style map-style dataset: 6-tuple samples, no windowlate."""
+    """Question-level style map-style dataset: 7-tuple samples, no windowlate."""
 
     def __len__(self) -> int:
         return 8

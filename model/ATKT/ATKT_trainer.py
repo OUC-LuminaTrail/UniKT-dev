@@ -205,9 +205,9 @@ class ATKTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data):
         """测试前向传播，支持 windowlateauc_mean 评估。
 
-        batch_data: (sequence, response, mask, late_group_id, true_labels, question)
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question, user_id)
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
