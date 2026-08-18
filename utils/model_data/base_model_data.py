@@ -195,16 +195,17 @@ class BaseModelData(ABC):
                 "K-fold labels not found in data. Please call data_src.add_kfold_labels() first."
             )
 
-        # Each user must have a single consistent fold label
+        id_col = "sequence_id" if "sequence_id" in data.columns else "user"
+
         inconsistent = (
-            data.group_by("user")
+            data.group_by(id_col)
             .agg(pl.col("fold").n_unique().alias("fold_nunique"))
             .filter(pl.col("fold_nunique") > 1)
         )
         if inconsistent.height > 0:
             raise ValueError("Found users with inconsistent fold labels")
 
-        user_fold = data.select(["user", "fold"]).unique(subset=["user"], keep="first")
+        user_fold = data.select([id_col, "fold"]).unique(subset=[id_col], keep="first")
 
         if user_fold.height != num_users:
             raise ValueError(
@@ -213,7 +214,7 @@ class BaseModelData(ABC):
                 f"Ensure K-fold labels are added to the correct data source."
             )
 
-        user_idx = user_fold["user"].to_numpy()
+        user_idx = user_fold[id_col].to_numpy()
         fold_label = user_fold["fold"].to_numpy()
 
         if user_idx.min() < 0 or user_idx.max() >= num_users:

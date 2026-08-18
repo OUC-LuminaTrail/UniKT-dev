@@ -55,7 +55,7 @@ class QuestionModelData(BaseModelData):
         # Load split sequence data
         data = self.data_src.get_split_question_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].nunique()
+        num_users = data["sequence_id"].nunique()
 
         # Build sequence arrays
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
@@ -63,11 +63,11 @@ class QuestionModelData(BaseModelData):
         user_response = np.zeros((num_users, max_seq_len), dtype=int)
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
 
-        user_indices = data["user"].values
+        user_indices = data["sequence_id"].values
         seq_positions = data["seq_pos"].values
 
         user_sequence[user_indices, seq_positions] = data["question"].values
-        user_id_sequence[user_indices, seq_positions] = data["original_user"].values
+        user_id_sequence[user_indices, seq_positions] = data["user"].values
         user_response[user_indices, seq_positions] = data["label"].values
         user_mask[user_indices, seq_positions] = 1
 

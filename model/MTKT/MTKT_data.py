@@ -251,10 +251,10 @@ class MTKTModelData(SkillModelData):
         """
         data = self.data_src.get_split_skill_sequence_data().to_pandas()
         max_seq_len: int = self.data_src.get_metadata("max_seq_len")
-        num_users: int = int(data["user"].nunique())
+        num_users: int = int(data["sequence_id"].nunique())
 
         user_timestamp = np.zeros((num_users, max_seq_len), dtype=np.float64)
-        user_indices = data["user"].values
+        user_indices = data["sequence_id"].values
         seq_positions = data["seq_pos"].values
         user_timestamp[user_indices, seq_positions] = data["timestamp"].values
         return user_timestamp
