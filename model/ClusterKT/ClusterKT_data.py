@@ -130,7 +130,7 @@ class ClusterKTModelData(QuestionModelData):
         self.num_skill_groups = num_skill_groups
 
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data_pd["user"].nunique()
+        num_users = data_pd["sequence_id"].nunique()
 
         logger.info(
             f"Building ClusterKT sequences: {num_users} users, "
@@ -143,7 +143,7 @@ class ClusterKTModelData(QuestionModelData):
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
         user_timestamp = np.zeros((num_users, max_seq_len), dtype=np.float64)
 
-        user_indices = data_pd["user"].values
+        user_indices = data_pd["sequence_id"].values
         seq_positions = data_pd["seq_pos"].values
 
         # Map question → skill_group

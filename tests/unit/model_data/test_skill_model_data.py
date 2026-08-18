@@ -2,7 +2,7 @@
 
 Covers the 2026-08 framework change: the windowlate iterable dataset appends
 the ORIGINAL student id as a 7th tuple element, and ``build_sequence_data``
-fills ``user_id_sequence`` from the split data's ``original_user`` column so
+fills ``user_id_sequence`` from the split data's ``user`` column so
 train/val/test share one id space.
 """
 
@@ -119,7 +119,7 @@ class TestWindowlateIterableDatasetUserId:
 
 
 class TestBuildSequenceDataOriginalUser:
-    """user_id_sequence fills from original_user, not the split row index."""
+    """user_id_sequence fills from user, not the split row index."""
 
     @pytest.fixture
     def split_frame(self) -> pl.DataFrame:
@@ -129,12 +129,12 @@ class TestBuildSequenceDataOriginalUser:
         #   split row 2 -> original 5  (positions 0..1)
         return pl.DataFrame(
             {
-                "user": [0, 0, 0, 1, 1, 2, 2],
+                "sequence_id": [0, 0, 0, 1, 1, 2, 2],
                 "seq_pos": [0, 1, 2, 0, 1, 0, 1],
                 "skill": [10, 11, 12, 13, 14, 15, 16],
                 "question": [1, 2, 3, 4, 5, 6, 7],
                 "label": [1, 0, 1, 0, 1, 1, 0],
-                "original_user": [5, 5, 5, 9, 9, 5, 5],
+                "user": [5, 5, 5, 9, 9, 5, 5],
             }
         )
 
@@ -156,12 +156,12 @@ class TestBuildSequenceDataOriginalUser:
         assert user_id_sequence[1].tolist() == [9, 9, 0]
         assert user_id_sequence[2].tolist() == [5, 5, 0]
 
-    def test_missing_original_user_column_raises(self):
+    def test_missing_user_column_raises(self):
         # No backward compatibility: legacy split frames without the column
         # fail fast on data access.
         frame = pl.DataFrame(
             {
-                "user": [0, 0],
+                "sequence_id": [0, 0],
                 "seq_pos": [0, 1],
                 "skill": [10, 11],
                 "question": [1, 2],
@@ -229,7 +229,7 @@ class TestLoadWindowlateDataOrder:
 
 
 class TestSplitPipelineOriginalUserColumn:
-    """Split pipeline preserves the pre-split student id (original_user)."""
+    """Split pipeline preserves the pre-split student id (user)."""
 
     @staticmethod
     def _build(frame: pl.DataFrame, max_seq_len: int, min_seq_len: int) -> pl.DataFrame:
@@ -248,7 +248,7 @@ class TestSplitPipelineOriginalUserColumn:
         ds.relation_data = None
         return ds._build_split_sequences(expand_skills=False)
 
-    def test_original_user_column_present_and_matches_source(self):
+    def test_user_column_present_and_matches_source(self):
         frame = pl.DataFrame(
             {
                 "user": [0, 0, 0, 1, 1],
@@ -258,11 +258,12 @@ class TestSplitPipelineOriginalUserColumn:
             }
         )
         out = self._build(frame, max_seq_len=2, min_seq_len=1)
-        assert "original_user" in out.columns
+        assert "user" in out.columns
+        assert "sequence_id" in out.columns
         # user 0 -> splits (0,0),(0,1) -> new ids 0,1; user 1 -> split id 2.
         # new ids are assigned per (user, split_idx) in global order.
-        assert out["user"].to_list() == [0, 0, 1, 2, 2]
-        assert out["original_user"].to_list() == [0, 0, 0, 1, 1]
+        assert out["sequence_id"].to_list() == [0, 0, 1, 2, 2]
+        assert out["user"].to_list() == [0, 0, 0, 1, 1]
         assert out["seq_pos"].to_list() == [0, 1, 0, 0, 1]
 
     def test_empty_input_keeps_schema(self):
@@ -275,7 +276,9 @@ class TestSplitPipelineOriginalUserColumn:
             }
         )
         out = self._build(frame, max_seq_len=2, min_seq_len=1)
-        assert "original_user" in out.columns
+        assert "user" in out.columns
+        assert "sequence_id" in out.columns
+        assert "original_user" not in out.columns
         assert out.height == 0
 
     def test_min_seq_len_drop_keeps_global_id_order(self):
@@ -291,6 +294,6 @@ class TestSplitPipelineOriginalUserColumn:
             }
         )
         out = self._build(frame, max_seq_len=2, min_seq_len=2)
-        assert out["user"].to_list() == [0, 0, 1, 1, 2, 2]
-        assert out["original_user"].to_list() == [0, 0, 0, 0, 2, 2]
+        assert out["sequence_id"].to_list() == [0, 0, 1, 1, 2, 2]
+        assert out["user"].to_list() == [0, 0, 0, 0, 2, 2]
         assert out["seq_pos"].to_list() == [0, 1, 0, 1, 0, 1]

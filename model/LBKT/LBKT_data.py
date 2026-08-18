@@ -119,7 +119,7 @@ class LBKTModelData(QuestionModelData):
         _validate_required_columns(columns)
 
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].nunique()
+        num_users = data["sequence_id"].nunique()
 
         fold_labels = data["fold"].values
         train_mask = (fold_labels != fold_idx) & (fold_labels != -1)
@@ -136,7 +136,7 @@ class LBKTModelData(QuestionModelData):
         user_attempt_factor = np.zeros((num_users, max_seq_len), dtype=np.float32)
         user_hint_factor = np.zeros((num_users, max_seq_len), dtype=np.float32)
 
-        user_indices = data["user"].values
+        user_indices = data["sequence_id"].values
         seq_positions = data["seq_pos"].values
 
         user_sequence[user_indices, seq_positions] = data["question"].values

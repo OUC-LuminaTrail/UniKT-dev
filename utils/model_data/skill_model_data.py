@@ -80,7 +80,7 @@ class WindowlateIterableDataset(IterableDataset):
             Tuple of (sequence, response, mask, late_group_id, label, question,
             user_id) tensors, each of shape (max_seq_len,). user_id carries
             the ORIGINAL student id (the same id space as the split data's
-            ``original_user`` column); trailing pad positions keep the buffer
+            ``user`` column); trailing pad positions keep the buffer
             value 0 -- consumers must select valid positions via the mask or
             the window bounds, never via the raw user_id value.
         """
@@ -218,7 +218,7 @@ class SkillModelData(BaseModelData):
             Tuple of (user_sequence, user_response, user_mask,
             user_id_sequence, user_question) as numpy arrays,
             each of shape (num_split_users, max_seq_len). user_id_sequence
-            carries ORIGINAL student ids (from the ``original_user`` column),
+            carries ORIGINAL student ids (from the ``user`` column),
             so one student's multiple splits share the same id -- matching
             the windowlate parquet's id space.
         """
@@ -231,7 +231,7 @@ class SkillModelData(BaseModelData):
         if isinstance(data, pl.LazyFrame):
             data = data.collect()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].n_unique()
+        num_users = data["sequence_id"].n_unique()
 
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
@@ -239,11 +239,11 @@ class SkillModelData(BaseModelData):
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
         user_question = np.zeros((num_users, max_seq_len), dtype=int)
 
-        user_indices = data["user"].to_numpy()
+        user_indices = data["sequence_id"].to_numpy()
         seq_positions = data["seq_pos"].to_numpy()
 
         user_sequence[user_indices, seq_positions] = data["skill"].to_numpy()
-        user_id_sequence[user_indices, seq_positions] = data["original_user"].to_numpy()
+        user_id_sequence[user_indices, seq_positions] = data["user"].to_numpy()
         user_response[user_indices, seq_positions] = data["label"].to_numpy()
         user_mask[user_indices, seq_positions] = 1
         user_question[user_indices, seq_positions] = data["question"].to_numpy()

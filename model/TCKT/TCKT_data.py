@@ -141,12 +141,12 @@ class TCKTModelData(QuestionModelData):
             n_it:   max_it_minutes + 1
         """
         data = self.data_src.get_split_question_sequence_data()
-        num_users = data["user"].n_unique()
+        num_users = data["sequence_id"].n_unique()
 
         sub = data.select(
-            ["user", "seq_pos", "ms_first_response", "timestamp"]
+            ["sequence_id", "seq_pos", "ms_first_response", "timestamp"]
         ).to_pandas()
-        user_idx = sub["user"].to_numpy()
+        user_idx = sub["sequence_id"].to_numpy()
         seq_pos = sub["seq_pos"].to_numpy()
         ms = sub["ms_first_response"].to_numpy(dtype=np.float64)
         ts = sub["timestamp"].to_numpy(dtype=np.float64)

@@ -114,14 +114,14 @@ class PSKTModelData(QuestionModelData):
             data = data.collect()
 
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].n_unique()
+        num_users = data["sequence_id"].n_unique()
 
         user_sequence = np.zeros((num_users, max_seq_len), dtype=np.int64)
         user_response = np.full((num_users, max_seq_len), 2, dtype=np.int64)
         user_mask = np.zeros((num_users, max_seq_len), dtype=np.int64)
         user_timestamp = np.zeros((num_users, max_seq_len), dtype=np.int64)
 
-        user_idx = data["user"].to_numpy()
+        user_idx = data["sequence_id"].to_numpy()
         seq_pos = data["seq_pos"].to_numpy()
         user_sequence[user_idx, seq_pos] = data["question"].to_numpy()
         user_response[user_idx, seq_pos] = data["label"].to_numpy()

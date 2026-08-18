@@ -543,7 +543,7 @@ class DyGKTModelData(QuestionModelData):
                 .to_numpy(dtype=np.int64)
             )
 
-        users = split_data["user"].to_numpy(dtype=np.int64)
+        users = split_data["sequence_id"].to_numpy(dtype=np.int64)
         seq_pos = split_data["seq_pos"].to_numpy(dtype=np.int64)
         valid = (
             (users >= 0)

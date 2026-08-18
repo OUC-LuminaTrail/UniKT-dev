@@ -162,9 +162,9 @@ class DKTForgetModelData(SkillModelData):
         data = self.data_src.get_split_skill_sequence_data()
 
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].n_unique()
+        num_users = data["sequence_id"].n_unique()
 
-        user_indices = data["user"].to_numpy()
+        user_indices = data["sequence_id"].to_numpy()
         seq_positions = data["seq_pos"].to_numpy()
 
         user_sequence = np.zeros((num_users, max_seq_len), dtype=np.int64)

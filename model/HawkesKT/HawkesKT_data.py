@@ -51,7 +51,7 @@ class HawkesKTModelData(QuestionModelData):
 
         # 1. Load question split data (one row per question, has timestamp)
         q_data = self.data_src.get_split_question_sequence_data()
-        num_users = q_data["user"].n_unique()
+        num_users = q_data["sequence_id"].n_unique()
 
         # 2. Get first skill per question from question_data
         question_data = self.data_src.get_relation("question_skill")
@@ -68,7 +68,7 @@ class HawkesKTModelData(QuestionModelData):
         label_seqs = np.zeros((num_users, max_seq_len), dtype=np.int64)
         mask_seqs = np.zeros((num_users, max_seq_len), dtype=np.int64)
 
-        user_indices = merged_pd["user"].values
+        user_indices = merged_pd["sequence_id"].values
         seq_positions = merged_pd["seq_pos"].values
 
         skill_seqs[user_indices, seq_positions] = merged_pd["skill"].values
