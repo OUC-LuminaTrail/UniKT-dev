@@ -67,7 +67,7 @@ class QuestionModelData(BaseModelData):
         seq_positions = data["seq_pos"].values
 
         user_sequence[user_indices, seq_positions] = data["question"].values
-        user_id_sequence[user_indices, seq_positions] = user_indices
+        user_id_sequence[user_indices, seq_positions] = data["original_user"].values
         user_response[user_indices, seq_positions] = data["label"].values
         user_mask[user_indices, seq_positions] = 1
 
