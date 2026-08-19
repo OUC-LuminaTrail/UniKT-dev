@@ -281,3 +281,145 @@ class TestAccumulator:
         )
         m = accum.compute("val")
         assert {"acc", "auc", "auprc", "mae", "rmse", "r2", "kappa"} <= set(m)
+
+
+# ---------------------------------------------------------------------------
+# fusion helpers + accumulator state machine (direct)
+# ---------------------------------------------------------------------------
+
+from utils.training.metrics.accumulator import _order_keys  # noqa: E402
+from utils.training.metrics.grouping import _group_scores, _pearson_r2  # noqa: E402
+
+
+class TestGroupScores:
+    def test_mean_averages_each_group_and_safe_divides_unseen(self):
+        out = _group_scores(np.array([0.6, 0.2]), np.array([0, 1]), 3, "mean", 0.5)
+        # group 2 has no members: 0/1 instead of 0/0 -> nan
+        assert out.tolist() == pytest.approx([0.6, 0.2, 0.0])
+
+    def test_vote_uses_majority_direction_subset(self):
+        y = np.array([0.9, 0.8, 0.1, 0.1, 0.2, 0.9, 0.9, 0.9])
+        inverse = np.array([0, 0, 0, 1, 1, 1, 2, 2])
+        out = _group_scores(y, inverse, 3, "vote", 0.5)
+        # group 0: majority correct -> mean of the two >= threshold members;
+        # group 1: majority incorrect -> mean of the two < threshold members.
+        assert out.tolist() == pytest.approx([0.85, 0.15, 0.9])
+
+    def test_vote_group_fully_on_majority_side_equals_mean(self):
+        # When every member sits on the majority side, the selected subset is
+        # the whole group, so vote degenerates to the plain mean.
+        out = _group_scores(np.array([0.9, 0.9]), np.array([0, 0]), 1, "vote", 0.5)
+        assert out.tolist() == pytest.approx([0.9])
+
+    def test_all_unanimous_group_includes_every_member(self):
+        y = np.array([0.9, 0.8, 0.1, 0.1, 0.2])
+        inverse = np.array([0, 0, 0, 1, 1])
+        out = _group_scores(y, inverse, 2, "all", 0.5)
+        # group 1 is unanimous (both below) -> whole-group mean, not majority
+        # subset (which would also be the whole group here) — and group 0 is
+        # mixed -> majority subset, matching vote.
+        assert out.tolist() == pytest.approx([0.85, 0.15])
+
+    def test_unknown_fusion_raises(self):
+        with pytest.raises(ValueError, match="Unsupported fusion_type"):
+            _group_scores(np.array([0.6]), np.array([0]), 1, "median", 0.5)
+
+    def test_exact_half_tie_counts_as_majority(self):
+        # 1 of 2 members >= threshold: ratio exactly 0.5 -> majority is True
+        # (>=), so vote selects the correct-side member.
+        out = _group_scores(np.array([0.9, 0.1]), np.array([0, 0]), 1, "vote", 0.5)
+        assert out.tolist() == pytest.approx([0.9])
+
+
+class TestPearsonR2:
+    def test_perfect_linear_correlation(self):
+        assert _pearson_r2([1, 2, 3], [2, 4, 6]) == pytest.approx(1.0)
+        assert _pearson_r2([1, 2, 3], [3, 2, 1]) == pytest.approx(1.0)  # sign lost
+
+    def test_zero_variance_returns_zero(self):
+        assert _pearson_r2([1, 1, 1], [1, 2, 3]) == 0.0
+        assert _pearson_r2([1, 2, 3], [1, 1, 1]) == 0.0
+
+
+def _group_batch(y_label, y_score, group_id):
+    def t(values):
+        return torch.tensor(values, dtype=torch.float32)
+
+    y_pred = [1.0 if s >= 0.5 else 0.0 for s in y_score]
+    return {
+        "y_label": t(y_label),
+        "y_predict": t(y_pred),
+        "y_score": t(y_score),
+        "y_prob": t(y_score),
+        "group_id": torch.tensor(group_id),
+    }
+
+
+class TestAccumulatorGroupPath:
+    def test_group_id_in_test_phase_produces_fusion_keys(self):
+        accum = MetricsAccumulator()
+        accum.reset("test")
+        accum.update(
+            "test", _group_batch([1, 1, 0, 0], [0.9, 0.8, 0.2, 0.1], [7, 7, 3, 3])
+        )
+
+        metrics = accum.compute("test")
+        expected = {
+            f"{fusion}_{metric}"
+            for fusion in ("mean", "vote", "all")
+            for metric in ("acc", "rmse", "r2", "auc", "auprc")
+        }
+        assert expected <= set(metrics)
+        assert metrics["mean_acc"] == 1.0
+
+    def test_inconsistent_group_labels_raise(self):
+        accum = MetricsAccumulator()
+        accum.reset("test")
+        accum.update("test", _group_batch([1, 0], [0.9, 0.8], [7, 7]))
+        with pytest.raises(ValueError, match="Inconsistent labels"):
+            accum.compute("test")
+
+    def test_group_id_ignored_in_val_phase(self):
+        accum = MetricsAccumulator()
+        accum.reset("val")
+        accum.update(
+            "val", _group_batch([1, 1, 0, 0], [0.9, 0.8, 0.2, 0.1], [7, 7, 3, 3])
+        )
+
+        metrics = accum.compute("val")
+        assert "acc" in metrics  # plain per-instance metrics
+        assert not any(key.startswith(("mean_", "vote_", "all_")) for key in metrics)
+
+
+class TestOrderingAndReset:
+    def test_order_keys_train_phase_known_first_then_alpha(self):
+        out = _order_keys({"rmse": 1, "acc": 2, "zz": 3, "auc": 4, "auprc": 5}, "val")
+        assert list(out) == ["acc", "auc", "auprc", "rmse", "zz"]
+
+    def test_order_keys_group_phase_fusion_then_metric(self):
+        out = _order_keys(
+            {"all_rmse": 3, "vote_acc": 2, "mean_auc": 1, "mean_acc": 4}, "test"
+        )
+        assert list(out) == ["mean_acc", "mean_auc", "vote_acc", "all_rmse"]
+
+    def test_multi_batch_concatenation_preserves_order(self):
+        accum = MetricsAccumulator()
+        accum.reset("val")
+        accum.update("val", _batch([1, 0], [1, 0], [0.9, 0.1], [0.9, 0.1]))
+        accum.update("val", _batch([1], [1], [0.8], [0.8]))
+
+        ctx = MetricsAccumulator._build_context("val", accum._accumulators["val"])
+        assert ctx.y_label.tolist() == [1.0, 0.0, 1.0]  # batch order kept
+
+    def test_compute_on_unreset_phase_is_empty(self):
+        assert MetricsAccumulator().compute("train") == {}
+
+    def test_compute_after_reset_without_updates_is_empty(self):
+        accum = MetricsAccumulator()
+        accum.reset("train")
+        assert accum.compute("train") == {}
+
+    def test_update_on_unknown_phase_auto_resets(self):
+        accum = MetricsAccumulator()
+        accum.update("banana", _batch([1, 0], [1, 0], [0.9, 0.1], [0.9, 0.1]))
+        assert accum.compute("banana")["acc"] == 1.0

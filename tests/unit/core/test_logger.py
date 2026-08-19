@@ -1,0 +1,186 @@
+"""Tests for the unified logger: cache semantics, file sink, level handling."""
+
+import logging
+import os
+
+import pytest
+from rich.logging import RichHandler
+
+from utils.core.logger import (
+    add_file_handler,
+    get_logger,
+    remove_file_handler,
+    reset_loggers,
+    set_log_level,
+)
+
+
+def _fresh_name(isolated_loggers, key):
+    """A unique logger name never used by another test (the global logging
+    registry returns the same object per name, so reuse would carry residue)."""
+    return f"utest.logger.{key}"
+
+
+# --- get_logger ---
+
+
+class TestGetLogger:
+    def test_same_name_returns_cached_instance(self, isolated_loggers):
+        name = _fresh_name(isolated_loggers, "cache")
+        assert get_logger(name) is get_logger(name)
+
+    def test_propagate_false_and_single_rich_handler(self, isolated_loggers):
+        lg = get_logger(_fresh_name(isolated_loggers, "handlers"))
+        assert lg.propagate is False
+        rich_handlers = [h for h in lg.handlers if isinstance(h, RichHandler)]
+        assert len(rich_handlers) == 1
+
+    def test_second_call_adds_no_extra_handlers(self, isolated_loggers):
+        name = _fresh_name(isolated_loggers, "twice")
+        first = get_logger(name)
+        n = len(first.handlers)
+        assert len(get_logger(name).handlers) == n
+
+    def test_file_sink_attached_to_new_logger(self, isolated_loggers, tmp_path):
+        add_file_handler(tmp_path / "run.log")
+        try:
+            lg = get_logger(_fresh_name(isolated_loggers, "after_sink"))
+            assert isolated_loggers._file_handler in lg.handlers
+        finally:
+            remove_file_handler()
+
+
+# --- add/remove file handler ---
+
+
+class TestFileHandler:
+    def test_creates_parent_dirs_and_returns_path(self, isolated_loggers, tmp_path):
+        target = tmp_path / "nested" / "dirs" / "run.log"
+        returned = add_file_handler(target)
+        try:
+            assert returned == target
+            assert target.exists()
+        finally:
+            remove_file_handler()
+
+    def test_session_header_contains_timestamp_and_pid(
+        self, isolated_loggers, tmp_path
+    ):
+        target = tmp_path / "run.log"
+        add_file_handler(target)
+        try:
+            content = target.read_text(encoding="utf-8")
+            assert "session start" in content
+            assert f"pid={os.getpid()}" in content
+            assert "=" * 70 in content
+        finally:
+            remove_file_handler()
+
+    def test_retroactive_attach_to_existing_logger(self, isolated_loggers, tmp_path):
+        lg = get_logger(_fresh_name(isolated_loggers, "retro"))
+        target = tmp_path / "run.log"
+        add_file_handler(target)
+        try:
+            assert any(
+                isinstance(h, logging.FileHandler) and h.baseFilename == str(target)
+                for h in lg.handlers
+            )
+        finally:
+            remove_file_handler()
+
+    def test_remove_without_handler_is_noop(self, isolated_loggers):
+        remove_file_handler()  # must not raise
+        remove_file_handler()
+
+    def test_re_attach_swaps_and_closes_old_sink(self, isolated_loggers, tmp_path):
+        first = tmp_path / "first.log"
+        second = tmp_path / "second.log"
+        lg = get_logger(_fresh_name(isolated_loggers, "swap"))
+        add_file_handler(first)
+        lg.warning("to first")
+        add_file_handler(second)
+        try:
+            lg.warning("to second")
+            first_lines = first.read_text(encoding="utf-8")
+            second_lines = second.read_text(encoding="utf-8")
+            assert "to first" in first_lines
+            assert "to second" not in first_lines  # old sink closed, no appends
+            assert "to second" in second_lines
+        finally:
+            remove_file_handler()
+
+    def test_failed_attach_leaves_previous_sink(self, isolated_loggers, tmp_path):
+        good = tmp_path / "good.log"
+        add_file_handler(good)
+        # A directory in place of the log file makes FileHandler construction fail.
+        (tmp_path / "not_a_file.log").mkdir()
+        # OSError message varies by platform; only the type is asserted.
+        with pytest.raises(OSError):
+            add_file_handler(tmp_path / "not_a_file.log")
+        try:
+            from utils.core import logger as logger_module
+
+            assert logger_module._file_handler.baseFilename == str(good)
+        finally:
+            remove_file_handler()
+
+
+# --- level handling ---
+
+
+class TestLevelHandling:
+    def test_env_debug_level(self, isolated_loggers, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        lg = get_logger(_fresh_name(isolated_loggers, "debug"))
+        assert lg.level == logging.DEBUG
+
+    def test_env_unknown_falls_back_to_info(
+        self, isolated_loggers, clean_log_level_env, monkeypatch
+    ):
+        monkeypatch.setenv("LOG_LEVEL", "notalevel")
+        lg = get_logger(_fresh_name(isolated_loggers, "fallback"))
+        assert lg.level == logging.INFO
+
+    def test_set_log_level_updates_cached_and_future(
+        self, isolated_loggers, clean_log_level_env, monkeypatch
+    ):
+        name = _fresh_name(isolated_loggers, "setlevel")
+        existing = get_logger(name)
+        set_log_level(logging.ERROR)
+        try:
+            assert existing.level == logging.ERROR
+            future = get_logger(_fresh_name(isolated_loggers, "setlevel2"))
+            assert future.level == logging.ERROR
+            assert os.environ["LOG_LEVEL"] == "ERROR"
+        finally:
+            set_log_level(logging.INFO)
+
+    def test_set_log_level_updates_file_sink(
+        self, isolated_loggers, clean_log_level_env, tmp_path, monkeypatch
+    ):
+        from utils.core import logger as logger_module
+
+        add_file_handler(tmp_path / "run.log")
+        try:
+            set_log_level(logging.DEBUG)
+            assert logger_module._file_handler.level == logging.DEBUG
+        finally:
+            remove_file_handler()
+            set_log_level(logging.INFO)
+
+
+# --- reset ---
+
+
+class TestResetLoggers:
+    def test_reset_clears_cache_and_detaches_sink(self, isolated_loggers, tmp_path):
+        from utils.core import logger as logger_module
+
+        name = _fresh_name(isolated_loggers, "reset")
+        lg = get_logger(name)
+        add_file_handler(tmp_path / "run.log")
+        assert logger_module._file_handler is not None
+        reset_loggers()
+        assert logger_module._file_handler is None
+        assert name not in logger_module._loggers
+        assert lg not in logger_module._loggers.values()
