@@ -93,7 +93,11 @@ class MixerModel(nn.Module):
 
 
 class HGNNConv(nn.Module):
-    """单层超图卷积：先线性变换，再沿超图邻接矩阵 G 传播。"""
+    """单层超图卷积：先线性变换，再沿超图邻接传播。
+
+    以 G = D_v^-1/2 H D_e^-1 H^T D_v^-1/2 的因式形式执行传播，
+    避免物化近似稠密的用户×用户邻接 G。
+    """
 
     def __init__(self, in_ft: int, out_ft: int):
         super().__init__()
@@ -106,10 +110,19 @@ class HGNNConv(nn.Module):
         self.weight.data.uniform_(-stdv, stdv)
         self.bias.data.uniform_(-stdv, stdv)
 
-    def forward(self, x: torch.Tensor, G: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        H: torch.Tensor,
+        H_t: torch.Tensor,
+        dv: torch.Tensor,
+        de: torch.Tensor,
+    ) -> torch.Tensor:
         x = x.matmul(self.weight)
         x = x + self.bias
-        return torch.sparse.mm(G, x)
+        x = torch.sparse.mm(H_t, dv.unsqueeze(1) * x)
+        x = torch.sparse.mm(H, de.unsqueeze(1) * x)
+        return dv.unsqueeze(1) * x
 
 
 class HGNN(nn.Module):
@@ -117,8 +130,15 @@ class HGNN(nn.Module):
         super().__init__()
         self.hgc1 = HGNNConv(in_ch, n_hid)
 
-    def forward(self, x: torch.Tensor, G: torch.Tensor) -> torch.Tensor:
-        return F.relu(self.hgc1(x, G))
+    def forward(
+        self,
+        x: torch.Tensor,
+        H: torch.Tensor,
+        H_t: torch.Tensor,
+        dv: torch.Tensor,
+        de: torch.Tensor,
+    ) -> torch.Tensor:
+        return F.relu(self.hgc1(x, H, H_t, dv, de))
 
 
 class DGMKT(nn.Module):
@@ -128,7 +148,9 @@ class DGMKT(nn.Module):
         num_c_raw: 未做 16 倍数填充的技能数。
         num_users: 超图节点数（原始学生数）。
         max_seq_len: 序列长度（位置注意力参数 pos 按此构造）。
-        G: HGNN 归一化超图邻接矩阵（稀疏 COO，随 build_components 构建）。
+        H: 学生-技能计数关联矩阵（稀疏 COO，随 build_components 构建）。
+        dv: 超图节点度缩放 D_v^-1/2 [num_users]。
+        de: 超边度缩放 D_e^-1 [num_skills]。
         d_model: 隐藏维度。
         n_layer: 每路 Mamba 骨干的层数。
         pad_num_c_multiple: num_c 向上取整的倍数。
@@ -139,7 +161,9 @@ class DGMKT(nn.Module):
         num_c_raw: int,
         num_users: int,
         max_seq_len: int,
-        G: torch.Tensor,
+        H: torch.Tensor,
+        dv: torch.Tensor,
+        de: torch.Tensor,
         d_model: int = 512,
         n_layer: int = 4,
         pad_num_c_multiple: int = 16,
@@ -167,7 +191,11 @@ class DGMKT(nn.Module):
         # Persistent so checkpoints reproduce the HGNN inputs on reload (RNG differs at rebuild)
         self.register_buffer("stu", torch.empty(num_users, d_model).normal_())
         # Deterministically rebuilt from data; excluded from state_dict
-        self.register_buffer("G", G, persistent=False)
+        H = H.coalesce()
+        self.register_buffer("H", H, persistent=False)
+        self.register_buffer("H_t", H.t().coalesce(), persistent=False)
+        self.register_buffer("dv", dv, persistent=False)
+        self.register_buffer("de", de, persistent=False)
         # One-hot table: class indicator rows plus one all-zero row
         self.register_buffer(
             "one_hot_table",
@@ -209,7 +237,7 @@ class DGMKT(nn.Module):
         batch_size, seq_len = skill.shape
 
         # H branch: student profile lookup
-        stu_embedding = self.net(self.stu, self.G)  # [num_users, d]
+        stu_embedding = self.net(self.stu, self.H, self.H_t, self.dv, self.de)
         stu_h = stu_embedding[student]
 
         mask = torch.ne(answer, 2).unsqueeze(-1).float()
