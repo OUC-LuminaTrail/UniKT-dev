@@ -187,10 +187,10 @@ class ReKTPModelData(QuestionModelData):
         back to position indices.
         """
         q_data = self.data_src.get_split_question_sequence_data()
-        num_users = q_data["user"].n_unique()
+        num_users = q_data["sequence_id"].n_unique()
         max_seq_len = int(self.data_src.get_metadata("max_seq_len"))
         time_seqs = np.zeros((num_users, max_seq_len), dtype=np.float64)
-        user_indices = q_data["user"].to_numpy()
+        user_indices = q_data["sequence_id"].to_numpy()
         seq_positions = q_data["seq_pos"].to_numpy()
         columns = q_data.columns
 
