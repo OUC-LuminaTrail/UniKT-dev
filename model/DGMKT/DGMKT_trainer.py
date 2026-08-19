@@ -65,7 +65,9 @@ class DGMKTTrainer(BaseTrainer):
             train_dataset,
             val_dataset,
             test_dataset,
-            G,
+            H,
+            dv,
+            de,
             num_users,
             seq_len,
         ) = DGMKTModelData(data_src).prepare_data(rc)
@@ -77,7 +79,9 @@ class DGMKTTrainer(BaseTrainer):
             num_c_raw=num_skills,
             num_users=num_users,
             max_seq_len=seq_len,
-            G=G,
+            H=H,
+            dv=dv,
+            de=de,
             d_model=m.d_model,
             n_layer=m.n_layer,
         )

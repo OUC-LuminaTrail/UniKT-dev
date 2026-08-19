@@ -3,7 +3,6 @@
 from typing import Any
 
 import numpy as np
-import scipy.sparse as sp
 import torch
 from torch.utils.data import Dataset
 from typing_extensions import override
@@ -49,26 +48,31 @@ def _build_incidence(
     return H
 
 
-def _generate_G_from_H(H: np.ndarray) -> torch.Tensor:
-    """Feng HGNN normalization of H"""
-    H = np.asarray(H, dtype=np.float64)
-    W = np.ones(H.shape[1])  # uniform hyperedge weights
+def _build_hypergraph_props(
+    H: np.ndarray,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Feng HGNN normalization in factored form.
 
-    DV = np.sum(H * W, axis=1)
-    DE = np.sum(H, axis=0)
-    DE = np.maximum(DE, 1.0)
-    DV = np.where(DV > 0, DV, 1.0)
+    G = D_v^-1/2 H D_e^-1 H^T D_v^-1/2 is near-dense when few skills cover
+    many users, so return the sparse incidence H plus diagonal scales.
+    """
+    DV = np.maximum(H.sum(axis=1), 1.0)
+    DE = np.maximum(H.sum(axis=0), 1.0)
+    dv = torch.from_numpy((DV**-0.5).astype(np.float32))
+    de = torch.from_numpy((1.0 / DE).astype(np.float32))
 
-    H_sp = sp.csr_matrix(H)
-    coo = (
-        sp.diags(DV**-0.5) @ H_sp @ sp.diags(1.0 / DE) @ H_sp.T @ sp.diags(DV**-0.5)
-    ).tocoo()
-    coo.data = coo.data.astype(np.float32)
-    logger.debug(f"HGNN adjacency built (n_node={H.shape[0]}, nnz={coo.nnz})")
-
-    indices = torch.from_numpy(np.vstack((coo.row, coo.col)).astype(np.int64))
-    values = torch.from_numpy(coo.data)
-    return torch.sparse_coo_tensor(indices, values, coo.shape).coalesce()
+    H_f = H.astype(np.float32)
+    idx = np.nonzero(H_f)
+    H_coo = torch.sparse_coo_tensor(
+        torch.from_numpy(np.vstack(idx).astype(np.int64)),
+        torch.from_numpy(H_f[idx]),
+        H_f.shape,
+    ).coalesce()
+    logger.debug(
+        f"HGNN hypergraph built (n_node={H.shape[0]}, n_edge={H.shape[1]}, "
+        f"nnz={H_coo._nnz()})"
+    )
+    return H_coo, dv, de
 
 
 class DGMKTModelData(SkillModelData):
@@ -104,7 +108,7 @@ class DGMKTModelData(SkillModelData):
         H = _build_incidence(
             user_sequence, user_mask, orig_ids, num_original, num_skills
         )
-        G = _generate_G_from_H(H)
+        H_coo, dv, de = _build_hypergraph_props(H)
         num_users = num_original
 
         train_dataset = DGMKTDataset(*train_data)
@@ -128,7 +132,9 @@ class DGMKTModelData(SkillModelData):
             train_dataset,
             val_dataset,
             test_dataset,
-            G,
+            H_coo,
+            dv,
+            de,
             num_users,
             seq_len,
         )
