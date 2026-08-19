@@ -1,10 +1,4 @@
-"""DGEKT 模型数据处理模块。
-
-- 题目 / 答案 / 掩码序列（question 级）
-- 三张静态图，节点空间统一为 2Q 个交互节点（答对题 q = q，答错题 q = q+Q）：
-  超图拉普拉斯 ``hyper_g``（题目-概念关联矩阵的块对角展开）、出 / 入转移
-  邻接 ``adj_out`` / ``adj_in``（训练折相邻交互计数 + 自环行归一化）
-"""
+"""DGEKT 模型数据处理模块。"""
 
 from typing import Any
 
@@ -63,7 +57,7 @@ class DGEKTModelData(QuestionModelData):
         Returns:
             (train_dataset, val_dataset, test_dataset, info) 元组，其中 ``info``
             为含 ``num_questions``、``num_skills``、``max_seq_len``、
-            ``hyper_g``、``adj_out``、``adj_in`` 的字典。
+            ``hyper_factors``、``adj_out``、``adj_in`` 的字典。
         """
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
@@ -83,11 +77,11 @@ class DGEKTModelData(QuestionModelData):
         (te_q, te_a, te_mask) = test_slices
 
         q_matrix = self.build_relationship_matrix(("question", "has", "skill"))
-        hyper_g = self._build_hyper_graph(q_matrix)
+        hyper_p, hyper_q = self._build_hyper_factors(q_matrix)
         # Transition counts are collected from the training fold only.
         adj_out, adj_in = self._build_transition_adj(tr_q, tr_a, tr_mask, num_questions)
         logger.info(
-            f"DGEKT graphs: hyper_g nnz={hyper_g._nnz()}, "
+            f"DGEKT graphs: hyper P nnz={hyper_p._nnz()}, Q nnz={hyper_q._nnz()}, "
             f"adj_out nnz={adj_out._nnz()}, adj_in nnz={adj_in._nnz()}"
         )
         logger.info(
@@ -108,19 +102,18 @@ class DGEKTModelData(QuestionModelData):
             "num_questions": num_questions,
             "num_skills": num_skills,
             "max_seq_len": max_seq_len,
-            "hyper_g": hyper_g,
+            "hyper_factors": (hyper_p, hyper_q),
             "adj_out": adj_out,
             "adj_in": adj_in,
         }
         return train_dataset, val_dataset, test_dataset, info
 
-    def _build_hyper_graph(self, q_matrix: np.ndarray) -> torch.Tensor:
-        """超图拉普拉斯 ``G = Dv^-1/2 · H · De^-1 · H^T · Dv^-1/2``。
+    def _build_hyper_factors(self, q_matrix: np.ndarray) -> tuple:
+        """超图拉普拉斯 G = Dv^-1/2·H·De^-1·H^T·Dv^-1/2 的因子分解。
 
-        关联矩阵 H 为块对角 ``[[Qm, 0], [0, Qm]]``（2Q 交互节点 × 2S 超边），
-        使答对 / 答错节点空间各自聚合概念超边。
+        返回 (P, Q) = (Dv^-1/2·H·De^-1, H^T·Dv^-1/2).
         """
-        qm = sparse.coo_matrix(q_matrix)
+        qm = sparse.coo_matrix(q_matrix, dtype=np.float64)
         H = sparse.block_diag([qm, qm]).tocoo()
 
         node_deg = np.asarray(H.sum(axis=1)).ravel()
@@ -130,14 +123,9 @@ class DGEKTModelData(QuestionModelData):
         nz = edge_deg > 0
         inv_edge[nz] = 1.0 / edge_deg[nz]
 
-        G = (
-            sparse.diags(inv_sqrt_node)
-            @ H
-            @ sparse.diags(inv_edge)
-            @ H.T
-            @ sparse.diags(inv_sqrt_node)
-        )
-        return self._to_torch_sparse(G.tocoo())
+        P = (sparse.diags(inv_sqrt_node) @ H @ sparse.diags(inv_edge)).tocoo()
+        Q = (H.T @ sparse.diags(inv_sqrt_node)).tocoo()
+        return self._to_torch_sparse(P), self._to_torch_sparse(Q)
 
     def _build_transition_adj(
         self,
@@ -173,6 +161,10 @@ class DGEKTModelData(QuestionModelData):
 
     @staticmethod
     def _to_torch_sparse(mat: sparse.coo_matrix) -> torch.Tensor:
-        indices = torch.from_numpy(np.vstack([mat.row, mat.col]).astype(np.int64))
-        values = torch.from_numpy(mat.data.astype(np.float32))
-        return torch.sparse_coo_tensor(indices, values, mat.shape).coalesce()
+        csr = mat.tocsr()
+        return torch.sparse_csr_tensor(
+            torch.from_numpy(csr.indptr.astype(np.int64)),
+            torch.from_numpy(csr.indices.astype(np.int64)),
+            torch.from_numpy(csr.data.astype(np.float32)),
+            csr.shape,
+        )
