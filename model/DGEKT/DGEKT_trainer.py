@@ -1,9 +1,4 @@
-"""DGEKT 模型训练器。
-
-监督损失为三路（concept / transition / ensemble）BCE 之和——按每生有效步
-取均值、batch 内求和；另有在线蒸馏项：ensemble 路温度软化后与两分支路
-logits 的全分布 L1 距离，权重 ``kd_alpha``。评估用三路概率平均。
-"""
+"""DGEKT 模型训练器。"""
 
 from dataclasses import field
 
@@ -78,7 +73,7 @@ class DGEKTTrainer(BaseTrainer):
             emb_dim=m.emb_dim,
             hidden_dim=m.hidden_dim,
             num_layers=m.num_layers,
-            hyper_g=info["hyper_g"],
+            hyper_factors=info["hyper_factors"],
             adj_out=info["adj_out"],
             adj_in=info["adj_in"],
         )
@@ -106,17 +101,21 @@ class DGEKTTrainer(BaseTrainer):
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)
 
-        logit_c, logit_t, logit_e = self.model(question, response, mask)  # [B, S, Q]
+        h_c, h_t, h_e = self.model(question, response, mask)
 
-        # Keep only the next question's logit per step; sigmoid is elementwise,
-        # so applying it after the gather is equivalent and much cheaper.
-        next_idx = question[:, 1:].unsqueeze(-1)  # [B, S-1, 1]
-        p_c = torch.sigmoid(torch.gather(logit_c[:, :-1], -1, next_idx).squeeze(-1))
-        p_t = torch.sigmoid(torch.gather(logit_t[:, :-1], -1, next_idx).squeeze(-1))
-        p_e = torch.sigmoid(torch.gather(logit_e[:, :-1], -1, next_idx).squeeze(-1))
+        pair_mask = mask[:, :-1] & mask[:, 1:]  # [B, S-1]
+        logit_c, logit_t, logit_e = self.model.target_logits(
+            h_c[:, :-1][pair_mask],
+            h_t[:, :-1][pair_mask],
+            h_e[:, :-1][pair_mask],
+            question[:, 1:][pair_mask],
+        )
+        p_c, p_t, p_e = (torch.sigmoid(x) for x in (logit_c, logit_t, logit_e))
 
+        prob_seq = torch.zeros_like(pair_mask, dtype=p_c.dtype)
+        prob_seq[pair_mask] = (p_c + p_t + p_e) / 3.0
         y_hat, y_label, valid_mask = self._extract_valid_predictions(
-            self._pad_to_full_sequence((p_c + p_t + p_e) / 3.0), response, mask
+            self._pad_to_full_sequence(prob_seq), response, mask
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
@@ -124,28 +123,37 @@ class DGEKTTrainer(BaseTrainer):
         sup_loss = kd_loss = None
         if self.model.training:
             # Supervised loss: per-student mean over valid steps, summed over batch.
-            labels = response.float()[:, 1:]
+            labels = response.float()[:, 1:][pair_mask]
             counts = valid_mask.sum(dim=1).clamp(min=1)
+            student_of = torch.repeat_interleave(
+                torch.arange(mask.size(0), device=mask.device),
+                valid_mask.sum(dim=1),
+            )
             sup_loss = sum(
                 (
-                    (
-                        F.binary_cross_entropy(
-                            p.clamp(1e-7, 1.0 - 1e-7), labels, reduction="none"
-                        )
-                        * valid_mask
-                    ).sum(dim=1)
-                    / counts
+                    F.binary_cross_entropy(
+                        p.clamp(1e-7, 1.0 - 1e-7), labels, reduction="none"
+                    )
+                    / counts[student_of]
                 ).sum()
                 for p in (p_c, p_t, p_e)
             )
 
-            # Online distillation: L1 between the softened ensemble distribution
-            # and both branch distributions.
+            # Online distillation
             t = self.run_config.model.kd_temperature
-            soft_e = torch.sigmoid(logit_e / t)
-            kd_loss = (soft_e - torch.sigmoid(logit_c / t)).abs().sum() + (
-                soft_e - torch.sigmoid(logit_t / t)
-            ).abs().sum()
+            lc_v, lt_v, le_v = self.model.head_logits(h_c, h_t, h_e, mask)
+            soft_e = torch.sigmoid(le_v / t)
+            per_row = (soft_e - torch.sigmoid(lc_v / t)).abs().sum(dim=-1) + (
+                soft_e - torch.sigmoid(lt_v / t)
+            ).abs().sum(dim=-1)
+            # S/L_i rescale gives every student a fixed S-term contribution,
+            # making the KD magnitude independent of sequence length.
+            lengths = mask.sum(dim=1)
+            sample_ids = torch.repeat_interleave(
+                torch.arange(mask.size(0), device=mask.device), lengths
+            )
+            scale = mask.size(1) / lengths.clamp(min=1)
+            kd_loss = (per_row * scale[sample_ids]).sum()
 
         return {
             "y_hat": y_hat,

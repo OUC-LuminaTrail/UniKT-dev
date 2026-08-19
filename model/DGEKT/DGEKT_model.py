@@ -5,7 +5,8 @@
 
 交互节点空间为 2Q（答对题 q = q，答错题 q = q+Q），冻结的随机初始特征经
 两条图卷积分支增强后查表作为 GRU 输入：
-    ques_h = HGNN(ques, G)                          概念关联超图分支
+    P = Dv^-1/2·H·De^-1, Q = H^T·Dv^-1/2   超图拉普拉斯因子，G = P·Q
+    ques_h = P @ (Q @ ...)                 概念关联超图分支
     ques_d = [GCN(ques, adj_out); GCN(ques, adj_in)] 有向转移图分支
     logit_c = fc_c(GRU_c(lookup(ques_h)))
     logit_t = fc_t(GRU_t(lookup(ques_d)))
@@ -36,7 +37,7 @@ class _GraphConvolution(nn.Module):
 
 
 class _HypergraphConvolution(nn.Module):
-    """HGNN 层：``G @ (x W + b)``。"""
+    """HGNN 层：``P @ (Q @ (x W + b))``"""
 
     def __init__(self, in_features: int, out_features: int):
         super().__init__()
@@ -46,8 +47,10 @@ class _HypergraphConvolution(nn.Module):
         nn.init.uniform_(self.weight, -stdv, stdv)
         nn.init.uniform_(self.bias, -stdv, stdv)
 
-    def forward(self, x: torch.Tensor, G: torch.Tensor) -> torch.Tensor:
-        return torch.sparse.mm(G, x.matmul(self.weight) + self.bias)
+    def forward(
+        self, x: torch.Tensor, p: torch.Tensor, q: torch.Tensor
+    ) -> torch.Tensor:
+        return torch.sparse.mm(p, torch.sparse.mm(q, x.matmul(self.weight) + self.bias))
 
 
 class _GCN(nn.Module):
@@ -70,8 +73,10 @@ class _HGNN(nn.Module):
         self.hgc1 = _HypergraphConvolution(in_dim, hidden_dim)
         self.hgc2 = _HypergraphConvolution(hidden_dim, out_dim)
 
-    def forward(self, x: torch.Tensor, G: torch.Tensor) -> torch.Tensor:
-        return F.relu(self.hgc2(F.relu(self.hgc1(x, G)), G))
+    def forward(
+        self, x: torch.Tensor, p: torch.Tensor, q: torch.Tensor
+    ) -> torch.Tensor:
+        return F.relu(self.hgc2(F.relu(self.hgc1(x, p, q)), p, q))
 
 
 class DGEKT(nn.Module):
@@ -82,7 +87,8 @@ class DGEKT(nn.Module):
         emb_dim: 交互嵌入维度（须为偶数，转移分支各 GCN 输出一半）。
         hidden_dim: GRU 隐藏维度。
         num_layers: GRU 层数。
-        hyper_g: 超图拉普拉斯稀疏张量 [2Q, 2Q]。
+        hyper_factors: 超图拉普拉斯因子 (P, Q)，P = Dv^-1/2·H·De^-1
+            [2Q, 2S]，Q = H^T·Dv^-1/2 [2S, 2Q]，G = P·Q。
         adj_out: 出转移邻接稀疏张量 [2Q, 2Q]。
         adj_in: 入转移邻接稀疏张量 [2Q, 2Q]。
     """
@@ -93,7 +99,7 @@ class DGEKT(nn.Module):
         emb_dim: int,
         hidden_dim: int,
         num_layers: int,
-        hyper_g: torch.Tensor,
+        hyper_factors: tuple[torch.Tensor, torch.Tensor],
         adj_out: torch.Tensor,
         adj_in: torch.Tensor,
     ):
@@ -106,8 +112,10 @@ class DGEKT(nn.Module):
         self.register_buffer(
             "interaction_feat", torch.randn(2 * num_questions, emb_dim)
         )
+        hyper_p, hyper_q = hyper_factors
         # Static graphs are deterministically rebuilt from data each run.
-        self.register_buffer("hyper_g", hyper_g, persistent=False)
+        self.register_buffer("hyper_p", hyper_p, persistent=False)
+        self.register_buffer("hyper_q", hyper_q, persistent=False)
         self.register_buffer("adj_out", adj_out, persistent=False)
         self.register_buffer("adj_in", adj_in, persistent=False)
         self.hgnn = _HGNN(emb_dim, emb_dim, emb_dim)
@@ -124,7 +132,7 @@ class DGEKT(nn.Module):
     def forward(
         self, question: torch.Tensor, response: torch.Tensor, mask: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """前向传播。
+        """前向传播至隐状态层。
 
         Args:
             question: 题目序列 [B, S]。
@@ -132,10 +140,13 @@ class DGEKT(nn.Module):
             mask: 有效位置掩码 [B, S]。
 
         Returns:
-            (logit_c, logit_t, logit_e) 三路 logits，各 [B, S, Q]。
+            (out_c, out_t, gate_in)：concept / transition 路 GRU 隐状态
+            [B, S, hidden_dim] 与 ensemble 路门控拼接特征
+            [B, S, 2*hidden_dim]；输出头由 :meth:`head_logits` /
+            :meth:`target_logits` 在选定步上应用。
         """
         # Graph convolutions rerun every forward so gradients reach their weights.
-        ques_h = self.hgnn(self.interaction_feat, self.hyper_g)
+        ques_h = self.hgnn(self.interaction_feat, self.hyper_p, self.hyper_q)
         ques_d = torch.cat(
             [
                 self.gcn_out(self.interaction_feat, self.adj_out),
@@ -151,10 +162,56 @@ class DGEKT(nn.Module):
 
         out_c, _ = self.rnn_c(x_c)
         out_t, _ = self.rnn_t(x_t)
-        logit_c = self.fc_c(out_c)
-        logit_t = self.fc_t(out_t)
         theta = torch.sigmoid(self.gate_w1(out_c) + self.gate_w2(out_t))
-        logit_e = self.fc_ensemble(
-            torch.cat([theta * out_t, (1 - theta) * out_c], dim=-1)
+        gate_in = torch.cat([theta * out_t, (1 - theta) * out_c], dim=-1)
+        return out_c, out_t, gate_in
+
+    def head_logits(
+        self,
+        h_c: torch.Tensor,
+        h_t: torch.Tensor,
+        h_e: torch.Tensor,
+        rows: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """选定步上的全词表三路 logits。
+
+        Args:
+            h_c / h_t: 隐状态 [B, S, hidden_dim]。
+            h_e: 门控拼接特征 [B, S, 2*hidden_dim]。
+            rows: 步骤选择掩码 [B, S]。
+
+        Returns:
+            (logit_c, logit_t, logit_e)，各 [V, num_questions]。
+        """
+        return (
+            self.fc_c(h_c[rows]),
+            self.fc_t(h_t[rows]),
+            self.fc_ensemble(h_e[rows]),
         )
-        return logit_c, logit_t, logit_e
+
+    def target_logits(
+        self,
+        h_c: torch.Tensor,
+        h_t: torch.Tensor,
+        h_e: torch.Tensor,
+        q_idx: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """选定步上目标题目的三路 logit。
+
+        每行与其目标题的头权重行点积，等价于从全词表 logits 中
+        gather 目标列。
+
+        Args:
+            h_c / h_t: 选定步隐状态 [V, hidden_dim]。
+            h_e: 选定步门控特征 [V, 2*hidden_dim]。
+            q_idx: 各步目标题索引 [V]。
+
+        Returns:
+            (logit_c, logit_t, logit_e)，各 [V]。
+        """
+        return (
+            (h_c * self.fc_c.weight[q_idx]).sum(dim=-1) + self.fc_c.bias[q_idx],
+            (h_t * self.fc_t.weight[q_idx]).sum(dim=-1) + self.fc_t.bias[q_idx],
+            (h_e * self.fc_ensemble.weight[q_idx]).sum(dim=-1)
+            + self.fc_ensemble.bias[q_idx],
+        )
