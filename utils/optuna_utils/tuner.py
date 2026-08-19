@@ -375,12 +375,13 @@ class OptunaTuner:
 
         # Search history
         history_path = os.path.join(self.config.save_dir, "search_history.yaml")
+        multi_objective = len(self.study.directions) > 1
         trials_data = [
             {
                 "number": trial.number,
-                # trial.value is None for multi-objective trials; fall back to
-                # the full values list so the history stays serialisable.
-                "value": trial.value if trial.value is not None else trial.values,
+                # FrozenTrial.value RAISES on multi-objective studies (optuna
+                # >= 4), so branch on the study shape, not on the value.
+                "value": trial.values if multi_objective else trial.value,
                 "params": trial.params,
                 "state": trial.state.name,
                 "error": trial.user_attrs.get("error"),

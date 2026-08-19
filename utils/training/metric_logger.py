@@ -191,7 +191,9 @@ class LocalMetricLogger(MetricLogger):
         ``leading`` columns are fixed prefix pairs ``(name, value)``,
         ``values`` are dynamic metric columns. The header is determined
         on first write; subsequent rows align to existing columns, with
-        missing values left blank.
+        missing values left blank. A metric column appearing for the first
+        time after the header was written extends the file in-place: all
+        existing rows are back-filled with blanks under the new column.
 
         Args:
             path: CSV file path.
@@ -206,9 +208,34 @@ class LocalMetricLogger(MetricLogger):
             self._csv_headers[path] = header
             csv.writer(f).writerow(header)
         metric_cols = self._csv_headers[path][len(leading) :]
+        new_cols = sorted(set(values) - set(metric_cols))
+        if new_cols:
+            metric_cols = self._extend_header(path, leading, metric_cols, new_cols)
+            f = self._csv_files[path]
         row = [v for _, v in leading] + [values.get(c, "") for c in metric_cols]
         csv.writer(f).writerow(row)
         f.flush()
+
+    def _extend_header(
+        self,
+        path: str,
+        leading: list[tuple[str, Any]],
+        metric_cols: list[str],
+        new_cols: list[str],
+    ) -> list[str]:
+        """Rewrite the file with additional metric columns (blanks back-filled)."""
+        self._csv_files[path].close()
+        with open(path, newline="") as f:
+            existing = list(csv.reader(f))
+        extended = metric_cols + new_cols
+        with open(path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([c for c, _ in leading] + extended)
+            for row in existing[1:]:
+                writer.writerow(row + [""] * len(new_cols))
+        self._csv_files[path] = open(path, "a", newline="")  # noqa: SIM115
+        self._csv_headers[path] = [c for c, _ in leading] + extended
+        return extended
 
     def log_metrics(self, *, phase, metrics, step, epoch, stage=None) -> None:
         """Log epoch-level metrics to a CSV file.

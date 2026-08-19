@@ -186,7 +186,8 @@ class BaseModelData(ABC):
             np.ndarray: user_folds[user_idx] = fold_label.
 
         Raises:
-            ValueError: If the fold column is missing or user counts mismatch.
+            ValueError: If the fold column is missing, the fold data is empty,
+                or user counts mismatch.
         """
         data = self._get_kfold_data()
 
@@ -216,6 +217,12 @@ class BaseModelData(ABC):
 
         user_idx = user_fold[id_col].to_numpy()
         fold_label = user_fold["fold"].to_numpy()
+
+        if user_idx.size == 0:
+            raise ValueError(
+                "Fold data contains no users; add K-fold labels to a non-empty "
+                "data source before splitting."
+            )
 
         if user_idx.min() < 0 or user_idx.max() >= num_users:
             raise ValueError(
@@ -258,7 +265,7 @@ class BaseModelData(ABC):
         # Validate inputs
         if len(arrays) == 0:
             raise ValueError(
-                "get_kfold_split_data requires at least one input array/tensor"
+                "split_kfold_data requires at least one input array/tensor"
             )
 
         # Get valid user indices

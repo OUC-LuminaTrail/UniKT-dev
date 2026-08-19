@@ -211,3 +211,276 @@ class TestErrorHandling:
 
         # exception is logged inside _reap, never propagated to the caller
         mgr.close()
+
+
+# ---------------------------------------------------------------------------
+# save_checkpoint payload shape
+# ---------------------------------------------------------------------------
+
+
+class TestSavePayload:
+    def test_minimal_payload_keys(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        model = torch.nn.Linear(2, 1)
+        opt = torch.optim.SGD(model.parameters(), lr=0.1)
+        mgr.save_checkpoint(3, model, opt, filename="ckpt.pth")
+        mgr.close()
+
+        saved = torch.load(tmp_path / "ckpt.pth", weights_only=False)
+        assert saved["epoch"] == 3
+        assert "model_state_dict" in saved and "optimizer_state_dict" in saved
+        assert "rng_states" in saved
+        assert "scheduler_state_dict" not in saved
+        assert "early_stopping_state" not in saved
+
+    def test_scheduler_and_es_state_included(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        model = torch.nn.Linear(2, 1)
+        opt = torch.optim.SGD(model.parameters(), lr=0.1)
+        sched = torch.optim.lr_scheduler.StepLR(opt, step_size=1)
+        mgr.save_checkpoint(
+            4,
+            model,
+            opt,
+            scheduler=sched,
+            early_stopping_state={"best_score": 0.9},
+            filename="ckpt.pth",
+        )
+        mgr.close()
+
+        saved = torch.load(tmp_path / "ckpt.pth", weights_only=False)
+        assert "scheduler_state_dict" in saved
+        assert saved["early_stopping_state"] == {"best_score": 0.9}
+
+    def test_additional_state_overrides_reserved_keys(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        model = torch.nn.Linear(2, 1)
+        opt = torch.optim.SGD(model.parameters(), lr=0.1)
+        mgr.save_checkpoint(
+            3,
+            model,
+            opt,
+            additional_state={"epoch": 99, "custom": "x"},
+            filename="ckpt.pth",
+        )
+        mgr.close()
+
+        saved = torch.load(tmp_path / "ckpt.pth", weights_only=False)
+        assert saved["epoch"] == 99  # additional_state wins over reserved keys
+        assert saved["custom"] == "x"
+
+
+# ---------------------------------------------------------------------------
+# _detach_to_cpu recursion
+# ---------------------------------------------------------------------------
+
+
+class TestDetachToCpu:
+    def test_nested_structures_recursed(self):
+        from utils.training.checkpoint import _detach_to_cpu
+
+        leaf = torch.tensor([1.0, 2.0], requires_grad=True)
+        out = _detach_to_cpu({"a": [leaf, (leaf + 1,)], "b": {"c": "plain"}, "d": 5})
+        assert isinstance(out["a"], list)
+        assert isinstance(out["a"][1], tuple)
+        assert out["b"]["c"] == "plain"
+        assert out["d"] == 5
+        flat = out["a"][0]
+        assert not flat.requires_grad
+        assert flat.device.type == "cpu"
+        assert torch.equal(flat.detach(), leaf)
+
+    def test_tensor_clone_is_independent(self):
+        from utils.training.checkpoint import _detach_to_cpu
+
+        original = torch.tensor([1.0])
+        cloned = _detach_to_cpu(original)
+        cloned.mul_(10)
+        assert original.item() == 1.0
+
+    def test_non_tensor_leaf_untouched(self):
+        from utils.training.checkpoint import _detach_to_cpu
+
+        assert _detach_to_cpu("str") == "str"
+        assert _detach_to_cpu(None) is None
+
+
+# ---------------------------------------------------------------------------
+# RNG capture / restore round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestRngStates:
+    def test_capture_restore_round_trip_torch_numpy_python(self):
+        import random as random_module
+
+        import numpy as np
+
+        from utils.training.checkpoint import _capture_rng_states, _restore_rng_states
+
+        torch.manual_seed(123)
+        np.random.seed(123)
+        random_module.seed(123)
+        states = _capture_rng_states()
+
+        # Advance every RNG so the current state differs from the snapshot.
+        torch.rand(3)
+        np.random.rand(3)
+        random_module.random()
+
+        _restore_rng_states(states)
+        t1 = torch.rand(3)
+        n1 = np.random.rand(3)
+        p1 = random_module.random()
+
+        _restore_rng_states(states)
+        assert torch.equal(torch.rand(3), t1)
+        assert np.array_equal(np.random.rand(3), n1)
+        assert random_module.random() == p1
+
+    def test_captured_numpy_state_is_weights_only_safe(self):
+        from utils.training.checkpoint import _capture_rng_states
+
+        states = _capture_rng_states()
+        np_key = states["numpy"]
+        assert isinstance(np_key[1], list)  # not an ndarray
+
+    def test_cuda_state_none_on_cpu(self):
+        from utils.training.checkpoint import _capture_rng_states
+
+        if torch.cuda.is_available():
+            pytest.skip("CUDA present; the None branch is not reachable")
+        assert _capture_rng_states()["cuda"] is None
+
+
+# ---------------------------------------------------------------------------
+# torch.compile prefix stripping
+# ---------------------------------------------------------------------------
+
+
+class TestCompilePrefix:
+    def test_strips_prefix_into_raw_model(self):
+        from utils.training.checkpoint import _strip_compile_prefix_if_needed
+
+        model = torch.nn.Linear(2, 1)
+        prefixed = {f"_orig_mod.{k}": v for k, v in model.state_dict().items()}
+        stripped = _strip_compile_prefix_if_needed(prefixed, model)
+        assert set(stripped) == set(model.state_dict())
+
+    def test_keeps_prefix_when_model_is_compiled(self):
+        from utils.training.checkpoint import _strip_compile_prefix_if_needed
+
+        model = torch.nn.Linear(2, 1)
+        prefixed = {f"_orig_mod.{k}": v for k, v in model.state_dict().items()}
+        # A model whose own keys are prefixed (compiled) matches the state as-is.
+        fake_compiled = type("M", (), {"state_dict": lambda self: prefixed})()
+        assert _strip_compile_prefix_if_needed(prefixed, fake_compiled) is prefixed
+
+    def test_plain_state_untouched(self):
+        from utils.training.checkpoint import _strip_compile_prefix_if_needed
+
+        model = torch.nn.Linear(2, 1)
+        plain = model.state_dict()
+        assert _strip_compile_prefix_if_needed(plain, model) is plain
+
+
+# ---------------------------------------------------------------------------
+# load_weights / read_model_state_dict / load_checkpoint
+# ---------------------------------------------------------------------------
+
+
+class TestLoadWeights:
+    def test_plain_state_dict_returns_none_and_loads(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        src = torch.nn.Linear(2, 1)
+        with torch.no_grad():
+            src.weight.fill_(7.0)
+        mgr.save_weights(src, "plain.pth")
+        mgr.close()
+
+        dst = torch.nn.Linear(2, 1)
+        result = CheckpointManager.load_weights(str(tmp_path / "plain.pth"), dst)
+        assert result is None
+        assert torch.equal(dst.weight, src.weight)
+
+    def test_full_checkpoint_returns_dict(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        src = torch.nn.Linear(2, 1)
+        opt = torch.optim.SGD(src.parameters(), lr=0.1)
+        mgr.save_checkpoint(9, src, opt, filename="full.pth")
+        mgr.close()
+
+        dst = torch.nn.Linear(2, 1)
+        raw = CheckpointManager.load_weights(str(tmp_path / "full.pth"), dst)
+        assert raw["epoch"] == 9
+        assert torch.equal(dst.weight, src.weight)
+
+    def test_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError, match="Checkpoint not found"):
+            CheckpointManager.load_weights(
+                str(tmp_path / "nope.pth"), torch.nn.Linear(2, 1)
+            )
+
+    def test_read_model_state_dict_both_formats(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        model = torch.nn.Linear(2, 1)
+        opt = torch.optim.SGD(model.parameters(), lr=0.1)
+        mgr.save_weights(model, "plain.pth")
+        mgr.save_checkpoint(1, model, opt, filename="full.pth")
+        mgr.close()
+
+        plain = CheckpointManager.read_model_state_dict(str(tmp_path / "plain.pth"))
+        full = CheckpointManager.read_model_state_dict(str(tmp_path / "full.pth"))
+        assert set(plain) == set(full) == set(model.state_dict())
+
+
+class TestLoadCheckpointE2E:
+    def test_full_restore_model_optimizer_es(self, tmp_path):
+        from utils.config.run_config import EarlyStoppingConfig
+        from utils.training.early_stopping import EarlyStopping
+
+        mgr = CheckpointManager(str(tmp_path))
+        src = torch.nn.Linear(2, 1)
+        opt = torch.optim.Adam(src.parameters(), lr=0.1)
+        # Give the optimizer real per-param state (exp_avg / exp_avg_sq buffers).
+        loss = src(torch.ones(1, 2)).sum()
+        loss.backward()
+        opt.step()
+
+        es = EarlyStopping(EarlyStoppingConfig())
+        es.step(0.75, epoch=2, metrics={"auc": 0.75})
+
+        mgr.save_checkpoint(
+            2,
+            src,
+            opt,
+            early_stopping_state={
+                "best_score": es.best_score,
+                "best_epoch": es.best_epoch,
+                "num_bad_epochs": es.num_bad_epochs,
+                "best_metrics": es.best_metrics,
+            },
+            filename="ckpt.pth",
+        )
+        mgr.close()
+
+        dst = torch.nn.Linear(2, 1)
+        dst_opt = torch.optim.Adam(dst.parameters(), lr=0.1)
+        dst_es = EarlyStopping(EarlyStoppingConfig())
+        loaded = mgr.load_checkpoint(
+            str(tmp_path / "ckpt.pth"), dst, optimizer=dst_opt, early_stopping=dst_es
+        )
+
+        assert loaded["epoch"] == 2
+        assert torch.equal(dst.weight, src.weight)
+        assert dst_es.best_score == 0.75
+        assert dst_es.best_epoch == 2
+        assert dst_es.num_bad_epochs == 0
+        assert dst_es.best_metrics == {"auc": 0.75}
+        # optimizer state actually restored (has per-param state)
+        assert len(dst_opt.state) == len(opt.state) and len(dst_opt.state) > 0
+
+    def test_missing_file_raises(self, tmp_path):
+        mgr = CheckpointManager(str(tmp_path))
+        with pytest.raises(FileNotFoundError, match="Checkpoint not found"):
+            mgr.load_checkpoint(str(tmp_path / "nope.pth"), torch.nn.Linear(2, 1))

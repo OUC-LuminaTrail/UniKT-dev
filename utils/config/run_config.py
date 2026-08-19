@@ -231,15 +231,14 @@ def build_run_config_schema(model_name: str) -> dict[str, type]:
 
     Binds the polymorphic ``model`` node to the concrete registered
     :class:`ModelConfig` subclass; the framework nodes are the fixed five.
+
+    Raises:
+        KeyError: If no ModelConfig is registered for ``model_name`` (raised
+            by the registry, listing the available names).
     """
     from ..core import MODEL_CONFIGS  # lazy: avoid any import-time cycle
 
     model_cls = MODEL_CONFIGS.get(model_name)
-    if model_cls is None:
-        available = ", ".join(sorted(MODEL_CONFIGS.keys())) or "none yet"
-        raise KeyError(
-            f"No ModelConfig registered for '{model_name}'. Available: {available}"
-        )
     return {**_FRAMEWORK_NODES, "model": model_cls}
 
 

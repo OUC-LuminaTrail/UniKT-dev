@@ -41,7 +41,15 @@ if _CUDNN_RNN not in flop_registry:
         ``aten::_cudnn_rnn`` schema.
         """
         # Gates per cell update per cuDNN mode code: RNN=1, LSTM=4, GRU=3.
-        gate_mult = {0: 1, 1: 1, 2: 4, 3: 3}.get(mode, 4)
+        # An unknown code means a new cuDNN cell variant — refuse to guess
+        # rather than silently mis-counting FLOPs.
+        try:
+            gate_mult = {0: 1, 1: 1, 2: 4, 3: 3}[mode]
+        except KeyError as exc:
+            raise ValueError(
+                f"Unknown cuDNN RNN mode code {mode!r}; update the gate "
+                "multiplier table in utils/efficiency/measures/custom_formulas.py"
+            ) from exc
         if batch_first:
             batch, seq, input_dim = input_size
         else:
