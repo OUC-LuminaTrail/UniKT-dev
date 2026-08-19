@@ -1,5 +1,7 @@
 """PSKT trainer module."""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -23,13 +25,25 @@ class PSKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    embed_dim: int = 256
+    embed_dim: int = field(
+        default=256,
+        metadata={"optuna": {"type": "int", "low": 128, "high": 512}},
+    )
     max_time_interval: int = 43200
     epochs: int = 200
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-6
-    batch_size: int = 64
+    weight_decay: float = field(
+        default=1e-6,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("PSKT")

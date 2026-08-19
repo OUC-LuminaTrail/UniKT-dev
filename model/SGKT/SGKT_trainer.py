@@ -34,7 +34,7 @@ class SGKTConfig(ModelConfig):
         sim_emb: Embedding type for similarity (default: question_emb).
         embedding_dim: Embedding dimension (default: 100).
         hidden_dim: Hidden layer dimension (default: 100).
-        dropout_keep_probs: Dropout keep probabilities for each GCN layer in HRG (default: [0.8, 0.8, 1]).
+        gnn_dropout_keep: Keep probability of the HRG GNN aggregators (default: 0.8).
         epochs: Number of training epochs (default: 100).
         learning_rate: Learning rate for optimizer (default: 0.00025).
         lr_decay: Learning rate decay factor per epoch (default: 0.92).
@@ -42,25 +42,47 @@ class SGKTConfig(ModelConfig):
         batch_size: Batch size for training (default: 6).
     """
 
-    n_hop: int = 3
+    n_hop: int = field(
+        default=3,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 5}},
+    )
     sg_layers: int = 2
     hist_neighbor_num: int = 3
     next_neighbor_num: int = 4
-    att_bound: float = 0.7
+    att_bound: float = field(
+        default=0.7,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.8}},
+    )
     cooc_neighbor_num: int = 0
-    skill_neighbor_num: int = 4
+    skill_neighbor_num: int = field(
+        default=4,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 10}},
+    )
     question_neighbor_num: int = 4
     aggregator: str = "sum"
     select_index: list[int] = field(default_factory=lambda: [0, 1, 2])
     sim_emb: str = "question_emb"
     embedding_dim: int = 100
     hidden_dim: int = 100
-    dropout_keep_probs: list[float] = field(default_factory=lambda: [0.8, 0.8, 1.0])
+    # keep-prob of the GNN aggregators; single effective position of the old list
+    gnn_dropout_keep: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 0.95}},
+    )
     epochs: int = 100
-    learning_rate: float = 0.00025
+    learning_rate: float = field(
+        default=0.00025,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     lr_decay: float = 0.92
-    weight_decay: float = 1e-8
-    batch_size: int = 6
+    weight_decay: float = field(
+        default=1e-8,
+        metadata={"optuna": {"type": "float", "low": 1e-8, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=6,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 6, 8, 16]}},
+    )
 
 
 @register_trainer("SGKT")
@@ -91,7 +113,7 @@ class SGKTTrainer(BaseTrainer):
             data_metadata=metadata,
             embedding_dim=m.embedding_dim,
             hidden_dim=m.hidden_dim,
-            dropout_keep_probs=m.dropout_keep_probs,
+            keep_prob_gnn=m.gnn_dropout_keep,
             question_neighbor_num=m.question_neighbor_num,
             skill_neighbor_num=m.skill_neighbor_num,
             n_hop=m.n_hop,

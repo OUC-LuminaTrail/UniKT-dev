@@ -1,3 +1,5 @@
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -21,13 +23,30 @@ class HawkesKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    emb_size: int = 64
-    time_log: float = 2.718281828459045
+    emb_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
+    time_log: float = field(
+        default=2.718281828459045,
+        metadata={"optuna": {"type": "float", "low": 1.5, "high": 3.0}},
+    )
     epochs: int = 200
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    weight_decay: float = field(
+        default=0.0,
+        metadata={"optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4]}},
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("HawkesKT")

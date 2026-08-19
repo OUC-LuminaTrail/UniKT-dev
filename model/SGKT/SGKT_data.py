@@ -23,6 +23,7 @@ def sample_hist_neighbors(
     hist_neighbor_num,
     skill_index,
     pad_index=None,
+    deterministic=False,
 ):
     """
     Sample historical neighbors based on skill matching.
@@ -79,7 +80,10 @@ def sample_hist_neighbors(
         for t in range(1, max_seq_len):
             candidates = np.where(valid[t])[0]
             n_candidates = len(candidates)
-            if n_candidates >= hist_neighbor_num:
+            if deterministic and n_candidates > 0:
+                # Fixed earliest-M pick keeps eval reproducible.
+                result[b, t] = candidates[np.arange(hist_neighbor_num) % n_candidates]
+            elif n_candidates >= hist_neighbor_num:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=False
                 )
@@ -188,7 +192,10 @@ class SGKTModelData(QuestionModelData):
 
         # Create custom collate function with hist_neighbor_num
         train_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
-        val_collate_fn = partial(sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num)
+        # Deterministic eval collate keeps val/test metrics reproducible.
+        val_collate_fn = partial(
+            sgkt_collate_fn, hist_neighbor_num=hist_neighbor_num, deterministic=True
+        )
 
         logger.info(
             f"Train samples: {len(train_dataset)}, Val samples: {len(val_dataset)}"
@@ -379,7 +386,7 @@ class SGKTDataset(Dataset):
         }
 
 
-def sgkt_collate_fn(batch, hist_neighbor_num=5):
+def sgkt_collate_fn(batch, hist_neighbor_num=5, deterministic=False):
     """
     Custom collate function for SGKT that computes hist_neighbor_index per batch.
 
@@ -407,6 +414,7 @@ def sgkt_collate_fn(batch, hist_neighbor_num=5):
         hist_neighbor_num,
         batched["skills"][:, :model_seq_len],  # Slice skills to model_seq_len
         pad_index=model_seq_len,
+        deterministic=deterministic,
     )
 
     batched["hist_neighbor_index"] = torch.from_numpy(hist_neighbor_index).long()

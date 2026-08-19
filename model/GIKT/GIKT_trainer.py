@@ -79,9 +79,7 @@ class GIKTConfig(ModelConfig):
     lr_decay: float | None = None
     weight_decay: float = field(
         default=1e-8,
-        metadata={
-            "optuna": {"type": "float", "low": 0.000001, "high": 0.001, "log": True}
-        },
+        metadata={"optuna": {"type": "float", "low": 1e-9, "high": 0.001, "log": True}},
     )
     batch_size: int = field(
         default=32,
@@ -106,7 +104,7 @@ class GIKTTrainer(BaseTrainer):
             self.num_skills,
             self.num_questions,
             train_collate_fn,
-            val_collate_fn,
+            eval_collate_fn,
         ) = model_data.prepare_data(rc)
 
         logger.info("Initializing GIKT model...")
@@ -164,7 +162,8 @@ class GIKTTrainer(BaseTrainer):
             val_data=val_dataset,
             test_data=test_dataset,
             collate_fn=train_collate_fn,
-            val_collate_fn=val_collate_fn,
+            val_collate_fn=eval_collate_fn,
+            test_collate_fn=eval_collate_fn,
         )
 
     def forward_pass(self, batch_data):

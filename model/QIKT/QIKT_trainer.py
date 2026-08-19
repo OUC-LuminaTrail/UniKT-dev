@@ -1,5 +1,7 @@
 """QIKT 模型训练器模块"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -32,9 +34,18 @@ class QIKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    emb_size: int = 64
-    dropout: float = 0.1
-    mlp_layer_num: int = 1
+    emb_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "int", "low": 32, "high": 128}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
+    mlp_layer_num: int = field(
+        default=1,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 3}},
+    )
     output_mode: str = "an"
     output_q_all_lambda: float = 1.0
     output_c_all_lambda: float = 1.0
@@ -44,10 +55,22 @@ class QIKTConfig(ModelConfig):
     loss_c_next_lambda: float = 1.0
     loss_q_next_lambda: float = 0.0
     epochs: int = 100
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("QIKT")
@@ -174,33 +197,40 @@ class QIKTTrainer(BaseTrainer):
         y_hat, y_label, _ = self._extract_valid_predictions(y_fused, response, mask)
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
 
-        # Reuse mask logic so aux predictions align with the main head for multi-task loss
-        q_all, _, _ = self._extract_valid_predictions(
-            outputs["y_question_all"], response, mask
-        )
-        c_all, _, _ = self._extract_valid_predictions(
-            outputs["y_concept_all"], response, mask
-        )
-        q_next, _, _ = self._extract_valid_predictions(
-            outputs["y_question_next"], response, mask
-        )
-        c_next, _, _ = self._extract_valid_predictions(
-            outputs["y_concept_next"], response, mask
-        )
-
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.5)
 
-        return {
+        result = {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
             "y_score": y_hat,
             "y_prob": y_hat,
-            "_aux_q_all": q_all,
-            "_aux_c_all": c_all,
-            "_aux_q_next": q_next,
-            "_aux_c_next": c_next,
         }
+        # Aux predictions only feed the training multi-task loss; eval logging
+        # goes through the pure-BCE _compute_eval_loss.
+        if self.model.training:
+            # Reuse mask logic so aux predictions align with the main head
+            q_all, _, _ = self._extract_valid_predictions(
+                outputs["y_question_all"], response, mask
+            )
+            c_all, _, _ = self._extract_valid_predictions(
+                outputs["y_concept_all"], response, mask
+            )
+            q_next, _, _ = self._extract_valid_predictions(
+                outputs["y_question_next"], response, mask
+            )
+            c_next, _, _ = self._extract_valid_predictions(
+                outputs["y_concept_next"], response, mask
+            )
+            result.update(
+                {
+                    "_aux_q_all": q_all,
+                    "_aux_c_all": c_all,
+                    "_aux_q_next": q_next,
+                    "_aux_c_next": c_next,
+                }
+            )
+        return result
 
     def _compute_loss(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
         """多任务损失计算

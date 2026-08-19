@@ -32,7 +32,7 @@ python train.py -m GIKT -d assistments09 \
 
 ``--seed`` 用于复现实验，设置为不同值可以测试模型对随机性的敏感度。``--device`` 默认自动检测 GPU 可用性，但在多 GPU 机器上建议显式指定（如 ``cuda:0``）。``--no_swanlab`` 关闭 SwanLab 记录，适合本地快速迭代时减少网络开销。
 
-**注意：** 确定性算法默认开启，会调用 ``torch.use_deterministic_algorithms`` 确保可复现性。若某个算子不支持 deterministic 模式导致训练失败，可以用 ``--no_deterministic`` 关闭。
+**注意：** 确定性算法默认开启，会调用 ``torch.use_deterministic_algorithms`` 确保可复现性。若某个算子不支持 deterministic 模式导致训练失败，可以用 ``--general.deterministic false`` 关闭。
 
 (dataparams--数据加载)=
 

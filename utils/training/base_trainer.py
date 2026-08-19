@@ -80,6 +80,9 @@ class BaseTrainer(InferenceOpsMixin, ABC):
        stored on the components.
     2. :meth:`build_callbacks`: Return extra callbacks (default ``[]``).
     3. :meth:`forward_pass`: Model forward pass for one batch.
+    4. :meth:`_compute_loss`: Training loss (default ``self.loss(y_hat,
+       y_label)``); auxiliary terms added here are excluded from val/test
+       loss, which always goes through :meth:`_compute_eval_loss`.
     """
 
     def __init__(self, rc: Any, data_src: Any, exp_manager: Any = None) -> None:
@@ -781,7 +784,7 @@ class BaseTrainer(InferenceOpsMixin, ABC):
             the number of valid elements it was averaged over.
         """
         output = self.forward_pass(batch_data)
-        loss = self._compute_loss(output)
+        loss = self._compute_eval_loss(output)
 
         self.metrics_accumulator.update("val", output)
 
@@ -801,7 +804,7 @@ class BaseTrainer(InferenceOpsMixin, ABC):
             Loss value for this batch (Python scalar).
         """
         output = self.test_forward_pass(batch_data)
-        loss = self._compute_loss(output)
+        loss = self._compute_eval_loss(output)
 
         self.metrics_accumulator.update("test", output)
 
@@ -950,6 +953,10 @@ class BaseTrainer(InferenceOpsMixin, ABC):
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
         """Compute the training loss from model outputs.
 
+        Subclass overrides may add auxiliary terms (regularization,
+        contrastive/multi-task losses); those apply to training only —
+        evaluation logging goes through :meth:`_compute_eval_loss`.
+
         Args:
             outputs: Dict containing ``"y_hat"`` and ``"y_label"``.
 
@@ -959,6 +966,27 @@ class BaseTrainer(InferenceOpsMixin, ABC):
         y_hat = outputs["y_hat"]
         y_label = outputs["y_label"]
         return self.loss(y_hat, y_label)
+
+    def _compute_eval_loss(self, outputs: dict) -> torch.Tensor:
+        """Compute the loss used for val/test logging.
+
+        Pure prediction loss by default: auxiliary terms that a subclass adds
+        in ``_compute_loss`` must not leak into val/test loss (they are
+        training-only regularizers and would make eval loss incomparable to
+        the logged prediction quality). Override only when eval loss should
+        deliberately include extra terms.
+
+        Reduced to a per-batch mean: loss fns built with
+        ``reduction="none"`` (which reduce inside ``_compute_loss``) still
+        yield a scalar here; mean-reduced loss fns are unaffected.
+
+        Args:
+            outputs: Dict containing ``"y_hat"`` and ``"y_label"``.
+
+        Returns:
+            Loss tensor (scalar).
+        """
+        return self.loss(outputs["y_hat"], outputs["y_label"]).mean()
 
     def _monitor_name(self) -> str:
         """Get the name of the metric being monitored for early stopping.
@@ -972,7 +1000,10 @@ class BaseTrainer(InferenceOpsMixin, ABC):
 
     def _print_timing_summary(self) -> None:
         """Print total training time and average time per epoch."""
-        if self._run_start_time is None:
+        # When training raised before completing, _train_end_time is unset;
+        # bail out instead of throwing a TypeError from _finish that masks
+        # the original exception.
+        if self._run_start_time is None or self._train_end_time is None:
             return
         total = self._train_end_time - self._run_start_time
         n_epochs = len(self._epoch_times)

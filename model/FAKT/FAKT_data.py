@@ -237,9 +237,9 @@ class FAKTModelData(SkillModelData):
         """从 split_skill_sequence_data 的时间戳计算 rgaps/sgaps/pcounts。"""
         data = self.data_src.get_split_skill_sequence_data().to_pandas()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].nunique()
+        num_users = data["sequence_id"].nunique()
 
-        users = data["user"].values
+        users = data["sequence_id"].values
         seq_positions = data["seq_pos"].values
 
         skills_mat = np.zeros((num_users, max_seq_len), dtype=np.int64)

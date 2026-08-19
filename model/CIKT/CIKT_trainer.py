@@ -1,5 +1,7 @@
 """CIKT 模型训练器模块。"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -28,18 +30,33 @@ class CIKTConfig(ModelConfig):
         batch_size: Batch size.
     """
 
-    d_model: int = 64
-    dropout: float = 0.5
+    d_model: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
+    dropout: float = field(
+        default=0.5,
+        metadata={"optuna": {"type": "float", "low": 0.2, "high": 0.5}},
+    )
     num_difficulty_levels: int = 10
     loss_w_causal: float = 0.1
     loss_w_intervention: float = 0.2
     loss_w_trivial: float = 0.6
     loss_w_replace: float = 0.3
     epochs: int = 100
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-5
-    batch_size: int = 8
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [8, 16, 32, 64]}},
+    )
 
 
 @register_trainer("CIKT")
@@ -57,6 +74,7 @@ class CIKTTrainer(BaseTrainer):
             test_dataset,
             difficulty_table,
             collate_fn,
+            eval_collate_fn,
         ) = model_data.prepare_data(rc)
 
         metadata = data_src.get_metadata()
@@ -105,6 +123,8 @@ class CIKTTrainer(BaseTrainer):
             val_data=val_dataset,
             test_data=test_dataset,
             collate_fn=collate_fn,
+            val_collate_fn=eval_collate_fn,
+            test_collate_fn=eval_collate_fn,
         )
 
     def forward_pass(self, batch_data):
@@ -127,20 +147,28 @@ class CIKTTrainer(BaseTrainer):
             y_pred_full, y, mask
         )
         y_hat, y_label = self._handle_empty_batch(y_hat, y_label)
-        a_true_full = self.model.difficulty_table[q][:, 1:]  # [B, L-1]
 
-        return {
+        outputs = {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": self._generate_binary_predictions(y_hat, threshold=0.5),
             "y_score": y_hat,
             "y_prob": y_hat,
-            "_aux_causal": out["y_causal"][valid_mask],
-            "_aux_intervention": out["y_intervention"][valid_mask],
-            "_aux_replace": out["y_replace"][valid_mask],
-            "_aux_trivial": out["y_trivial"][valid_mask],
-            "_aux_trivial_label": a_true_full[valid_mask],
         }
+        # Auxiliary branch outputs are only consumed by the training loss.
+        if self.model.training:
+            a_true_full = self.model.difficulty_table[q][:, 1:]  # [B, L-1]
+            outputs.update(
+                {
+                    "_aux_causal": out["y_causal"][valid_mask],
+                    "_aux_intervention": out["y_intervention"][valid_mask],
+                    "_aux_replace": out["y_replace"][valid_mask],
+                    "_aux_trivial": out["y_trivial"][valid_mask],
+                    "_aux_trivial_label": a_true_full[valid_mask],
+                }
+            )
+
+        return outputs
 
     def _compute_loss(self, outputs):
         """多任务损失"""

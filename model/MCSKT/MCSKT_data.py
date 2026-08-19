@@ -218,10 +218,10 @@ class MCSKTModelData(SkillModelData):
         if isinstance(data, pl.LazyFrame):
             data = data.collect()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].n_unique()
+        num_users = data["sequence_id"].n_unique()
 
         user_timestamp = np.zeros((num_users, max_seq_len), dtype=np.float64)
-        user_indices = data["user"].to_numpy()
+        user_indices = data["sequence_id"].to_numpy()
         seq_positions = data["seq_pos"].to_numpy()
         user_timestamp[user_indices, seq_positions] = data["timestamp"].to_numpy()
         return user_timestamp

@@ -96,8 +96,7 @@ def create_optimized_dataloader(
     # Get num_workers
     num_workers = config.get_num_workers()
 
-    # Prepare DataLoader arguments
-    # kwargs take priority over config
+    # Prepare DataLoader arguments; kwargs take priority over config
     loader_kwargs = {
         "batch_size": batch_size,
         "shuffle": shuffle,
@@ -107,12 +106,13 @@ def create_optimized_dataloader(
         "persistent_workers": config.persistent_workers if num_workers > 0 else False,
     }
 
-    # Remove invalid parameters (prefetch_factor only valid when num_workers > 0)
-    if loader_kwargs["prefetch_factor"] is None:
-        del loader_kwargs["prefetch_factor"]
-
     # Override default arguments with kwargs
     loader_kwargs.update(kwargs)
+
+    # prefetch/persistent require multiprocessing; normalize after overrides
+    if loader_kwargs["num_workers"] == 0:
+        loader_kwargs.pop("prefetch_factor", None)
+        loader_kwargs["persistent_workers"] = False
 
     # Create DataLoader
     loader = DataLoader(dataset, **loader_kwargs)

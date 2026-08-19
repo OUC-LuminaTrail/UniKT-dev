@@ -48,6 +48,7 @@ from utils.core import (
     CASE_SINKS,
     CASE_VISUALIZERS,
     get_logger,
+    seed_everything,
 )
 from utils.data_process import get_data_source
 
@@ -76,6 +77,8 @@ def cmd_inference(args):
     rc = load_run_config_archive(run_config_path)
     model_name = rc.experiment.model_name
     dataset_name = rc.data.dataset
+
+    seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
 
     if model_name not in ANALYZERS:
         sys.exit(

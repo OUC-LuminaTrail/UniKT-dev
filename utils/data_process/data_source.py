@@ -202,9 +202,11 @@ class DataSource(ABC):
             "num_questions": self.sequence_data["question"].n_unique(),
             "num_skills": self.relation_data["question_skill"]["skill"].n_unique(),
             "num_split_question_users": self.split_question_sequence_data[
-                "user"
+                "sequence_id"
             ].n_unique(),
-            "num_split_skill_users": self.split_skill_sequence_data["user"].n_unique(),
+            "num_split_skill_users": self.split_skill_sequence_data[
+                "sequence_id"
+            ].n_unique(),
         }
 
         # Optional entity counts from their relation tables
@@ -760,8 +762,10 @@ class DataSource(ABC):
                 False, split the question sequences unchanged.
 
         Returns:
-            DataFrame with the original ``sequence_data`` columns plus a
-            ``seq_pos`` column (and an extra ``skill`` column when
+            DataFrame with the original ``sequence_data`` columns (including
+            the pre-split ``user`` student id) plus a ``sequence_id`` column
+            (the dense split id assigned in global ``(user, split_idx)`` order)
+            and a ``seq_pos`` column (and an extra ``skill`` column when
             ``expand_skills``).
         """
         max_seq_len = self.args.max_seq_len
@@ -857,18 +861,20 @@ class DataSource(ABC):
                 .alias("new_user_id")
             )
 
-            b = b.join(valid, on=["user", "split_idx"], how="inner").with_columns(
+            b = b.join(valid, on=["user", "split_idx"], how="inner")
+            b = b.with_columns(
                 [
-                    pl.col("new_user_id").alias("user"),
+                    pl.col("new_user_id").alias("sequence_id"),
                     (pl.col("seq_pos") % max_seq_len).alias("relative_pos"),
                 ]
             )
 
             out_cols = [pl.col(c) for c in seq_cols]
+            out_cols.append(pl.col("sequence_id"))
             if expand_skills:
                 out_cols.append(pl.col("skill"))
             out_cols.append(pl.col("relative_pos").alias("seq_pos"))
-            parts.append(b.select(out_cols).sort("user", "seq_pos"))
+            parts.append(b.select(out_cols).sort("sequence_id", "seq_pos"))
 
             next_new_id += n_new
             if (batch_idx + 1) % 10 == 0:
@@ -879,6 +885,9 @@ class DataSource(ABC):
 
         if not parts:
             empty = self.sequence_data.head(0).select(seq_cols)
+            empty = empty.with_columns(
+                pl.lit(None, dtype=pl.Int32).alias("sequence_id")
+            )
             if expand_skills:
                 empty = empty.with_columns(pl.lit(None, dtype=pl.Int32).alias("skill"))
             return empty.with_columns(pl.lit(None, dtype=pl.Int64).alias("seq_pos"))
@@ -890,7 +899,7 @@ class DataSource(ABC):
 
         Splits user sequences longer than ``max_seq_len`` into multiple
         sub-sequences, drops splits shorter than ``min_seq_len``, and assigns
-        new dense user IDs to each retained split.
+        a new dense ``sequence_id`` to each retained split.
 
         Processing is done in user-aligned batches to bound peak memory,
         while producing output identical to whole-frame processing.
@@ -903,7 +912,7 @@ class DataSource(ABC):
         self.split_question_sequence_data = self._build_split_sequences(
             expand_skills=False
         )
-        final_num_users = self.split_question_sequence_data["user"].n_unique()
+        final_num_users = self.split_question_sequence_data["sequence_id"].n_unique()
         logger.debug(f"Split into {final_num_users} question sub-sequences")
 
     def build_split_skill_sequence_data(self):
@@ -917,7 +926,7 @@ class DataSource(ABC):
         Processing is done in user-aligned batches to bound peak memory,
         while producing output identical to whole-frame processing.
 
-        Output columns: original sequence_data columns + skill + seq_pos
+        Output columns: original sequence_data columns + sequence_id + skill + seq_pos
         """
         if self.sequence_data is None:
             raise ValueError(
@@ -928,7 +937,7 @@ class DataSource(ABC):
 
         self.split_skill_sequence_data = self._build_split_sequences(expand_skills=True)
         logger.debug(
-            f"Split into {self.split_skill_sequence_data['user'].n_unique()} "
+            f"Split into {self.split_skill_sequence_data['sequence_id'].n_unique()} "
             f"skill sub-sequences"
         )
 

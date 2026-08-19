@@ -437,6 +437,11 @@ class GRKT(nn.Module):
             score = (master - diff).sigmoid()
             scores.append(score)
 
+            # State updates below only feed later steps; skip them on the last
+            # one (their outputs are never read).
+            if i == S - 1:
+                continue
+
             # Knowledge gain & loss — shared preparation
             know_index = know_safe[:, :, None].expand(B, K, KH)
             target_h = h.gather(-2, know_index)
@@ -493,9 +498,15 @@ class GRKT(nn.Module):
 
                 learn_input = torch.cat([total_know_prob_emb_1, total_target_h], -1)
                 decision = self.decision_mlp(learn_input)
-                decision_gumbel_mask = F.gumbel_softmax(
-                    decision, tau=self.tau, hard=True, dim=-1
-                )
+                if self.training:
+                    decision_gumbel_mask = F.gumbel_softmax(
+                        decision, tau=self.tau, hard=True, dim=-1
+                    )
+                else:
+                    # Deterministic hard argmax (no Gumbel noise) at inference.
+                    decision_gumbel_mask = torch.zeros_like(decision).scatter_(
+                        -1, decision.argmax(dim=-1, keepdim=True), 1.0
+                    )
                 decision_gumbel_mask_1 = decision_gumbel_mask[:, :, :1]
 
                 learn = self.learn_mlp(learn_input)

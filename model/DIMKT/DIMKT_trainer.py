@@ -1,5 +1,7 @@
 """DIMKT 模型训练器模块。"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -24,14 +26,34 @@ class DIMKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    emb_size: int = 128
-    dropout: float = 0.2
+    emb_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
+    # coupled to difficulty table construction in DIMKT_data, not searched
     difficult_levels: int = 100
     epochs: int = 100
-    learning_rate: float = 5e-4
+    learning_rate: float = field(
+        default=5e-4,
+        metadata={
+            "optuna": {"type": "float", "low": 0.0001, "high": 0.01, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-4
-    batch_size: int = 64
+    weight_decay: float = field(
+        default=1e-4,
+        metadata={
+            "optuna": {"type": "float", "low": 0.000001, "high": 0.001, "log": True}
+        },
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("DIMKT")
@@ -129,7 +151,7 @@ class DIMKTTrainer(BaseTrainer):
         self, batch_data: tuple[torch.Tensor, ...]
     ) -> dict[str, torch.Tensor]:
         """测试前向传播，支持 windowlateauc_mean 评估。"""
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)

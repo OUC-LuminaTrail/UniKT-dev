@@ -1,5 +1,7 @@
 """CL4KT trainer."""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -36,13 +38,26 @@ class CL4KTConfig(ModelConfig):
         batch_size: Batch size; larger batches give more in-batch negatives.
     """
 
-    hidden_size: int = 64
-    num_blocks: int = 2
-    num_attn_heads: int = 8
+    # powers of two so hidden_size % num_attn_heads == 0 for every combination
+    hidden_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128]}},
+    )
+    num_blocks: int = field(
+        default=2,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
+    num_attn_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8]}},
+    )
     kq_same: bool = True
     final_fc_dim: int = 512
     d_ff: int = 1024
-    dropout: float = 0.2
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     reg_cl: float = 0.1
     mask_prob: float = 0.2
     crop_prob: float = 0.3
@@ -53,9 +68,21 @@ class CL4KTConfig(ModelConfig):
     hard_negative_weight: float = 1.0
     max_grad_norm: float = 2.0
     epochs: int = 150
-    learning_rate: float = 1e-3
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("CL4KT")
@@ -161,9 +188,9 @@ class CL4KTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data) -> dict:
         """Test forward pass over windowlate samples.
 
-        batch_data: (sequence, response, mask, late_group_id, true_labels, question).
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question, user_id).
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
         mask = self._move_tensor_to_device(mask)

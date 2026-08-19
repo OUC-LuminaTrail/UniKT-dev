@@ -1,5 +1,7 @@
 """extraKT 模型训练器"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -33,10 +35,20 @@ class extraKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
+    # powers of two so d_model % num_attn_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
     n_blocks: int = 4
-    num_attn_heads: int = 8
-    dropout: float = 0.05
+    num_attn_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.05,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     d_ff: int = 256
     final_fc_dim: int = 512
     kq_same: int = 1
@@ -46,10 +58,25 @@ class extraKTConfig(ModelConfig):
     num_buckets: int = 32
     max_distance: int = 100
     epochs: int = 150
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 64
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {
+                "type": "categorical",
+                "choices": [0.0, 1e-5, 1e-4, 1e-3],
+            }
+        },
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("extraKT")
@@ -182,9 +209,9 @@ class extraKTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data):
         """测试前向传播，支持 windowlateauc_mean 评估。
 
-        batch_data: (sequence, response, mask, late_group_id, true_labels, question)
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question, user_id)
         """
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

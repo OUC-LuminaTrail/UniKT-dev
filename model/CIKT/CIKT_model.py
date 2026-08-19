@@ -143,7 +143,15 @@ class DisentangleCausal(nn.Module):
         score = torch.cat(
             (causal_score.unsqueeze(2), trivial_score.unsqueeze(2)), dim=2
         )
-        score = F.gumbel_softmax(score, tau=self.tau, hard=self.is_hard, dim=2)
+        if self.training:
+            score = F.gumbel_softmax(score, tau=self.tau, hard=self.is_hard, dim=2)
+        elif self.is_hard:
+            # Deterministic hard argmax (no Gumbel noise) at inference.
+            score = torch.zeros_like(score).scatter_(
+                2, score.argmax(dim=2, keepdim=True), 1.0
+            )
+        else:
+            score = F.softmax(score / self.tau, dim=2)
         causal_mask = score[:, :, 0, :].masked_fill(attn_mask, 0.0)
         trivial_mask = score[:, :, 1, :].masked_fill(attn_mask, 0.0)
         return causal_mask, trivial_mask
@@ -424,9 +432,11 @@ class CIKT(nn.Module):
         x_embed_causal = x_embed.unsqueeze(1) * causal_mask.unsqueeze(-1)
         x_causal_ave = self._expand_and_average(x_embed_causal, batch_size)
 
-        # Intervention: remove
-        x_embed_trivial = x_embed.unsqueeze(1) * trivial_mask.unsqueeze(-1)
-        x_trivial_ave = self._expand_and_average(x_embed_trivial, batch_size)
+        # Intervention: remove — auxiliary branch for the training loss only
+        # (O(L^2) expand; skipped at eval).
+        if self.training:
+            x_embed_trivial = x_embed.unsqueeze(1) * trivial_mask.unsqueeze(-1)
+            x_trivial_ave = self._expand_and_average(x_embed_trivial, batch_size)
 
         # Intervention: invert
         x_embed_intervention = self.encoder_embedding(
@@ -454,12 +464,17 @@ class CIKT(nn.Module):
         # Predict
         # 对 intervention/replace 复用 norm1，trivial 用 norm2。
         x_causal_ave = self.norm1(x_causal_ave)
-        x_trivial_ave = self.norm2(x_trivial_ave)
+        if self.training:
+            x_trivial_ave = self.norm2(x_trivial_ave)
         x_intervention_ave = self.norm1(x_intervention_ave)
         x_replace_ave = self.norm1(x_replace_ave)
 
         y_causal = self.pred_causal(x_causal_ave, q_state)
-        y_trivial = self.pred_trivial(x_trivial_ave, q_state)
+        y_trivial = (
+            self.pred_trivial(x_trivial_ave, q_state)
+            if self.training
+            else y_causal.new_zeros(y_causal.shape)
+        )
         y_intervention = self.pred_intervention(x_intervention_ave, q_state)
         y_replace = self.pred_replace(x_replace_ave, q_state)
 

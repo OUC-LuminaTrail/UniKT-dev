@@ -498,7 +498,7 @@ class DyGKTModelData(QuestionModelData):
 
         # Build metadata
         question_skill_ids = self._build_primary_skill_ids(q_table)
-        num_users = int(self.data_src.get_metadata("num_split_question_users"))
+        num_users = int(self.data_src.get_metadata("num_users"))
 
         metadata = {
             "num_questions": num_questions,
@@ -543,7 +543,7 @@ class DyGKTModelData(QuestionModelData):
                 .to_numpy(dtype=np.int64)
             )
 
-        users = split_data["user"].to_numpy(dtype=np.int64)
+        users = split_data["sequence_id"].to_numpy(dtype=np.int64)
         seq_pos = split_data["seq_pos"].to_numpy(dtype=np.int64)
         valid = (
             (users >= 0)

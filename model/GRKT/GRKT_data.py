@@ -63,7 +63,7 @@ class GRKTModelData(QuestionModelData):
 
         # Load split question sequence data
         q_data = self.data_src.get_split_question_sequence_data()
-        num_users = q_data["user"].n_unique()
+        num_users = q_data["sequence_id"].n_unique()
         merged_pd = q_data.to_pandas()
 
         # Build multi-skill per question from question_skill relation
@@ -88,7 +88,7 @@ class GRKTModelData(QuestionModelData):
         user_time = np.zeros((num_users, max_seq_len), dtype=np.int64)
         user_mask = np.zeros((num_users, max_seq_len), dtype=np.int64)
 
-        user_indices = merged_pd["user"].values
+        user_indices = merged_pd["sequence_id"].values
         seq_positions = merged_pd["seq_pos"].values
         questions = merged_pd["question"].values
         labels = merged_pd["label"].values

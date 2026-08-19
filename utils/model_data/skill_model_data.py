@@ -72,12 +72,17 @@ class WindowlateIterableDataset(IterableDataset):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        torch.Tensor,
     ]:
         """Build a single sample tensor.
 
         Returns:
-            Tuple of (sequence, response, mask, late_group_id, label, question)
-            tensors, each of shape (max_seq_len,).
+            Tuple of (sequence, response, mask, late_group_id, label, question,
+            user_id) tensors, each of shape (max_seq_len,). user_id carries
+            the ORIGINAL student id (the same id space as the split data's
+            ``user`` column); trailing pad positions keep the buffer
+            value 0 -- consumers must select valid positions via the mask or
+            the window bounds, never via the raw user_id value.
         """
         positions = sample["position"]
 
@@ -87,6 +92,7 @@ class WindowlateIterableDataset(IterableDataset):
         late_group_id = np.full(self.max_seq_len, -1, dtype=np.int64)
         label = np.zeros(self.max_seq_len, dtype=np.int64)
         question = np.zeros(self.max_seq_len, dtype=np.int64)
+        user_id = np.zeros(self.max_seq_len, dtype=np.int64)
 
         sequence[positions] = sample["skill"]
         response[positions] = sample["response"]
@@ -94,6 +100,7 @@ class WindowlateIterableDataset(IterableDataset):
         late_group_id[positions] = sample["group_id"]
         label[positions] = sample["true_label"]
         question[positions] = sample["question"]
+        user_id[positions] = sample["user_id"]
 
         return (
             torch.from_numpy(sequence),
@@ -102,6 +109,7 @@ class WindowlateIterableDataset(IterableDataset):
             torch.from_numpy(late_group_id),
             torch.from_numpy(label),
             torch.from_numpy(question),
+            torch.from_numpy(user_id),
         )
 
     def _read_batch_arrays(self, table: pa.Table) -> dict[str, np.ndarray]:
@@ -136,6 +144,7 @@ class WindowlateIterableDataset(IterableDataset):
         self, batch: dict[str, np.ndarray]
     ) -> Iterator[
         tuple[
+            torch.Tensor,
             torch.Tensor,
             torch.Tensor,
             torch.Tensor,
@@ -208,7 +217,10 @@ class SkillModelData(BaseModelData):
         Returns:
             Tuple of (user_sequence, user_response, user_mask,
             user_id_sequence, user_question) as numpy arrays,
-            each of shape (num_split_users, max_seq_len).
+            each of shape (num_split_users, max_seq_len). user_id_sequence
+            carries ORIGINAL student ids (from the ``user`` column),
+            so one student's multiple splits share the same id -- matching
+            the windowlate parquet's id space.
         """
         import numpy as np
         import polars as pl
@@ -219,7 +231,7 @@ class SkillModelData(BaseModelData):
         if isinstance(data, pl.LazyFrame):
             data = data.collect()
         max_seq_len = self.data_src.get_metadata("max_seq_len")
-        num_users = data["user"].n_unique()
+        num_users = data["sequence_id"].n_unique()
 
         user_sequence = np.zeros((num_users, max_seq_len), dtype=int)
         user_id_sequence = np.zeros((num_users, max_seq_len), dtype=int)
@@ -227,11 +239,11 @@ class SkillModelData(BaseModelData):
         user_mask = np.zeros((num_users, max_seq_len), dtype=int)
         user_question = np.zeros((num_users, max_seq_len), dtype=int)
 
-        user_indices = data["user"].to_numpy()
+        user_indices = data["sequence_id"].to_numpy()
         seq_positions = data["seq_pos"].to_numpy()
 
         user_sequence[user_indices, seq_positions] = data["skill"].to_numpy()
-        user_id_sequence[user_indices, seq_positions] = user_indices
+        user_id_sequence[user_indices, seq_positions] = data["user"].to_numpy()
         user_response[user_indices, seq_positions] = data["label"].to_numpy()
         user_mask[user_indices, seq_positions] = 1
         user_question[user_indices, seq_positions] = data["question"].to_numpy()
@@ -253,9 +265,10 @@ class SkillModelData(BaseModelData):
 
         Returns:
             Tuple of (user_sequence, user_response, user_mask,
-            user_id_sequence, late_group_id, user_true_labels,
-            user_question) as numpy arrays,
-            each of shape (num_samples, max_seq_len).
+            late_group_id, user_true_labels, user_question,
+            user_id_sequence) as numpy arrays,
+            each of shape (num_samples, max_seq_len). user_id_sequence
+            (original student ids) is last, matching WindowlateIterableDataset.
         """
         import numpy as np
 
@@ -312,10 +325,10 @@ class SkillModelData(BaseModelData):
             user_sequence,
             user_response,
             user_mask,
-            user_id_sequence,
             late_group_id,
             user_true_labels,
             user_question,
+            user_id_sequence,
         )
 
     def create_windowlate_iterable_dataset(

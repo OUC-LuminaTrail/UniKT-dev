@@ -30,7 +30,8 @@ class SQGKTConfig(ModelConfig):
         sim_emb: Similarity embedding: skill_emb/question_emb/feature.
         embedding_dim: Embedding dimension.
         hidden_neurons: Hidden sizes for each LSTM layer; last layer must equal embedding_dim.
-        dropout_probs: Dropout probabilities for [LSTM, GNN, eval].
+        lstm_dropout: Dropout probability on LSTM outputs (default: 0.2).
+        gnn_dropout: Dropout probability of the GNN graph aggregators (default: 0.2).
         epochs: Number of training epochs.
         learning_rate: Learning rate.
         lr_decay: Learning rate decay factor per epoch.
@@ -38,24 +39,49 @@ class SQGKTConfig(ModelConfig):
         batch_size: Batch size.
     """
 
-    n_hop: int = 3
-    skill_neighbor_num: int = 4
+    n_hop: int = field(
+        default=3,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 5}},
+    )
+    skill_neighbor_num: int = field(
+        default=4,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 10}},
+    )
     question_neighbor_num: int = 4
     user_neighbor_num: int = 5
     hist_neighbor_num: int = 3
     next_neighbor_num: int = 4
-    att_bound: float = 0.7
+    att_bound: float = field(
+        default=0.7,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.8}},
+    )
     aggregator: str = "sum"
     variant: str = "hsei"
     sim_emb: str = "question_emb"
     embedding_dim: int = 100
     hidden_neurons: list[int] = field(default_factory=lambda: [200, 100])
-    dropout_probs: list[float] = field(default_factory=lambda: [0.2, 0.2, 0.0])
+    lstm_dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
+    gnn_dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 100
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-8
-    batch_size: int = 32
+    weight_decay: float = field(
+        default=1e-8,
+        metadata={"optuna": {"type": "float", "low": 1e-8, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=32,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128, 256]}},
+    )
 
 
 @register_trainer("SQGKT")
@@ -71,12 +97,12 @@ class SQGKTTrainer(BaseTrainer):
             train_dataset,
             val_dataset,
             test_dataset,
-            self.graph_data,
+            graph_data,
             self.num_skills,
             self.num_questions,
             self.num_users,
             train_collate_fn,
-            val_collate_fn,
+            eval_collate_fn,
         ) = model_data.prepare_data(rc)
 
         logger.info("Initializing SQGKT model...")
@@ -87,7 +113,8 @@ class SQGKTTrainer(BaseTrainer):
             data_metadata=metadata,
             embedding_dim=m.embedding_dim,
             hidden_neurons=list(m.hidden_neurons),
-            dropout_probs=list(m.dropout_probs),
+            lstm_dropout=m.lstm_dropout,
+            gnn_dropout=m.gnn_dropout,
             n_hop=m.n_hop,
             skill_neighbor_num=m.skill_neighbor_num,
             question_neighbor_num=m.question_neighbor_num,
@@ -97,6 +124,10 @@ class SQGKTTrainer(BaseTrainer):
             aggregator=m.aggregator,
             variant=m.variant,
             sim_emb=m.sim_emb,
+            question_neighbors=graph_data["question_neighbors"],
+            skill_neighbors=graph_data["skill_neighbors"],
+            q_neighbors_2=graph_data["q_neighbors_2"],
+            uq_stat_q=graph_data["uq_stat_q"],
         )
 
         optimizer = torch.optim.Adam(
@@ -107,16 +138,6 @@ class SQGKTTrainer(BaseTrainer):
             if m.lr_decay
             else None
         )
-
-        # Move static graph data to device and bind the shared embedding table.
-        device = (
-            torch.device(rc.general.device) if rc.general.device else self._try_gpu()
-        )
-        self.graph_data = {
-            key: value.to(device) if hasattr(value, "to") else value
-            for key, value in self.graph_data.items()
-        }
-        self.graph_data["feature_embedding"] = model.feature_embedding.weight
 
         logger.info(
             f"SQGKT Trainer: {self.num_skills} skills, {self.num_questions} questions"
@@ -131,7 +152,8 @@ class SQGKTTrainer(BaseTrainer):
             val_data=val_dataset,
             test_data=test_dataset,
             collate_fn=train_collate_fn,
-            val_collate_fn=val_collate_fn,
+            val_collate_fn=eval_collate_fn,
+            test_collate_fn=eval_collate_fn,
         )
 
     def forward_pass(self, batch_data):
@@ -151,7 +173,6 @@ class SQGKTTrainer(BaseTrainer):
                 user_mask=mask,
                 user_ids=user_id,
                 skills=skills,
-                graph_data=self.graph_data,
                 hist_neighbor_index=hist_neighbor_index,
             )
         )

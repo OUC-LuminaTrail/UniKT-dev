@@ -1,5 +1,6 @@
 """MCKT trainer."""
 
+from dataclasses import field
 from typing import Literal
 
 import torch
@@ -36,11 +37,27 @@ class MCKTConfig(ModelConfig):
         max_grad_norm: Max gradient norm for clipping.
     """
 
-    d_model: int = 128
-    n_heads: int = 8
-    dropout: float = 0.1
-    temperature: float = 0.8
-    sim_threshold: float = 0.8
+    # powers of two so d_model % n_heads == 0 for every combination
+    d_model: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
+    n_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
+    temperature: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.1, "high": 1.0}},
+    )
+    sim_threshold: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 0.95}},
+    )
     cl_batch_size: int = 10000
     cl_exp_mode: Literal["paper", "source"] = "source"
     pro_loss_weight: float = 1.0
@@ -49,10 +66,19 @@ class MCKTConfig(ModelConfig):
     pos_strategy: Literal["same_kc_set", "shared_kc"] = "shared_kc"
     pos_include_self: bool = True
     epochs: int = 70
-    learning_rate: float = 0.002
+    learning_rate: float = field(
+        default=0.002,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 1e-5
-    batch_size: int = 80
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-3, "log": True}},
+    )
+    batch_size: int = field(
+        default=80,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 80, 128]}},
+    )
     max_grad_norm: float = 15.0
 
 
@@ -156,11 +182,13 @@ class MCKTTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, outputs: dict[str, torch.Tensor]) -> torch.Tensor:
-        bce_loss = self.loss(outputs["y_hat"], outputs["y_label"])
-        if not self.model.training:
-            return bce_loss
+        """Total loss = BCE + training-only contrastive auxiliary terms.
+
+        Eval logging goes through the base ``_compute_eval_loss`` (pure BCE);
+        the model forward returns ``None`` aux terms in eval mode.
+        """
         return (
-            bce_loss
+            self.loss(outputs["y_hat"], outputs["y_label"])
             + outputs["_state_loss"]
             + outputs["_pro_loss"]
             + outputs["_react_loss"]

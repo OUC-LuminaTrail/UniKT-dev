@@ -3,6 +3,8 @@
 定义 HDHKT 模型特定的训练逻辑。
 """
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -32,19 +34,41 @@ class HDHKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    hidden_dim: int = 250
-    n_hop: int = 4
+    hidden_dim: int = field(
+        default=250,
+        metadata={"optuna": {"type": "int", "low": 128, "high": 512}},
+    )
+    n_hop: int = field(
+        default=4,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 6}},
+    )
     heads: int = 1
     lstm_layers: int = 1
     history_neighbour: int = 5
     att_bound: float = 0.1
     num_difficulty_clusters: int = 5
     epochs: int = 120
-    learning_rate: float = 0.0003
+    learning_rate: float = field(
+        default=0.0003,
+        metadata={
+            "optuna": {"type": "float", "low": 0.00001, "high": 0.001, "log": True}
+        },
+    )
     lr_decay: float | None = None
-    dropout: float = 0.25
-    weight_decay: float = 0.00001
-    batch_size: int = 64
+    dropout: float = field(
+        default=0.25,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
+    weight_decay: float = field(
+        default=0.00001,
+        metadata={
+            "optuna": {"type": "float", "low": 1e-06, "high": 0.0001, "log": True}
+        },
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("HDHKT")

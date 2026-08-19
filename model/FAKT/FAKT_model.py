@@ -249,15 +249,19 @@ class MoETransformerLayer(nn.Module):
             dim=2
         )
 
-        expert_usage_stats = torch.zeros(E, device=query.device)
-        for i in range(E):
-            expert_mask = top_indices == i  # [B, L, max_k]
-            expert_weight = (normalized_weights * expert_mask.float()).sum()
-            expert_usage_stats[i] = expert_weight
+        # Usage statistics only serve training-time analysis; skip at eval.
+        if self.training:
+            expert_usage_stats = torch.zeros(E, device=query.device)
+            for i in range(E):
+                expert_mask = top_indices == i  # [B, L, max_k]
+                expert_weight = (normalized_weights * expert_mask.float()).sum()
+                expert_usage_stats[i] = expert_weight
 
-        total_weight = expert_usage_stats.sum()
-        if total_weight > 0:
-            expert_usage_stats = expert_usage_stats / total_weight
+            total_weight = expert_usage_stats.sum()
+            if total_weight > 0:
+                expert_usage_stats = expert_usage_stats / total_weight
+        else:
+            expert_usage_stats = None
 
         return moe_output, confidence_scores, expert_usage_stats
 
@@ -284,14 +288,18 @@ class MoETransformerLayer(nn.Module):
                 )
                 output = self.single_expert(non_attention_input)
 
-            stats = {
-                "single_expert_type": self.single_expert_type,
-                "confidence_scores": torch.ones(batch_size, seqlen, device=device),
-                "expert_usage_stats": torch.zeros(4, device=device),
-            }
-            expert_map = {"attention": 0, "lstm": 1, "cnn": 2, "mamba": 3}
-            if self.single_expert_type in expert_map:
-                stats["expert_usage_stats"][expert_map[self.single_expert_type]] = 1.0
+            stats = None
+            if self.training:
+                stats = {
+                    "single_expert_type": self.single_expert_type,
+                    "confidence_scores": torch.ones(batch_size, seqlen, device=device),
+                    "expert_usage_stats": torch.zeros(4, device=device),
+                }
+                expert_map = {"attention": 0, "lstm": 1, "cnn": 2, "mamba": 3}
+                if self.single_expert_type in expert_map:
+                    stats["expert_usage_stats"][expert_map[self.single_expert_type]] = (
+                        1.0
+                    )
 
         elif self.use_moe:
             router_logits = self.gate(query)
@@ -301,11 +309,13 @@ class MoETransformerLayer(nn.Module):
                 self.adaptive_expert_selection(query, key, values, routing_probs)
             )
             output = moe_output
-            stats = {
-                "confidence_scores": confidence_scores,
-                "expert_usage_stats": expert_stats,
-                "routing_probs": routing_probs,
-            }
+            stats = None
+            if self.training:
+                stats = {
+                    "confidence_scores": confidence_scores,
+                    "expert_usage_stats": expert_stats,
+                    "routing_probs": routing_probs,
+                }
         else:
             _ = zero_pad
             output = self.default_expert(query, key, values, mask=src_mask)

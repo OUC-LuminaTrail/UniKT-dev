@@ -152,11 +152,14 @@ class BaseCaseAnalyzer(InferenceOpsMixin, ABC):
         self.model = c.model
         batch_size = self._inference_batch_size or self.run_config.model.batch_size
         if isinstance(c.val_data, torch.utils.data.Dataset):
+            # single-run inference on small data: no multiprocessing workers,
+            # which would fork and trip Python 3.12+ deadlock warnings
             self.val_data = create_optimized_dataloader(
                 c.val_data,
                 batch_size=batch_size,
                 shuffle=False,
                 device=self.device_,
+                num_workers=0,
                 collate_fn=c.collate_fn,
             )
         else:

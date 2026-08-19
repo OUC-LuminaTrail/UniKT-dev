@@ -1,5 +1,7 @@
 """SparseKT 模型训练器模块"""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -39,10 +41,23 @@ class SparseKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 256
-    n_blocks: int = 2
-    n_heads: int = 8
-    dropout: float = 0.1
+    # powers of two so d_model % n_heads == 0 for every combination
+    d_model: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
+    n_blocks: int = field(
+        default=2,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 4}},
+    )
+    n_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [2, 4, 8, 16]}},
+    )
+    dropout: float = field(
+        default=0.1,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     d_ff: int = 256
     kq_same: int = 1
     separate_qa: int = 0
@@ -50,13 +65,31 @@ class SparseKTConfig(ModelConfig):
     final_fc_dim: int = 512
     final_fc_dim2: int = 256
     emb_type: str = "qid_sparseattn"
-    sparse_ratio: float = 0.8
-    k_index: int = 5
+    sparse_ratio: float = field(
+        default=0.8,
+        metadata={"optuna": {"type": "float", "low": 0.5, "high": 0.9}},
+    )
+    k_index: int = field(
+        default=5,
+        metadata={"optuna": {"type": "int", "low": 2, "high": 10}},
+    )
     epochs: int = 100
-    learning_rate: float = 1e-4
+    learning_rate: float = field(
+        default=1e-4,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-3, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 128
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
 
 
 @register_trainer("SparseKT")
@@ -199,7 +232,7 @@ class SparseKTTrainer(BaseTrainer):
         - 模型内部已经使用移位后的 response 作为 target，所以 y_hat[:, t] 直接对应 response[t]
         - 测试时 response[:, -1] = 0（占位），模型会忽略（使用移位后的目标）
         """
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

@@ -14,9 +14,17 @@ logger = get_logger(__name__)
 
 
 def sample_hist_neighbors(
-    batch_size, max_seq_len, hist_neighbor_num, skill_index, pad_index=None
+    batch_size,
+    max_seq_len,
+    hist_neighbor_num,
+    skill_index,
+    pad_index=None,
+    deterministic=False,
 ):
-    """同技能历史采样：位置 t 在历史 [0, t-1] 中随机选 M 个技能相同的位置。"""
+    """同技能历史采样：位置 t 在历史 [0, t-1] 中选 M 个技能相同的位置。
+
+    随机模式用于训练；deterministic 模式（评估）固定取最早的前 M 个候选。
+    """
     if pad_index is None:
         pad_index = max_seq_len
     if hist_neighbor_num == 0:
@@ -39,11 +47,18 @@ def sample_hist_neighbors(
         valid = same_skill & causal
         for t in range(1, max_seq_len):
             candidates = np.where(valid[t])[0]
-            if len(candidates) >= hist_neighbor_num:
+            if len(candidates) == 0:
+                continue
+            if deterministic:
+                # Fixed earliest-M pick keeps eval reproducible.
+                result[b, t] = candidates[
+                    np.arange(hist_neighbor_num) % len(candidates)
+                ]
+            elif len(candidates) >= hist_neighbor_num:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=False
                 )
-            elif len(candidates) > 0:
+            else:
                 result[b, t] = np.random.choice(
                     candidates, hist_neighbor_num, replace=True
                 )
@@ -64,21 +79,22 @@ class SQGKTModelData(QuestionModelData):
         )
         num_questions = self.data_src.get_metadata("num_questions")
         num_skills = self.data_src.get_metadata("num_skills")
-        # load_sequence_data returns split sequences (windows) as rows; user id is the row index.
-        num_users = user_sequence.shape[0]
+        num_users = self.data_src.get_metadata("num_users")
 
         logger.info("Building question-skill neighbors...")
+        rng = np.random.default_rng(rc.general.seed)
         question_neighbors, skill_neighbors = self.build_qs_neighbors(
             question_skill_matrix,
             num_skills,
             num_questions,
             rc.model.question_neighbor_num,
             rc.model.skill_neighbor_num,
+            rng,
         )
 
         logger.info("Building student-question graph...")
         q_neighbors_2, uq_stat_q = self.build_sq_graph(
-            num_questions, rc.model.user_neighbor_num, rc.data.fold
+            num_questions, rc.model.user_neighbor_num, rc.data.fold, rng
         )
 
         train_data, val_data, test_data = self.split_kfold_data(
@@ -104,8 +120,14 @@ class SQGKTModelData(QuestionModelData):
             test_seq, test_res, test_mask, test_uid, test_skills
         )
 
-        collate = partial(
+        train_collate = partial(
             sqgkt_collate_fn, hist_neighbor_num=rc.model.hist_neighbor_num
+        )
+        # Deterministic eval collate keeps val/test metrics reproducible.
+        eval_collate = partial(
+            sqgkt_collate_fn,
+            hist_neighbor_num=rc.model.hist_neighbor_num,
+            deterministic=True,
         )
 
         logger.info(
@@ -117,8 +139,6 @@ class SQGKTModelData(QuestionModelData):
             "skill_neighbors": torch.from_numpy(skill_neighbors).long(),
             "q_neighbors_2": torch.from_numpy(q_neighbors_2).long(),
             "uq_stat_q": torch.from_numpy(uq_stat_q).float(),
-            "next_neighbor_num": rc.model.next_neighbor_num,
-            "feature_embedding": None,
         }
         return (
             train_dataset,
@@ -128,12 +148,14 @@ class SQGKTModelData(QuestionModelData):
             num_skills,
             num_questions,
             num_users,
-            collate,
-            collate,
+            train_collate,
+            eval_collate,
         )
 
     @staticmethod
-    def build_qs_neighbors(question_skill_matrix, num_skills, num_questions, qn, sn):
+    def build_qs_neighbors(
+        question_skill_matrix, num_skills, num_questions, qn, sn, rng
+    ):
         """问题-技能二部图邻居表（偏移节点 id，对应 GIKTGraphAggregator）。
 
         节点 id 布局：技能 [0, num_skills)，题目 [num_skills, num_skills+num_questions)。
@@ -154,18 +176,18 @@ class SQGKTModelData(QuestionModelData):
         for q_id, neighbors in enumerate(question_to_skills):
             if len(neighbors) == 0:
                 continue
-            question_neighbors[num_skills + q_id] = np.random.choice(
+            question_neighbors[num_skills + q_id] = rng.choice(
                 neighbors, qn, replace=len(neighbors) < qn
             )
         for s_id, neighbors in enumerate(skill_to_questions):
             if len(neighbors) == 0:
                 continue
-            skill_neighbors[s_id] = np.random.choice(
+            skill_neighbors[s_id] = rng.choice(
                 neighbors, sn, replace=len(neighbors) < sn
             )
         return question_neighbors, skill_neighbors
 
-    def build_sq_graph(self, num_questions, k, fold_idx):
+    def build_sq_graph(self, num_questions, k, fold_idx, rng):
         """学生-问题图（论文 §4.1–4.2）。
 
         对每个问题 q_j 采样 k 个答过它的学生，并按论文式 (6) 计算边权 g_ij 的三个分量：
@@ -212,7 +234,7 @@ class SQGKTModelData(QuestionModelData):
             if not students:
                 continue
             n = len(students)
-            idx = np.random.choice(n, k, replace=(n < k))
+            idx = rng.choice(n, k, replace=(n < k))
             sampled = np.array(students, dtype=np.int32)[idx]
             q_neighbors_2[q] = sampled
             for slot, u in enumerate(sampled):
@@ -256,7 +278,7 @@ class SQGKTDataset(Dataset):
         }
 
 
-def sqgkt_collate_fn(batch, hist_neighbor_num=3):
+def sqgkt_collate_fn(batch, hist_neighbor_num=3, deterministic=False):
     from torch.utils.data.dataloader import default_collate
 
     batched = default_collate(batch)
@@ -269,6 +291,7 @@ def sqgkt_collate_fn(batch, hist_neighbor_num=3):
             hist_neighbor_num,
             batched["skills"][:, :model_seq_len],
             pad_index=model_seq_len,
+            deterministic=deterministic,
         )
     ).long()
     return batched

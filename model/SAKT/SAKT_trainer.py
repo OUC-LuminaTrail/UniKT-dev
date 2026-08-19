@@ -1,5 +1,7 @@
 """SAKT trainer."""
 
+from dataclasses import field
+
 import torch
 
 from utils.config import ModelConfig
@@ -25,15 +27,40 @@ class SAKTConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    emb_size: int = 256
-    num_attn_heads: int = 8
-    num_en: int = 1
-    dropout: float = 0.2
+    # powers of two so emb_size % num_attn_heads == 0 for every combination
+    emb_size: int = field(
+        default=256,
+        metadata={"optuna": {"type": "categorical", "choices": [128, 256]}},
+    )
+    num_attn_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
+    num_en: int = field(
+        default=1,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 3}},
+    )
+    dropout: float = field(
+        default=0.2,
+        metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
+    )
     epochs: int = 200
-    learning_rate: float = 1e-3
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
+    )
     lr_decay: float | None = None
-    weight_decay: float = 0.0
-    batch_size: int = 64
+    # categorical so the default 0.0 stays inside the space
+    weight_decay: float = field(
+        default=0.0,
+        metadata={
+            "optuna": {"type": "categorical", "choices": [0.0, 1e-5, 1e-4, 1e-3]}
+        },
+    )
+    batch_size: int = field(
+        default=64,
+        metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
+    )
 
 
 @register_trainer("SAKT")
@@ -119,11 +146,11 @@ class SAKTTrainer(BaseTrainer):
     def test_forward_pass(self, batch_data):
         """Run SAKT forward pass for windowlate evaluation.
 
-        batch_data: (sequence, response, mask, late_group_id, true_labels, question)
+        batch_data: (sequence, response, mask, late_group_id, true_labels, question, user_id)
         Windowlate mask marks target positions only, so it is shifted with the
         model output by using mask[:, 1:].
         """
-        sequence, response, mask, late_group_id, true_labels, _ = batch_data
+        sequence, response, mask, late_group_id, true_labels, _, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)

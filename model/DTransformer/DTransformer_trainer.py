@@ -1,6 +1,7 @@
 """DTransformer 模型训练器"""
 
 import random
+from dataclasses import field
 
 import torch
 import torch.nn.functional as F
@@ -37,12 +38,25 @@ class DTransformerConfig(ModelConfig):
         batch_size: Batch size for training.
     """
 
-    d_model: int = 128
+    # powers of two so d_model % num_attn_heads == 0 for every combination
+    d_model: int = field(
+        default=128,
+        metadata={"optuna": {"type": "categorical", "choices": [64, 128, 256]}},
+    )
     d_ff: int = 256
-    num_attn_heads: int = 8
+    num_attn_heads: int = field(
+        default=8,
+        metadata={"optuna": {"type": "categorical", "choices": [4, 8, 16]}},
+    )
     n_know: int = 16
-    n_blocks: int = 3
-    dropout: float = 0.3
+    n_blocks: int = field(
+        default=3,
+        metadata={"optuna": {"type": "int", "low": 1, "high": 3}},
+    )
+    dropout: float = field(
+        default=0.3,
+        metadata={"optuna": {"type": "float", "low": 0.1, "high": 0.5}},
+    )
     separate_qa: int = 0
     l2: float = 1e-3
     shortcut: int = 0
@@ -50,9 +64,18 @@ class DTransformerConfig(ModelConfig):
     hard_neg: int = 0
     proj: int = 0
     epochs: int = 150
-    learning_rate: float = 1e-3
-    weight_decay: float = 1e-5
-    batch_size: int = 32
+    learning_rate: float = field(
+        default=1e-3,
+        metadata={"optuna": {"type": "float", "low": 1e-5, "high": 1e-2, "log": True}},
+    )
+    weight_decay: float = field(
+        default=1e-5,
+        metadata={"optuna": {"type": "float", "low": 1e-6, "high": 1e-4, "log": True}},
+    )
+    batch_size: int = field(
+        default=32,
+        metadata={"optuna": {"type": "categorical", "choices": [16, 32, 64, 128]}},
+    )
 
 
 @register_trainer("DTransformer")
@@ -247,7 +270,7 @@ class DTransformerTrainer(BaseTrainer):
 
     def test_forward_pass(self, batch_data):
         """测试前向传播，支持 windowlateauc_mean 评估"""
-        sequence, response, mask, late_group_id, true_labels, question = batch_data
+        sequence, response, mask, late_group_id, true_labels, question, _ = batch_data
 
         sequence = self._move_tensor_to_device(sequence)
         response = self._move_tensor_to_device(response)
