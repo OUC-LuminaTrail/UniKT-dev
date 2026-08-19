@@ -1017,9 +1017,12 @@ class DataSource(ABC):
         num_users = len(unique_users)
         num_test_users = int(num_users * test_ratio)
 
-        # Shuffle user IDs randomly
+        # Shuffle user IDs (seeded local generator, like the KFold below, so
+        # the test/cv split is reproducible per data source and does not touch
+        # the global numpy RNG state).
+        rng = np.random.default_rng(self.seed)
         user_indices = np.arange(num_users)
-        np.random.shuffle(user_indices)
+        rng.shuffle(user_indices)
         # Get indices of non-test users after shuffling
         non_test_indices = user_indices[num_test_users:]
         # Initialize fold assignment array

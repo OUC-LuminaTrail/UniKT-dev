@@ -1,6 +1,5 @@
 """Tests for DataSource split-sequence building, build_* guards, add_kfold_labels."""
 
-import numpy as np
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
@@ -248,8 +247,6 @@ class TestAddKfoldLabels:
         seq = make_sequence_frame(users, list(range(20)))
         ds = make_data_source(sequence_data=seq)
 
-        # NOTE: source shuffle is unseeded; test seeds externally.
-        np.random.seed(123)
         ds.add_kfold_labels(n_splits=4, test_ratio=0.2)
 
         out = ds.sequence_data
@@ -267,22 +264,39 @@ class TestAddKfoldLabels:
         assert ds.metadata["kfold_n_splits"] == 4
         assert ds.metadata["test_ratio"] == 0.2
 
-    def test_seeded_calls_are_deterministic(
+    def test_same_seed_same_split(self, make_data_source, make_sequence_frame):
+        # add_kfold_labels seeds its shuffle from the data source's seed, so
+        # two sources with the same seed and data produce identical labels
+        # without touching the global numpy RNG.
+        users = [u for u in range(8) for _ in range(3)]
+        seq = make_sequence_frame(users, list(range(24)))
+
+        ds_a = make_data_source(sequence_data=seq, seed=7)
+        ds_a.add_kfold_labels(n_splits=3, test_ratio=0.25)
+
+        ds_b = make_data_source(sequence_data=seq, seed=7)
+        ds_b.add_kfold_labels(n_splits=3, test_ratio=0.25)
+
+        assert_frame_equal(ds_a.sequence_data, ds_b.sequence_data)
+
+    def test_different_seed_different_split(
         self, make_data_source, make_sequence_frame
     ):
         users = [u for u in range(8) for _ in range(3)]
         seq = make_sequence_frame(users, list(range(24)))
 
-        # NOTE: source shuffle is unseeded; test seeds externally.
-        np.random.seed(7)
-        ds_a = make_data_source(sequence_data=seq)
+        ds_a = make_data_source(sequence_data=seq, seed=7)
         ds_a.add_kfold_labels(n_splits=3, test_ratio=0.25)
-
-        np.random.seed(7)
-        ds_b = make_data_source(sequence_data=seq)
+        ds_b = make_data_source(sequence_data=seq, seed=8)
         ds_b.add_kfold_labels(n_splits=3, test_ratio=0.25)
 
-        assert_frame_equal(ds_a.sequence_data, ds_b.sequence_data)
+        test_users_a = set(
+            ds_a.sequence_data.filter(pl.col("fold") == -1)["user"].to_list()
+        )
+        test_users_b = set(
+            ds_b.sequence_data.filter(pl.col("fold") == -1)["user"].to_list()
+        )
+        assert test_users_a != test_users_b
 
     def test_zero_test_ratio_folds_all_users(
         self, make_data_source, make_sequence_frame
@@ -291,8 +305,6 @@ class TestAddKfoldLabels:
         seq = make_sequence_frame(users, list(range(12)))
         ds = make_data_source(sequence_data=seq)
 
-        # NOTE: source shuffle is unseeded; test seeds externally.
-        np.random.seed(11)
         ds.add_kfold_labels(n_splits=3, test_ratio=0.0)
 
         folds = ds.sequence_data["fold"].to_list()

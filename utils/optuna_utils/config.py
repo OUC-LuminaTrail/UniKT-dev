@@ -307,8 +307,6 @@ def param_spaces_from_model_config(model_name: str) -> list[HyperparameterSpace]
     from utils.core import MODEL_CONFIGS
 
     model_cls = MODEL_CONFIGS.get(model_name)
-    if model_cls is None:
-        raise KeyError(f"No ModelConfig registered for '{model_name}'")
 
     spaces: list[HyperparameterSpace] = []
     for f in dc_fields(model_cls):

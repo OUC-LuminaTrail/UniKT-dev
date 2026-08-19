@@ -124,15 +124,17 @@ class TestExtractValidPredictionsEdges:
         assert y_label.numel() == 0
         assert valid.shape == (2, 0)
 
-    def test_integer_mask_rejected_by_masked_select(self):
-        # NOTE: pinned current behavior — the adjacent-pair AND works on int
-        # masks, but torch.masked_select then requires a bool mask, so callers
-        # must cast data-file int8 masks (e.g. via _move_tensor_to_device with
-        # dtype=torch.bool) before this helper.
+    def test_integer_mask_normalized_to_bool(self):
+        # Data files often store int8 masks; the helper casts them internally
+        # so callers need no manual conversion.
         host = _Host()
         y_hat_full = torch.tensor([[1.0, 2.0, 3.0]])
         response = torch.tensor([[0, 1, 0]])
-        mask = torch.tensor([[1, 1, 0]], dtype=torch.int8)
+        int_mask = torch.tensor([[1, 1, 0]], dtype=torch.int8)
+        bool_mask = torch.tensor([[True, True, False]])
 
-        with pytest.raises(RuntimeError, match="expected BoolTensor"):
-            host._extract_valid_predictions(y_hat_full, response, mask)
+        out_int = host._extract_valid_predictions(y_hat_full, response, int_mask)
+        out_bool = host._extract_valid_predictions(y_hat_full, response, bool_mask)
+        assert torch.equal(out_int[0], out_bool[0])
+        assert torch.equal(out_int[1], out_bool[1])
+        assert out_int[0].tolist() == [1.0]

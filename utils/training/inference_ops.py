@@ -66,7 +66,7 @@ class InferenceOpsMixin:
         Args:
             y_hat_full: Model output tensor ``[B, S]``.
             response: Response label tensor ``[B, S]``.
-            mask: Valid position mask ``[B, S]``.
+            mask: Valid position mask ``[B, S]`` (bool; int masks are cast).
             same_position: Whether input uses same-position convention
                 (``out[t]`` predicts ``response[t]``).
 
@@ -76,6 +76,11 @@ class InferenceOpsMixin:
                 y_label: Labels at valid positions.
                 valid_mask: Mask of valid adjacent pairs.
         """
+        # masked_select below requires a bool mask; data files often store
+        # int8 masks, so normalize any integer mask on entry.
+        if mask.dtype != torch.bool:
+            mask = mask.to(torch.bool)
+
         # Normalize same-position input to next-item view
         if same_position:
             y_hat_full = self._pad_to_full_sequence(y_hat_full[:, 1:])

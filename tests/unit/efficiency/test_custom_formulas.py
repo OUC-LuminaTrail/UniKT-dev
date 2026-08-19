@@ -86,7 +86,8 @@ class TestCudnnRnnFormula:
     def test_seq_first_layout_agrees_with_batch_first(self):
         assert _run(mode=2, batch_first=True) == _run(mode=2, batch_first=False)
 
-    def test_unknown_mode_falls_back_to_four_gates(self):
-        # NOTE: pinned current behavior — unknown cuDNN mode codes default to
-        # LSTM's 4 gates rather than raising.
-        assert _run(mode=99) == _expected(4, 2, 3, 8, 16, layers=1, directions=1)
+    def test_unknown_mode_raises(self):
+        # An unknown cuDNN mode code is a new cell variant the table does not
+        # know; refuse to guess rather than silently mis-counting FLOPs.
+        with pytest.raises(ValueError, match="Unknown cuDNN RNN mode code"):
+            _run(mode=99)

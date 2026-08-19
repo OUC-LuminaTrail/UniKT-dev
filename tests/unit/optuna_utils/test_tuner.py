@@ -280,11 +280,9 @@ class TestSaveResults:
         echo = yaml.safe_load((save_dir / "optuna_config.yaml").read_text())
         assert echo["study_name"] == "utest_study"
 
-    def test_multi_objective_history_value_fallback_crashes(self, tmp_path):
-        # NOTE: pinned current behavior — the `trial.value if trial.value is not
-        # None else trial.values` fallback is dead: optuna 4.8's FrozenTrial
-        # raises RuntimeError for completed multi-objective trials instead of
-        # returning None, so saving a multi-objective history fails.
+    def test_multi_objective_history_saves_values_list(self, tmp_path):
+        # FrozenTrial.value RAISES on multi-objective studies (optuna >= 4);
+        # the history must branch on the study shape and save the values list.
         save_dir = tmp_path / "opt_mo"
         cfg = _grid_cfg(save_dir=str(save_dir), directions=["maximize", "minimize"])
         tuner = OptunaTuner(
@@ -292,5 +290,10 @@ class TestSaveResults:
             [_x_space()],
             lambda trial, params: [float(params["x"]), 1.0 / params["x"]],
         )
-        with pytest.raises(RuntimeError, match="multi-objective"):
-            tuner.search()
+        tuner.search()
+
+        history = yaml.safe_load((save_dir / "search_history.yaml").read_text())
+        assert len(history) == 2
+        assert all(isinstance(row["value"], list) for row in history)
+        assert all(len(row["value"]) == 2 for row in history)
+        assert {row["value"][0] for row in history} == {1.0, 2.0}

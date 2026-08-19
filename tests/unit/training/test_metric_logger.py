@@ -123,10 +123,9 @@ class TestLocalMetricLogger:
         rows = _rows(tmp_path / "metrics_train.csv")
         assert rows[2] == ["1", "0.5", ""]  # auc absent -> empty cell
 
-    def test_new_columns_silently_dropped(self, tmp_path):
-        # NOTE: pinned current behavior — the class docstring claims headers
-        # are "extended in-place when new metric columns appear", but _write_row
-        # fixes the header on first write and drops unknown columns' values.
+    def test_new_columns_extend_header_in_place(self, tmp_path):
+        # A metric column appearing after the header was written must extend
+        # the file: existing rows are back-filled with blanks under it.
         logger = LocalMetricLogger(log_dir=str(tmp_path))
         logger.log_metrics(phase="train", metrics={"acc": 0.9}, step=0, epoch=0)
         logger.log_metrics(
@@ -135,8 +134,9 @@ class TestLocalMetricLogger:
         logger.finish()
 
         rows = _rows(tmp_path / "metrics_train.csv")
-        assert rows[0] == ["epoch", "acc"]  # header not extended
-        assert rows[2] == ["1", "0.5"]  # new_col value dropped
+        assert rows[0] == ["epoch", "acc", "new_col"]
+        assert rows[1] == ["0", "0.9", ""]  # earlier row back-filled blank
+        assert rows[2] == ["1", "0.5", "1.0"]
 
     def test_none_metric_values_filtered_from_row(self, tmp_path):
         logger = LocalMetricLogger(log_dir=str(tmp_path))

@@ -50,9 +50,7 @@ class TestSchema:
         assert schema["model"] is MODEL_CONFIGS._registry[tiny_model_config_name]
 
     def test_unknown_model_raises_registry_keyerror(self):
-        # NOTE: pinned current behavior — MODEL_CONFIGS.get raises its own
-        # KeyError before the friendlier "No ModelConfig registered" branch
-        # (which is dead code) can fire.
+        # The registry's KeyError lists the available names.
         with pytest.raises(KeyError, match="not found"):
             build_run_config_schema("NoSuchModelAnywhere")
 

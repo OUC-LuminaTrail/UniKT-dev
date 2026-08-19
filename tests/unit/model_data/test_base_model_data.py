@@ -213,15 +213,12 @@ class TestSplitKfoldData:
             )
 
     def test_no_arrays_raises(self, split_model_data):
-        # NOTE: pinned current behavior — the message still uses the legacy
-        # "get_kfold_split_data" name rather than split_kfold_data.
-        with pytest.raises(ValueError, match="requires at least one input"):
+        with pytest.raises(
+            ValueError, match="split_kfold_data requires at least one input"
+        ):
             split_model_data.split_kfold_data(fold_idx=1)
 
-    def test_zero_rows_raises_from_empty_fold_check(self, make_skill_model_data):
-        # NOTE: pinned current behavior — zero-row arrays reach numpy's
-        # minimum-reduction on an empty user index array instead of a
-        # domain-specific error.
+    def test_zero_rows_raises_domain_error(self, make_skill_model_data):
         empty = pl.DataFrame(
             {
                 "sequence_id": pl.Series([], dtype=pl.Int64),
@@ -229,7 +226,7 @@ class TestSplitKfoldData:
             }
         )
         model_data = make_skill_model_data(split_frame=empty)
-        with pytest.raises(ValueError, match="zero-size array"):
+        with pytest.raises(ValueError, match="no users"):
             model_data.split_kfold_data(np.zeros((0, 2)), fold_idx=0)
 
 
