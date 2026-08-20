@@ -35,6 +35,9 @@ class ReKTPConfig(ModelConfig):
         use_local: Ablate the local per-KC affine recursion branch. ``False``
             skips the segmented scan and feeds zero local features to the
             readout; the branch parameters then stay inert.
+        use_forgetting: Enable the learned gap-conditioned temporal decay in
+            the local branch. ``False`` keeps local writes and KC isolation but
+            uses an identity transition for a forgetting ablation.
         dropout: Dropout probability.
         epochs: Maximum training epochs.
         learning_rate: Adam learning rate.
@@ -75,6 +78,7 @@ class ReKTPConfig(ModelConfig):
     )
     use_global: bool = True
     use_local: bool = True
+    use_forgetting: bool = True
     epochs: int = 100
     learning_rate: float = field(
         default=2.7e-3,
@@ -126,6 +130,7 @@ class ReKTPTrainer(BaseTrainer):
             ),
             use_global=m.use_global,
             use_local=m.use_local,
+            use_forgetting=getattr(m, "use_forgetting", True),
         )
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay

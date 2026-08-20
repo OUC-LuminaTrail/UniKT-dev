@@ -5,8 +5,9 @@ blocks whose dilation grows as ``conv_dilation_base**i``; the rest of the
 model is the same question-level KT pipeline.
 
 Ablation: ``use_global`` toggles the global causal dilated-conv branch
-(:meth:`ReKTP._global_history_states`) and ``use_local`` toggles the local
-per-KC affine recursion branch (:meth:`ReKTP._local_pre_states`). An ablated
+(:meth:`ReKTP._global_history_states`), ``use_local`` toggles the local per-KC
+affine recursion branch (:meth:`ReKTP._local_pre_states`), and
+``use_forgetting`` toggles only the local time-decay transition. An ablated
 branch is skipped entirely in the forward pass and feeds all-zero features to
 the readout, so its parameters never receive a gradient and stay inert; the
 architecture, parameter count, and shared pathway (event embeddings, IRT head)
@@ -78,8 +79,10 @@ class ReKTP(nn.Module):
 
     Readout concatenates ``[global_state, local_pre_state, event_embedding]``.
     ``use_global`` / ``use_local`` ablate the global dilated-conv branch and
-    the local affine-recursion branch respectively; an ablated branch emits
-    all-zero features of the same shape, keeping the rest of the model intact.
+    the local affine-recursion branch respectively. ``use_forgetting=False``
+    keeps the local per-KC writes and scan but replaces the learned temporal
+    decay with an identity transition. An ablated branch emits all-zero
+    features of the same shape, keeping the rest of the model intact.
     """
 
     def __init__(
@@ -96,6 +99,7 @@ class ReKTP(nn.Module):
         question_embed_dim: int | None = None,
         use_global: bool = True,
         use_local: bool = True,
+        use_forgetting: bool = True,
     ):
         super().__init__()
         if max_gap_bins < 1:
@@ -105,11 +109,13 @@ class ReKTP(nn.Module):
         self.hidden_dim = hidden_dim
         self.max_gap_bins = max_gap_bins
         # Ablation switches. ``use_global=False`` removes the stacked causal
-        # dilated-conv branch and ``use_local=False`` removes the per-KC
-        # affine recursion branch; both together leave only the shared event
-        # embedding + IRT readout (a valid lower-bound baseline).
+        # dilated-conv branch, ``use_local=False`` removes the per-KC affine
+        # recursion branch, and ``use_forgetting=False`` keeps the local branch
+        # but makes its temporal transition an identity. The first two together
+        # leave only the shared event embedding + IRT readout.
         self.use_global = bool(use_global)
         self.use_local = bool(use_local)
+        self.use_forgetting = bool(use_forgetting)
 
         skill_ids = torch.as_tensor(question_skill_ids, dtype=torch.long)
         skill_mask = torch.as_tensor(question_skill_mask, dtype=torch.bool)
@@ -454,10 +460,20 @@ class ReKTP(nn.Module):
             + self.question_diff(packed_question) * skill_change_embedding
             + self.answer_embed(packed_response)
         )
-        gap_embedding = self.gap_embed(gap_bucket)
-        decay = torch.exp(
-            -torch.nn.functional.softplus(self.local_decay(gap_embedding))
-        )
+        if self.use_forgetting:
+            gap_embedding = self.gap_embed(gap_bucket)
+            decay = torch.exp(
+                -torch.nn.functional.softplus(self.local_decay(gap_embedding))
+            )
+        else:
+            # Preserve the local writes and per-KC segmentation while removing
+            # only the temporal forgetting transition for a clean ablation.
+            decay = torch.ones(
+                *packed_skill.shape,
+                self.hidden_dim,
+                device=packed_skill.device,
+                dtype=skill_embedding.dtype,
+            )
         valid_3d = packed_valid.unsqueeze(-1)
         decay = torch.where(valid_3d, decay, torch.ones_like(decay))
         initial_state = torch.tanh(self.local_init(skill_embedding))
