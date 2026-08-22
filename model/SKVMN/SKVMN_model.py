@@ -203,9 +203,12 @@ class SKVMN(nn.Module):
         c_hist = ft.new_empty(seq_len, batch_size, self.dim_s)
         hx = self.hx.repeat(batch_size, 1)  # [B, dim_s]
         cx = self.cx.repeat(batch_size, 1)  # [B, dim_s]
+        # 单次同步判定整批是否有 hop；逐步 any() 会每步触发 GPU->CPU 同步
+        any_hop = bool(has_hop.any())
         for t in range(seq_len):
-            if has_hop[:, t].any():
-                # 非原地替换，避免污染已存入 *_hist 的历史状态
+            if any_hop:
+                # 非原地替换，避免污染已存入 *_hist 的历史状态；
+                # 无 hop 的行 where 掩码为 False，不会传播未初始化的 gather 值
                 hop = has_hop[:, t].unsqueeze(-1)
                 hx = torch.where(hop, h_hist[src[:, t], batch_idx], hx)
                 cx = torch.where(hop, c_hist[src[:, t], batch_idx], cx)

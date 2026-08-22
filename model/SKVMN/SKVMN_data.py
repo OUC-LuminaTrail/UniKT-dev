@@ -51,7 +51,7 @@ class SKVMNModelData(SkillModelData):
         """准备训练和验证数据
 
         Args:
-            rc: RunConfig (OmegaConf DictConfig)
+            rc: RunConfig instance
 
         Returns:
             训练数据集、验证数据集和窗口验证数据集

@@ -63,7 +63,7 @@ class SKVMNTrainer(BaseTrainer):
     """SKVMN 模型训练器
 
     Args:
-        rc: RunConfig (OmegaConf DictConfig)
+        rc: RunConfig instance
         data_src: 数据源实例
         exp_manager: 实验管理器（可选）
     """
