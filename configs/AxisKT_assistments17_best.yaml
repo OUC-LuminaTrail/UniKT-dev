@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on assistments17 from Optuna search
-# (see runs/hyperparam_search/ReKTP_assistments17_*_n_trials100/ for the full study).
+# Best hyperparameters for AxisKT on assistments17 from Optuna search
+# (see runs/hyperparam_search/AxisKT_assistments17_*_n_trials100/ for the full study).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: assistments17

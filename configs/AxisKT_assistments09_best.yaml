@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on assistments09 from Optuna search
-# (runs/hyperparam_search/ReKTP_assistments09_20260802-180056_n_trials100, trial 83, val AUC 0.7865).
+# Best hyperparameters for AxisKT on assistments09 from Optuna search
+# (runs/hyperparam_search/AxisKT_assistments09_20260802-180056_n_trials100, trial 83, val AUC 0.7865).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: assistments09

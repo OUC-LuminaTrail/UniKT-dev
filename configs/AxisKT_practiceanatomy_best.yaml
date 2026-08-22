@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on practiceanatomy from Optuna search
-# (see runs/hyperparam_search/ReKTP_practiceanatomy_*_n_trials100/ for the full study).
+# Best hyperparameters for AxisKT on practiceanatomy from Optuna search
+# (see runs/hyperparam_search/AxisKT_practiceanatomy_*_n_trials100/ for the full study).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: practiceanatomy

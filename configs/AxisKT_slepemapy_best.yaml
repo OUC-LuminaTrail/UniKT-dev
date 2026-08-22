@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on slepemapy from Optuna search
-# (runs/hyperparam_search/ReKTP_slepemapy_20260812-164435_n_trials100, trial 93, val AUC 0.7840).
+# Best hyperparameters for AxisKT on slepemapy from Optuna search
+# (runs/hyperparam_search/AxisKT_slepemapy_20260812-164435_n_trials100, trial 93, val AUC 0.7840).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: slepemapy

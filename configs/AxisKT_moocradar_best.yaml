@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on moocradar from Optuna search
-# (see runs/hyperparam_search/ReKTP_moocradar_*_n_trials100/ for the full study).
+# Best hyperparameters for AxisKT on moocradar from Optuna search
+# (see runs/hyperparam_search/AxisKT_moocradar_*_n_trials100/ for the full study).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: moocradar

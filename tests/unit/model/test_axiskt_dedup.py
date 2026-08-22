@@ -1,4 +1,4 @@
-"""Equivalence regression for the ReKTP dedup refactor.
+"""Equivalence regression for the AxisKT dedup refactor.
 
 The refactor threads precomputed question-derived tensors (the
 ``question_skill_ids`` gather, ``skill_embed`` / ``skill_change`` lookups, and
@@ -7,7 +7,7 @@ re-gathering and re-embedding them inside each sub-method. It must not change
 the forward output or any backward gradient.
 
 The oracle is the golden snapshot produced by
-``tests/fixtures/generate_rektp_dedup_golden.py``, captured before the refactor.
+``tests/fixtures/generate_axiskt_dedup_golden.py``, captured before the refactor.
 """
 
 from pathlib import Path
@@ -15,17 +15,17 @@ from pathlib import Path
 import pytest
 import torch
 
-ReKTP = pytest.importorskip("model.ReKTP.ReKTP_model").ReKTP
+AxisKT = pytest.importorskip("model.AxisKT.AxisKT_model").AxisKT
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="ReKTP requires CUDA"
+    not torch.cuda.is_available(), reason="AxisKT requires CUDA"
 )
 
 DEVICE = torch.device("cuda")
 
-# ``tests/unit/model/test_rektp_dedup.py`` -> ``tests/fixtures/...``.
+# ``tests/unit/model/test_axiskt_dedup.py`` -> ``tests/fixtures/...``.
 _FIXTURE_PATH = (
-    Path(__file__).resolve().parents[2] / "fixtures" / "rektp_dedup_golden.pt"
+    Path(__file__).resolve().parents[2] / "fixtures" / "axiskt_dedup_golden.pt"
 )
 
 
@@ -37,7 +37,7 @@ def golden():
 
 
 def _build_model(golden):
-    model = ReKTP(**golden["kwargs"]).train()
+    model = AxisKT(**golden["kwargs"]).train()
     model.load_state_dict(golden["state_dict"])
     return model.to(DEVICE)
 

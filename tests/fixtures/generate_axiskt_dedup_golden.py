@@ -1,14 +1,14 @@
-"""Generate the ReKTP dedup-equivalence golden snapshot.
+"""Generate the AxisKT dedup-equivalence golden snapshot.
 
 Captures the forward output and backward gradients of a fixed model state on a
 fixed input. The dedup refactor must reproduce these bit-for-bit, so this
-snapshot is the equivalence oracle for ``tests/unit/model/test_rektp_dedup.py``.
+snapshot is the equivalence oracle for ``tests/unit/model/test_axiskt_dedup.py``.
 
-ReKTP requires CUDA, so the snapshot is captured on the default GPU device;
+AxisKT requires CUDA, so the snapshot is captured on the default GPU device;
 all tensors are saved on CPU and moved back by the test. Regenerate only after
 an intentional numerical change::
 
-    pixi run python tests/fixtures/generate_rektp_dedup_golden.py
+    pixi run python tests/fixtures/generate_axiskt_dedup_golden.py
 """
 
 import sys
@@ -18,7 +18,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from model.ReKTP.ReKTP_model import ReKTP
+from model.AxisKT.AxisKT_model import AxisKT
 
 
 def build_kwargs():
@@ -42,9 +42,9 @@ def build_kwargs():
 
 def build_model():
     if not torch.cuda.is_available():
-        raise RuntimeError("ReKTP requires CUDA to generate the golden snapshot")
+        raise RuntimeError("AxisKT requires CUDA to generate the golden snapshot")
     torch.manual_seed(1234)
-    model = ReKTP(**build_kwargs()).to("cuda")
+    model = AxisKT(**build_kwargs()).to("cuda")
     with torch.no_grad():
         # The IRT head and several local layers are zero-initialised; activate
         # them so the logits and gradients are non-trivial and a regression
@@ -94,7 +94,7 @@ def main():
         "logits": logits.detach().cpu(),
         "grads": grads,
     }
-    out_path = Path(__file__).parent / "rektp_dedup_golden.pt"
+    out_path = Path(__file__).parent / "axiskt_dedup_golden.pt"
     torch.save(snapshot, out_path)
     print(f"saved {out_path}")
     print(f"  logits shape={tuple(logits.shape)}, max|logits|={logits.abs().max():.4f}")

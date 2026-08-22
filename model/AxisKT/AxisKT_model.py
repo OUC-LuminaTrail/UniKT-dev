@@ -1,12 +1,12 @@
-"""ReKTP: private KC scans with a stacked causal-conv global encoder.
+"""AxisKT: private KC scans with a stacked causal-conv global encoder.
 
 The global encoder is a stack of ``n_blocks`` causal depthwise-separable conv
 blocks whose dilation grows as ``conv_dilation_base**i``; the rest of the
 model is the same question-level KT pipeline.
 
 Ablation: ``use_global`` toggles the global causal dilated-conv branch
-(:meth:`ReKTP._global_history_states`), ``use_local`` toggles the local per-KC
-affine recursion branch (:meth:`ReKTP._local_pre_states`), and
+(:meth:`AxisKT._global_history_states`), ``use_local`` toggles the local per-KC
+affine recursion branch (:meth:`AxisKT._local_pre_states`), and
 ``use_forgetting`` toggles only the local time-decay transition. An ablated
 branch is skipped entirely in the forward pass and feeds all-zero features to
 the readout, so its parameters never receive a gradient and stay inert; the
@@ -20,7 +20,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from model.ReKTP.triton_scan import segmented_scalar_affine_exclusive_scan
+from model.AxisKT.triton_scan import segmented_scalar_affine_exclusive_scan
 
 # Question-derived tensors computed once per forward and shared across the
 # sub-methods that would otherwise re-gather them.
@@ -74,7 +74,7 @@ class GlobalConvBlock(nn.Module):
         return self.norm(residual + self.dropout(y))
 
 
-class ReKTP(nn.Module):
+class AxisKT(nn.Module):
     """Question-level KT with decoupled per-KC storage and global interaction.
 
     Readout concatenates ``[global_state, local_pre_state, event_embedding]``.
@@ -690,7 +690,7 @@ class ReKTP(nn.Module):
             # Fused inference path: one Triton kernel produces both the local
             # readout and the event-embedding pooling; training keeps the aten
             # scatter chain so gradient semantics stay untouched.
-            from model.ReKTP.packed_readout import fused_readout_pool
+            from model.AxisKT.packed_readout import fused_readout_pool
 
             (
                 packed_state,
@@ -786,4 +786,4 @@ class ReKTP(nn.Module):
         return torch.cat([logits, logits.new_zeros(logits.size(0), 1)], dim=1)
 
 
-__all__ = ["ReKTP"]
+__all__ = ["AxisKT"]

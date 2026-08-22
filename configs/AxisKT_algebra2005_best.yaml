@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on algebra2005 from Optuna search
-# (see runs/hyperparam_search/ReKTP_algebra2005_*_n_trials100/ for the full study).
+# Best hyperparameters for AxisKT on algebra2005 from Optuna search
+# (see runs/hyperparam_search/AxisKT_algebra2005_*_n_trials100/ for the full study).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: algebra2005

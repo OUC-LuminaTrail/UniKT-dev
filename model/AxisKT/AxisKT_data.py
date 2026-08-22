@@ -1,4 +1,4 @@
-"""Question-level data preparation for ReKTP."""
+"""Question-level data preparation for AxisKT."""
 
 import math
 from typing import Any
@@ -16,7 +16,7 @@ from utils.model_data import QuestionModelData
 logger = get_logger(__name__)
 
 
-class ReKTPDataset(Dataset):
+class AxisKTDataset(Dataset):
     """Question sequences with a once-precomputed KC packing order."""
 
     def __init__(
@@ -76,7 +76,7 @@ class ReKTPDataset(Dataset):
         return len(self.questions)
 
 
-def rektp_packed_collate_fn(batch):
+def axiskt_packed_collate_fn(batch):
     """Stack dense inputs and trim precomputed orders to the batch width.
 
     The returned 7-tuple adds ``valid_idx``: the row-major indices of the
@@ -125,8 +125,8 @@ def build_question_skill_table(data_src: DataSource) -> tuple[np.ndarray, np.nda
 
     missing = np.flatnonzero(~skill_mask.any(axis=1))
     if missing.size:
-        logger.warning("ReKTP found %d questions without a KC relation", missing.size)
-    logger.info("ReKTP question-KC table: max_skills_per_question=%d", max_skills)
+        logger.warning("AxisKT found %d questions without a KC relation", missing.size)
+    logger.info("AxisKT question-KC table: max_skills_per_question=%d", max_skills)
     return skill_ids, skill_mask
 
 
@@ -136,7 +136,7 @@ def derive_max_gap_bins(time_seqs: np.ndarray) -> int:
     return max(2, int(math.floor(math.log2(max_span))) + 2)
 
 
-class ReKTPModelData(QuestionModelData):
+class AxisKTModelData(QuestionModelData):
     """Prepare original question sequences and a separate question-KC view."""
 
     @override
@@ -166,9 +166,9 @@ class ReKTPModelData(QuestionModelData):
         )
         logger.info("Using K-fold: fold %d/%d", fold_idx + 1, kfold_n_splits)
         return (
-            ReKTPDataset(*train_data, question_skill_ids, question_skill_mask),
-            ReKTPDataset(*val_data, question_skill_ids, question_skill_mask),
-            ReKTPDataset(*test_data, question_skill_ids, question_skill_mask),
+            AxisKTDataset(*train_data, question_skill_ids, question_skill_mask),
+            AxisKTDataset(*val_data, question_skill_ids, question_skill_mask),
+            AxisKTDataset(*test_data, question_skill_ids, question_skill_mask),
             {
                 "question_skill_ids": question_skill_ids,
                 "question_skill_mask": question_skill_mask,
@@ -211,7 +211,7 @@ class ReKTPModelData(QuestionModelData):
             )
         else:
             logger.warning(
-                "No usable timestamp column for dataset %r; ReKTP time gaps "
+                "No usable timestamp column for dataset %r; AxisKT time gaps "
                 "fall back to position indices",
                 self.data_src.dataset,
             )
@@ -220,9 +220,9 @@ class ReKTPModelData(QuestionModelData):
 
 
 __all__ = [
-    "ReKTPDataset",
-    "ReKTPModelData",
+    "AxisKTDataset",
+    "AxisKTModelData",
     "build_question_skill_table",
     "derive_max_gap_bins",
-    "rektp_packed_collate_fn",
+    "axiskt_packed_collate_fn",
 ]

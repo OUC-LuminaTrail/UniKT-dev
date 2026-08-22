@@ -1,10 +1,10 @@
 import pytest
 import torch
 
-ReKTP = pytest.importorskip("model.ReKTP.ReKTP_model").ReKTP
+AxisKT = pytest.importorskip("model.AxisKT.AxisKT_model").AxisKT
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="ReKTP requires CUDA"
+    not torch.cuda.is_available(), reason="AxisKT requires CUDA"
 )
 
 DEVICE = torch.device("cuda")
@@ -14,7 +14,7 @@ def _build_model(device, *, activate_private_writes=True):
     # Skill id 2 is the padding sentinel.
     question_skill_ids = torch.tensor([[0, 2], [1, 2], [0, 1]])
     question_skill_mask = torch.tensor([[True, False], [True, False], [True, True]])
-    model = ReKTP(
+    model = AxisKT(
         data_metadata={"num_questions": 3, "num_skills": 2},
         question_skill_ids=question_skill_ids,
         question_skill_mask=question_skill_mask,
@@ -69,7 +69,7 @@ def _position_times(questions: torch.Tensor) -> torch.Tensor:
 
 
 def test_default_question_embed_dim_matches_hidden_dim():
-    model = ReKTP(**_dim_kwargs())
+    model = AxisKT(**_dim_kwargs())
 
     # At full width the shared projection is skipped entirely.
     assert model.question_embed_proj is None
@@ -78,8 +78,8 @@ def test_default_question_embed_dim_matches_hidden_dim():
 
 @pytest.mark.parametrize("dim", [4, 8])
 def test_low_dim_question_embed_shrinks_per_question_parameters(dim):
-    full = ReKTP(**_dim_kwargs())
-    reduced = ReKTP(**_dim_kwargs(), question_embed_dim=dim)
+    full = AxisKT(**_dim_kwargs())
+    reduced = AxisKT(**_dim_kwargs(), question_embed_dim=dim)
 
     assert reduced.question_embed.weight.shape == (3, dim)
     assert reduced.question_embed_proj is not None
@@ -89,7 +89,7 @@ def test_low_dim_question_embed_shrinks_per_question_parameters(dim):
 
 @pytest.mark.parametrize("dim", [4, 16])
 def test_question_vector_is_always_hidden_dim_wide(dim):
-    model = ReKTP(**_dim_kwargs(), question_embed_dim=dim).eval()
+    model = AxisKT(**_dim_kwargs(), question_embed_dim=dim).eval()
 
     with torch.no_grad():
         vector = model._question_vector(torch.tensor([[0, 1, 2]]))
@@ -99,7 +99,7 @@ def test_question_vector_is_always_hidden_dim_wide(dim):
 
 
 def test_zero_dim_removes_the_question_pathway():
-    model = ReKTP(**_dim_kwargs(), question_embed_dim=0)
+    model = AxisKT(**_dim_kwargs(), question_embed_dim=0)
 
     assert model.question_embed is None
     assert model.question_embed_proj is None
@@ -109,8 +109,8 @@ def test_zero_dim_removes_the_question_pathway():
 
 
 def test_zero_dim_drops_exactly_the_question_rows():
-    full = ReKTP(**_dim_kwargs())
-    ablated = ReKTP(**_dim_kwargs(), question_embed_dim=0)
+    full = AxisKT(**_dim_kwargs())
+    ablated = AxisKT(**_dim_kwargs(), question_embed_dim=0)
 
     dropped = sum(p.numel() for p in full.parameters()) - sum(
         p.numel() for p in ablated.parameters()
@@ -119,7 +119,7 @@ def test_zero_dim_drops_exactly_the_question_rows():
 
 
 def test_zero_dim_still_runs_and_keeps_the_difficulty_scalar():
-    model = ReKTP(**_dim_kwargs(), question_embed_dim=0).to(DEVICE).eval()
+    model = AxisKT(**_dim_kwargs(), question_embed_dim=0).to(DEVICE).eval()
     with torch.no_grad():
         # question_diff is zero-initialised, so activate it to expose the scalar.
         model.question_diff.weight.normal_(0.0, 0.5)
@@ -140,7 +140,7 @@ def test_zero_dim_still_runs_and_keeps_the_difficulty_scalar():
 
 def test_negative_question_embed_dim_is_rejected():
     with pytest.raises(ValueError, match="question_embed_dim must be non-negative"):
-        ReKTP(**_dim_kwargs(), question_embed_dim=-2)
+        AxisKT(**_dim_kwargs(), question_embed_dim=-2)
 
 
 def test_local_readout_initializes_as_masked_mean():
@@ -152,9 +152,7 @@ def test_local_readout_initializes_as_masked_mean():
     packed_state = torch.randn(B, P, H, device=DEVICE)
     skill_embedding = torch.randn(B, P, H, device=DEVICE)
     question_vector = torch.randn(B, 4, H, device=DEVICE)
-    packed_pos = torch.tensor(
-        [[0, 0, 1, 2, 2], [0, 1, 1, 3, 3]], device=DEVICE
-    )
+    packed_pos = torch.tensor([[0, 0, 1, 2, 2], [0, 1, 1, 3, 3]], device=DEVICE)
     packed_valid = torch.ones(B, P, dtype=torch.bool, device=DEVICE)
 
     actual = model._packed_question_conditioned_readout(
@@ -212,9 +210,7 @@ def test_local_readout_matches_cat_linear_reference():
 
     # Pack the (s, k) grid in row-major order, dropping masked occurrences;
     # the (b, s) groups are then the runs of equal ``packed_pos``.
-    flat_pos = (
-        torch.arange(N, device=DEVICE).view(N, 1).expand(N, K).reshape(-1)
-    )
+    flat_pos = torch.arange(N, device=DEVICE).view(N, 1).expand(N, K).reshape(-1)
     sel = readout_mask.reshape(B, N * K)
     packed_pos = torch.stack([flat_pos[sel[b]] for b in range(B)])
     packed_state = torch.stack(

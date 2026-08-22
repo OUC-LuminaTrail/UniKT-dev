@@ -1,4 +1,4 @@
-"""Trainer and configuration for ReKTP."""
+"""Trainer and configuration for AxisKT."""
 
 from dataclasses import field
 
@@ -11,9 +11,9 @@ from utils.training import BaseTrainer, RuntimeComponents
 logger = get_logger(__name__)
 
 
-@register_model_config("ReKTP")
-class ReKTPConfig(ModelConfig):
-    """ReKTP configuration.
+@register_model_config("AxisKT")
+class AxisKTConfig(ModelConfig):
+    """AxisKT configuration.
 
     Args:
         hidden_dim: Shared event, local-state, and encoder dimension.
@@ -47,7 +47,7 @@ class ReKTPConfig(ModelConfig):
         amp: Enable bf16 autocast for the forward pass. The matmul-heavy
             encoder and Linear layers run in bfloat16; backward is
             autograd-managed, and the custom triton scan keeps fp32 internally.
-            Local to ReKTP for quick checking, not the framework-level
+            Local to AxisKT for quick checking, not the framework-level
             precision node. Off by default.
     """
 
@@ -98,24 +98,24 @@ class ReKTPConfig(ModelConfig):
     )
 
 
-@register_trainer("ReKTP")
-class ReKTPTrainer(BaseTrainer):
-    """Train ReKTP with one next-item objective per original question."""
+@register_trainer("AxisKT")
+class AxisKTTrainer(BaseTrainer):
+    """Train AxisKT with one next-item objective per original question."""
 
     def build_components(self, rc, data_src) -> RuntimeComponents:
-        from model.ReKTP.ReKTP_data import (
-            ReKTPModelData,
-            rektp_packed_collate_fn,
+        from model.AxisKT.AxisKT_data import (
+            AxisKTModelData,
+            axiskt_packed_collate_fn,
         )
-        from model.ReKTP.ReKTP_model import ReKTP
+        from model.AxisKT.AxisKT_model import AxisKT
 
-        model_data = ReKTPModelData(data_src)
+        model_data = AxisKTModelData(data_src)
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
         max_gap_bins = int(extra["max_gap_bins"])
-        logger.info("Initializing ReKTP model...")
-        model = ReKTP(
+        logger.info("Initializing AxisKT model...")
+        model = AxisKT(
             data_metadata=data_src.get_metadata(),
             question_skill_ids=extra["question_skill_ids"],
             question_skill_mask=extra["question_skill_mask"],
@@ -144,7 +144,7 @@ class ReKTPTrainer(BaseTrainer):
             train_data=train_data,
             val_data=val_data,
             test_data=test_data,
-            collate_fn=rektp_packed_collate_fn,
+            collate_fn=axiskt_packed_collate_fn,
         )
 
     def forward_pass(
@@ -192,4 +192,4 @@ class ReKTPTrainer(BaseTrainer):
         }
 
 
-__all__ = ["ReKTPConfig", "ReKTPTrainer"]
+__all__ = ["AxisKTConfig", "AxisKTTrainer"]

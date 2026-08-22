@@ -8,7 +8,7 @@ reference on CPU, so they run without a GPU.
 import pytest
 import torch
 
-from model.ReKTP.triton_scan import (
+from model.AxisKT.triton_scan import (
     _serial_scalar_affine_exclusive_scan,
     segmented_scalar_affine_exclusive_scan,
 )

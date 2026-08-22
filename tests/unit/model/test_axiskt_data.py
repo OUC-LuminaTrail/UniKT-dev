@@ -4,12 +4,12 @@ import numpy as np
 import polars as pl
 import torch
 
-from model.ReKTP.ReKTP_data import (
-    ReKTPDataset,
-    ReKTPModelData,
+from model.AxisKT.AxisKT_data import (
+    AxisKTDataset,
+    AxisKTModelData,
+    axiskt_packed_collate_fn,
     build_question_skill_table,
     derive_max_gap_bins,
-    rektp_packed_collate_fn,
 )
 from utils.model_data import QuestionModelData
 
@@ -49,7 +49,7 @@ class _SplitDataDataSource:
 
 
 def test_model_data_uses_question_level_base():
-    assert issubclass(ReKTPModelData, QuestionModelData)
+    assert issubclass(AxisKTModelData, QuestionModelData)
 
 
 def test_question_skill_table_is_unique_sorted_and_padded():
@@ -76,7 +76,7 @@ def test_build_time_sequences_accumulates_dwell_for_assistments09():
         }
     )
     data_src = _SplitDataDataSource("assistments09", df, max_seq_len=2)
-    times = ReKTPModelData(data_src)._build_time_sequences()
+    times = AxisKTModelData(data_src)._build_time_sequences()
     # t: 0, then +dwell/1000 + 1 per step; None dwell counts as 0 seconds.
     np.testing.assert_allclose(times, [[0.0, 6.0], [0.0, 2.0]])
 
@@ -92,7 +92,7 @@ def test_build_time_sequences_converts_real_timestamps_to_seconds():
         }
     )
     data_src = _SplitDataDataSource("junyi2015", df, max_seq_len=2)
-    times = ReKTPModelData(data_src)._build_time_sequences()
+    times = AxisKTModelData(data_src)._build_time_sequences()
     np.testing.assert_allclose(times, [[1.0, 2.5], [10.0, 0.0]])
 
 
@@ -106,7 +106,7 @@ def test_build_time_sequences_falls_back_to_positions_without_timestamps():
         }
     )
     data_src = _SplitDataDataSource("future_dataset", df, max_seq_len=2)
-    times = ReKTPModelData(data_src)._build_time_sequences()
+    times = AxisKTModelData(data_src)._build_time_sequences()
     np.testing.assert_allclose(times, [[0.0, 1.0]])
 
 
@@ -126,7 +126,7 @@ def test_derive_max_gap_bins_value_and_minimum():
 def _make_dataset():
     question_skill_ids = np.array([[0, 1], [1, 2]])
     question_skill_mask = np.array([[True, True], [True, False]])
-    return ReKTPDataset(
+    return AxisKTDataset(
         [[0, 1, 0, 1], [1, 0, 1, 1]],
         [[1, 0, 1, 0], [0, 1, 0, 1]],
         [np.arange(4, dtype=np.float64), np.arange(4, dtype=np.float64)],
@@ -148,7 +148,7 @@ def test_collate_valid_idx_matches_masked_select():
         kc_order,
         kc_inverse,
         valid_idx,
-    ) = rektp_packed_collate_fn(rows)
+    ) = axiskt_packed_collate_fn(rows)
     assert questions.shape == (2, 4)
     assert responses.shape == (2, 4)
     assert times.shape == (2, 4)
@@ -177,7 +177,7 @@ def test_collate_valid_idx_empty_when_no_adjacent_pairs():
         (row[0], row[1], row[2], empty_mask.clone(), row[4], row[5], row[6])
         for row in rows
     ]
-    _, _, _, masks, _, _, valid_idx = rektp_packed_collate_fn(rows)
+    _, _, _, masks, _, _, valid_idx = axiskt_packed_collate_fn(rows)
     valid_mask = masks[:, :-1] & masks[:, 1:]
     assert valid_idx.numel() == int(valid_mask.sum())
     assert valid_idx.numel() == 0

@@ -1,8 +1,8 @@
-# Best hyperparameters for ReKTP on xes3g5m from Optuna search
-# (runs/hyperparam_search/ReKTP_xes3g5m_20260813-235501_n_trials100, trial 73, val AUC 0.9070).
+# Best hyperparameters for AxisKT on xes3g5m from Optuna search
+# (runs/hyperparam_search/AxisKT_xes3g5m_20260813-235501_n_trials100, trial 73, val AUC 0.9070).
 
 experiment:
-  model_name: ReKTP
+  model_name: AxisKT
 
 data:
   dataset: xes3g5m

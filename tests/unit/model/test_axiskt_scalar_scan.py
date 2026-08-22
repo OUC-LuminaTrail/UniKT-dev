@@ -1,4 +1,4 @@
-"""Tests for the 1x1 (scalar) Triton segmented scan in ReKTP.
+"""Tests for the 1x1 (scalar) Triton segmented scan in AxisKT.
 
 Semantics of the scalar kernels (``_fwd_kernel_scalar`` /
 ``_bwd_adj_kernel_scalar`` / ``_bwd_dinit_kernel_scalar``):
@@ -19,10 +19,10 @@ against it both forward and backward.
 import pytest
 import torch
 
-from model.ReKTP.triton_scan import segmented_scalar_affine_exclusive_scan
+from model.AxisKT.triton_scan import segmented_scalar_affine_exclusive_scan
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="ReKTP segmented scan requires CUDA"
+    not torch.cuda.is_available(), reason="AxisKT segmented scan requires CUDA"
 )
 
 DEVICE = torch.device("cuda")
@@ -435,7 +435,7 @@ def test_scalar_scan_finite_difference_gradients():
 
 
 def test_scalar_scan_cuda_uses_triton_kernel(monkeypatch):
-    from model.ReKTP import triton_scan as ts
+    from model.AxisKT import triton_scan as ts
 
     def boom(*args, **kwargs):
         raise AssertionError("serial fallback must not run for 1x1 on CUDA")
