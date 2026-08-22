@@ -21,10 +21,6 @@ import torch
 from torch import nn
 from torch.nn.init import kaiming_normal_
 
-# Triangular membership 及 identity 阈值，沿用原论文实现取值
-_TRI_A, _TRI_B, _TRI_C = 0.075, 0.088, 1.00
-_ID_WEAK, _ID_STRONG = 0.1, 0.6
-
 
 class SKVMN(nn.Module):
     """SKVMN 模型
@@ -35,6 +31,8 @@ class SKVMN(nn.Module):
         size_m: 记忆槽位数量
         dropout: Dropout 概率
         use_onehot: 写入记忆的交互表示使用 one-hot 向量而非交互嵌入
+        tri_a/tri_b/tri_c: 三角隶属度函数的左界、峰值、右界
+        id_weak/id_strong: identity 阈值化的一档/二档阈值
     """
 
     def __init__(
@@ -44,12 +42,22 @@ class SKVMN(nn.Module):
         size_m: int,
         dropout: float = 0.2,
         use_onehot: bool = False,
+        tri_a: float = 0.075,
+        tri_b: float = 0.088,
+        tri_c: float = 1.00,
+        id_weak: float = 0.1,
+        id_strong: float = 0.6,
     ):
         super().__init__()
         self.num_c = num_c
         self.dim_s = dim_s
         self.size_m = size_m
         self.use_onehot = use_onehot
+        self.tri_a = tri_a
+        self.tri_b = tri_b
+        self.tri_c = tri_c
+        self.id_weak = id_weak
+        self.id_strong = id_strong
 
         self.k_emb_layer = nn.Embedding(self.num_c, self.dim_s)
         self.x_emb_layer = nn.Embedding(2 * self.num_c + 1, self.dim_s)
@@ -97,14 +105,17 @@ class SKVMN(nn.Module):
         # 三角隶属度: min((w-a)/(b-a), (c-w)/(c-b)) 再与 0 取 max
         w = correlation_weight.reshape(-1)
         tri = torch.stack(
-            [(w - _TRI_A) / (_TRI_B - _TRI_A), (_TRI_C - w) / (_TRI_C - _TRI_B)]
+            [
+                (w - self.tri_a) / (self.tri_b - self.tri_a),
+                (self.tri_c - w) / (self.tri_c - self.tri_b),
+            ]
         )
         tri, _ = torch.min(tri, dim=0)
         tri = torch.relu(tri)
 
-        # identity 向量: <0.1 -> 0, [0.1, 0.6) -> 1, >=0.6 -> 2
+        # identity 向量: <weak -> 0, [weak, strong) -> 1, >=strong -> 2
         identity = torch.where(
-            tri.ge(_ID_STRONG), 2.0, torch.where(tri.ge(_ID_WEAK), 1.0, 0.0)
+            tri.ge(self.id_strong), 2.0, torch.where(tri.ge(self.id_weak), 1.0, 0.0)
         ).view(batch_size, seq_len, -1)
 
         # identity 向量间的平方欧氏距离，0 即 identity 相同

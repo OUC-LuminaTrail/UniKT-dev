@@ -19,6 +19,11 @@ class SKVMNConfig(ModelConfig):
         dropout: Dropout probability.
         use_onehot: Represent the write interaction as a question-level
             one-hot vector instead of an interaction embedding.
+        tri_a: Left bound of the triangular membership function.
+        tri_b: Peak of the triangular membership function.
+        tri_c: Right bound of the triangular membership function.
+        id_weak: First identity threshold (membership >= id_weak -> level 1).
+        id_strong: Second identity threshold (membership >= id_strong -> level 2).
         epochs: Number of training epochs.
         learning_rate: Learning rate for optimizer.
         lr_decay: Learning rate decay factor per epoch.
@@ -39,6 +44,13 @@ class SKVMNConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
     use_onehot: bool = False
+    # paper-fixed thresholds; ordered constraints (tri_a < tri_b < tri_c,
+    # id_weak < id_strong) keep them out of the Optuna search space
+    tri_a: float = 0.075
+    tri_b: float = 0.088
+    tri_c: float = 1.00
+    id_weak: float = 0.1
+    id_strong: float = 0.6
     epochs: int = 150
     learning_rate: float = field(
         default=1e-3,
@@ -85,6 +97,11 @@ class SKVMNTrainer(BaseTrainer):
             size_m=m.size_m,
             dropout=m.dropout,
             use_onehot=m.use_onehot,
+            tri_a=m.tri_a,
+            tri_b=m.tri_b,
+            tri_c=m.tri_c,
+            id_weak=m.id_weak,
+            id_strong=m.id_strong,
         )
 
         loss_fn = torch.nn.BCELoss()
