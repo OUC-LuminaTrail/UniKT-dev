@@ -1,20 +1,6 @@
-"""SKVMN (Sparse Key-Value Memory Network) 模型实现
+"""SKVMN (Sequential Key-Value Memory Network) 模型实现
 
-论文: Sparse Knowledge Tracing: Efficient and Interpretable Knowledge
-Tracking with Sparse Memory Networks (Abdelrahman et al., 2023)
-
-在 DKVMN 的键值记忆机制之上引入 Hop-LSTM：将每个时间步的相关权重
-阈值化为 identity 向量，检索序列内最近的相同 identity 时刻 t-λ，
-在 LSTM 递推时把 hidden/cell state 恢复为 t-λ 时刻的状态，从而
-跳过冗余的中间步骤。
-
-迁移自 pykt-toolkit (pykt/models/skvmn.py)，主要改动：
-- 移除模块级全局 device，改为跟随输入张量的设备
-- triangular_layer 消除逐行 Python 拼接，改为 reshape + clamp
-- Hop-LSTM 消除 batch 维 Python 双重循环，改为 gather + where
-- 修复原实现别名 bug：原版 hop 替换时 ``hx[j, :] = ...`` 原地写入
-  上一时间步 append 进 hidden_state 的张量（cx 有 clone 保护而 hx
-  遗漏），会污染历史 hidden_state 并影响最终预测；此处改为非原地替换
+论文: Knowledge tracing with sequential key-value memory networks
 """
 
 import torch
@@ -214,12 +200,9 @@ class SKVMN(nn.Module):
         c_hist = ft.new_empty(seq_len, batch_size, self.dim_s)
         hx = self.hx.repeat(batch_size, 1)  # [B, dim_s]
         cx = self.cx.repeat(batch_size, 1)  # [B, dim_s]
-        # 单次同步判定整批是否有 hop；逐步 any() 会每步触发 GPU->CPU 同步
         any_hop = bool(has_hop.any())
         for t in range(seq_len):
             if any_hop:
-                # 非原地替换，避免污染已存入 *_hist 的历史状态；
-                # 无 hop 的行 where 掩码为 False，不会传播未初始化的 gather 值
                 hop = has_hop[:, t].unsqueeze(-1)
                 hx = torch.where(hop, h_hist[src[:, t], batch_idx], hx)
                 cx = torch.where(hop, c_hist[src[:, t], batch_idx], cx)

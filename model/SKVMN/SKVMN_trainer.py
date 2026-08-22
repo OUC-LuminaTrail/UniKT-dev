@@ -44,8 +44,6 @@ class SKVMNConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
     use_onehot: bool = False
-    # paper-fixed thresholds; ordered constraints (tri_a < tri_b < tri_c,
-    # id_weak < id_strong) keep them out of the Optuna search space
     tri_a: float = 0.075
     tri_b: float = 0.088
     tri_c: float = 1.00
@@ -143,7 +141,6 @@ class SKVMNTrainer(BaseTrainer):
 
         y_hat_full = self.model(sequence, response, mask)  # [B, S]
 
-        # SKVMN same-position output: p[:, t] predicts response[t] from history 0..t-1; same_position=True delegates alignment to the helper.
         y_hat, y_label, _ = self._extract_valid_predictions(
             y_hat_full, response, mask, same_position=True
         )
