@@ -40,6 +40,47 @@ class TestEfficiencyReport:
         assert payload["determinism"] == {"seed": 42}
 
 
+class TestStageErrors:
+    def test_errors_serialize_to_json(self, tmp_path):
+        report = _make_report()
+        report.errors = {"train": "RuntimeError: boom"}
+        out = tmp_path / "efficiency_report.json"
+        report.write_json(out)
+        assert json.loads(out.read_text())["errors"] == {"train": "RuntimeError: boom"}
+
+    def test_to_dict_defaults_to_empty_errors(self):
+        assert _make_report().to_dict()["errors"] == {}
+
+    def test_print_console_renders_failed_stage(self, capsys):
+        report = _make_report()
+        report.errors = {"train": "RuntimeError: boom"}
+        report.print_console()
+        output = capsys.readouterr().out
+        assert "Stage failed — train" in output
+        assert "RuntimeError: boom" in output
+
+    def test_error_table_collapses_and_truncates(self):
+        from rich.console import Console
+
+        from utils.efficiency.report import (
+            _CONSOLE_ERROR_MAX_CHARS,
+            _stage_error_table,
+        )
+
+        def render(message: str) -> str:
+            console = Console(record=True, width=_CONSOLE_ERROR_MAX_CHARS + 10)
+            console.print(_stage_error_table("train", message))
+            return console.export_text()
+
+        assert "a b c" in render("a\n  b\nc")
+
+        long = "x" * (_CONSOLE_ERROR_MAX_CHARS + 50)
+        text = render(long)
+        assert "x" * (_CONSOLE_ERROR_MAX_CHARS - 1) in text
+        assert "x" * _CONSOLE_ERROR_MAX_CHARS not in text  # truncated, not wrapped
+        assert "…" in text
+
+
 class TestRsHelper:
     def test_zero_samples_renders_dashes(self):
         assert _rs(ResourceSummary(n=0), "MiB") == ("—", "—")

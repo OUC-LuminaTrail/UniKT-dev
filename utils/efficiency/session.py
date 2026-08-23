@@ -19,6 +19,7 @@ from utils.core import (
     seed_everything,
 )
 
+from .device import reclaim_memory
 from .environment import ResourceSampler, collect_environment
 from .measures.batch import batch_size_of, count_valid_interactions, to_device
 from .report import EfficiencyReport
@@ -61,7 +62,12 @@ class EfficiencySession:
         self.stages = _resolve_stages(modes)
 
     def run(self) -> EfficiencyReport:
-        """Run the enabled stages under a shared resource sampler and assemble the report."""
+        """Run the enabled stages under a shared resource sampler and assemble the report.
+
+        A stage failure (e.g. CUDA OOM) is recorded in ``report.errors`` and
+        skipped — later stages still run. Only when every requested stage fails
+        is the report written and an error re-raised (non-zero exit).
+        """
         device = self.device
         # Move model/loss onto the device via the target; the benchmark never
         # calls trainer.run(), so without this the forward moves inputs to device
@@ -95,13 +101,25 @@ class EfficiencySession:
         sampler = ResourceSampler(device, self.cfg.general.resource_sample_interval)
         sampler.start()
         results: dict[str, Any] = {}
+        errors: dict[str, str] = {}
         resources: dict[str, Any] = {}
+        last_exc: Exception | None = None
         try:
             for name, stage in self.stages:
                 logger.info(f"[{name}] running ...")
                 sampler.begin_stage(name)
                 try:
                     results[name] = stage.run(ctx)
+                except Exception as e:
+                    # One failed stage (e.g. CUDA OOM) must not abort the rest:
+                    # record it, reclaim memory, keep measuring.
+                    errors[name] = f"{type(e).__name__}: {e}"
+                    last_exc = e
+                    logger.error(
+                        f"[{name}] failed, continuing with next stage",
+                        exc_info=True,
+                    )
+                    reclaim_memory(device)
                 finally:
                     sampler.end_stage()
         finally:
@@ -125,10 +143,15 @@ class EfficiencySession:
             environment=environment,
             resource=resources,
             results=results,
+            errors=errors,
         )
 
         if self.output_dir is not None:
             report.write_json(self.output_dir / "efficiency_report.json")
+        if errors and not results:
+            raise RuntimeError(
+                f"All efficiency stages failed: {list(errors)}"
+            ) from last_exc
         return report
 
 

@@ -4,6 +4,7 @@ Centralizes synchronization, peak-memory windows, and per-step event timing so
 stages never sprinkle ``if device.type == "cuda"`` ladders.
 """
 
+import gc
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -23,6 +24,17 @@ def synchronize(device: torch.device) -> None:
     """Wait for all queued CUDA kernels; no-op on CPU."""
     if device.type == "cuda":
         torch.cuda.synchronize(device)
+
+
+def reclaim_memory(device: torch.device) -> None:
+    """Best-effort reclaim after a failed measurement (e.g. CUDA OOM recovery).
+
+    The allocator keeps failed-stage blocks reserved; without this the next
+    stage inherits the fragmentation and fails identically.
+    """
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
 
 class DeviceBackend:

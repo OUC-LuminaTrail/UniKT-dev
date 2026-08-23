@@ -1,9 +1,18 @@
-"""Tests for ``_resolve_stages``: routing, validation, dedup, priority order."""
+"""Tests for ``_resolve_stages``: routing, validation, dedup, priority order.
+
+Plus ``EfficiencySession.run`` stage-failure isolation: one stage raising
+(e.g. CUDA OOM) is recorded in ``report.errors`` while later stages still run.
+"""
+
+import json
+from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import pytest
+import torch
 
 from utils.core import EFFICIENCY_STAGES, register_efficiency_stage
-from utils.efficiency.session import _resolve_stages
+from utils.efficiency.session import EfficiencySession, _resolve_stages
 from utils.efficiency.stages.base import EfficiencyStage
 
 
@@ -66,3 +75,94 @@ class TestResolveStages:
         stages = _resolve_stages(["utest_stage_a"])
         assert [name for name, _ in stages] == ["utest_stage_a"]
         assert EFFICIENCY_STAGES.get("utest_stage_a") is not None
+
+
+class _FakeTarget:
+    """Duck-typed BenchmarkTarget: CPU device, one synthetic batch."""
+
+    device = torch.device("cpu")
+    model = torch.nn.Linear(2, 2)
+
+    def prepare(self, device):
+        pass
+
+    @property
+    def train_data(self):
+        return [{"questions": torch.zeros(2, 3, dtype=torch.long)}]
+
+    def forward(self, batch):
+        return {"y_label": torch.zeros(6)}
+
+
+def _make_session(tmp_path, modes: str) -> EfficiencySession:
+    # eff_cfg must be a real dataclass: session serialization runs it through
+    # ``config_to_dict`` → ``asdict``, which rejects SimpleNamespace.
+    @dataclass
+    class _GeneralCfg:
+        # default_factory closure: a plain ``= modes`` default would shadow the
+        # enclosing parameter inside the class body.
+        modes: str = field(default_factory=lambda: modes)
+        resource_sample_interval: float = 0.05
+
+    @dataclass
+    class _EffCfg:
+        general: _GeneralCfg = field(default_factory=_GeneralCfg)
+
+    rc = SimpleNamespace(
+        experiment=SimpleNamespace(model_name="UTestModel"),
+        data=SimpleNamespace(dataset="tinyds", max_seq_len=3),
+        general=SimpleNamespace(seed=42),
+    )
+    return EfficiencySession(
+        target=_FakeTarget(), rc=rc, eff_cfg=_EffCfg(), output_dir=tmp_path
+    )
+
+
+@pytest.fixture
+def fail_then_ok_stages(registry_snapshot):
+    """A stage that raises OOM (runs first) and a healthy stage (runs second)."""
+
+    @register_efficiency_stage("utest_fail_stage")
+    class _FailStage(_FakeStage):
+        priority = 10
+
+        def run(self, ctx):
+            raise torch.cuda.OutOfMemoryError("CUDA out of memory. (fake)")
+
+    @register_efficiency_stage("utest_ok_stage")
+    class _OkStage(_FakeStage):
+        priority = 20
+
+        def run(self, ctx):
+            return {"ok": True}
+
+
+class TestStageFailureIsolation:
+    def test_failed_stage_recorded_and_later_stages_run(
+        self, fail_then_ok_stages, tmp_path
+    ):
+        report = _make_session(tmp_path, "utest_fail_stage,utest_ok_stage").run()
+        assert report.results == {"utest_ok_stage": {"ok": True}}
+        assert "utest_fail_stage" in report.errors
+        assert "OutOfMemoryError" in report.errors["utest_fail_stage"]
+        assert report.modes == ["utest_fail_stage", "utest_ok_stage"]
+
+    def test_errors_persist_to_report_json(self, fail_then_ok_stages, tmp_path):
+        _make_session(tmp_path, "utest_fail_stage,utest_ok_stage").run()
+        payload = json.loads((tmp_path / "efficiency_report.json").read_text())
+        assert "OutOfMemoryError" in payload["errors"]["utest_fail_stage"]
+        assert payload["results"]["utest_ok_stage"] == {"ok": True}
+
+    def test_all_stages_failed_raises_after_writing_report(
+        self, fail_then_ok_stages, tmp_path
+    ):
+        with pytest.raises(RuntimeError, match="All efficiency stages failed"):
+            _make_session(tmp_path, "utest_fail_stage").run()
+        payload = json.loads((tmp_path / "efficiency_report.json").read_text())
+        assert set(payload["errors"]) == {"utest_fail_stage"}
+        assert payload["results"] == {}
+
+    def test_no_failure_leaves_errors_empty(self, fail_then_ok_stages, tmp_path):
+        report = _make_session(tmp_path, "utest_ok_stage").run()
+        assert report.errors == {}
+        assert report.results == {"utest_ok_stage": {"ok": True}}
