@@ -21,6 +21,9 @@ from .stages.base import TITLE_STYLE
 
 logger = get_logger(__name__)
 
+# Console cap for a failed stage's error message (JSON keeps the full text).
+_CONSOLE_ERROR_MAX_CHARS = 200
+
 
 @dataclass
 class EfficiencyReport:
@@ -37,6 +40,7 @@ class EfficiencyReport:
     environment: EnvironmentInfo
     resource: dict[str, ResourceStats] | None
     results: dict[str, Any] = field(default_factory=dict)
+    errors: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         """Serialize the report (including nested stage results) to a dict."""
@@ -51,7 +55,7 @@ class EfficiencyReport:
         logger.info(f"[Report] saved to {path}")
 
     def print_console(self) -> None:
-        """Print the report: one table per stage result, then resource + environment."""
+        """Print the report: one table per stage result (failed stages render their error), then resource + environment."""
         console = Console()
         console.print()
         console.print(
@@ -66,6 +70,10 @@ class EfficiencyReport:
         console.print()
 
         for name in self.modes:
+            if name in self.errors:
+                console.print(_stage_error_table(name, self.errors[name]))
+                console.print()
+                continue
             result = self.results.get(name)
             if result is None:
                 continue
@@ -84,6 +92,26 @@ class EfficiencyReport:
             console.print()
         console.print(_environment_table(self.environment))
         console.print()
+
+
+def _stage_error_table(name: str, message: str) -> Table:
+    """Render a failed stage's error (red, single line, capped for the console).
+
+    The JSON report keeps the full multi-line message; only the console view
+    is collapsed/truncated.
+    """
+    one_line = " ".join(message.split())
+    if len(one_line) > _CONSOLE_ERROR_MAX_CHARS:
+        one_line = one_line[: _CONSOLE_ERROR_MAX_CHARS - 1] + "…"
+    table = Table(
+        title=f"Stage failed — {name}",
+        title_style="bold red",
+        show_header=False,
+        box=None,
+    )
+    table.add_column("Error", style="red")
+    table.add_row(one_line)
+    return table
 
 
 def _resource_table(stats: ResourceStats, title: str = "Resource Usage") -> Table:

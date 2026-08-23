@@ -7,6 +7,7 @@ import pytest
 
 from utils.efficiency.sweep import (
     EfficiencySweep,
+    SweepFailure,
     SweepPoint,
     SweepReport,
     SweepRun,
@@ -173,3 +174,24 @@ class TestSweepReportIO:
             {"label": "bs16", "dir": str(tmp_path / "bs16")},
         ]
         assert payload["sweep_dir"] == str(tmp_path / "sweep")
+
+    def test_failures_written_and_default_empty(self, tmp_path):
+        report = SweepReport(
+            model_name="GIKT",
+            dataset_name="assist09",
+            timestamp="2026-08-19 00:00:00",
+            labels=["bs8"],
+            modes=["profile"],
+            config={},
+            sweep_dir=str(tmp_path / "sweep"),
+            runs=[SweepRun("bs8", str(tmp_path / "bs8"))],
+        )
+        out = tmp_path / "sweep_index.json"
+        report.write_json(out)
+        assert json.loads(out.read_text())["failures"] == []
+
+        report.failures.append(SweepFailure("bs999", "OutOfMemoryError: CUDA OOM"))
+        report.write_json(out)
+        assert json.loads(out.read_text())["failures"] == [
+            {"label": "bs999", "error": "OutOfMemoryError: CUDA OOM"}
+        ]

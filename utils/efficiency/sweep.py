@@ -6,15 +6,16 @@ a trainer under its own sub-dir (clean CUDA allocator, isolated peak memory),
 and prints its full efficiency report. :func:`batch_size_sweep` is the built-in
 factory; ``seq_len``/precision/fold sweeps are the same shape.
 
-A lightweight index lists the runs; per-point metrics stay in each point's own
-report (no cross-point aggregation).
+A lightweight index lists the runs (and any points that failed, with their
+error); per-point metrics stay in each point's own report (no cross-point
+aggregation).
 """
 
 import copy
 import gc
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -52,8 +53,16 @@ class SweepRun:
 
 
 @dataclass
+class SweepFailure:
+    """One sweep point that raised: its label and a one-line error summary."""
+
+    label: str
+    error: str
+
+
+@dataclass
 class SweepReport:
-    """Lightweight sweep index: which points ran and where their reports live.
+    """Lightweight sweep index: which points ran and which failed, with locations.
 
     Holds no per-point metrics — each point's full EfficiencyReport stays in its
     own sub-directory; this index only points to them.
@@ -67,6 +76,7 @@ class SweepReport:
     config: dict
     sweep_dir: str
     runs: list[SweepRun]
+    failures: list[SweepFailure] = field(default_factory=list)
 
     def write_json(self, path: str | Path) -> None:
         """Write the sweep index as JSON, creating parent dirs as needed."""
@@ -81,6 +91,7 @@ class SweepReport:
             "config": self.config,
             "sweep_dir": self.sweep_dir,
             "runs": [{"label": r.label, "dir": r.dir} for r in self.runs],
+            "failures": [{"label": f.label, "error": f.error} for f in self.failures],
         }
         with path.open("w") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -220,12 +231,15 @@ class EfficiencySweep:
         )
 
         runs: list[SweepRun] = []
+        failures: list[SweepFailure] = []
         modes: list[str] = []
         for point in self.points:
             logger.info(f"[Sweep] === {point.label} ===")
             try:
                 report, child_dir = self._run_point(point)
             except Exception as e:
+                error = f"{type(e).__name__}: {e}"
+                failures.append(SweepFailure(point.label, error))
                 logger.error(
                     f"[Sweep] {point.label} failed, skipping: {e}", exc_info=True
                 )
@@ -247,6 +261,7 @@ class EfficiencySweep:
             config=config_to_dict(self.cfg),
             sweep_dir=self.sweep_dir,
             runs=runs,
+            failures=failures,
         )
         sweep_report.write_json(Path(self.sweep_dir) / "sweep_index.json")
         self._print_summary(sweep_report)
@@ -288,6 +303,8 @@ class EfficiencySweep:
         )
         for run in sweep_report.runs:
             console.print(f"  {run.label} -> {run.dir}")
+        for failure in sweep_report.failures:
+            console.print(f"  [red]{failure.label} -> FAILED:[/] {failure.error}")
         console.print()
 
     def _cleanup_cuda(self) -> None:
