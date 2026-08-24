@@ -8,6 +8,7 @@ inside every method, so the fake is enough to observe init/log/finish traffic.
 from __future__ import annotations
 
 import csv
+import sys
 import threading
 import time
 
@@ -34,14 +35,15 @@ def _rows(path):
 class _RecordingLogger:
     """Duck-typed backend recording (method, kwargs) for every call."""
 
-    def __init__(self, fail=()):
+    def __init__(self, fail=(), fail_exc=RuntimeError):
         self.calls = []
         self._fail = set(fail)
+        self._fail_exc = fail_exc
 
     def _rec(self, method, kwargs):
         self.calls.append((method, kwargs))
         if method in self._fail:
-            raise RuntimeError(f"{method} failed")
+            raise self._fail_exc(f"{method} failed")
 
     def init_run(self, **kwargs):
         self._rec("init_run", kwargs)
@@ -262,6 +264,16 @@ class TestComposite:
 
         assert any(method == "init_run" for method, _ in healthy.calls)
 
+    def test_import_error_propagates_instead_of_isolating(self):
+        # A missing dependency fails every future call from that backend;
+        # isolating it would silently drop the backend's records behind a
+        # single warning.
+        failing = _RecordingLogger(fail={"log_metrics"}, fail_exc=ImportError)
+        composite = MetricLoggerComposite([failing, _RecordingLogger()])
+
+        with pytest.raises(ImportError):
+            composite.log_metrics(phase="train", metrics={}, step=0, epoch=0)
+
 
 # ---------------------------------------------------------------------------
 # AsyncMetricLoggerProxy
@@ -374,6 +386,17 @@ class TestFactory:
 
         backends = [_unwrap(b) for b in _backends(logger)]
         assert [type(b) for b in backends] == [LocalMetricLogger]
+
+    def test_build_default_missing_cloud_backend_raises(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("KT_TRACKING_BACKEND", raising=False)
+        # A None sys.modules entry makes importlib.import_module raise
+        # ImportError without uninstalling the real package.
+        monkeypatch.setitem(sys.modules, "swanlab", None)
+
+        with pytest.raises(RuntimeError, match="not importable"):
+            build_default_metric_loggers(
+                log_dir=str(tmp_path), log_batch_metrics=False, cloud_tracking=True
+            )
 
     def test_build_default_async_disabled_leaves_raw_backends(
         self, tmp_path, monkeypatch
