@@ -13,6 +13,10 @@ license-file = "LICENSE"
 [pypi-options]
 index-url = "https://pypi.org/simple"
 
+[feature.common.pypi-dependencies]
+swanlab = ">=0.9,<1.0"
+wandb = ">=0.18,<1.0"
+
 [feature.base]
 platforms = ["linux-64"]
 [feature.base.dependencies]
@@ -27,8 +31,6 @@ pytest = ">=9.0.2,<10"
 seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
 [feature.base.pypi-dependencies]
-swanlab = ">=0.9,<1.0"
-wandb = ">=0.18,<1.0"
 psutil = ">=7.2.0"
 nvidia-ml-py = "*"
 py-cpuinfo = ">=9.0.0"
@@ -155,14 +157,14 @@ docs-fmt-check = { cmd = "python scripts/fmt-code-blocks.py source --check", cwd
 docs-linkcheck = { cmd = "sphinx-build -b linkcheck source _linkcheck", cwd = "docs", description = "Check external links" }
 
 [environments]
-dhg-cpu = { features = ["dhg", "dhg-cpu"], no-default-feature = true }
-dhg-gpu = { features = ["dhg", "dhg-gpu"], no-default-feature = true }
-cpu = { features = ["base", "cpu"] }
-mamba = { features = ["base", "gpu", "mamba"] }
-xlstm = { features = ["base", "gpu", "xlstm"] }
-web = { features = ["base", "web"] }
+dhg-cpu = { features = ["common", "dhg", "dhg-cpu"], no-default-feature = true }
+dhg-gpu = { features = ["common", "dhg", "dhg-gpu"], no-default-feature = true }
+cpu = { features = ["common", "base", "cpu"] }
+mamba = { features = ["common", "base", "gpu", "mamba"] }
+xlstm = { features = ["common", "base", "gpu", "xlstm"] }
+web = { features = ["common", "base", "web"] }
 docs = { features = ["docs"] }
-default = { features = ["base", "gpu"] }
+default = { features = ["common", "base", "gpu"] }
 
 [tasks]
 lint = "ruff check ."

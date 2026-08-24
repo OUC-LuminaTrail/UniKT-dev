@@ -16,6 +16,7 @@ selects which (``swanlab`` | ``wandb``, default ``swanlab``).
 
 import atexit
 import csv
+import importlib
 import os
 from abc import ABC, abstractmethod
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -685,10 +686,17 @@ class MetricLoggerComposite(MetricLogger):
         self._loggers = loggers
 
     def _fanout(self, method: str, **kwargs) -> None:
-        """Call a method on all wrapped loggers, isolating exceptions."""
+        """Call a method on all wrapped loggers, isolating exceptions.
+
+        ``ImportError`` propagates instead: a missing dependency fails every
+        call for the rest of the run, so isolating it would silently drop
+        that backend's records behind a single warning.
+        """
         for lg in self._loggers:
             try:
                 getattr(lg, method)(**kwargs)
+            except ImportError:
+                raise
             except Exception as e:
                 logger.warning(f"{type(lg).__name__}.{method} failed: {e}")
 
@@ -755,8 +763,9 @@ class AsyncMetricLoggerProxy(MetricLogger):
         """Initialize the wrapped backend synchronously.
 
         ``swanlab.init`` is network I/O; a failure must surface immediately
-        rather than after a silent run. The composite's ``_fanout`` turns an
-        exception here into a warning while other backends keep working.
+        rather than after a silent run. The composite's ``_fanout`` turns a
+        non-import failure here into a warning while other backends keep
+        working; ``ImportError`` propagates (see ``_fanout``).
         """
         self._inner.init_run(**kwargs)
 
@@ -900,7 +909,9 @@ def build_default_metric_loggers(
     Local CSV logging is always enabled. When ``cloud_tracking`` is ``True``,
     exactly one remote backend is added, selected by ``KT_TRACKING_BACKEND``
     (``swanlab`` | ``wandb``, default ``swanlab``) — the two are mutually
-    exclusive. Each backend is wrapped in :class:`AsyncMetricLoggerProxy`
+    exclusive, and an unimportable backend raises ``RuntimeError`` here
+    rather than degrading to a warning once training has started. Each
+    backend is wrapped in :class:`AsyncMetricLoggerProxy`
     when async I/O is enabled (default), so a slow remote upload cannot
     serialize the local CSV write.
 
@@ -922,6 +933,14 @@ def build_default_metric_loggers(
     ]
     if cloud_tracking:
         backend = _select_tracking_backend()
+        try:
+            importlib.import_module(backend)
+        except ImportError as e:
+            raise RuntimeError(
+                f"Cloud tracking backend '{backend}' is not importable: {e}. "
+                f"Install it in this environment, or disable cloud tracking "
+                f"with --general.cloud_tracking false."
+            ) from e
         loggers.append(get_metric_logger(backend))
 
     if async_io:
