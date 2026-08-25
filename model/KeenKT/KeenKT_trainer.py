@@ -75,14 +75,16 @@ class KeenKTConfig(ModelConfig):
     use_rasch: bool = True
     use_cl: bool = True
     cl_weight: float = field(
-        default=0.02,
-        metadata={"optuna": {"type": "float", "low": 0.005, "high": 0.1, "log": True}},
+        default=0.0004,
+        metadata={
+            "optuna": {"type": "float", "low": 2.5e-5, "high": 0.01, "log": True}
+        },
     )
     use_uncertainty_aug: bool = True
     use_diffusion: bool = True
     diffusion_weight: float = field(
-        default=0.08,
-        metadata={"optuna": {"type": "float", "low": 0.01, "high": 0.2, "log": True}},
+        default=0.0016,
+        metadata={"optuna": {"type": "float", "low": 2e-4, "high": 4e-3, "log": True}},
     )
     noise_level: float = field(
         default=0.3,
@@ -269,7 +271,7 @@ class KeenKTTrainer(BaseTrainer):
         }
 
     def _compute_loss(self, outputs: dict) -> torch.Tensor:
-        """BCE + 单次加权的对比/去噪辅助项。"""
+        """BCE + 对比/去噪辅助项"""
         m = self.run_config.model
         loss = self.loss(outputs["y_hat"], outputs["y_label"])
         if "cl_loss" in outputs:
