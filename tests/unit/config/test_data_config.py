@@ -52,6 +52,26 @@ class TestCreateOptimizedDataloader:
         )
         assert loader.pin_memory is True
 
+    def test_pin_memory_param_overrides_auto(self):
+        fake_cuda = type("FakeCuda", (), {"type": "cuda"})()
+        loader = create_optimized_dataloader(
+            _ScalarDataset(), device=fake_cuda, num_workers=0, pin_memory=False
+        )
+        assert loader.pin_memory is False
+
+    def test_pin_memory_none_keeps_auto(self):
+        fake_cuda = type("FakeCuda", (), {"type": "cuda"})()
+        loader = create_optimized_dataloader(
+            _ScalarDataset(), device=fake_cuda, num_workers=0, pin_memory=None
+        )
+        assert loader.pin_memory is True
+
+    def test_pin_memory_param_cannot_pin_cpu(self):
+        loader = create_optimized_dataloader(
+            _ScalarDataset(), device=torch.device("cpu"), pin_memory=True
+        )
+        assert loader.pin_memory is False
+
     def test_zero_workers_normalizes_loader_args(self):
         loader = create_optimized_dataloader(
             _ScalarDataset(),

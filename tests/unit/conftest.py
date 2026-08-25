@@ -108,6 +108,7 @@ def make_run_config(tiny_model_config_name):
         seed=42,
         dataset="tinyds",
         log_batch_metrics=False,
+        pin_memory=None,
         model_kwargs=None,
     ):
         model_cls = MODEL_CONFIGS._registry[tiny_model_config_name]
@@ -121,6 +122,7 @@ def make_run_config(tiny_model_config_name):
                 log_batch_metrics=log_batch_metrics,
                 skip_test=skip_test,
                 save_last_checkpoint=save_last_checkpoint,
+                pin_memory=pin_memory,
             ),
             early_stopping=early_stopping or EarlyStoppingConfig(patience=2),
             experiment=ExperimentConfig(model_name=tiny_model_config_name),

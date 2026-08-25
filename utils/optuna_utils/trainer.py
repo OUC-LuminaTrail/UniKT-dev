@@ -1,5 +1,6 @@
 """Trainer integration with Optuna objective functions."""
 
+import gc
 import time
 import traceback
 from collections.abc import Callable
@@ -68,6 +69,7 @@ class TrainerObjectiveWrapper:
             params = {}
 
         start_time = time.perf_counter()
+        trainer = None
 
         try:
             trial_rc = self._create_trial_rc(params)
@@ -156,6 +158,19 @@ class TrainerObjectiveWrapper:
             # the search dir rather than the last trial's run.log.
             if self.exp_manager is not None:
                 add_file_handler(Path(self.exp_manager.get_log_dir()) / "run.log")
+            # Release DataLoader workers deterministically: an exceptional
+            # exit (e.g. a pruned trial) keeps traceback frames — and with
+            # them the trainer's loaders — alive past the trial, and the
+            # leaked worker pipes accumulate up to the process fd limit.
+            if trainer is not None:
+                try:
+                    trainer.release()
+                except Exception:
+                    logger.warning(
+                        "Trainer release failed; worker pipes may leak",
+                        exc_info=True,
+                    )
+            gc.collect()
 
     def _create_trial_rc(self, params: dict[str, Any]) -> Any:
         """Evolve the base RunConfig with a trial's model hyperparameters.
@@ -167,6 +182,11 @@ class TrainerObjectiveWrapper:
         import copy
 
         trial_rc = copy.deepcopy(self.base_rc)
+        # Pin-memory loaders leak ~16 pipe fds per DataLoader on CUDA
+        # (torch 2.10), which a multi-trial search exhausts the process
+        # fd limit with; auto pinning is therefore disabled per trial.
+        if self.base_rc.general.pin_memory is None:
+            trial_rc.general.pin_memory = False
         for name, value in params.items():
             setattr(trial_rc.model, name, value)
         return trial_rc

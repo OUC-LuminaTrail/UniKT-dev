@@ -1,7 +1,7 @@
 """Tests for TrainerObjectiveWrapper: rc isolation, metric extraction, error paths.
 
 The trainer is a duck-typed double: the wrapper only touches ``add_callback``,
-``run``, and the ``early_stopping`` attribute after construction.
+``run``, ``release``, and the ``early_stopping`` attribute after construction.
 """
 
 import optuna
@@ -20,10 +20,17 @@ class _FakeEarlyStopping:
 class _FakeTrainer:
     """Records callbacks; optional early_stopping attrs; optional failure."""
 
-    def __init__(self, early_stopping=None, run_error: Exception | None = None):
+    def __init__(
+        self,
+        early_stopping=None,
+        run_error: Exception | None = None,
+        release_error: Exception | None = None,
+    ):
         self.callbacks = []
         self.early_stopping = early_stopping
         self._run_error = run_error
+        self._release_error = release_error
+        self.released = False
 
     def add_callback(self, cb):
         self.callbacks.append(cb)
@@ -31,6 +38,11 @@ class _FakeTrainer:
     def run(self):
         if self._run_error is not None:
             raise self._run_error
+
+    def release(self):
+        self.released = True
+        if self._release_error is not None:
+            raise self._release_error
 
 
 class _TrainerFactory:
@@ -90,6 +102,14 @@ class TestCreateTrialRc:
         assert first.model.hidden_dim == 64
         assert second.model.hidden_dim == 16
         assert first is not second
+
+    def test_auto_pin_memory_disabled_for_trials(self, make_run_config):
+        wrapper = _make_wrapper(make_run_config(), _TrainerFactory())
+        assert wrapper._create_trial_rc({}).general.pin_memory is False
+
+    def test_explicit_pin_memory_setting_respected(self, make_run_config):
+        wrapper = _make_wrapper(make_run_config(pin_memory=True), _TrainerFactory())
+        assert wrapper._create_trial_rc({}).general.pin_memory is True
 
 
 # --- _extract_metric (single-objective) ---
@@ -211,3 +231,40 @@ class TestCall:
         with pytest.raises(optuna.TrialPruned):
             wrapper(fake_trial)
         assert "error" not in fake_trial.user_attrs
+
+
+# --- release() on every exit path ---
+
+
+class TestTrialRelease:
+    """The wrapper must release each trial's trainer, whatever the outcome."""
+
+    @pytest.mark.parametrize(
+        "run_error",
+        [None, ValueError("bad dataset"), optuna.TrialPruned("mid-run")],
+        ids=["happy", "error", "pruned"],
+    )
+    def test_release_called_on_every_exit_path(
+        self, make_run_config, fake_trial, run_error
+    ):
+        factory = _TrainerFactory(
+            early_stopping=_FakeEarlyStopping(best_metrics={"auc": 0.42}),
+            run_error=run_error,
+        )
+        wrapper = _make_wrapper(make_run_config(), factory)
+        if run_error is None:
+            wrapper(fake_trial)
+        else:
+            with pytest.raises(type(run_error)):
+                wrapper(fake_trial)
+        assert factory.instances[0].released
+
+    def test_release_failure_does_not_mask_original_error(
+        self, make_run_config, fake_trial
+    ):
+        factory = _TrainerFactory(
+            run_error=ValueError("bad dataset"), release_error=RuntimeError("late")
+        )
+        wrapper = _make_wrapper(make_run_config(), factory)
+        with pytest.raises(ValueError, match="bad dataset"):
+            wrapper(fake_trial)

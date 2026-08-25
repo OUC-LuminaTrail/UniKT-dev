@@ -305,6 +305,7 @@ class BaseTrainer(InferenceOpsMixin, ABC):
                     shuffle=shuffle,
                     device=self.device_,
                     collate_fn=loader_collate_fn,
+                    pin_memory=self.run_config.general.pin_memory,
                 )
             return data
 
@@ -1019,6 +1020,24 @@ class BaseTrainer(InferenceOpsMixin, ABC):
         self._finish_metric_logger()
         if self.checkpoint_manager is not None:
             self.checkpoint_manager.close()
+
+    def release(self) -> None:
+        """Shut down DataLoader workers and drop the loader references.
+
+        Persistent workers keep their pipe file descriptors open until the
+        owning DataLoader is garbage-collected; a run that exits through an
+        exception (e.g. a pruned trial) can delay that collection
+        indefinitely, so multi-run processes call this between runs to
+        release the workers deterministically.
+        """
+        for name in ("train_data", "val_data", "test_data"):
+            loader = getattr(self, name, None)
+            if not isinstance(loader, torch.utils.data.DataLoader):
+                continue
+            iterator = getattr(loader, "_iterator", None)
+            if iterator is not None:
+                iterator._shutdown_workers()
+            setattr(self, name, None)
 
 
 __all__ = ["BaseTrainer", "StageResult"]
