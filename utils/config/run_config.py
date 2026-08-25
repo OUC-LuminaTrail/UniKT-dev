@@ -53,6 +53,8 @@ class GeneralConfig:
         cache: Enable disk cache for model data preparation.
         save_last_checkpoint: Save a full checkpoint (``last_checkpoint.pth``)
             at the end of every epoch.
+        pin_memory: DataLoader host-memory pinning (null = auto: pin only
+            on CUDA devices).
     """
 
     log_dir: str | None = None
@@ -65,6 +67,7 @@ class GeneralConfig:
     skip_test: bool = False
     cache: bool = False
     save_last_checkpoint: bool = True
+    pin_memory: bool | None = None
 
 
 @dataclass

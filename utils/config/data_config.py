@@ -51,6 +51,7 @@ def create_optimized_dataloader(
     shuffle: bool = True,
     config: DataLoaderConfig | None = None,
     device=None,
+    pin_memory: bool | None = None,
     **kwargs,
 ):
     """Create an optimized DataLoader.
@@ -61,6 +62,8 @@ def create_optimized_dataloader(
         shuffle: Whether to shuffle the data
         config: DataLoader configuration (defaults to DataLoaderConfig())
         device: Compute device (used to determine pin_memory)
+        pin_memory: Host-memory pinning override (None = auto from
+            config and device; never true on non-CUDA devices)
         **kwargs: Additional arguments passed to DataLoader (overrides config)
 
     Returns:
@@ -91,7 +94,9 @@ def create_optimized_dataloader(
 
     # Determine pin_memory
     is_cuda = device.type == "cuda"
-    pin_memory = config.pin_memory and is_cuda
+    if pin_memory is None:
+        pin_memory = config.pin_memory
+    pin_memory = pin_memory and is_cuda
 
     # Get num_workers
     num_workers = config.get_num_workers()
