@@ -49,7 +49,7 @@ class DGEKTConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 1e-4, "high": 1e-2, "log": True}},
     )
     weight_decay: float = 0.0
-    epochs: int = 20
+    epochs: int = 300
     batch_size: int = field(
         default=128,
         metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
