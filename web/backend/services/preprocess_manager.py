@@ -167,25 +167,66 @@ class PreprocessManager:
                 os.close(master_fd)
             return False
 
-        with SessionLocal() as session:
-            row = session.get(PreprocessTask, task_id)
-            if row:
-                row.pid = proc.pid
-                session.commit()
-
+        # Register the handle before anything can observe the pid, so a
+        # concurrent stop() either sees the handle (and terminates cleanly) or
+        # ran before the pid write — and the status check below then reaps the
+        # fresh process instead of orphaning it behind a "stopped" row.
         with self._lock:
             self._procs[task_id] = proc
             self._master_fds[task_id] = master_fd
 
+        try:
+            with SessionLocal() as session:
+                row = session.get(PreprocessTask, task_id)
+                lost_race = row is not None and row.status != "running"
+                if row is not None and not lost_race:
+                    row.pid = proc.pid
+                    session.commit()
+        except Exception:
+            # The registered handle must not outlive a failed pid write:
+            # without a monitor the process would hang on a full PTY buffer
+            # until the backend restarts. Kill and unregister instead.
+            logger.exception("pid write failed for preprocess %s; killing", task_id)
+            self._kill_group(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=3)
+            with self._lock:
+                self._procs.pop(task_id, None)
+                fd = self._master_fds.pop(task_id, None)
+            if fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+            return False
+
+        if lost_race:
+            # stop()/kill() won the race while we were spawning and owns the
+            # row's final state; kill the fresh process group and unregister.
+            logger.info(
+                "preprocess %s spawn lost the stop race (status in DB); killing",
+                task_id,
+            )
+            self._kill_group(proc.pid, signal.SIGKILL)
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=3)
+            with self._lock:
+                self._procs.pop(task_id, None)
+                fd = self._master_fds.pop(task_id, None)
+            if fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(fd)
+            return False
+
         reader = threading.Thread(
             target=self._read_pty, args=(task_id, master_fd), daemon=True
         )
-        reader.start()
         monitor = threading.Thread(target=self._monitor, args=(task_id,), daemon=True)
-        monitor.start()
+        # Register before start: an instantly-exiting process would otherwise
+        # have _monitor's _cleanup run against not-yet-registered threads.
         with self._lock:
             self._readers[task_id] = reader
             self._monitors[task_id] = monitor
+        reader.start()
+        monitor.start()
         return True
 
     def _read_pty(self, task_id: int, master_fd: int) -> None:
@@ -210,10 +251,14 @@ class PreprocessManager:
             # Don't transition — closing master_fd below SIGPIPEs the subprocess
             # and _monitor records the real exit code via the normal path.
             logger.exception("reader thread fatal error for preprocess %s", task_id)
-        with contextlib.suppress(OSError):
-            os.close(master_fd)
+        # Close only if we still own the registration: _cleanup may already
+        # have popped (and closed) the fd, and a second blind close could hit
+        # an fd number since reused by another task's openpty.
         with self._lock:
-            self._master_fds.pop(task_id, None)
+            fd = self._master_fds.pop(task_id, None)
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
     def _monitor(self, task_id: int) -> None:
         with self._lock:
@@ -307,7 +352,14 @@ class PreprocessManager:
             )
         if not claimed:
             return True
-        self._terminate(task_id)
+        if not self._terminate(task_id):
+            # Spawn raced us (handle not yet registered): fall back to the row
+            # pid so the subprocess cannot outlive a "stopped" row.
+            with SessionLocal() as session:
+                row = session.get(PreprocessTask, task_id)
+                fallback_pid = row.pid if row else None
+            if fallback_pid:
+                self._kill_group(fallback_pid, signal.SIGKILL)
         with SessionLocal() as session:
             transition(
                 session,
@@ -328,8 +380,22 @@ class PreprocessManager:
                 return False
             if row.status in ("running", "stopping"):
                 return False
+            # An interrupted row may still own a live orphan process and a
+            # recover-monitor thread; both must be reclaimed with the row.
+            orphan = (row.pid, row.started_at) if row.status == "interrupted" else None
             session.delete(row)
             session.commit()
+        if orphan and orphan[0]:
+            pid, started_at = orphan
+            try:
+                proc = psutil.Process(pid)
+                reused = pid_reused(proc, started_at)
+            except psutil.Error:
+                reused = True
+            if not reused:
+                self._kill_group(pid, signal.SIGKILL)
+        with self._lock:
+            self._monitors.pop(task_id, None)
 
         log_path = PREPROCESS_LOGS_DIR / f"{task_id}.log"
         if log_path.is_file():
@@ -375,7 +441,7 @@ class PreprocessManager:
                             with self._lock:
                                 self._monitors[task_id] = t
                             continue
-                    except psutil.NoSuchProcess:
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
                         pass
                 transition(
                     session,
@@ -391,8 +457,11 @@ class PreprocessManager:
         exit_code = -1
         try:
             proc = psutil.Process(pid)
-            proc.wait()
-            exit_code = proc.returncode
+            # psutil.Process has no returncode attribute; wait() returns the
+            # exit status, or None for non-child pids (recovered orphans are
+            # never children). None keeps the unknown outcome honest; the
+            # status below still resolves conservatively to failed.
+            exit_code = proc.wait()
         except (
             psutil.NoSuchProcess,
             psutil.AccessDenied,

@@ -22,6 +22,7 @@ import struct
 import subprocess
 import termios
 import threading
+import time
 from collections import deque
 from datetime import datetime
 
@@ -137,7 +138,14 @@ class ProcessManager:
             task.dataset_name = params.get("dataset", "")
             task.env_type = env_type
             task.env_name = env_name
-            task.extra_params = json.dumps(params)
+            # _do_launch re-resolves the command from the row, so the custom
+            # interpreter path must be persisted here as well.
+            task.python_path = custom_python_path or ""
+            # Search rows keep the default separators so the LIKE marker
+            # matches; train rows are dumped compact so no nested param value
+            # can forge the marker substring.
+            separators = None if params.get("task_kind") == "optuna" else (",", ":")
+            task.extra_params = json.dumps(params, separators=separators)
             session.commit()
             gpu_request = task.gpu_request
 
@@ -159,7 +167,7 @@ class ProcessManager:
         lanes = self._lanes()
         cap = self._gpu_slots_capacity
         usage = self._slot_usage()
-        while True:
+        while not self._stopping:
             tid, assigned = self._pop_dispatchable(lanes, cap, usage)
             if tid is None:
                 return
@@ -327,6 +335,28 @@ class ProcessManager:
                 )
                 return False
 
+            if self._stopping:
+                # Shutdown raced the launch: kill the fresh process instead of
+                # registering it. The row stays pending, so the next backend
+                # start re-queues it — no orphan, no double dispatch.
+                self._kill_process_group(proc.pid, signal.SIGKILL)
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    # Undead (uninterruptible sleep): mark failed so the next
+                    # start does not re-dispatch alongside the survivor.
+                    transition(
+                        session,
+                        Task,
+                        task_id,
+                        "pending",
+                        "failed",
+                        finished_at=datetime.now(),
+                    )
+                with contextlib.suppress(OSError):
+                    os.close(master_fd)
+                return False
+
             # Register the proc before the DB transition so a concurrent
             # stop_task/kill_task sees and can terminate it instead of racing
             # the transition and orphaning the subprocess.
@@ -337,17 +367,22 @@ class ProcessManager:
             extra: dict = {}
             if env_type == "custom" and custom_python_path:
                 extra["python_path"] = custom_python_path
-            if not transition(
-                session,
-                Task,
-                task_id,
-                "pending",
-                "running",
-                pid=proc.pid,
-                started_at=datetime.now(),
-                gpu_assigned=assigned_gpu,
-                **extra,
-            ):
+            try:
+                claimed = transition(
+                    session,
+                    Task,
+                    task_id,
+                    "pending",
+                    "running",
+                    pid=proc.pid,
+                    started_at=datetime.now(),
+                    gpu_assigned=assigned_gpu,
+                    **extra,
+                )
+            except Exception:
+                logger.exception("running transition failed for task %s", task_id)
+                claimed = False
+            if not claimed:
                 logger.warning(
                     "Launch of task %s aborted: row no longer pending", task_id
                 )
@@ -387,10 +422,14 @@ class ProcessManager:
             # Don't transition — _reap owns the terminal transition and records
             # the real exit code; transitioning here races it and loses the code.
             logger.exception("reader thread fatal error for task %s", task_id)
-        with contextlib.suppress(OSError):
-            os.close(master_fd)
+        # Close only if we still own the registration: _cleanup may already
+        # have popped (and closed) the fd, and a second blind close could hit
+        # an fd number since reused by another task's openpty.
         with self._lock:
-            self._master_fds.pop(task_id, None)
+            fd = self._master_fds.pop(task_id, None)
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
 
     def _build_cli_args(
         self,
@@ -549,11 +588,11 @@ class ProcessManager:
             task = session.get(Task, task_id)
             status = task.status if task else None
             pid = task.pid if task else None
+            started_at = task.started_at if task else None
 
         if status == "interrupted":
             if pid:
-                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                    os.kill(pid, signal.SIGKILL)
+                self._kill_orphan_pid(pid, started_at)
             with SessionLocal() as session:
                 transition(
                     session,
@@ -620,11 +659,11 @@ class ProcessManager:
             task = session.get(Task, task_id)
             status = task.status if task else None
             pid = task.pid if task else None
+            started_at = task.started_at if task else None
 
         if status == "interrupted":
             if pid:
-                with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                    os.kill(pid, signal.SIGKILL)
+                self._kill_orphan_pid(pid, started_at)
             with SessionLocal() as session:
                 transition(
                     session,
@@ -675,6 +714,24 @@ class ProcessManager:
 
         return False
 
+    def _kill_orphan_pid(self, pid: int, started_at: datetime | None) -> None:
+        """SIGKILL a lingering pid's process group unless it was recycled.
+
+        Interrupted rows can outlive their process (a stuck recover monitor
+        keeps the pid around), so verify identity before killing what may now
+        be an unrelated process that reused the pid.
+        """
+        try:
+            proc = psutil.Process(pid)
+            if pid_reused(proc, started_at):
+                logger.warning("pid %s reused by another process; not killing", pid)
+                return
+        except psutil.Error:
+            return
+        # The orphan leader owns its session (start_new_session), so killing
+        # the group also reaps worker subprocesses a bare kill would miss.
+        self._kill_process_group(pid, signal.SIGKILL)
+
     def force_cleanup_interrupted(self, task_id: int) -> None:
         """SIGKILL a lingering interrupted task's pid and drop its recover monitor.
 
@@ -684,9 +741,9 @@ class ProcessManager:
         with SessionLocal() as session:
             task = session.get(Task, task_id)
             pid = task.pid if task else None
+            started_at = task.started_at if task else None
         if pid:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-                os.kill(pid, signal.SIGKILL)
+            self._kill_orphan_pid(pid, started_at)
         with self._lock:
             self._recover_monitors.pop(task_id, None)
 
@@ -723,7 +780,7 @@ class ProcessManager:
                             with self._lock:
                                 self._recover_monitors[task_id] = t
                             continue
-                    except psutil.NoSuchProcess:
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
                         pass
                 transition(
                     session,
@@ -753,8 +810,11 @@ class ProcessManager:
         exit_code = -1
         try:
             proc = psutil.Process(pid)
-            proc.wait()
-            exit_code = proc.returncode
+            # psutil.Process has no returncode attribute; wait() returns the
+            # exit status, or None for non-child pids (recovered orphans are
+            # never children). None keeps the unknown outcome honest; the
+            # status below still resolves conservatively to failed.
+            exit_code = proc.wait()
         except (
             psutil.NoSuchProcess,
             psutil.AccessDenied,
@@ -785,23 +845,35 @@ class ProcessManager:
 
         Each running task gets the same graceful stop the UI uses (SIGINT to its
         process group, then SIGKILL only if it does not exit in time), so the
-        trainer can clean up and no orphans survive the backend exit. ``pid`` is
-        cleared; on the next start ``recover_tasks`` re-queues these interrupted
-        rows as ``pending`` and re-dispatches them against the current GPU set.
+        trainer can clean up and no orphans survive the backend exit. ``pid``
+        stays on the row: on the next start ``recover_tasks`` re-attaches live
+        orphans by pid and re-queues only rows whose process is gone.
         """
         self._stopping = True
         self._wake.set()
-        with contextlib.suppress(Exception):
-            self._thread.join(timeout=10)
-
-        for task_id in list(self._running):
-            self._terminate(task_id)
+        # The scheduler may be mid-launch (cold schema extraction runs a
+        # subprocess for up to 60s). Loop-terminate until the thread has
+        # exited so no Popen can be registered after the sweep — a launch
+        # completing during shutdown would otherwise survive it and be
+        # double-dispatched on the next start. Bounded so a wedged launch
+        # cannot hang server shutdown.
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            with contextlib.suppress(Exception):
+                self._thread.join(timeout=0.5)
+            with self._lock:
+                running = list(self._running)
+            for task_id in running:
+                self._terminate(task_id)
+            with self._lock:
+                drained = not self._running
+            if not self._thread.is_alive() and drained:
+                break
 
         with SessionLocal() as session:
+            # Keep pid: recover_tasks re-attaches survivors instead of
+            # re-queueing them alongside a still-running orphan.
             session.query(Task).filter(Task.status.in_(["running", "stopping"])).update(
-                {
-                    "status": "interrupted",
-                    "pid": None,
-                }
+                {"status": "interrupted"}
             )
             session.commit()
