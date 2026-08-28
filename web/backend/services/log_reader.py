@@ -39,13 +39,19 @@ async def stream_log_lines(
     rows or an active-row refresh, emitting a ``patch`` per change. Terminates
     with ``done`` once the source is no longer alive.
     """
-    lines, total = cache.get(path, from_line, _WS_INITIAL_LIMIT)
+    # Rendering is pure-Python pyte work (a cold cache replays the whole file
+    # byte by byte); keep it off the event loop or one big log stalls every
+    # other request. The cache is RLock-guarded, so this is safe next to the
+    # HTTP threadpool callers.
+    lines, total = await asyncio.to_thread(
+        cache.get, path, from_line, _WS_INITIAL_LIMIT
+    )
     await _send(
         websocket,
         {"type": "patch", "from_line": from_line, "total": total, "lines": lines},
     )
     prev_total = total
-    prev_sig = cache.tail_repr(path)
+    prev_sig = await asyncio.to_thread(cache.tail_repr, path)
 
     if not check_alive or not await asyncio.to_thread(check_alive):
         await _send(websocket, {"type": "done", "final": True})
@@ -56,7 +62,7 @@ async def stream_log_lines(
         alive = await asyncio.to_thread(check_alive)
         # Drain before the alive check short-circuits so the final bytes written
         # just before exit are not lost.
-        patch = cache.diff(path, prev_total, prev_sig)
+        patch = await asyncio.to_thread(cache.diff, path, prev_total, prev_sig)
         if patch:
             start, plines, ptotal, psig = patch
             await _send(
