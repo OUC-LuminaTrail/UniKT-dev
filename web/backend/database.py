@@ -5,6 +5,8 @@ configures WAL mode and NORMAL synchronous pragma on connection, and provides
 the Base declarative model class along with an init_db helper.
 """
 
+import sqlite3
+
 from config import DATABASE_PATH, PREPROCESS_LOGS_DIR, TASK_LOGS_DIR
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -45,3 +47,19 @@ def init_db():
     TASK_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     PREPROCESS_LOGS_DIR.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    _drop_legacy_columns()
+
+
+def _drop_legacy_columns() -> None:
+    """Drop columns removed from the ORM but still present in old databases.
+
+    create_all only creates missing tables, so a dropped mapping leaves a
+    stale NOT NULL column behind that breaks every INSERT. Idempotent; needs
+    SQLite >= 3.35 (older runtimes keep the column and fail loudly on insert).
+    """
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        return
+    with engine.begin() as conn:
+        columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(tasks)")}
+        if "exp_dir" in columns:
+            conn.exec_driver_sql("ALTER TABLE tasks DROP COLUMN exp_dir")
