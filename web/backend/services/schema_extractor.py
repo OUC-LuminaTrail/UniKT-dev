@@ -312,7 +312,8 @@ class SchemaExtractor:
         """Return ``{field_name: node}`` for routing flat preprocess params.
 
         ``node`` is ``""`` for flat flags (--force/--extra) and ``data``/``general``
-        for nested ones; the command builder treats a falsy node as flat.
+        for nested ones; the command builder treats an empty node as flat and
+        skips keys missing from the map entirely.
         """
         raw_groups = self._run_preprocess_helper(action)
         if raw_groups is None:
