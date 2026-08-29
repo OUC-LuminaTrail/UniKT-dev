@@ -4,6 +4,7 @@ import torch
 from torch.utils.data.dataset import Dataset
 from typing_extensions import override
 
+from model.HDHKT.skill_index import build_skill_index_table
 from utils.core import get_logger
 from utils.data_process import DataSource
 from utils.model_data import QuestionModelData
@@ -63,6 +64,12 @@ class HDHKTModelData(QuestionModelData):
         question_skill_matrix = torch.from_numpy(
             self.build_relationship_matrix(("question", "has", "skill"))
         ).float()
+
+        # Precomputed per-question related-skill id table
+        num_skills = self.data_src.get_metadata("num_skills")
+        skill_ids_per_question = build_skill_index_table(
+            question_skill_matrix, padding_index=num_skills
+        )
 
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
@@ -145,6 +152,7 @@ class HDHKTModelData(QuestionModelData):
             "skill_hypergraph": skill_hypergraph,
             "hetero_graph": hetero_graph,
             "question_skill_matrix": question_skill_matrix,
+            "skill_ids_per_question": skill_ids_per_question,
         }
 
         return return_data

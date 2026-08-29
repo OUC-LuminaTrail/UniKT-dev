@@ -33,11 +33,13 @@ class HeteroGNN(nn.Module):
         heads: int,
         dropout: float,
         metadata: tuple[list[str], list[tuple[str, str, str]]],
+        output_node_types: tuple[str, ...] | None = ("question", "skill"),
     ) -> None:
         super().__init__()
         self.n_hop = n_hop
         self.heads = heads
         self.dropout = dropout
+        self.output_node_types = output_node_types
         self.convs = torch.nn.ModuleList()
 
         for _ in range(n_hop):
@@ -63,13 +65,20 @@ class HeteroGNN(nn.Module):
         Returns:
             聚合后的节点表示字典
         """
-        for conv in self.convs:
+        for i, conv in enumerate(self.convs):
             x_dict = conv(x_dict, edge_index_dict)
+            is_last = i == self.n_hop - 1
             new_x_dict = {}
             for node_type, x in x_dict.items():
                 if x is not None:
-                    x = F.gelu(x)
-                    x = F.dropout(x, p=self.dropout, training=self.training)
+                    needs_post = (
+                        self.output_node_types is None
+                        or node_type in self.output_node_types
+                        or not is_last
+                    )
+                    if needs_post:
+                        x = F.gelu(x)
+                        x = F.dropout(x, p=self.dropout, training=self.training)
                 new_x_dict[node_type] = x
             x_dict = new_x_dict
         return x_dict
@@ -174,12 +183,12 @@ class MoEFusion(nn.Module):
 
         e1 = self.expert1(v1_flat)
         e2 = self.expert2(v2_flat)
-        e_shared = self.expert_shared(torch.cat([v1_flat, v2_flat], dim=-1))
+        combined = torch.cat([v1_flat, v2_flat], dim=-1)
+        e_shared = self.expert_shared(combined)
 
         # Stack expert outputs: [N, 3, D]
         experts = torch.stack([e1, e2, e_shared], dim=1)
 
-        combined = torch.cat([v1_flat, v2_flat], dim=-1)
         weights = self.router(combined)  # [N, 3]
 
         # weights: [N, 3] -> [N, 3, 1]
@@ -295,6 +304,64 @@ class HDHKT(nn.Module):
 
         self.general_interaction = GeneralInteraction(hidden_dim=self.hidden_dim)
 
+        # Eval-mode graph-backbone cache.
+        self._graph_cache: dict[tuple[int, int], dict[str, torch.Tensor]] = {}
+
+    def train(self, mode: bool = True) -> "HDHKT":
+        """Enter train/eval mode, invalidating the eval GNN cache on switch."""
+        prev = self.training
+        out = super().train(mode)
+        if mode != prev:
+            self._graph_cache.clear()
+        return out
+
+    def _compute_graph_outputs(
+        self,
+        hetero_graph: Any,
+        hypergraph: Any,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Run the graph backbone.
+
+        Returns:
+            (question_conv_fused [num_questions, H], skill_hetero_conv [num_skills, H]).
+        """
+        question_hyper_conv: torch.Tensor = self.hgnn_conv(
+            self.question_embedding_hyper.weight, hypergraph
+        )
+        conv = self.hetero_conv(
+            {
+                "question": self.question_embedding.weight,
+                "skill": self.skill_embedding.weight,
+                "assignment": self.assignment_embedding.weight,
+                "template": self.template_embedding.weight,
+            },
+            hetero_graph.edge_index_dict,
+        )
+        question_hetero_conv: torch.Tensor = conv["question"]
+        skill_hetero_conv: torch.Tensor = conv["skill"]
+        question_conv_fused = self.fuse(question_hetero_conv, question_hyper_conv)
+        return question_conv_fused, skill_hetero_conv
+
+    def _cached_graph_outputs(
+        self,
+        hetero_graph: Any,
+        hypergraph: Any,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return cached eval-mode graph outputs, computing once per graph pair."""
+        key = (id(hetero_graph), id(hypergraph))
+        cached = self._graph_cache.get(key)
+        if cached is None:
+            with torch.no_grad():
+                question_conv_fused, skill_hetero_conv = self._compute_graph_outputs(
+                    hetero_graph, hypergraph
+                )
+            cached = {
+                "question_conv_fused": question_conv_fused,
+                "skill_hetero_conv": skill_hetero_conv,
+            }
+            self._graph_cache[key] = cached
+        return cached["question_conv_fused"], cached["skill_hetero_conv"]
+
     def forward(
         self,
         user_sequence: torch.Tensor,  # [B, S]
@@ -302,7 +369,7 @@ class HDHKT(nn.Module):
         user_mask: torch.Tensor,  # [B, S]
         hetero_graph: Any,  # HeteroData
         hypergraph: Any,  # dhg.Hypergraph
-        question_skill_matrix: torch.Tensor,  # [Q, K]
+        skill_ids_per_question: torch.Tensor,  # [Q, K_max] (padding_index = num_skills)
         return_states: bool = False,
     ) -> torch.Tensor:  # [B, S]
         """前向传播。
@@ -313,7 +380,8 @@ class HDHKT(nn.Module):
             user_mask: 有效位置掩码 [B, S]
             hetero_graph: 异构图数据
             hypergraph: 超图数据
-            question_skill_matrix: 问题-技能关联矩阵 [Q, K]
+            skill_ids_per_question: 预计算的每题关联技能 id 表 [Q, K_max]，
+                未用槽位填 ``num_skills``（前向时追加零向量行）
             return_states: 是否返回内部状态（用于知识状态计算）
 
         Returns:
@@ -324,28 +392,14 @@ class HDHKT(nn.Module):
         # [B, S, embedding_dim]
         answers_embedding: torch.Tensor = self.answer_embedding(user_response)
 
-        question_hyper_conv: torch.Tensor = self.hgnn_conv(
-            self.question_embedding_hyper.weight, hypergraph
-        )
-
-        conv = self.hetero_conv(
-            {
-                "question": self.question_embedding.weight,
-                "skill": self.skill_embedding.weight,
-                "assignment": self.assignment_embedding.weight,
-                "template": self.template_embedding.weight,
-            },
-            hetero_graph.edge_index_dict,
-        )
-
-        # [num_questions, embedding_dim]
-        question_hetero_conv: torch.Tensor = conv["question"]
-        # [num_skills, embedding_dim]
-        skill_hetero_conv: torch.Tensor = conv["skill"]
-
-        question_conv_fused = self.fuse(
-            question_hetero_conv, question_hyper_conv
-        )  # [num_questions, embedding_dim]
+        if self.training:
+            question_conv_fused, skill_hetero_conv = self._compute_graph_outputs(
+                hetero_graph, hypergraph
+            )
+        else:
+            question_conv_fused, skill_hetero_conv = self._cached_graph_outputs(
+                hetero_graph, hypergraph
+            )  # [num_questions, H] / [num_skills, H]
 
         question_embedding_sequence = question_conv_fused[user_sequence]
 
@@ -360,10 +414,9 @@ class HDHKT(nn.Module):
         lstm_output, _ = self.lstm(exercise_emb)
 
         # Shift to next-question sequence; last timestep is zero-padded
-        next_user_sequence = torch.zeros_like(user_sequence)  # [B, S]
-        if user_sequence.size(1) > 1:
-            next_user_sequence[:, :-1] = user_sequence[:, 1:]
-            next_user_sequence[:, -1] = 0
+        next_user_sequence = torch.cat(
+            [user_sequence[:, 1:], user_sequence.new_zeros(B, 1)], dim=1
+        )  # [B, S]
 
         # [B, S, embedding_dim]
         next_question_embedding: torch.Tensor = question_conv_fused[next_user_sequence]
@@ -381,59 +434,28 @@ class HDHKT(nn.Module):
         )  # [B, S, M+1, H]
 
         # Knowledge status = next-question features + related skill features
-        # Binary vector marking each question's related skills
-        q_skill_vectors = question_skill_matrix[
-            next_user_sequence
-        ]  # [B, S, num_skills]
-
-        # Descending sort brings the related (value=1) skill indices to the front
-        sorted_skill_indices = torch.argsort(
-            q_skill_vectors, dim=-1, descending=True
-        )  # [B, S, num_skills]
-
-        max_skills_per_question = int(q_skill_vectors.sum(dim=-1).max().item())
-        skill_counts = q_skill_vectors.sum(dim=-1).long()  # [B, S]
-
-        related_skill_ids = sorted_skill_indices[
-            ..., :max_skills_per_question
-        ].clone()  # [B, S, K]
-
-        # Pad positions with fewer than K skills using a padding index
-        device = next_user_sequence.device
-        pos = torch.arange(max_skills_per_question, device=device).view(
-            1, 1, -1
-        )  # [1,1,K]
-        valid_pos_mask = pos < skill_counts.unsqueeze(-1)  # [B, S, K]
-
-        padding_index = skill_hetero_conv.size(
-            0
-        )  # index of an appended zero-vector row
-        padding_ids = torch.full_like(related_skill_ids, padding_index)
-        related_skill_ids = torch.where(
-            valid_pos_mask, related_skill_ids, padding_ids
-        )  # [B, S, K]
+        num_skills = skill_hetero_conv.size(0)
+        k_max = skill_ids_per_question.size(-1)
+        skill_ids_full = skill_ids_per_question[next_user_sequence]  # [B, S, K_max]
+        skill_counts = (skill_ids_full != num_skills).sum(dim=-1)  # [B, S]
+        batch_k = skill_counts.max()  # 0-d tensor, kept on-device
+        k_slot_mask = (
+            torch.arange(k_max, device=skill_ids_full.device) < batch_k
+        )  # [K_max]
 
         # Append a zero-vector row so the padding index resolves to zeros
-        skill_conv_padded = torch.cat(
-            [
-                skill_hetero_conv,
-                torch.zeros(
-                    1, self.hidden_dim, device=device, dtype=skill_hetero_conv.dtype
-                ),
-            ],
-            dim=0,
-        )  # [num_skills+1, embedding_dim]
+        skill_conv_padded = F.pad(skill_hetero_conv, (0, 0, 0, 1))  # [num_skills+1, H]
 
-        # [B, S, max_skills_per_question, embedding_dim]
-        related_skill_embs = skill_conv_padded[related_skill_ids]
+        # [B, S, K_max, embedding_dim]
+        related_skill_embs = skill_conv_padded[skill_ids_full]
 
         knowledge_status = torch.cat(
             [next_question_embedding.unsqueeze(2), related_skill_embs],
             dim=2,
-        )  # [B, S, max_skills_per_question+1, embedding_dim]
+        )  # [B, S, K_max+1, embedding_dim]
 
         logits = self.general_interaction(
-            student_status, knowledge_status, user_mask
+            student_status, knowledge_status, user_mask, skill_slot_mask=k_slot_mask
         )  # [B, S]
 
         if return_states:

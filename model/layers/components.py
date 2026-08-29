@@ -135,6 +135,8 @@ class GeneralInteraction(nn.Module):
         hist_candidates: torch.Tensor,  # [B, S, M+1, H]
         next_candidates: torch.Tensor,  # [B, S, N+1, H]
         user_mask: torch.Tensor,  # [B, S]
+        skill_slot_mask: torch.Tensor
+        | None = None,  # [K] or [B, S, K], K = N_plus_1 - 1
     ) -> torch.Tensor:
         B, S, M_plus_1, H = hist_candidates.size()
         N_plus_1 = next_candidates.size(2)
@@ -169,28 +171,48 @@ class GeneralInteraction(nn.Module):
         # f: [B, S, M+1, N+1]
         attention_scores = torch.tanh(f1 + f2)  # [B, S, M+1, N+1]
 
+        # Candidate index 0 is the next-question; indices 1..N
+        # are skill slots. skill_slot_mask covers those K = N slots.
+        if skill_slot_mask is not None:
+            if skill_slot_mask.dim() == 1:  # [K] -> [1, 1, 1, N+1]
+                cand_mask = torch.cat(
+                    [
+                        torch.ones(1, dtype=torch.bool, device=skill_slot_mask.device),
+                        skill_slot_mask,
+                    ]
+                ).view(1, 1, 1, N_plus_1)
+            else:  # [B, S, K] -> [B, S, 1, N+1]
+                cand_mask = torch.cat(
+                    [
+                        torch.ones(
+                            *skill_slot_mask.shape[:2],
+                            1,
+                            dtype=torch.bool,
+                            device=skill_slot_mask.device,
+                        ),
+                        skill_slot_mask,
+                    ],
+                    dim=-1,
+                ).unsqueeze(2)
+            attention_scores = attention_scores.masked_fill(~cand_mask, -1e9)
+
         # 4. 展平并进行softmax
         attention_scores_flat = attention_scores.reshape(
             B, S, -1
         )  # [B, S, (M+1)*(N+1)]
-        logits_raw_flat = logits_raw.reshape(B, S, -1)  # [B, S, (M+1)*(N+1)]
 
         # 5. 应用用户掩码
         mask_expanded = user_mask.unsqueeze(-1)  # [B, S, 1]
-        attention_scores_flat = torch.where(
-            mask_expanded,
-            attention_scores_flat,
-            torch.full_like(attention_scores_flat, -1e9),
-        )
+        attention_scores_flat = attention_scores_flat.masked_fill(~mask_expanded, -1e9)
 
         # 6. Softmax归一化
         attention_weights = F.softmax(
             attention_scores_flat,
             dim=-1,
-        )  # [B, S, (M+1)*(N+1)]
+        ).view(B, S, M_plus_1, N_plus_1)  # [B, S, M+1, N+1]
 
         # 7. 加权求和
-        logits = torch.sum(logits_raw_flat * attention_weights, dim=-1)  # [B, S]
+        logits = torch.einsum("bsmn,bsmn->bs", logits_raw, attention_weights)  # [B, S]
 
         # 8. 应用掩码（无效位置置零）
         logits = logits * user_mask.float()

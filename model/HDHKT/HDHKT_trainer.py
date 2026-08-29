@@ -95,6 +95,7 @@ class HDHKTTrainer(BaseTrainer):
         self.hypergraph = data_dict["skill_hypergraph"]
         self.hetero_graph = data_dict["hetero_graph"]
         self.question_skill_matrix = data_dict["question_skill_matrix"]
+        self.skill_ids_per_question = data_dict["skill_ids_per_question"]
 
         from model.HDHKT.HDHKT_model import HDHKT
 
@@ -128,7 +129,9 @@ class HDHKTTrainer(BaseTrainer):
         )
         self.hetero_graph = self.hetero_graph.to(device)
         self.hypergraph = self.hypergraph.to(device)
+        _ = self.hypergraph.L_HGNN
         self.question_skill_matrix = self.question_skill_matrix.to(device)
+        self.skill_ids_per_question = self.skill_ids_per_question.to(device)
 
         return RuntimeComponents(
             model=model,
@@ -163,7 +166,7 @@ class HDHKTTrainer(BaseTrainer):
             mask,
             self.hetero_graph,
             self.hypergraph,
-            self.question_skill_matrix,
+            self.skill_ids_per_question,
         )  # [B, S]
 
         y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)

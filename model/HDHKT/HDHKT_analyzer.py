@@ -77,6 +77,7 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         self.hetero_graph = hetero_graph
         self.hypergraph = hypergraph
         self.question_skill_matrix = question_skill_matrix
+        self.skill_ids_per_question = data_dict["skill_ids_per_question"]
 
         return RuntimeComponents(model=model, val_data=val_dataset)
 
@@ -85,6 +86,7 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         self.hetero_graph = self.hetero_graph.to(device)
         self.hypergraph = self.hypergraph.to(device)
         self.question_skill_matrix = self.question_skill_matrix.to(device)
+        self.skill_ids_per_question = self.skill_ids_per_question.to(device)
 
     def forward_pass(
         self,
@@ -112,7 +114,7 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             mask,
             self.hetero_graph,
             self.hypergraph,
-            self.question_skill_matrix,
+            self.skill_ids_per_question,
             return_states=True,
         )
 
