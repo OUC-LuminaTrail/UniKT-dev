@@ -11,7 +11,6 @@ export interface TaskInfo {
   python_path: string | null
   status: string
   pid: number | null
-  exp_dir: string
   started_at: string | null
   finished_at: string | null
   exit_code: number | null

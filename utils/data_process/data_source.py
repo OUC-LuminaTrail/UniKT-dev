@@ -480,13 +480,25 @@ class DataSource(ABC):
 
         if lower_name.endswith(".zip"):
             with zipfile.ZipFile(archive_path, "r") as zf:
+                # zipfile has no extraction filter; reject members whose
+                # resolved path escapes the destination.
+                dest_root = os.path.realpath(extract_target)
+                for member in zf.namelist():
+                    member_path = os.path.realpath(os.path.join(extract_target, member))
+                    if not member_path.startswith(dest_root + os.sep):
+                        raise ValueError(
+                            f"Refusing to extract archive member outside "
+                            f"destination: {member}"
+                        )
                 zf.extractall(extract_target)
         elif lower_name.endswith((".tar.gz", ".tgz")):
             with tarfile.open(archive_path, "r:gz") as tf:
-                tf.extractall(extract_target)
+                # "data" filter (PEP 706): archive contents are untrusted, so
+                # absolute paths, ".." traversal, and special files are rejected.
+                tf.extractall(extract_target, filter="data")
         elif lower_name.endswith(".tar"):
             with tarfile.open(archive_path, "r:") as tf:
-                tf.extractall(extract_target)
+                tf.extractall(extract_target, filter="data")
         elif lower_name.endswith(".gz") and not lower_name.endswith(".tar.gz"):
             uncompressed_name = lower_name[:-3]
             target_file = os.path.join(extract_target, uncompressed_name)

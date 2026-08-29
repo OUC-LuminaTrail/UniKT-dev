@@ -23,3 +23,20 @@ SEARCH_TASK_MARKER = '%"task_kind": "optuna"%'
 HOST = "127.0.0.1"
 PORT = 8765
 GPU_CACHE_SECONDS = 2
+
+
+def read_env_file_value(key: str) -> str | None:
+    """Return a ``KEY=VALUE`` entry from the repo-root ``.env``, if present.
+
+    The vite config reads the same file (loadEnv) for KT_WEB_PORT; the backend
+    process env does not include it, so mirror the lookup here.
+    """
+    env_path = PROJECT_ROOT / ".env"
+    if not env_path.is_file():
+        return None
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith(f"{key}="):
+            value = stripped.split("=", 1)[1].strip().strip("'\"")
+            return value or None
+    return None

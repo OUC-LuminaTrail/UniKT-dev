@@ -33,11 +33,12 @@ def build_param_flags(
     Args:
         params: flat ``{field: value}`` from the frontend form.
         routes: ``{field: node}`` — node is the RunConfig node (``"data"`` /
-            ``"general"`` / ...), ``""`` or missing for flat flags.
+            ``"general"`` / ...), or ``""`` for an explicit flat flag; keys
+            missing from ``routes`` are skipped entirely.
         defaults: ``{field: default}`` — params equal to their default are skipped.
-        allow_flat_node: if True, a falsy/missing node yields a flat ``--field``
-            flag (preprocess ``--force``/``--extra``); if False, fields without a
-            node are skipped (model params are always nested under a node).
+        allow_flat_node: if True, an empty-node entry yields a flat ``--field``
+            flag (preprocess ``--force``/``--extra``); if False, flat entries
+            are skipped (model params are always nested under a node).
 
     Returns:
         A list of CLI flag strings.
@@ -45,6 +46,10 @@ def build_param_flags(
     flags: list[str] = []
     for field, value in params.items():
         node = routes.get(field)
+        if node is None:
+            # Unrouted key — never a legal CLI target; skipping keeps clients
+            # from injecting arbitrary flags such as --data_url/--config.
+            continue
         is_flat = not node
         if is_flat and not allow_flat_node:
             continue

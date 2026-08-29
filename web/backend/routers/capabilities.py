@@ -71,6 +71,13 @@ def _detect_gpu() -> CapabilitiesResponse:
     return _cached_capabilities
 
 
+def reset_cache() -> None:
+    """Forget the cached detection so the next request re-detects GPUs."""
+    global _cached_capabilities
+    with _capabilities_lock:
+        _cached_capabilities = None
+
+
 @router.get("/capabilities", response_model=CapabilitiesResponse)
 def get_capabilities():
     """Return the system's GPU capabilities.

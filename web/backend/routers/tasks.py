@@ -32,6 +32,14 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 logger = logging.getLogger(__name__)
 
+# optuna special keys steer _build_cli_args onto the search script with paths
+# only /api/search is allowed to choose. Strip them from direct task creation
+# so a client cannot point --optuna_config/--output_dir at arbitrary
+# filesystem locations.
+_RESERVED_SEARCH_KEYS = frozenset(
+    {"task_kind", "optuna_config_path", "output_dir", "metric"}
+)
+
 
 @router.post("", response_model=TaskResponse, status_code=201)
 def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manager)):
@@ -47,8 +55,9 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
     Raises:
         AppError: 500 if the task failed to launch.
     """
+    params = {k: v for k, v in body.params.items() if k not in _RESERVED_SEARCH_KEYS}
     with SessionLocal() as session:
-        dataset_name = body.params.get("dataset", "")
+        dataset_name = params.get("dataset", "")
         task = Task(
             name=body.name,
             command="",
@@ -58,7 +67,9 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
             env_name="",
             status="pending",
             tags="[]",
-            extra_params=json.dumps(body.params),
+            # Compact separators: no nested param value can then forge the
+            # LIKE marker that classifies a row as a search task.
+            extra_params=json.dumps(params, separators=(",", ":")),
             gpu_request=body.gpu,
         )
         session.add(task)
@@ -70,7 +81,7 @@ def create_task(body: TaskCreate, pm: ProcessManager = Depends(get_process_manag
         pm.launch_task(
             task_id=task_id,
             model_name=body.model_name,
-            params=body.params,
+            params=params,
             env_id=body.env_id,
             custom_python_path=body.custom_python_path,
         )

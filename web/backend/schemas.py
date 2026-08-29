@@ -43,7 +43,6 @@ class TaskResponse(BaseModel):
         python_path: Python interpreter path used.
         status: Current task status (pending, running, completed, etc.).
         pid: Process ID of the running task, or None.
-        exp_dir: Experiment output directory.
         started_at: When the task started, or None.
         finished_at: When the task finished, or None.
         exit_code: Process exit code, or None.
@@ -64,7 +63,6 @@ class TaskResponse(BaseModel):
     python_path: str | None = None
     status: str
     pid: int | None
-    exp_dir: str
     started_at: datetime | None
     finished_at: datetime | None
     exit_code: int | None

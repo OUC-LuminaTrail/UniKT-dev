@@ -4,9 +4,11 @@ Configures the FastAPI app with CORS, error handling, pagination, and registers 
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from http.client import responses
 
+from config import read_env_file_value
 from database import init_db
 from errors import AppError
 from fastapi import FastAPI
@@ -117,10 +119,19 @@ def app_error_handler(_eh, _request, exc: AppError) -> Problem:
 eh = new_exception_handler(handlers={AppError: app_error_handler})
 add_exception_handler(app, eh)
 
+# The frontend only ever calls same-origin through the Vite proxy, so the
+# browser origin is the dev/preview server itself. Restrict cross-origin
+# access to those origins: the API is unauthenticated and can launch
+# processes, so a random webpage must not be able to drive it.
+_frontend_port = (
+    os.environ.get("KT_WEB_PORT") or read_env_file_value("KT_WEB_PORT") or "5173"
+)
+_allowed_origins = [
+    f"http://{host}:{_frontend_port}" for host in ("localhost", "127.0.0.1")
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_allowed_origins,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Messages"],
