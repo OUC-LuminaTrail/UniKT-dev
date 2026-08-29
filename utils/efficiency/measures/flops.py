@@ -29,9 +29,9 @@ def count_flops(
     custom formula registered on import of :mod:`utils.efficiency.measures`, so FLOPs
     share the cuDNN config used for latency and memory.
     """
-    from torch.utils.flop_counter import FlopCounterMode
-
     try:
+        from torch.utils.flop_counter import FlopCounterMode
+
         # Grad-enabled (NOT inference_mode/no_grad): FlopCounterMode's ModuleTracker
         # fw_pre_hook registers grad hooks that read grad_fn.next_functions; under
         # inference_mode grad_fn is None -> AttributeError. Forward builds a graph
@@ -47,7 +47,7 @@ def count_flops(
         breakdown = format_breakdown(flop_counter)
         return flops, breakdown
     except Exception as e:
-        logger.warning(f"[Profile] FLOPs measurement failed (non-fatal): {e}")
+        logger.warning(f"[Profile] FLOPs measurement failed: {e}")
         return None, {}
 
 
