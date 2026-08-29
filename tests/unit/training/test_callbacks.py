@@ -261,6 +261,7 @@ class TestCheckpointCallback:
         cb = CheckpointCallback(mgr, early_stopping=None, keep_best_state=False)
         cb.on_phase_end(0, "val", 0.1, {"auc": 0.9}, trainer=_StubTrainer())
         assert cb.best_model_state is None
+        mgr.flush()  # saves are async; drain before asserting on disk
         assert (tmp_path / "best_model.pth").exists()
 
     def test_is_better_first_always_wins(self, tmp_path):
