@@ -139,6 +139,24 @@ def _load_extra_params(task_id: int) -> dict | None:
         return json.loads(task.extra_params or "{}")
 
 
+def _require_search_task(task_id: int) -> None:
+    """Raise 404 unless the id addresses a search task.
+
+    Search and training tasks share the ``tasks`` table; restrict these
+    endpoints to rows carrying the optuna marker so training ids are not
+    operable here (deleted, killed, or misread as an empty study).
+    """
+    with SessionLocal() as session:
+        found = session.execute(
+            select(Task.id).where(
+                Task.id == task_id,
+                Task.extra_params.like(SEARCH_TASK_MARKER),
+            )
+        ).first()
+    if found is None:
+        raise AppError("task_not_found", 404)
+
+
 @router.post("", response_model=TaskResponse, status_code=201)
 def create_search(
     body: SearchCreate, pm: ProcessManager = Depends(get_process_manager)
@@ -155,7 +173,10 @@ def create_search(
             env_name="",
             status="pending",
             tags="[]",
-            extra_params="{}",
+            # Marker-bearing placeholder: a failure before params are built
+            # still classifies the row as a search task instead of leaking
+            # into the training list.
+            extra_params=json.dumps({"task_kind": "optuna"}),
             gpu_request=body.gpu,
         )
         session.add(task)
@@ -249,8 +270,9 @@ def get_search(task_id: int):
     """Return a single search task by its ID.
 
     Raises:
-        AppError: 404 if the task does not exist.
+        AppError: 404 if the task does not exist or is not a search task.
     """
+    _require_search_task(task_id)
     with SessionLocal() as session:
         task = session.get(Task, task_id)
         if not task:
@@ -261,6 +283,7 @@ def get_search(task_id: int):
 @router.post("/{task_id}/stop")
 def stop_search(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     """Request a graceful stop of a running search."""
+    _require_search_task(task_id)
     stop_task_handler(pm, task_id)
     return {"status": "stopping"}
 
@@ -268,6 +291,7 @@ def stop_search(task_id: int, pm: ProcessManager = Depends(get_process_manager))
 @router.post("/{task_id}/kill")
 def kill_search(task_id: int, pm: ProcessManager = Depends(get_process_manager)):
     """Force-kill a running search."""
+    _require_search_task(task_id)
     kill_task_handler(pm, task_id)
     return {"status": "killed"}
 
@@ -282,6 +306,7 @@ def delete_search(
 
     The search output directory (study.db, trial subdirs) is preserved.
     """
+    _require_search_task(task_id)
     return delete_task_handler(
         pm, cache, task_id, TASK_LOGS_DIR, post_cleanup=_cleanup_search_artifacts
     )
@@ -292,8 +317,10 @@ def get_search_trials(task_id: int):
     """Return live trial progress read from the search's ``study.db``.
 
     Renders an empty summary when the DB is not ready yet (search not started or
-    optuna has not created it). Raises AppError 404 if the task does not exist.
+    optuna has not created it). Raises AppError 404 if the task does not exist
+    or is not a search task.
     """
+    _require_search_task(task_id)
     extra = _load_extra_params(task_id)
     if extra is None:
         raise AppError("task_not_found", 404)
@@ -312,8 +339,9 @@ def get_search_trials(task_id: int):
 def get_study_db_path(task_id: int):
     """Return the ``study.db`` path and a copy-paste optuna-dashboard command.
 
-    Raises AppError 404 if the task does not exist.
+    Raises AppError 404 if the task does not exist or is not a search task.
     """
+    _require_search_task(task_id)
     extra = _load_extra_params(task_id)
     if extra is None:
         raise AppError("task_not_found", 404)

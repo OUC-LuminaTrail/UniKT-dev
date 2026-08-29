@@ -30,7 +30,6 @@ class Task(Base):
     python_path: Mapped[str] = mapped_column(String(512), default="")
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    exp_dir: Mapped[str] = mapped_column(String(512), default="")
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)

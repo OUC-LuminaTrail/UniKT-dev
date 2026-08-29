@@ -21,6 +21,18 @@ router = APIRouter(tags=["events"])
 KEEPALIVE_SECONDS = 15.0
 
 
+def _status_snapshot() -> list[dict]:
+    """Snapshot every task and preprocess status for a new SSE subscriber."""
+    with SessionLocal() as session:
+        return [
+            {"type": "task_status", "id": t.id, "status": t.status, "pid": t.pid}
+            for t in session.query(Task).all()
+        ] + [
+            {"type": "preprocess_status", "id": p.id, "status": p.status}
+            for p in session.query(PreprocessTask).all()
+        ]
+
+
 @router.get("/api/events")
 async def events():
     """Server-sent events stream of status changes."""
@@ -31,20 +43,9 @@ async def events():
         # by id; a missed terminal status is not.
         q = event_bus.subscribe()
         try:
-            with SessionLocal() as session:
-                snapshot = [
-                    {
-                        "type": "task_status",
-                        "id": t.id,
-                        "status": t.status,
-                        "pid": t.pid,
-                    }
-                    for t in session.query(Task).all()
-                ] + [
-                    {"type": "preprocess_status", "id": p.id, "status": p.status}
-                    for p in session.query(PreprocessTask).all()
-                ]
-            for event in snapshot:
+            # The full-table read runs in a worker thread so the event loop
+            # stays free for the other SSE/HTTP/WS clients.
+            for event in await asyncio.to_thread(_status_snapshot):
                 yield f"data: {json.dumps(event)}\n\n"
 
             while True:
