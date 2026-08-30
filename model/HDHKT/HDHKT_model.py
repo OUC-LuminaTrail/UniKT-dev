@@ -198,6 +198,59 @@ class MoEFusion(nn.Module):
         return self.norm(fused).reshape(*B_shape, self.dim)
 
 
+class SumFusion(nn.Module):
+    """简单求和融合（消融 w/o-MoE (Sum)）。
+
+    两个视图直接逐元素相加，末端保留与 MoEFusion 相同的 LayerNorm 以保证可比性。
+    """
+
+    def __init__(self, dim: int, dropout: float = 0.1) -> None:
+        super().__init__()
+        self.dim = dim
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, view1: torch.Tensor, view2: torch.Tensor) -> torch.Tensor:
+        return self.norm(view1 + view2)
+
+
+class CatFusion(nn.Module):
+    """拼接融合（消融 w/o-MoE (Cat)）。
+
+    拼接两视图后经线性层投影回原维度，末端 LayerNorm 与 MoEFusion 对齐。
+    """
+
+    def __init__(self, dim: int, dropout: float = 0.1) -> None:
+        super().__init__()
+        self.dim = dim
+        self.proj = nn.Sequential(
+            nn.Linear(dim * 2, dim), nn.GELU(), nn.Dropout(dropout)
+        )
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, view1: torch.Tensor, view2: torch.Tensor) -> torch.Tensor:
+        B_shape = view1.shape[:-1]
+        fused = self.proj(torch.cat([view1, view2], dim=-1))
+        return self.norm(fused).reshape(*B_shape, self.dim)
+
+
+class WeightedFusion(nn.Module):
+    """静态权重融合（消融 w/o-MoE (Wgt)）。
+
+    仅使用一组与输入无关的可学习标量权重做加权求和（无动态路由），末端 LayerNorm。
+    """
+
+    def __init__(self, dim: int, dropout: float = 0.1) -> None:
+        super().__init__()
+        self.dim = dim
+        self.view_weights = nn.Parameter(torch.tensor([0.0, 0.0]))
+        self.norm = nn.LayerNorm(dim)
+
+    def forward(self, view1: torch.Tensor, view2: torch.Tensor) -> torch.Tensor:
+        weights = torch.softmax(self.view_weights, dim=0)
+        fused = weights[0] * view1 + weights[1] * view2
+        return self.norm(fused)
+
+
 class HDHKT(nn.Module):
     """HDHKT 主模型。
 
@@ -213,6 +266,11 @@ class HDHKT(nn.Module):
         dropout: Dropout 概率（所有层共享）
         history_neighbour: 历史邻居数量
         att_bound: 注意力边界
+        use_hetero_graph: 是否使用异构图（消融开关）
+        use_sa_relation: 是否使用 skill–assignment 关系（消融开关）
+        use_qt_relation: 是否使用 question–template 关系（消融开关）
+        use_hypergraph: 是否使用超图（消融开关）
+        fusion_mode: 视图融合策略，moe/sum/cat/wgt（消融开关）
         **kwargs: 额外的关键字参数
 
     Example:
@@ -224,7 +282,7 @@ class HDHKT(nn.Module):
     def __init__(
         self,
         data_metadata: dict[str, Any],
-        hetero_metadata: tuple[list[str], list[tuple[str, str, str]]],
+        hetero_metadata: tuple[list[str], list[tuple[str, str, str]]] | None,
         *,
         hidden_dim: int,
         n_hop: int,
@@ -233,10 +291,26 @@ class HDHKT(nn.Module):
         dropout: float,
         history_neighbour: int,
         att_bound: float,
+        use_hetero_graph: bool = True,
+        use_sa_relation: bool = True,
+        use_qt_relation: bool = True,
+        use_hypergraph: bool = True,
+        fusion_mode: str = "moe",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.data_metadata = data_metadata
+
+        # Ablation switches (all True / "moe" = the full model)
+        self.use_hetero_graph = use_hetero_graph
+        self.use_sa_relation = use_hetero_graph and use_sa_relation
+        self.use_qt_relation = use_hetero_graph and use_qt_relation
+        self.use_hypergraph = use_hypergraph
+        if fusion_mode not in ("moe", "sum", "cat", "wgt"):
+            raise ValueError(
+                f"Unknown fusion_mode '{fusion_mode}', expected one of moe/sum/cat/wgt"
+            )
+        self.fusion_mode = fusion_mode
 
         self.hidden_dim = hidden_dim
         self.lstm_layers = lstm_layers
@@ -246,20 +320,8 @@ class HDHKT(nn.Module):
             num_embeddings=data_metadata["num_questions"],
             embedding_dim=self.hidden_dim,
         )
-        self.question_embedding_hyper = torch.nn.Embedding(
-            num_embeddings=data_metadata["num_questions"],
-            embedding_dim=self.hidden_dim,
-        )
         self.skill_embedding = torch.nn.Embedding(
             num_embeddings=data_metadata["num_skills"],
-            embedding_dim=self.hidden_dim,
-        )
-        self.assignment_embedding = torch.nn.Embedding(
-            num_embeddings=data_metadata["num_assignments"],
-            embedding_dim=self.hidden_dim,
-        )
-        self.template_embedding = torch.nn.Embedding(
-            num_embeddings=data_metadata["num_templates"],
             embedding_dim=self.hidden_dim,
         )
         self.answer_embedding = torch.nn.Embedding(
@@ -268,22 +330,46 @@ class HDHKT(nn.Module):
         )
         self.embedding_dropout = torch.nn.Dropout(p=self.dropout)
 
-        self.hetero_conv = HeteroGNN(
-            embedding_dim=self.hidden_dim,
-            n_hop=n_hop,
-            heads=heads,
-            dropout=self.dropout,
-            metadata=hetero_metadata,
-        )
+        if self.use_hypergraph:
+            self.question_embedding_hyper = torch.nn.Embedding(
+                num_embeddings=data_metadata["num_questions"],
+                embedding_dim=self.hidden_dim,
+            )
+            self.hgnn_conv = HyperGNN(
+                in_ch=self.hidden_dim,
+                n_hid=self.hidden_dim,
+                n_class=self.hidden_dim,
+                dropout=self.dropout,
+            )
 
-        self.hgnn_conv = HyperGNN(
-            in_ch=self.hidden_dim,
-            n_hid=self.hidden_dim,
-            n_class=self.hidden_dim,
-            dropout=self.dropout,
-        )
+        if self.use_hetero_graph:
+            if self.use_sa_relation:
+                self.assignment_embedding = torch.nn.Embedding(
+                    num_embeddings=data_metadata["num_assignments"],
+                    embedding_dim=self.hidden_dim,
+                )
+            if self.use_qt_relation:
+                self.template_embedding = torch.nn.Embedding(
+                    num_embeddings=data_metadata["num_templates"],
+                    embedding_dim=self.hidden_dim,
+                )
+            assert hetero_metadata is not None
+            self.hetero_conv = HeteroGNN(
+                embedding_dim=self.hidden_dim,
+                n_hop=n_hop,
+                heads=heads,
+                dropout=self.dropout,
+                metadata=hetero_metadata,
+            )
 
-        self.fuse = MoEFusion(dim=self.hidden_dim, dropout=self.dropout)
+        if self.use_hetero_graph and self.use_hypergraph:
+            fusion_cls = {
+                "moe": MoEFusion,
+                "sum": SumFusion,
+                "cat": CatFusion,
+                "wgt": WeightedFusion,
+            }[fusion_mode]
+            self.fuse = fusion_cls(dim=self.hidden_dim, dropout=self.dropout)
 
         self.fc_exercise = Linear(
             self.hidden_dim * 2, self.hidden_dim, weight_initializer="uniform"
@@ -315,32 +401,54 @@ class HDHKT(nn.Module):
             self._graph_cache.clear()
         return out
 
-    def _compute_graph_outputs(
+    def compute_graph_outputs(
         self,
         hetero_graph: Any,
         hypergraph: Any,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Run the graph backbone.
+        """Run the graph backbone under the active ablation switches.
+
+        Removed components degrade as follows: no hetero graph -> skill features
+        fall back to the raw skill embedding; a single surviving view is used
+        without fusion.
 
         Returns:
-            (question_conv_fused [num_questions, H], skill_hetero_conv [num_skills, H]).
+            (question_conv_fused [num_questions, H], skill_conv [num_skills, H]).
         """
-        question_hyper_conv: torch.Tensor = self.hgnn_conv(
-            self.question_embedding_hyper.weight, hypergraph
-        )
-        conv = self.hetero_conv(
-            {
+        question_hetero_conv: torch.Tensor | None = None
+        skill_conv: torch.Tensor | None = None
+        if self.use_hetero_graph:
+            x_dict = {
                 "question": self.question_embedding.weight,
                 "skill": self.skill_embedding.weight,
-                "assignment": self.assignment_embedding.weight,
-                "template": self.template_embedding.weight,
-            },
-            hetero_graph.edge_index_dict,
-        )
-        question_hetero_conv: torch.Tensor = conv["question"]
-        skill_hetero_conv: torch.Tensor = conv["skill"]
-        question_conv_fused = self.fuse(question_hetero_conv, question_hyper_conv)
-        return question_conv_fused, skill_hetero_conv
+            }
+            if self.use_sa_relation:
+                x_dict["assignment"] = self.assignment_embedding.weight
+            if self.use_qt_relation:
+                x_dict["template"] = self.template_embedding.weight
+            conv = self.hetero_conv(x_dict, hetero_graph.edge_index_dict)
+            question_hetero_conv = conv["question"]
+            skill_conv = conv["skill"]
+
+        question_hyper_conv: torch.Tensor | None = None
+        if self.use_hypergraph:
+            question_hyper_conv = self.hgnn_conv(
+                self.question_embedding_hyper.weight, hypergraph
+            )
+
+        if question_hetero_conv is not None and question_hyper_conv is not None:
+            question_conv_fused = self.fuse(question_hetero_conv, question_hyper_conv)
+        elif question_hetero_conv is not None:
+            question_conv_fused = question_hetero_conv
+        elif question_hyper_conv is not None:
+            question_conv_fused = question_hyper_conv
+        else:
+            question_conv_fused = self.question_embedding.weight
+
+        if skill_conv is None:
+            skill_conv = self.skill_embedding.weight
+
+        return question_conv_fused, skill_conv
 
     def _cached_graph_outputs(
         self,
@@ -352,7 +460,7 @@ class HDHKT(nn.Module):
         cached = self._graph_cache.get(key)
         if cached is None:
             with torch.no_grad():
-                question_conv_fused, skill_hetero_conv = self._compute_graph_outputs(
+                question_conv_fused, skill_hetero_conv = self.compute_graph_outputs(
                     hetero_graph, hypergraph
                 )
             cached = {
@@ -393,7 +501,7 @@ class HDHKT(nn.Module):
         answers_embedding: torch.Tensor = self.answer_embedding(user_response)
 
         if self.training:
-            question_conv_fused, skill_hetero_conv = self._compute_graph_outputs(
+            question_conv_fused, skill_hetero_conv = self.compute_graph_outputs(
                 hetero_graph, hypergraph
             )
         else:

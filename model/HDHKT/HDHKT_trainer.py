@@ -26,6 +26,13 @@ class HDHKTConfig(ModelConfig):
         history_neighbour: History neighbor count.
         att_bound: Attention bound.
         num_difficulty_clusters: Number of difficulty clusters for weighted hypergraph.
+        use_hetero_graph: Ablation: use the heterogeneous graph.
+        use_sa_relation: Ablation: use the skill-assignment relation.
+        use_qt_relation: Ablation: use the question-template relation.
+        use_hypergraph: Ablation: use the difficulty-aware hypergraph.
+        use_edge_weights: Ablation: weight hyperedges by difficulty.
+        use_difficulty_clustering: Ablation: cluster questions by difficulty per skill.
+        fusion_mode: Ablation: view fusion strategy, one of moe/sum/cat/wgt.
         epochs: Number of training epochs.
         learning_rate: Learning rate for optimizer.
         lr_decay: Learning rate decay factor per epoch.
@@ -47,6 +54,14 @@ class HDHKTConfig(ModelConfig):
     history_neighbour: int = 5
     att_bound: float = 0.1
     num_difficulty_clusters: int = 5
+    # --- Ablation switches (defaults = the full model; excluded from Optuna) ---
+    use_hetero_graph: bool = True
+    use_sa_relation: bool = True
+    use_qt_relation: bool = True
+    use_hypergraph: bool = True
+    use_edge_weights: bool = True
+    use_difficulty_clustering: bool = True
+    fusion_mode: str = "moe"
     epochs: int = 120
     learning_rate: float = field(
         default=0.0003,
@@ -103,7 +118,9 @@ class HDHKTTrainer(BaseTrainer):
         m = rc.model
         model = HDHKT(
             data_metadata=data_src.get_metadata(),
-            hetero_metadata=self.hetero_graph.metadata(),
+            hetero_metadata=(
+                self.hetero_graph.metadata() if m.use_hetero_graph else None
+            ),
             hidden_dim=m.hidden_dim,
             n_hop=m.n_hop,
             heads=m.heads,
@@ -111,6 +128,11 @@ class HDHKTTrainer(BaseTrainer):
             dropout=m.dropout,
             history_neighbour=m.history_neighbour,
             att_bound=m.att_bound,
+            use_hetero_graph=m.use_hetero_graph,
+            use_sa_relation=m.use_sa_relation,
+            use_qt_relation=m.use_qt_relation,
+            use_hypergraph=m.use_hypergraph,
+            fusion_mode=m.fusion_mode,
         )
 
         loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -127,9 +149,11 @@ class HDHKTTrainer(BaseTrainer):
         device = (
             torch.device(rc.general.device) if rc.general.device else self._try_gpu()
         )
-        self.hetero_graph = self.hetero_graph.to(device)
-        self.hypergraph = self.hypergraph.to(device)
-        _ = self.hypergraph.L_HGNN
+        if self.hetero_graph is not None:
+            self.hetero_graph = self.hetero_graph.to(device)
+        if self.hypergraph is not None:
+            self.hypergraph = self.hypergraph.to(device)
+            _ = self.hypergraph.L_HGNN
         self.question_skill_matrix = self.question_skill_matrix.to(device)
         self.skill_ids_per_question = self.skill_ids_per_question.to(device)
 

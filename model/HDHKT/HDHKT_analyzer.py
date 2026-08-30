@@ -64,7 +64,7 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         m = rc.model
         model = HDHKT(
             data_metadata=data_src.get_metadata(),
-            hetero_metadata=hetero_graph.metadata(),
+            hetero_metadata=(hetero_graph.metadata() if m.use_hetero_graph else None),
             hidden_dim=m.hidden_dim,
             n_hop=m.n_hop,
             heads=m.heads,
@@ -72,6 +72,11 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             dropout=m.dropout,
             history_neighbour=m.history_neighbour,
             att_bound=m.att_bound,
+            use_hetero_graph=m.use_hetero_graph,
+            use_sa_relation=m.use_sa_relation,
+            use_qt_relation=m.use_qt_relation,
+            use_hypergraph=m.use_hypergraph,
+            fusion_mode=m.fusion_mode,
         )
 
         self.hetero_graph = hetero_graph
@@ -83,8 +88,10 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
 
     def on_device(self, device: torch.device) -> None:
         """Move graph structures and matrices to the inference device."""
-        self.hetero_graph = self.hetero_graph.to(device)
-        self.hypergraph = self.hypergraph.to(device)
+        if self.hetero_graph is not None:
+            self.hetero_graph = self.hetero_graph.to(device)
+        if self.hypergraph is not None:
+            self.hypergraph = self.hypergraph.to(device)
         self.question_skill_matrix = self.question_skill_matrix.to(device)
         self.skill_ids_per_question = self.skill_ids_per_question.to(device)
 
@@ -263,22 +270,11 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
         """Build fused question representations and exercise embeddings."""
         answers_embedding = self.model.answer_embedding(response)
 
-        question_hyper_conv = self.model.hgnn_conv(
-            self.model.question_embedding_hyper.weight, self.hypergraph
+        # Reuse the model's graph backbone so ablation switches apply identically
+        # to the inference path.
+        question_conv_fused, _ = self.model.compute_graph_outputs(
+            self.hetero_graph, self.hypergraph
         )
-
-        conv = self.model.hetero_conv(
-            {
-                "question": self.model.question_embedding.weight,
-                "skill": self.model.skill_embedding.weight,
-                "assignment": self.model.assignment_embedding.weight,
-                "template": self.model.template_embedding.weight,
-            },
-            self.hetero_graph.edge_index_dict,
-        )
-        question_hetero_conv = conv["question"]
-
-        question_conv_fused = self.model.fuse(question_hetero_conv, question_hyper_conv)
         question_embedding_sequence = question_conv_fused[sequence]
 
         exercise_emb = torch.cat(

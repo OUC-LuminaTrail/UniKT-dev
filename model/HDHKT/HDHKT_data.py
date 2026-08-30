@@ -71,34 +71,49 @@ class HDHKTModelData(QuestionModelData):
             question_skill_matrix, padding_index=num_skills
         )
 
-        skill_hypergraph = self.build_difficulty_weighted_hypergraph(
-            ("question", "has", "skill"),
-            num_difficulty_clusters=rc.model.num_difficulty_clusters,
-        )
+        if rc.model.use_hypergraph:
+            skill_hypergraph = self.build_difficulty_weighted_hypergraph(
+                ("question", "has", "skill"),
+                num_difficulty_clusters=rc.model.num_difficulty_clusters,
+                use_difficulty_clustering=rc.model.use_difficulty_clustering,
+                use_edge_weights=rc.model.use_edge_weights,
+            )
 
-        logger.debug(
-            f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)"
-        )
+            logger.debug(
+                f"  - Primary hypergraph: Difficulty-weighted hypergraph ({skill_hypergraph.num_e} hyperedges)"
+            )
+        else:
+            skill_hypergraph = None
+            logger.debug("  - Hypergraph disabled (ablation)")
 
-        hetero_graph = self.build_hetero_graph(
-            [
+        if rc.model.use_hetero_graph:
+            edge_types = [
                 (
                     "question",
                     "has",
                     "skill",
                 ),
-                (
-                    "skill",
-                    "related_to",
-                    "assignment",
-                ),
-                (
-                    "question",
-                    "belongs_to",
-                    "template",
-                ),
             ]
-        )
+            if rc.model.use_sa_relation:
+                edge_types.append(
+                    (
+                        "skill",
+                        "related_to",
+                        "assignment",
+                    )
+                )
+            if rc.model.use_qt_relation:
+                edge_types.append(
+                    (
+                        "question",
+                        "belongs_to",
+                        "template",
+                    )
+                )
+            hetero_graph = self.build_hetero_graph(edge_types)
+        else:
+            hetero_graph = None
+            logger.debug("  - Heterogeneous graph disabled (ablation)")
 
         if fold_idx is not None:
             kfold_n_splits = self.data_src.get_metadata("kfold_n_splits")
@@ -162,6 +177,8 @@ class HDHKTModelData(QuestionModelData):
         edge_type: tuple[str, str, str],
         vertex_type: str = None,
         num_difficulty_clusters: int = 3,
+        use_difficulty_clustering: bool = True,
+        use_edge_weights: bool = True,
     ):
         """
         构建基于难度加权的超图
@@ -176,6 +193,10 @@ class HDHKTModelData(QuestionModelData):
                       例如: ('question', 'has', 'skill')
             vertex_type: 顶点类型（可选），默认使用 edge_type 的第一个元素
             num_difficulty_clusters: 难度聚类数量，默认为3
+            use_difficulty_clustering: 是否进行难度感知聚类（消融开关）；
+                关闭时每个技能退化为一条普通超边，权重取该技能下题目平均难度
+            use_edge_weights: 是否启用超边难度权重（消融开关）；
+                关闭时所有超边权重为 1
 
         返回:
             tuple: (hypergraph, edge_weights)
@@ -218,66 +239,82 @@ class HDHKTModelData(QuestionModelData):
         logger.debug(
             f"Building difficulty-weighted {hyperedge_node_type} hypergraph..."
         )
-        for hyperedge_idx, vertices in tqdm(
-            edge_dict.items(), desc=f"Clustering {hyperedge_node_type} by difficulty"
-        ):
-            if len(vertices) == 0:
-                continue
 
-            # 获取这些题目的难度分数
-            difficulties = np.array(
-                [difficulty_scores.get(v, 0.5) for v in vertices]
-            ).reshape(-1, 1)
+        if not use_difficulty_clustering:
+            # Ablation w/o clustering: one plain hyperedge per skill, weighted by
+            # the mean difficulty of its questions (all-1 when weights are off).
+            e_list = [vertices for vertices in edge_dict.values() if len(vertices) > 0]
+            if use_edge_weights:
+                edge_weights = [
+                    float(np.mean([difficulty_scores.get(v, 0.5) for v in vertices]))
+                    for vertices in e_list
+                ]
+            else:
+                edge_weights = [1.0] * len(e_list)
+        else:
+            for hyperedge_idx, vertices in tqdm(
+                edge_dict.items(),
+                desc=f"Clustering {hyperedge_node_type} by difficulty",
+            ):
+                if len(vertices) == 0:
+                    continue
 
-            # 如果题目数量少于聚类数，每个题目单独成簇
-            if len(vertices) < num_difficulty_clusters:
-                for v in vertices:
-                    e_list.append([v])
-                    edge_weights.append(1.0)
-                continue
+                # 获取这些题目的难度分数
+                difficulties = np.array(
+                    [difficulty_scores.get(v, 0.5) for v in vertices]
+                ).reshape(-1, 1)
 
-            try:
-                kmeans = KMeans(
-                    n_clusters=min(num_difficulty_clusters, len(vertices)),
-                    random_state=42,
-                    n_init=10,
-                )
-                cluster_labels = kmeans.fit_predict(difficulties)
+                # 如果题目数量少于聚类数，每个题目单独成簇
+                if len(vertices) < num_difficulty_clusters:
+                    for v in vertices:
+                        e_list.append([v])
+                        edge_weights.append(1.0)
+                    continue
 
-                # Collect cluster info for sorting by difficulty
-                current_skill_clusters = []
-
-                for cluster_id in range(kmeans.n_clusters):
-                    cluster_vertices = [
-                        vertices[i]
-                        for i in range(len(vertices))
-                        if cluster_labels[i] == cluster_id
-                    ]
-
-                    if len(cluster_vertices) == 0:
-                        continue
-
-                    # Edge weight = mean difficulty of questions in this cluster
-                    cluster_difficulties = difficulties[cluster_labels == cluster_id]
-                    avg_difficulty = float(np.mean(cluster_difficulties))
-
-                    current_skill_clusters.append(
-                        {
-                            "vertices": cluster_vertices,
-                            "weight": avg_difficulty,
-                            "avg_difficulty": avg_difficulty,
-                        }
+                try:
+                    kmeans = KMeans(
+                        n_clusters=min(num_difficulty_clusters, len(vertices)),
+                        random_state=42,
+                        n_init=10,
                     )
+                    cluster_labels = kmeans.fit_predict(difficulties)
 
-                current_skill_clusters.sort(key=lambda x: x["avg_difficulty"])
+                    # Collect cluster info for sorting by difficulty
+                    current_skill_clusters = []
 
-                for cluster in current_skill_clusters:
-                    e_list.append(cluster["vertices"])
-                    edge_weights.append(cluster["weight"])
+                    for cluster_id in range(kmeans.n_clusters):
+                        cluster_vertices = [
+                            vertices[i]
+                            for i in range(len(vertices))
+                            if cluster_labels[i] == cluster_id
+                        ]
 
-            except Exception:
-                e_list.append(vertices)
-                edge_weights.append(1.0)
+                        if len(cluster_vertices) == 0:
+                            continue
+
+                        # Edge weight = mean difficulty of questions in this cluster
+                        cluster_difficulties = difficulties[
+                            cluster_labels == cluster_id
+                        ]
+                        avg_difficulty = float(np.mean(cluster_difficulties))
+
+                        current_skill_clusters.append(
+                            {
+                                "vertices": cluster_vertices,
+                                "weight": avg_difficulty,
+                                "avg_difficulty": avg_difficulty,
+                            }
+                        )
+
+                    current_skill_clusters.sort(key=lambda x: x["avg_difficulty"])
+
+                    for cluster in current_skill_clusters:
+                        e_list.append(cluster["vertices"])
+                        edge_weights.append(cluster["weight"])
+
+                except Exception:
+                    e_list.append(vertices)
+                    edge_weights.append(1.0)
 
         if len(e_list) == 0:
             logger.warning("No hyperedges found. Creating self-loop hypergraph.")
@@ -289,7 +326,9 @@ class HDHKTModelData(QuestionModelData):
         )
 
         hypergraph = Hypergraph(
-            num_v=num_vertices, e_list=e_list, e_weight=edge_weights
+            num_v=num_vertices,
+            e_list=e_list,
+            e_weight=edge_weights if use_edge_weights else None,
         )
 
         logger.debug(
