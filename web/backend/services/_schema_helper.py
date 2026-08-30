@@ -13,13 +13,28 @@ choices, ...}``, so model configs and preprocess configs share one path.
 """
 
 import json
+import re
 import sys
 import typing
 from dataclasses import MISSING, fields
 
-from docstring_parser import parse
-
 sys.path.insert(0, ".")
+
+# docstring-parser is declared only at workspace level, so environments built
+# with ``no-default-feature`` (dhg-gpu / dhg-cpu) and custom interpreters lack
+# it. Schema reflection must still run there — hence the fallback parser.
+try:
+    from docstring_parser import parse as _parse_docstring
+except ImportError:
+    _parse_docstring = None
+
+_SECTION_RE = re.compile(r"^(Args|Attributes):$")
+# Other Google-style sections that terminate an Args/Attributes block even
+# when indented like an entry (e.g. a trailing "Note:" paragraph).
+_ENTRY_STOP_RE = re.compile(
+    r"^(Note|Notes|Returns|Raises|Examples?|Yields|Warnings?|See Also|References):"
+)
+_PARAM_RE = re.compile(r"^(\w+)(?:\s*\([^)]*\))?\s*:\s*(.*)$")
 
 
 def _base_type(tp):
@@ -76,13 +91,66 @@ def _field_spec(f, help_map=None):
     }
 
 
+def _fallback_docstring_helps(doc: str) -> dict[str, str]:
+    """Extract ``{name: description}`` from Google-style Args/Attributes sections.
+
+    Covers the entry forms used in this repo: ``name: desc`` and
+    ``name (type): desc`` with deeper-indented continuation lines joined by
+    newlines, matching docstring_parser's Google-style output.
+    """
+    helps: dict[str, str] = {}
+    lines = doc.splitlines()
+    i = 0
+    while i < len(lines):
+        if not _SECTION_RE.match(lines[i].strip()):
+            i += 1
+            continue
+        i += 1
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            if not stripped:
+                i += 1
+                continue
+            if not line[0].isspace():
+                break  # section ended (section header or summary text)
+            if _ENTRY_STOP_RE.match(stripped):
+                break
+            m = _PARAM_RE.match(stripped)
+            if m is None:
+                i += 1
+                continue
+            base_indent = len(line) - len(line.lstrip())
+            name, parts = m.group(1), [m.group(2).strip()]
+            i += 1
+            while i < len(lines):
+                cont = lines[i]
+                s = cont.strip()
+                if not s or (len(cont) - len(cont.lstrip())) <= base_indent:
+                    break
+                parts.append(s)
+                i += 1
+            text = "\n".join(parts).strip("\n")
+            if text:
+                helps[name] = text
+    return helps
+
+
 def _parse_docstring_helps(cls: type) -> dict[str, str]:
     """Extract ``{field_name: help_text}`` from the class docstring Args: section.
 
-    Delegates to ``docstring_parser`` (Google/NumPy/Sphinx, multi-line).
+    Delegates to ``docstring_parser`` (Google/NumPy/Sphinx, multi-line) when
+    installed; otherwise falls back to a minimal Google-style parser so
+    environments without the package still expose parameter helps.
     """
-    doc = parse(cls.__doc__ or "")
-    return {p.arg_name: p.description for p in doc.params if p.description}
+    doc = cls.__doc__ or ""
+    if _parse_docstring is not None:
+        return {
+            p.arg_name: p.description
+            for p in _parse_docstring(doc).params
+            if p.description
+        }
+    return _fallback_docstring_helps(doc)
 
 
 def reflect_group(group_name, node, cls, only=None, skip=None):
