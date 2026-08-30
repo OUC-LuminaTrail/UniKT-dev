@@ -7,7 +7,12 @@ variable (default: INFO).
 A shared file sink can be registered via :func:`add_file_handler`. Entry
 scripts (``train.py``, ``evaluate.py``, ``case_analysis.py``, ...) call it
 manually with the run directory, so every framework logger writes to the
-run's log file alongside the console output.
+run's log file alongside the console output. While the sink is registered,
+``warnings.warn`` output from the owning process is forwarded to both the
+original warning hook and the same file as WARNING records. Forked workers
+intentionally keep their own warning path instead of inheriting a shared
+file sink, because a regular ``FileHandler`` cannot be rotated safely across
+processes.
 
 Usage:
     from utils.core import get_logger
@@ -28,6 +33,8 @@ Log Format:
 
 import logging
 import os
+import warnings
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -37,10 +44,17 @@ from rich.logging import RichHandler
 _loggers: dict = {}
 
 # Shared file sink, appended to every framework logger when set. Forked
-# DataLoader workers inherit it but stay silent on their hot path
-# (Dataset.__getitem__ / collate do not log), so there is no interleaving.
-# Revisit if worker-side logging is ever added.
+# DataLoader workers inherit the handler, but the warning hook is removed in
+# the child process so worker warnings do not write to a stale parent sink.
 _file_handler: logging.FileHandler | None = None
+
+# Keep captured warning records on a private, non-registered logger. Using the
+# stdlib ``py.warnings`` logger directly would mutate host applications'
+# levels, handlers, and root propagation settings.
+_warning_logger = logging.Logger("py.warnings")
+_warning_logger.propagate = False
+_warning_previous_showwarning: Callable[..., None] | None = None
+_warning_capture_active = False
 
 
 def _get_log_level_from_env() -> int:
@@ -90,6 +104,65 @@ def _detach_from_all(handler: logging.Handler) -> None:
             lg.removeHandler(handler)
 
 
+def _detach_warning_handler(handler: logging.Handler) -> None:
+    """Detach the private warning sink without touching host loggers."""
+    if handler in _warning_logger.handlers:
+        _warning_logger.removeHandler(handler)
+
+
+def _warning_showwarning(
+    message,
+    category,
+    filename,
+    lineno,
+    file=None,
+    line=None,
+) -> None:
+    """Forward a warning to the prior hook and the active file sink."""
+    previous = _warning_previous_showwarning
+    if previous is not None and previous is not _warning_showwarning:
+        previous(message, category, filename, lineno, file, line)
+
+    # The prior hook remains responsible for stderr or an explicitly supplied
+    # file. Only the normal warning path is duplicated into the run log.
+    if file is None and _warning_capture_active and _file_handler is not None:
+        _warning_logger.warning(
+            "%s",
+            warnings.formatwarning(message, category, filename, lineno, line),
+        )
+
+
+def _install_warning_capture() -> None:
+    """Install the warning hook while preserving the current hook."""
+    global _warning_capture_active, _warning_previous_showwarning
+    if warnings.showwarning is not _warning_showwarning:
+        _warning_previous_showwarning = warnings.showwarning
+        warnings.showwarning = _warning_showwarning
+    _warning_capture_active = True
+
+
+def _restore_warning_capture() -> None:
+    """Restore the prior warning hook when it is still ours."""
+    global _warning_capture_active, _warning_previous_showwarning
+    if not _warning_capture_active:
+        return
+    if warnings.showwarning is _warning_showwarning:
+        warnings.showwarning = _warning_previous_showwarning
+    _warning_previous_showwarning = None
+    _warning_capture_active = False
+
+
+def _disable_warning_capture_after_fork() -> None:
+    """Keep forked workers from writing warnings to the parent's sink."""
+    _restore_warning_capture()
+    if _file_handler is not None:
+        _warning_logger.removeHandler(_file_handler)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_disable_warning_capture_after_fork)
+
+
 def _write_session_header(handler: logging.FileHandler) -> None:
     """Prefix this session with a separator header.
 
@@ -111,7 +184,11 @@ def add_file_handler(log_path: str | Path) -> Path:
     Any previously attached file handler is detached and closed first, so a
     second call (e.g. a new run directory in a kfold loop) switches the sink.
     The handler is appended to every framework logger; loggers created
-    afterwards pick it up via :func:`get_logger`.
+    afterwards pick it up via :func:`get_logger`. :func:`warnings.warn`
+    output from this process is forwarded to the prior warning hook and
+    captured into the file as WARNING records as well. Child processes keep
+    their inherited warning hook disabled to avoid stale or unsynchronized
+    writes to the parent's file sink.
 
     Args:
         log_path: Destination file path (parent dirs created as needed).
@@ -140,9 +217,14 @@ def add_file_handler(log_path: str | Path) -> Path:
 
     if old_handler is not None:
         _detach_from_all(old_handler)
+        _detach_warning_handler(old_handler)
         old_handler.close()
 
     _file_handler = handler
+    _warning_logger.setLevel(handler.level)
+    if handler not in _warning_logger.handlers:
+        _warning_logger.addHandler(handler)
+    _install_warning_capture()
     for lg in _all_framework_loggers():
         if handler not in lg.handlers:
             lg.addHandler(handler)
@@ -150,13 +232,21 @@ def add_file_handler(log_path: str | Path) -> Path:
 
 
 def remove_file_handler() -> None:
-    """Detach and close the shared file handler, if any."""
+    """Detach and close the shared file handler, if any.
+
+    The warning hook is restored only when it is still owned by this module;
+    an external replacement made while the sink was active is left intact.
+    """
     global _file_handler
+    _restore_warning_capture()
     if _file_handler is None:
         return
-    _detach_from_all(_file_handler)
-    _file_handler.close()
+    handler = _file_handler
+    _detach_from_all(handler)
+    _detach_warning_handler(handler)
+    handler.close()
     _file_handler = None
+    _warning_logger.setLevel(logging.NOTSET)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -223,6 +313,7 @@ def set_log_level(level: int) -> None:
     os.environ["LOG_LEVEL"] = logging.getLevelName(level)
     if _file_handler is not None:
         _file_handler.setLevel(level)
+        _warning_logger.setLevel(level)
     for logger in _all_framework_loggers():
         logger.setLevel(level)
         for handler in logger.handlers:
