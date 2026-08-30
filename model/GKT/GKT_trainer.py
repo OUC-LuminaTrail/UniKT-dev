@@ -73,6 +73,8 @@ class GKTConfig(ModelConfig):
         embedding_dim: Embedding dimension of the model.
         dropout: Dropout probability.
         graph_type: Graph type for GKT model.
+        use_gradient_checkpointing: Use per-timestep gradient checkpointing during
+            training (extra recompute in backward for large activation-memory savings).
         epochs: Number of training epochs.
         learning_rate: Learning rate for optimizer.
         lr_decay: Learning rate decay factor per epoch.
@@ -93,6 +95,7 @@ class GKTConfig(ModelConfig):
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
     )
     graph_type: Literal["dense", "transition"] = "dense"
+    use_gradient_checkpointing: bool = False
     epochs: int = 150
     learning_rate: float = field(
         default=0.001,
@@ -147,6 +150,7 @@ class GKTTrainer(BaseTrainer):
             graph_type=m.graph_type,
             graph=graph,
             dropout=m.dropout,
+            use_gradient_checkpointing=m.use_gradient_checkpointing,
         )
 
         loss_fn = torch.nn.BCELoss()
