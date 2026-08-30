@@ -7,7 +7,9 @@ variable (default: INFO).
 A shared file sink can be registered via :func:`add_file_handler`. Entry
 scripts (``train.py``, ``evaluate.py``, ``case_analysis.py``, ...) call it
 manually with the run directory, so every framework logger writes to the
-run's log file alongside the console output.
+run's log file alongside the console output. While the sink is registered,
+``warnings.warn`` output (third-party libraries included) is captured into
+the same file as WARNING records.
 
 Usage:
     from utils.core import get_logger
@@ -80,6 +82,11 @@ def _all_framework_loggers() -> list[logging.Logger]:
         if any(isinstance(h, RichHandler) for h in lg.handlers):
             seen.add(id(lg))
             targets.append(lg)
+    # The captureWarnings target carries no RichHandler; match by name.
+    py_warnings = logging.Logger.manager.loggerDict.get("py.warnings")
+    if isinstance(py_warnings, logging.Logger) and id(py_warnings) not in seen:
+        seen.add(id(py_warnings))
+        targets.append(py_warnings)
     return targets
 
 
@@ -111,7 +118,8 @@ def add_file_handler(log_path: str | Path) -> Path:
     Any previously attached file handler is detached and closed first, so a
     second call (e.g. a new run directory in a kfold loop) switches the sink.
     The handler is appended to every framework logger; loggers created
-    afterwards pick it up via :func:`get_logger`.
+    afterwards pick it up via :func:`get_logger`. :func:`warnings.warn`
+    output is captured into the file as WARNING records as well.
 
     Args:
         log_path: Destination file path (parent dirs created as needed).
@@ -142,6 +150,11 @@ def add_file_handler(log_path: str | Path) -> Path:
         _detach_from_all(old_handler)
         old_handler.close()
 
+    # Route warnings.warn() (third-party libraries included) into the sink.
+    logging.captureWarnings(True)
+    py_warnings = logging.getLogger("py.warnings")
+    py_warnings.setLevel(_get_log_level_from_env())
+
     _file_handler = handler
     for lg in _all_framework_loggers():
         if handler not in lg.handlers:
@@ -150,13 +163,17 @@ def add_file_handler(log_path: str | Path) -> Path:
 
 
 def remove_file_handler() -> None:
-    """Detach and close the shared file handler, if any."""
+    """Detach and close the shared file handler, if any.
+
+    Also disables warning capture.
+    """
     global _file_handler
     if _file_handler is None:
         return
     _detach_from_all(_file_handler)
     _file_handler.close()
     _file_handler = None
+    logging.captureWarnings(False)
 
 
 def get_logger(name: str) -> logging.Logger:

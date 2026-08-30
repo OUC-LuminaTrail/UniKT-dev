@@ -2,6 +2,7 @@
 
 import logging
 import os
+import warnings
 
 import pytest
 from rich.logging import RichHandler
@@ -167,6 +168,52 @@ class TestLevelHandling:
         finally:
             remove_file_handler()
             set_log_level(logging.INFO)
+
+
+# --- warnings capture ---
+
+
+class TestWarningsCapture:
+    def test_warning_written_to_file_sink(self, isolated_loggers, tmp_path):
+        target = tmp_path / "run.log"
+        add_file_handler(target)
+        try:
+            with warnings.catch_warnings():
+                # Bypass the default once-per-location warning filter.
+                warnings.simplefilter("always")
+                warnings.warn("third-party style warning", RuntimeWarning)
+            content = target.read_text(encoding="utf-8")
+            assert "third-party style warning" in content
+            assert "WARNING" in content
+        finally:
+            remove_file_handler()
+
+    def test_remove_restores_native_warnings_path(self, isolated_loggers, tmp_path):
+        native_showwarning = warnings.showwarning
+        add_file_handler(tmp_path / "run.log")
+        assert warnings.showwarning is not native_showwarning
+        remove_file_handler()
+        assert warnings.showwarning is native_showwarning
+
+    def test_re_attach_moves_warnings_sink(self, isolated_loggers, tmp_path):
+        first = tmp_path / "first.log"
+        second = tmp_path / "second.log"
+        add_file_handler(first)
+        with warnings.catch_warnings():
+            warnings.simplefilter("always")
+            warnings.warn("warning to first", UserWarning)
+        add_file_handler(second)
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("always")
+                warnings.warn("warning to second", UserWarning)
+            first_content = first.read_text(encoding="utf-8")
+            second_content = second.read_text(encoding="utf-8")
+            assert "warning to first" in first_content
+            assert "warning to second" not in first_content
+            assert "warning to second" in second_content
+        finally:
+            remove_file_handler()
 
 
 # --- reset ---
