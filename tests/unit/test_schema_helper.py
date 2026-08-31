@@ -326,23 +326,27 @@ class TestExtractorRobustness:
         with pytest.raises(KeyError):
             sx.get_preprocess_schema("process")
 
-    def test_colliding_noise_envelope_does_not_overwrite(self, extractor, monkeypatch):
-        # First-wins dispatch: a dependency's colliding {"type": "models"}
-        # line printed after the real envelope must not replace it.
+    def test_colliding_noise_envelope_before_real_recovers(
+        self, extractor, monkeypatch
+    ):
+        # The helper's imports run before it prints anything, so a colliding
+        # dependency line realistically lands BEFORE the real envelope;
+        # last-wins keeps the real one (matches main).
         sx = extractor[1]
-        real = '{"type": "models", "data": ["M"]}\n'
         fake = '{"type": "models", "data": ["FAKE"]}\n'
+        real = '{"type": "models", "data": ["M"]}\n'
         monkeypatch.setattr(
             "subprocess.run",
-            lambda *a, **k: self._fake_run_result(real + fake),
+            lambda *a, **k: self._fake_run_result(fake + real),
         )
         assert sx.list_models() == ["M"]
 
-    def test_all_models_errored_is_failure_not_empty_success(
-        self, extractor, monkeypatch
+    def test_all_models_errored_degrades_once_with_log(
+        self, extractor, monkeypatch, caplog
     ):
         # Every model in an error envelope (e.g. a framework default turned
-        # non-JSON-serializable) must not cache an empty model list silently.
+        # non-JSON-serializable): the empty list is cached with a loud log
+        # line instead of re-running the subprocess per request.
         sx = extractor[1]
         out = (
             '{"type": "models", "data": ["A", "B"]}\n'
@@ -352,8 +356,23 @@ class TestExtractorRobustness:
         monkeypatch.setattr(
             "subprocess.run", lambda *a, **k: self._fake_run_result(out)
         )
-        assert sx.list_models() == []
-        assert sx._loaded is False  # failure, not a cached empty success
+        with caplog.at_level(logging.ERROR, logger=extractor[0].__name__):
+            assert sx.list_models() == []
+        assert sx._loaded is True  # degraded once and cached, no retry storm
+        assert any("every model" in r.message for r in caplog.records)
+
+    def test_framework_error_envelope_keeps_model_list(self, extractor, monkeypatch):
+        # A framework reflection failure emits one error envelope keyed on
+        # None; the model list (printed before it) must still be served.
+        sx = extractor[1]
+        out = (
+            '{"type": "models", "data": ["A"]}\n'
+            '{"type": "error", "model": null, "error": "boom"}\n'
+        )
+        monkeypatch.setattr(
+            "subprocess.run", lambda *a, **k: self._fake_run_result(out)
+        )
+        assert sx.list_models() == ["A"]
 
     def test_waiter_does_not_serially_retry_failed_extraction(
         self, extractor, monkeypatch
@@ -432,10 +451,14 @@ class TestExtractorRobustness:
             return self._fake_run_result(good)
 
         monkeypatch.setattr("subprocess.run", slow_run)
-        result_box = {}
+        outcome = {}
 
         def extract():
-            result_box["groups"] = sx.get_preprocess_schema("process")
+            try:
+                sx.get_preprocess_schema("process")
+                outcome["result"] = "ok"
+            except KeyError:
+                outcome["result"] = "miss"
 
         t = threading.Thread(target=extract)
         t.start()
@@ -443,9 +466,10 @@ class TestExtractorRobustness:
         sx.reset_cache()  # invalidate while the subprocess is "running"
         release.set()
         t.join(timeout=10)
-        # Extraction returned data but the cache must not hold the stale
-        # pre-reset result (a fresh extraction would be required instead).
+        # The raced result is neither cached NOR served — the leader sees the
+        # same miss its waiters would, and a fresh request re-extracts.
         assert sx._preprocess_schemas.get("process") is None
+        assert outcome["result"] == "miss"
 
     def test_preprocess_single_flight(self, extractor, monkeypatch):
         # Concurrent misses for one action share a single subprocess.

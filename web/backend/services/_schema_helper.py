@@ -22,10 +22,13 @@ from pathlib import Path
 # Every pixi environment declares docstring-parser (workspace level plus the
 # dhg feature); the remaining package-less audiences are wizard-configured
 # conda/custom interpreters. Schema reflection must still run there — hence
-# the fallback parser.
+# the fallback parser. Exception, not just ImportError: a corrupt install
+# (SyntaxError) must degrade to the fallback too, and since schema_extractor
+# imports this module for DEGRADED_MARKER, a narrow catch would let a broken
+# package take the whole backend down at boot.
 try:
     from docstring_parser import parse as _parse_docstring
-except ImportError:
+except Exception:
     _parse_docstring = None
 
 _SECTION_RE = re.compile(r"^(Args|Arguments|Attributes|Parameters|Params):$")
@@ -236,26 +239,29 @@ def _emit_models():
     from utils.core import MODEL_CONFIGS, get_supported_models
 
     # Fixed framework groups, in display order: (group_name, RunConfig node, dataclass).
-    # Reflected lazily ONCE — every model's schema embeds the same immutable
-    # groups — but inside the per-model try so a framework-config reflection
-    # error degrades per-model instead of aborting the whole helper.
-    framework_specs = (
-        ("general", "general", GeneralConfig),
-        ("compile", "compile", CompileConfig),
-        ("early_stopping", "early_stopping", EarlyStoppingConfig),
-        ("data", "data", RunDataConfig),
-    )
-    framework_groups: list[dict] | None = None
-
+    # Reflected exactly once, BEFORE the per-model loop: a deterministic
+    # framework-config failure emits a single error envelope and stops — no
+    # per-model re-reflection of the same failing classes. The models
+    # envelope is already printed, so the model list still reaches the
+    # extractor (an error keyed on None matches no model name).
     models = get_supported_models()
     print(json.dumps({"type": "models", "data": models}))
+    try:
+        framework_groups = [
+            reflect_group(name, node, cls)
+            for name, node, cls in (
+                ("general", "general", GeneralConfig),
+                ("compile", "compile", CompileConfig),
+                ("early_stopping", "early_stopping", EarlyStoppingConfig),
+                ("data", "data", RunDataConfig),
+            )
+        ]
+    except Exception as e:
+        print(json.dumps({"type": "error", "model": None, "error": str(e)}))
+        return
+
     for model_name in models:
         try:
-            if framework_groups is None:
-                framework_groups = [
-                    reflect_group(name, node, cls)
-                    for name, node, cls in framework_specs
-                ]
             model_cls = MODEL_CONFIGS.get(model_name)
             groups = [*framework_groups, reflect_group(model_name, "model", model_cls)]
             print(json.dumps({"type": "schema", "model": model_name, "data": groups}))

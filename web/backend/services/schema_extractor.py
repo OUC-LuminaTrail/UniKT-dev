@@ -134,19 +134,21 @@ class SchemaExtractor:
         all_models: list[str] | None = None
         errored: set[str] = set()
         schemas: dict[str, list[dict]] = {}
-        # .get payload guards + first-wins dispatch: dependencies may print
-        # bare JSON to stdout during the helper's imports, and a noise dict
-        # with a colliding "type" must not overwrite the real envelope. The
-        # helper protocol emits each envelope once, so first-wins is exact.
+        # .get payload guards: dependencies may print bare JSON to stdout
+        # during the helper's imports, and subscripts on a noise dict whose
+        # "type" collides would raise out of _extract. Last-wins assignment
+        # (matching main): the helper's imports run before it prints, so a
+        # colliding noise line realistically lands BEFORE the real envelope
+        # and last-wins keeps the real one.
         for entry in _iter_envelopes(result):
             etype = entry.get("type")
             if etype == "models":
                 data = entry.get("data")
-                if all_models is None and isinstance(data, list):
+                if isinstance(data, list):
                     all_models = data
             elif etype == "schema":
                 model, data = entry.get("model"), entry.get("data")
-                if model and model not in schemas and isinstance(data, list):
+                if model and isinstance(data, list):
                     schemas[model] = data
             elif etype == "error":
                 model = entry.get("model")
@@ -161,13 +163,13 @@ class SchemaExtractor:
             return None
         if errored and set(all_models) <= errored:
             # Every model errored (e.g. a framework-config default turned
-            # non-JSON-serializable): treat as failure, not an empty success
-            # that would be cached silently.
+            # non-JSON-serializable). Commit the empty result with a loud
+            # log line rather than failing uncached — an uncached failure
+            # would re-run the full torch-importing subprocess per request.
             logger.error(
                 "Schema helper errored on every model — %s",
                 result.stderr.strip() or "(no stderr)",
             )
-            return None
         return [m for m in all_models if m not in errored], schemas
 
     def _run_helper_subprocess(
@@ -190,6 +192,13 @@ class SchemaExtractor:
             return None
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             # Transient failure; callers return None so the next call retries.
+            return None
+        except (ValueError, UnicodeDecodeError) as e:
+            # Configuration-class failures (unknown env-type prefix from
+            # resolve_command, non-UTF-8 helper stdout): degrade with a log
+            # line on BOTH paths — without this the preprocess route escaped
+            # as an unhandled 500 while the models path only logged.
+            logger.error("%s schema extraction failed — %s", label, e)
             return None
         if result.returncode != 0:
             # Without this an empty stdout would parse to ([], {}) and be
@@ -373,16 +382,21 @@ class SchemaExtractor:
                         if isinstance(data, list):
                             raw = data
                             break
-            return raw
         finally:
             # Only a successful, still-current extraction is cached; a None
             # result is not, so the next call retries instead of raising
-            # KeyError forever until restart.
+            # KeyError forever until restart. A result invalidated by a
+            # reset_cache() mid-run is dropped AND served as a miss, so the
+            # leader and its waiters see the same outcome instead of the
+            # leader getting stale data while waiters 404.
             with self._cond:
                 self._preprocess_loading.discard(action)
-                if raw is not None and gen == self._preprocess_gen:
+                if raw is not None and gen != self._preprocess_gen:
+                    raw = None
+                if raw is not None:
                     self._preprocess_schemas[action] = raw
                 self._cond.notify_all()
+        return raw
 
     def get_preprocess_schema(self, action: str) -> list[ParamGroup]:
         """Return the parameter schema for a preprocess action (download/process).
