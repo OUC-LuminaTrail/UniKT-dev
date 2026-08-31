@@ -13,13 +13,35 @@ choices, ...}``, so model configs and preprocess configs share one path.
 """
 
 import json
+import re
 import sys
 import typing
 from dataclasses import MISSING, fields
+from pathlib import Path
 
-from docstring_parser import parse
+# Every pixi environment declares docstring-parser (workspace level plus the
+# dhg feature); the remaining package-less audiences are wizard-configured
+# conda/custom interpreters. Schema reflection must still run there — hence
+# the fallback parser. Exception, not just ImportError: a corrupt install
+# (SyntaxError) must degrade to the fallback too, and since schema_extractor
+# imports this module for DEGRADED_MARKER, a narrow catch would let a broken
+# package take the whole backend down at boot.
+try:
+    from docstring_parser import parse as _parse_docstring
+except Exception:
+    _parse_docstring = None
 
-sys.path.insert(0, ".")
+_SECTION_RE = re.compile(r"^(Args|Arguments|Attributes|Parameters|Params):$")
+# Other Google-style sections that may appear indented like an entry inside
+# an Args/Attributes block (e.g. a trailing "Note:" paragraph); the block
+# resumes after their paragraph instead of ending.
+_ENTRY_STOP_RE = re.compile(
+    r"^(Note|Notes|Returns|Raises|Examples?|Yields|Warnings?|See Also|References):"
+)
+# Typed entries are ``name (type): desc`` — the type group spans any
+# parenthesis content without a colon (nesting depth is irrelevant because
+# the colon terminates it).
+_PARAM_RE = re.compile(r"^(\w+)(?:\s*\([^:]*\))?\s*:\s*(.*)$")
 
 
 def _base_type(tp):
@@ -76,13 +98,104 @@ def _field_spec(f, help_map=None):
     }
 
 
+def _fallback_docstring_helps(doc: str) -> dict[str, str]:
+    """Extract ``{name: description}`` from Google-style Args/Attributes sections.
+
+    Covers the entry forms used in this repo: ``name: desc`` and
+    ``name (type): desc`` (one nesting level of parentheses) with
+    continuation lines, matching docstring_parser's Google-style output:
+    the entry line is the short description, deeper-indented lines form the
+    long description (leading blanks dropped, inner blank lines kept), and
+    the two join with a single newline. NumPy/reST-style docstrings are NOT
+    covered — install docstring-parser for those.
+    """
+    helps: dict[str, str] = {}
+    lines = doc.splitlines()
+
+    def indent(idx):
+        # expandtabs so tab-indented continuation lines count their full width
+        line = lines[idx].expandtabs()
+        return len(line) - len(line.lstrip())
+
+    i = 0
+    while i < len(lines):
+        if not _SECTION_RE.match(lines[i].strip()):
+            i += 1
+            continue
+        i += 1
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+            if not stripped:
+                i += 1
+                continue
+            if not line[0].isspace():
+                break  # section ended (section header or summary text)
+            if _ENTRY_STOP_RE.match(stripped):
+                # Skip the Note:/Returns:-style paragraph and resume the
+                # section instead of dropping entries documented after it.
+                # Only its immediately-indented non-entry lines belong to the
+                # note; blank lines and entry-like lines end it so following
+                # entries stay parseable.
+                note_indent = indent(i)
+                i += 1
+                while i < len(lines):
+                    s = lines[i].strip()
+                    if s and indent(i) > note_indent and not _PARAM_RE.match(s):
+                        i += 1
+                    else:
+                        break
+                continue
+            m = _PARAM_RE.match(stripped)
+            if m is None:
+                i += 1
+                continue
+            base_indent = indent(i)
+            name = m.group(1)
+            short = m.group(2).strip()
+            long_lines: list[str] = []
+            i += 1
+            # Collect the raw continuation block (blank or deeper-indented
+            # lines), then trim the blank runs at both ends — inner blanks
+            # stay as paragraph separators, as docstring_parser does.
+            while i < len(lines):
+                s = lines[i].strip()
+                if s and indent(i) <= base_indent:
+                    break
+                long_lines.append(s)
+                i += 1
+            while long_lines and not long_lines[0]:
+                long_lines.pop(0)
+            while long_lines and not long_lines[-1]:
+                long_lines.pop()
+            text = short
+            if long_lines:
+                # Empty inline descriptions carry no boundary newline —
+                # docstring_parser returns the long text alone.
+                long_text = "\n".join(long_lines)
+                text = short + "\n" + long_text if short else long_text
+            if text and name not in helps:
+                # First entry wins: a param-like line inside a Note: example
+                # ("lr: 0.001 works best") must not clobber the real entry.
+                helps[name] = text
+    return helps
+
+
 def _parse_docstring_helps(cls: type) -> dict[str, str]:
     """Extract ``{field_name: help_text}`` from the class docstring Args: section.
 
-    Delegates to ``docstring_parser`` (Google/NumPy/Sphinx, multi-line).
+    Delegates to ``docstring_parser`` (Google/NumPy/Sphinx, multi-line) when
+    installed; otherwise falls back to a minimal Google-style parser so
+    environments without the package still expose parameter helps.
     """
-    doc = parse(cls.__doc__ or "")
-    return {p.arg_name: p.description for p in doc.params if p.description}
+    doc = cls.__doc__ or ""
+    if _parse_docstring is not None:
+        return {
+            p.arg_name: p.description
+            for p in _parse_docstring(doc).params
+            if p.description
+        }
+    return _fallback_docstring_helps(doc)
 
 
 def reflect_group(group_name, node, cls, only=None, skip=None):
@@ -103,6 +216,18 @@ def reflect_group(group_name, node, cls, only=None, skip=None):
     return {"group_name": group_name, "node": node, "params": params}
 
 
+# Single stderr line signaling fallback-parser mode; schema_extractor checks
+# it after the returncode gate so stdout stays a pure data channel and the
+# signal cannot depend on envelope ordering.
+DEGRADED_MARKER = "schema-helper-degraded: docstring_parser unavailable"
+
+
+def _emit_degraded_marker():
+    """Signal degraded mode on stderr when running on the fallback parser."""
+    if _parse_docstring is None:
+        print(DEGRADED_MARKER, file=sys.stderr)
+
+
 def _emit_models():
     import model  # noqa: F401  triggers @register_model_config discovery
     from utils.config import (
@@ -114,24 +239,31 @@ def _emit_models():
     from utils.core import MODEL_CONFIGS, get_supported_models
 
     # Fixed framework groups, in display order: (group_name, RunConfig node, dataclass).
-    framework_groups = [
-        ("general", "general", GeneralConfig),
-        ("compile", "compile", CompileConfig),
-        ("early_stopping", "early_stopping", EarlyStoppingConfig),
-        ("data", "data", RunDataConfig),
-    ]
-
+    # Reflected exactly once, BEFORE the per-model loop: a deterministic
+    # framework-config failure emits a single error envelope and stops — no
+    # per-model re-reflection of the same failing classes. The models
+    # envelope is already printed, so the model list still reaches the
+    # extractor (an error keyed on None matches no model name).
     models = get_supported_models()
     print(json.dumps({"type": "models", "data": models}))
+    try:
+        framework_groups = [
+            reflect_group(name, node, cls)
+            for name, node, cls in (
+                ("general", "general", GeneralConfig),
+                ("compile", "compile", CompileConfig),
+                ("early_stopping", "early_stopping", EarlyStoppingConfig),
+                ("data", "data", RunDataConfig),
+            )
+        ]
+    except Exception as e:
+        print(json.dumps({"type": "error", "model": None, "error": str(e)}))
+        return
+
     for model_name in models:
         try:
             model_cls = MODEL_CONFIGS.get(model_name)
-            if model_cls is None:
-                continue
-            groups = [
-                reflect_group(name, node, cls) for name, node, cls in framework_groups
-            ]
-            groups.append(reflect_group(model_name, "model", model_cls))
+            groups = [*framework_groups, reflect_group(model_name, "model", model_cls)]
             print(json.dumps({"type": "schema", "model": model_name, "data": groups}))
         except Exception as e:
             print(json.dumps({"type": "error", "model": model_name, "error": str(e)}))
@@ -181,6 +313,14 @@ def _emit_preprocess(action: str):
 
 
 if __name__ == "__main__":
+    # Make the repo importable regardless of the caller's cwd (matches
+    # PROJECT_ROOT's own derivation in web/backend/config.py). Kept out of
+    # module scope so importing the helper (e.g. from pytest) cannot touch
+    # the host's sys.path.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    # Emitted at the single dispatch site so every mode signals degraded
+    # runs before any import or envelope output.
+    _emit_degraded_marker()
     mode = sys.argv[1] if len(sys.argv) > 1 else "models"
     if mode == "preprocess":
         _emit_preprocess(sys.argv[2] if len(sys.argv) > 2 else "")
