@@ -9,6 +9,7 @@ import logging
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 
 from config import PROJECT_ROOT
 from schemas import ModelSchemaResponse, ParamField, ParamGroup
@@ -36,6 +37,23 @@ def _maybe_warn_degraded(entry: object) -> None:
             "Schema helper environment lacks docstring_parser (conda/custom "
             "interpreter?); schema helps fall back to the built-in parser"
         )
+
+
+def _iter_envelopes(result: subprocess.CompletedProcess) -> Iterator[dict]:
+    """Yield each valid dict JSON envelope line from helper stdout.
+
+    Skips blank, non-JSON, and non-dict lines — dependencies may print bare
+    JSON to stdout during the helper's imports.
+    """
+    for line in result.stdout.strip().split("\n"):
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict):
+            yield entry
 
 
 def _parse_group(data: dict) -> ParamGroup:
@@ -107,51 +125,31 @@ class SchemaExtractor:
         Pure of instance state so the caller can commit the result under the
         lock. Errored models are excluded from the returned list.
         """
-        try:
-            base = self._resolve_base_cmd()
-            cmd = [*base, HELPER_SCRIPT]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
-            )
-        except EnvironmentNotConfigured as e:
-            # No env configured (user skipped the setup wizard); leave _loaded
-            # False so the next call retries once the wizard sets one.
-            logger.error("Schema extraction skipped — %s", e)
-            return None
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            # Transient failure; leave _loaded False so the next call retries.
-            return None
-        if result.returncode != 0:
-            # Without this an empty stdout would parse to ([], {}) and be cached
-            # as a successful load, so every later call short-circuits to it.
-            logger.error(
-                "Schema helper exited %d — %s",
-                result.returncode,
-                result.stderr.strip() or "(no stderr)",
-            )
+        result = self._run_helper_subprocess([], "Model")
+        if result is None:
             return None
         all_models: list[str] = []
         saw_models = False
         errored: set[str] = set()
         schemas: dict[str, list[dict]] = {}
-        for line in result.stdout.strip().split("\n"):
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            # .get dispatch: a dependency may print bare JSON (no "type" key)
-            # to stdout during the helper's imports; subscripts here would
-            # raise out of _extract and wedge _loading forever.
-            etype = entry.get("type") if isinstance(entry, dict) else None
+        # .get payload guards: dependencies may print bare JSON to stdout
+        # during the helper's imports, and subscripts on a noise dict whose
+        # "type" collides would raise out of _extract.
+        for entry in _iter_envelopes(result):
+            etype = entry.get("type")
             if etype == "models":
-                all_models = entry["data"]
-                saw_models = True
+                data = entry.get("data")
+                if isinstance(data, list):
+                    all_models = data
+                    saw_models = True
             elif etype == "schema":
-                schemas[entry["model"]] = entry["data"]
+                model, data = entry.get("model"), entry.get("data")
+                if model and isinstance(data, list):
+                    schemas[model] = data
             elif etype == "error":
-                errored.add(entry["model"])
+                model = entry.get("model")
+                if model:
+                    errored.add(model)
             else:
                 _maybe_warn_degraded(entry)
         if not saw_models:
@@ -162,6 +160,39 @@ class SchemaExtractor:
             )
             return None
         return [m for m in all_models if m not in errored], schemas
+
+    def _run_helper_subprocess(
+        self, args: list[str], label: str
+    ) -> subprocess.CompletedProcess | None:
+        """Run the schema helper subprocess; None on any failure.
+
+        Shared by the models and preprocess paths so env resolution, timeouts,
+        and non-zero-exit logging live in exactly one place.
+        """
+        try:
+            cmd = [*self._resolve_base_cmd(), HELPER_SCRIPT, *args]
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
+            )
+        except EnvironmentNotConfigured as e:
+            # No env configured (user skipped the setup wizard); callers
+            # return None so the next call retries once the wizard sets one.
+            logger.error("%s schema extraction skipped — %s", label, e)
+            return None
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            # Transient failure; callers return None so the next call retries.
+            return None
+        if result.returncode != 0:
+            # Without this an empty stdout would parse to ([], {}) and be
+            # cached as a successful load, short-circuiting every later call.
+            logger.error(
+                "%s schema helper exited %d — %s",
+                label,
+                result.returncode,
+                result.stderr.strip() or "(no stderr)",
+            )
+            return None
+        return result
 
     def _run_helper(self) -> None:
         """Load model list/schemas via the helper subprocess (single-flight).
@@ -178,20 +209,23 @@ class SchemaExtractor:
                     self._cond.wait()
                 return
             self._loading = True
+        result = None
         try:
             result = self._extract()
         except Exception:
             # Never leave _loading stuck True: every later call would block
             # on cond.wait() forever (schemas API, registry refresh, dispatch).
             logger.exception("Schema extraction crashed")
-            result = None
-        with self._cond:
-            if result is not None:
-                # Atomic replacement: readers always see a complete container.
-                self._models, self._schemas = result
-                self._loaded = True
-            self._loading = False
-            self._cond.notify_all()
+        finally:
+            # finally (not except-then-continue): even a BaseException must
+            # release the single-flight slot on its way out.
+            with self._cond:
+                if result is not None:
+                    # Atomic replacement: readers always see a complete container.
+                    self._models, self._schemas = result
+                    self._loaded = True
+                self._loading = False
+                self._cond.notify_all()
 
     def reset_cache(self) -> None:
         """Mark caches stale so the next access re-extracts them.
@@ -298,43 +332,24 @@ class SchemaExtractor:
         cached = self._preprocess_schemas.get(action)
         if cached is not None:
             return cached
+        result = self._run_helper_subprocess(["preprocess", action], "Preprocess")
+        if result is None:
+            return None
         raw: list[dict] | None = None
-        try:
-            base = self._resolve_base_cmd()
-            cmd = [*base, HELPER_SCRIPT, "preprocess", action]
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60, cwd=str(PROJECT_ROOT)
-            )
-        except EnvironmentNotConfigured as e:
-            logger.error("Preprocess schema extraction skipped — %s", e)
-            return None
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return None
-        if result.returncode != 0:
-            # A crashed run is a failure, not degraded-mode success (the
-            # helper prints its degraded marker before crash-prone imports).
-            logger.error(
-                "Preprocess schema helper exited %d — %s",
-                result.returncode,
-                result.stderr.strip() or "(no stderr)",
-            )
-            return None
-        for line in result.stdout.strip().split("\n"):
-            if not line:
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(entry, dict):
-                continue
+        # The helper prints its degraded marker before the schema envelope;
+        # checking other entry types first keeps the warning working regardless
+        # of position, then the matching envelope ends the scan.
+        for entry in _iter_envelopes(result):
             if (
                 entry.get("type") == "preprocess_schema"
                 and entry.get("action") == action
             ):
-                raw = entry["data"]
-                break
-            _maybe_warn_degraded(entry)
+                data = entry.get("data")
+                if isinstance(data, list):
+                    raw = data
+                    break
+            else:
+                _maybe_warn_degraded(entry)
         if raw is not None:
             self._preprocess_schemas[action] = raw
         return raw

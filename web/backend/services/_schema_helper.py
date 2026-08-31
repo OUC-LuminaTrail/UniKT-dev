@@ -104,6 +104,11 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
     """
     helps: dict[str, str] = {}
     lines = doc.splitlines()
+
+    def indent(idx):
+        line = lines[idx]
+        return len(line) - len(line.lstrip())
+
     i = 0
     while i < len(lines):
         if not _SECTION_RE.match(lines[i].strip()):
@@ -124,15 +129,11 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
                 # Only its immediately-indented non-entry lines belong to the
                 # note; blank lines and entry-like lines end it so following
                 # entries stay parseable.
-                note_indent = len(line) - len(line.lstrip())
+                note_indent = indent(i)
                 i += 1
                 while i < len(lines):
                     s = lines[i].strip()
-                    if (
-                        s
-                        and (len(lines[i]) - len(lines[i].lstrip())) > note_indent
-                        and not _PARAM_RE.match(s)
-                    ):
+                    if s and indent(i) > note_indent and not _PARAM_RE.match(s):
                         i += 1
                     else:
                         break
@@ -141,7 +142,7 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
             if m is None:
                 i += 1
                 continue
-            base_indent = len(line) - len(line.lstrip())
+            base_indent = indent(i)
             name = m.group(1)
             short = m.group(2).strip()
             long_lines: list[str] = []
@@ -152,22 +153,22 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
                 if not s:
                     # Blank line: keep consuming only if a deeper-indented
                     # continuation paragraph follows (multi-paragraph entry).
+                    blanks = 1
                     j = i + 1
                     while j < len(lines) and not lines[j].strip():
+                        blanks += 1
                         j += 1
-                    if (
-                        j < len(lines)
-                        and (len(lines[j]) - len(lines[j].lstrip())) > base_indent
-                    ):
-                        i = j
-                        # Blank lines after the first continuation paragraph
-                        # separate paragraphs; the leading one is dropped
-                        # (short/long boundary), as docstring_parser does.
+                    if j < len(lines) and indent(j) > base_indent:
+                        # Blank runs after the first continuation paragraph
+                        # are kept as paragraph separators (one "" each); the
+                        # leading run is dropped (short/long boundary), as
+                        # docstring_parser does.
                         if long_lines:
-                            long_lines.append("")
+                            long_lines.extend([""] * blanks)
+                        i = j
                         continue
                     break
-                if (len(cont) - len(cont.lstrip())) <= base_indent:
+                if indent(i) <= base_indent:
                     break
                 long_lines.append(s)
                 i += 1
@@ -239,24 +240,27 @@ def _emit_models():
     from utils.core import MODEL_CONFIGS, get_supported_models
 
     # Fixed framework groups, in display order: (group_name, RunConfig node, dataclass).
-    # Reflected once — every model's schema embeds the same immutable groups.
-    framework_groups = [
-        reflect_group(name, node, cls)
-        for name, node, cls in (
-            ("general", "general", GeneralConfig),
-            ("compile", "compile", CompileConfig),
-            ("early_stopping", "early_stopping", EarlyStoppingConfig),
-            ("data", "data", RunDataConfig),
-        )
-    ]
+    # Reflected lazily ONCE — every model's schema embeds the same immutable
+    # groups — but inside the per-model try so a framework-config reflection
+    # error degrades per-model instead of aborting the whole helper.
+    framework_specs = (
+        ("general", "general", GeneralConfig),
+        ("compile", "compile", CompileConfig),
+        ("early_stopping", "early_stopping", EarlyStoppingConfig),
+        ("data", "data", RunDataConfig),
+    )
+    framework_groups: list[dict] | None = None
 
     models = get_supported_models()
     print(json.dumps({"type": "models", "data": models}))
     for model_name in models:
         try:
+            if framework_groups is None:
+                framework_groups = [
+                    reflect_group(name, node, cls)
+                    for name, node, cls in framework_specs
+                ]
             model_cls = MODEL_CONFIGS.get(model_name)
-            if model_cls is None:
-                continue
             groups = [*framework_groups, reflect_group(model_name, "model", model_cls)]
             print(json.dumps({"type": "schema", "model": model_name, "data": groups}))
         except Exception as e:

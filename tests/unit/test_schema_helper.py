@@ -188,19 +188,22 @@ class TestParserParity:
         if helper._parse_docstring is None:
             pytest.skip("docstring_parser not installed in this environment")
         try:
-            import model  # noqa: F401  triggers @register_model_config discovery
-            from utils.core import MODEL_CONFIGS, get_supported_models
+            import torch  # noqa: F401  trainer modules import it at top level
+        except ImportError:
+            # Torch-less-but-parser-having environments (web, docs) cannot
+            # import any trainer module; parity over models needs the stack.
+            pytest.skip("training stack unavailable: torch not installed")
+        import model  # noqa: F401  triggers @register_model_config discovery
+        from utils.core import MODEL_CONFIGS, get_supported_models
 
-            model_classes = []
-            for name in get_supported_models():
-                # Trainer without a config class — supported in production
-                # (_emit_models skips it); parity skips it too.
-                with contextlib.suppress(KeyError):
-                    model_classes.append(MODEL_CONFIGS.get(name))
-        except ImportError as e:
-            # Trainer modules import torch, which torch-less-but-parser-having
-            # environments (web, docs) lack; parity over models needs it.
-            pytest.skip(f"training stack unavailable: {e}")
+        model_classes = []
+        for name in get_supported_models():
+            # A trainer without a config class makes registry.get raise
+            # KeyError — production emits an error envelope and the extractor
+            # drops the model; parity just skips it. Per-model suppression so
+            # one unimportable module cannot skip the other 70+.
+            with contextlib.suppress(ImportError, KeyError):
+                model_classes.append(MODEL_CONFIGS.get(name))
         from utils import config as cfg
 
         assert model_classes  # empty means discovery itself failed
@@ -256,14 +259,9 @@ class TestExtractorRobustness:
 
     @staticmethod
     def _fake_run_result(stdout: str, returncode: int = 0):
-        class _Result:
-            pass
-
-        r = _Result()
-        r.stdout = stdout
-        r.stderr = ""
-        r.returncode = returncode
-        return r
+        return subprocess.CompletedProcess(
+            args=[], returncode=returncode, stdout=stdout, stderr=""
+        )
 
     def test_stdout_noise_without_type_key_is_ignored(self, extractor, monkeypatch):
         # A dependency printing bare JSON (dict without "type", or a scalar)
