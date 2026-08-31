@@ -130,6 +130,12 @@ class SchemaExtractor:
                 schemas[entry["model"]] = entry["data"]
             elif entry["type"] == "error":
                 errored.add(entry["model"])
+            elif entry.get("type") == "meta" and entry.get("degraded"):
+                logger.warning(
+                    "Schema helper runs without docstring_parser "
+                    "(fallback parser in use); install it in the default "
+                    "environment for full docstring coverage"
+                )
         if not saw_models:
             # Exit 0 but no models envelope: truncated or malformed output.
             logger.error(
@@ -293,6 +299,12 @@ class SchemaExtractor:
             ):
                 raw = entry["data"]
                 break
+            if entry.get("type") == "meta" and entry.get("degraded"):
+                logger.warning(
+                    "Schema helper runs without docstring_parser "
+                    "(fallback parser in use); install it in the default "
+                    "environment for full docstring coverage"
+                )
         if raw is not None:
             self._preprocess_schemas[action] = raw
         return raw

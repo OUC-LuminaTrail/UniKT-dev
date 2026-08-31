@@ -18,8 +18,6 @@ import sys
 import typing
 from dataclasses import MISSING, fields
 
-sys.path.insert(0, ".")
-
 # docstring-parser is declared only at workspace level, so environments built
 # with ``no-default-feature`` (dhg-gpu / dhg-cpu) and custom interpreters lack
 # it. Schema reflection must still run there — hence the fallback parser.
@@ -97,9 +95,11 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
 
     Covers the entry forms used in this repo: ``name: desc`` and
     ``name (type): desc`` (one nesting level of parentheses) with
-    deeper-indented continuation lines joined by newlines, matching
-    docstring_parser's Google-style output. Blank lines inside a description
-    are dropped when a continuation follows, as docstring_parser does.
+    continuation lines, matching docstring_parser's Google-style output:
+    the entry line is the short description, deeper-indented lines form the
+    long description (leading blanks dropped, inner blank lines kept), and
+    the two join with a single newline. NumPy/reST-style docstrings are NOT
+    covered — install docstring-parser for those.
     """
     helps: dict[str, str] = {}
     lines = doc.splitlines()
@@ -120,11 +120,13 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
             if _ENTRY_STOP_RE.match(stripped):
                 # Skip the Note:/Returns:-style paragraph and resume the
                 # section instead of dropping entries documented after it.
+                # Only its immediately-indented lines belong to the note; a
+                # blank line ends it so following entries stay parseable.
                 note_indent = len(line) - len(line.lstrip())
                 i += 1
                 while i < len(lines):
                     s = lines[i].strip()
-                    if not s or (len(lines[i]) - len(lines[i].lstrip())) > note_indent:
+                    if s and (len(lines[i]) - len(lines[i].lstrip())) > note_indent:
                         i += 1
                     else:
                         break
@@ -134,7 +136,9 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
                 i += 1
                 continue
             base_indent = len(line) - len(line.lstrip())
-            name, parts = m.group(1), [m.group(2).strip()]
+            name = m.group(1)
+            short = m.group(2).strip()
+            long_lines: list[str] = []
             i += 1
             while i < len(lines):
                 cont = lines[i]
@@ -150,13 +154,20 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
                         and (len(lines[j]) - len(lines[j].lstrip())) > base_indent
                     ):
                         i = j
+                        # Blank lines after the first continuation paragraph
+                        # separate paragraphs; the leading one is dropped
+                        # (short/long boundary), as docstring_parser does.
+                        if long_lines:
+                            long_lines.append("")
                         continue
                     break
                 if (len(cont) - len(cont.lstrip())) <= base_indent:
                     break
-                parts.append(s)
+                long_lines.append(s)
                 i += 1
-            text = "\n".join(parts).strip("\n")
+            text = short
+            if long_lines:
+                text += "\n" + "\n".join(long_lines)
             if text:
                 helps[name] = text
     return helps
@@ -197,7 +208,18 @@ def reflect_group(group_name, node, cls, only=None, skip=None):
     return {"group_name": group_name, "node": node, "params": params}
 
 
+def _emit_degraded_marker():
+    """Emit the degraded-mode envelope when running on the fallback parser.
+
+    Goes to stdout (the envelope channel schema_extractor consumes) — stderr
+    is discarded on every success path there, so this is the only signal.
+    """
+    if _parse_docstring is None:
+        print(json.dumps({"type": "meta", "degraded": True}))
+
+
 def _emit_models():
+    _emit_degraded_marker()
     import model  # noqa: F401  triggers @register_model_config discovery
     from utils.config import (
         CompileConfig,
@@ -232,6 +254,7 @@ def _emit_models():
 
 
 def _emit_preprocess(action: str):
+    _emit_degraded_marker()
     from dataclasses import fields as dc_fields
 
     from utils.config import (
@@ -275,11 +298,10 @@ def _emit_preprocess(action: str):
 
 
 if __name__ == "__main__":
-    if _parse_docstring is None:
-        print(
-            "schema helper: docstring_parser not installed, using fallback parser",
-            file=sys.stderr,
-        )
+    # Runs as a subprocess with cwd=PROJECT_ROOT (schema_extractor); make the
+    # repo importable. Kept out of module scope so importing the helper (e.g.
+    # from pytest) cannot prepend a literal "." to the host's sys.path.
+    sys.path.insert(0, ".")
     mode = sys.argv[1] if len(sys.argv) > 1 else "models"
     if mode == "preprocess":
         _emit_preprocess(sys.argv[2] if len(sys.argv) > 2 else "")

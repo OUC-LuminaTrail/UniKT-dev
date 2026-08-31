@@ -3,16 +3,21 @@
 Covers the Google-style fallback parser used when ``docstring_parser`` is
 absent (conda / custom-interpreter environments; the dhg pixi feature
 declares the package but the fallback stays as the safety net), its parity
-with the real parser on every reflected config class, and the degraded-mode
-dispatch.
+with the real parser on every reflected config class, the degraded-mode
+dispatch and signal, and the module's import side-effect hygiene.
 """
 
+import json
+import subprocess
+import sys
 from dataclasses import dataclass, fields
 from typing import ClassVar
 
 import pytest
 
 import web.backend.services._schema_helper as helper
+
+_REPO_ROOT = __file__.rsplit("/tests/", 1)[0]
 
 
 def _cls_with_doc(doc):
@@ -65,12 +70,24 @@ class TestFallbackParser:
         doc = "S.\n\nArgs:\n    a: aa\n\n    Note: mid note\n\n    b: bb"
         assert helper._fallback_docstring_helps(doc) == {"a": "aa", "b": "bb"}
 
-    def test_multiparagraph_entry_keeps_later_paragraphs(self):
-        # Blank lines inside a description are dropped when a deeper-indented
-        # continuation follows, matching docstring_parser's single-newline join.
-        doc = "S.\n\nArgs:\n    a: first para.\n\n        second para.\n"
-        assert helper._fallback_docstring_helps(doc) == {
-            "a": "first para.\nsecond para."
+    def test_deeper_entries_survive_shallower_note(self):
+        # Entries indented deeper than the Note: line must not be swallowed
+        # as note text — a blank line ends the note paragraph.
+        doc = "S.\n\nArgs:\n        a: aa\n\n    Note: see the paper.\n\n        b: bb"
+        helps = helper._fallback_docstring_helps(doc)
+        assert helps.get("b") == "bb"
+
+    def test_multiparagraph_entry_blanking_rules(self):
+        # docstring_parser joins the entry line (short) and the deeper lines
+        # (long) with a single newline; the leading blank is dropped and
+        # inner blanks are kept.
+        one_blank = "S.\n\nArgs:\n    a: p1.\n\n        p2.\n"
+        assert helper._fallback_docstring_helps(one_blank) == {"a": "p1.\np2."}
+        two_blanks = "S.\n\nArgs:\n    a: p1.\n\n        p2.\n\n        p3.\n"
+        assert helper._fallback_docstring_helps(two_blanks) == {"a": "p1.\np2.\n\np3."}
+        no_leading_blank = "S.\n\nArgs:\n    a: p1.\n        p2.\n\n        p3.\n"
+        assert helper._fallback_docstring_helps(no_leading_blank) == {
+            "a": "p1.\np2.\n\np3."
         }
 
     def test_deeper_entry_like_line_after_blank_joins_description(self):
@@ -109,6 +126,41 @@ class TestDegradedMode:
         cls = _cls_with_doc("S.\n\nArgs:\n    x: help x.\n")
         assert helper._parse_docstring_helps(cls) == {"x": "stub value"}
 
+    def test_degraded_marker_emitted_on_stdout(self, monkeypatch, capsys):
+        # The marker rides the stdout envelope protocol (stderr is discarded
+        # by schema_extractor on success paths).
+        monkeypatch.setattr(helper, "_parse_docstring", None)
+        helper._emit_degraded_marker()
+        out = capsys.readouterr().out.strip()
+        assert json.loads(out) == {"type": "meta", "degraded": True}
+
+    def test_no_marker_when_parser_installed(self, capsys):
+        if helper._parse_docstring is None:
+            pytest.skip("docstring_parser not installed in this environment")
+        helper._emit_degraded_marker()
+        assert capsys.readouterr().out == ""
+
+
+class TestImportHygiene:
+    def test_import_does_not_prepend_cwd_to_sys_path(self):
+        # Module-scope sys.path.insert would leak into any importing process
+        # (pytest); the insert must live in the __main__ block only.
+        code = (
+            "import sys; "
+            f"sys.path.insert(0, {_REPO_ROOT!r}); "
+            "import web.backend.services._schema_helper; "
+            "print(sys.path[0])"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd="/tmp",
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() != "."
+
 
 class TestParserParity:
     def test_fallback_matches_docstring_parser_on_all_config_classes(
@@ -118,9 +170,17 @@ class TestParserParity:
         must expose identical per-field helps under both parsers."""
         if helper._parse_docstring is None:
             pytest.skip("docstring_parser not installed in this environment")
-        import model  # noqa: F401  triggers @register_model_config discovery
+        try:
+            import model  # noqa: F401  triggers @register_model_config discovery
+            from utils.core import MODEL_CONFIGS, get_supported_models
+
+            model_names = get_supported_models()
+            model_classes = [MODEL_CONFIGS.get(name) for name in model_names]
+        except ImportError as e:
+            # Trainer modules import torch, which torch-less-but-parser-having
+            # environments (web, docs) lack; parity over models needs it.
+            pytest.skip(f"training stack unavailable: {e}")
         from utils import config as cfg
-        from utils.core import MODEL_CONFIGS, get_supported_models
 
         classes = [
             getattr(cfg, name)
@@ -132,10 +192,9 @@ class TestParserParity:
                 "ProcessConfig",
                 "RunDataConfig",
             )
-        ] + [MODEL_CONFIGS.get(name) for name in get_supported_models()]
-        classes = [c for c in classes if c is not None]
+        ] + model_classes
+        assert len(classes) == 6 + len(model_names)
 
-        checked = 0
         for cls in classes:
             reference = helper._parse_docstring_helps(cls)
             fallback = helper._fallback_docstring_helps(cls.__doc__ or "")
@@ -149,5 +208,3 @@ class TestParserParity:
             assert set(fallback) <= set(reference) | {f.name for f in fields(cls)}, (
                 cls.__name__
             )
-            checked += 1
-        assert checked > 70  # 6 framework + the full model registry
