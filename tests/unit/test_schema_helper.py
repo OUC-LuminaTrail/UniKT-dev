@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import ClassVar
@@ -20,7 +21,7 @@ import pytest
 
 import web.backend.services._schema_helper as helper
 
-_REPO_ROOT = __file__.rsplit("/tests/", 1)[0]
+_REPO_ROOT = str(Path(__file__).resolve().parents[2])
 
 
 def _cls_with_doc(doc):
@@ -314,14 +315,94 @@ class TestExtractorRobustness:
 
     def test_preprocess_helper_crash_returns_none(self, extractor, monkeypatch):
         # Exit != 0 is a failure even when the degraded marker was printed
-        # before the crash; get_preprocess_schema surfaces KeyError.
+        # to stderr before the crash; get_preprocess_schema surfaces KeyError.
         sx = extractor[1]
-        out = '{"type": "meta", "degraded": true}\n'
         monkeypatch.setattr(
-            "subprocess.run", lambda *a, **k: self._fake_run_result(out, returncode=1)
+            "subprocess.run",
+            lambda *a, **k: self._fake_run_result(
+                "", returncode=1, stderr=helper.DEGRADED_MARKER + "\n"
+            ),
         )
         with pytest.raises(KeyError):
             sx.get_preprocess_schema("process")
+
+    def test_colliding_noise_envelope_does_not_overwrite(self, extractor, monkeypatch):
+        # First-wins dispatch: a dependency's colliding {"type": "models"}
+        # line printed after the real envelope must not replace it.
+        sx = extractor[1]
+        real = '{"type": "models", "data": ["M"]}\n'
+        fake = '{"type": "models", "data": ["FAKE"]}\n'
+        monkeypatch.setattr(
+            "subprocess.run",
+            lambda *a, **k: self._fake_run_result(real + fake),
+        )
+        assert sx.list_models() == ["M"]
+
+    def test_all_models_errored_is_failure_not_empty_success(
+        self, extractor, monkeypatch
+    ):
+        # Every model in an error envelope (e.g. a framework default turned
+        # non-JSON-serializable) must not cache an empty model list silently.
+        sx = extractor[1]
+        out = (
+            '{"type": "models", "data": ["A", "B"]}\n'
+            '{"type": "error", "model": "A"}\n'
+            '{"type": "error", "model": "B"}\n'
+        )
+        monkeypatch.setattr(
+            "subprocess.run", lambda *a, **k: self._fake_run_result(out)
+        )
+        assert sx.list_models() == []
+        assert sx._loaded is False  # failure, not a cached empty success
+
+    def test_waiter_does_not_serially_retry_failed_extraction(
+        self, extractor, monkeypatch
+    ):
+        # A waiter whose extraction failed gets None (KeyError) instead of
+        # promoting to its own subprocess run — N waiters must not mean N
+        # sequential 60s runs.
+        sx = extractor[1]
+        started = threading.Event()
+        first_done = threading.Event()
+        calls = []
+
+        def failing_run(*a, **k):
+            calls.append(1)
+            started.set()
+            first_done.wait(timeout=10)
+            return self._fake_run_result("", returncode=1)
+
+        monkeypatch.setattr("subprocess.run", failing_run)
+
+        results = []
+
+        def waiter():
+            # Starts after the extractor is mid-run, so it waits.
+            started.wait(timeout=10)
+            try:
+                sx.get_preprocess_schema("process")
+                results.append("ok")
+            except KeyError:
+                results.append("keyerror")
+
+        def first():
+            try:
+                sx.get_preprocess_schema("process")
+                results.append("ok")
+            except KeyError:
+                results.append("keyerror")
+
+        t1 = threading.Thread(target=first)
+        t1.start()
+        assert started.wait(timeout=10)
+        t2 = threading.Thread(target=waiter)
+        t2.start()
+        time.sleep(0.2)  # let t2 reach the cond.wait
+        first_done.set()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+        assert len(calls) == 1  # the waiter did not re-run the subprocess
+        assert results.count("keyerror") == 2
 
     def test_degraded_marker_logs_warning(self, extractor, monkeypatch, caplog):
         sx = extractor[1]

@@ -152,31 +152,19 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
             short = m.group(2).strip()
             long_lines: list[str] = []
             i += 1
+            # Collect the raw continuation block (blank or deeper-indented
+            # lines), then trim the blank runs at both ends — inner blanks
+            # stay as paragraph separators, as docstring_parser does.
             while i < len(lines):
-                cont = lines[i]
-                s = cont.strip()
-                if not s:
-                    # Blank line: keep consuming only if a deeper-indented
-                    # continuation paragraph follows (multi-paragraph entry).
-                    blanks = 1
-                    j = i + 1
-                    while j < len(lines) and not lines[j].strip():
-                        blanks += 1
-                        j += 1
-                    if j < len(lines) and indent(j) > base_indent:
-                        # Blank runs after the first continuation paragraph
-                        # are kept as paragraph separators (one "" each); the
-                        # leading run is dropped (short/long boundary), as
-                        # docstring_parser does.
-                        if long_lines:
-                            long_lines.extend([""] * blanks)
-                        i = j
-                        continue
-                    break
-                if indent(i) <= base_indent:
+                s = lines[i].strip()
+                if s and indent(i) <= base_indent:
                     break
                 long_lines.append(s)
                 i += 1
+            while long_lines and not long_lines[0]:
+                long_lines.pop(0)
+            while long_lines and not long_lines[-1]:
+                long_lines.pop()
             text = short
             if long_lines:
                 # Empty inline descriptions carry no boundary newline —
@@ -238,7 +226,6 @@ def _emit_degraded_marker():
 
 
 def _emit_models():
-    _emit_degraded_marker()
     import model  # noqa: F401  triggers @register_model_config discovery
     from utils.config import (
         CompileConfig,
@@ -277,7 +264,6 @@ def _emit_models():
 
 
 def _emit_preprocess(action: str):
-    _emit_degraded_marker()
     from dataclasses import fields as dc_fields
 
     from utils.config import (
@@ -326,6 +312,9 @@ if __name__ == "__main__":
     # module scope so importing the helper (e.g. from pytest) cannot touch
     # the host's sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+    # Emitted at the single dispatch site so every mode signals degraded
+    # runs before any import or envelope output.
+    _emit_degraded_marker()
     mode = sys.argv[1] if len(sys.argv) > 1 else "models"
     if mode == "preprocess":
         _emit_preprocess(sys.argv[2] if len(sys.argv) > 2 else "")

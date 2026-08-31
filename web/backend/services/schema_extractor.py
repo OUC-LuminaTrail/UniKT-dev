@@ -134,18 +134,19 @@ class SchemaExtractor:
         all_models: list[str] | None = None
         errored: set[str] = set()
         schemas: dict[str, list[dict]] = {}
-        # .get payload guards: dependencies may print bare JSON to stdout
-        # during the helper's imports, and subscripts on a noise dict whose
-        # "type" collides would raise out of _extract.
+        # .get payload guards + first-wins dispatch: dependencies may print
+        # bare JSON to stdout during the helper's imports, and a noise dict
+        # with a colliding "type" must not overwrite the real envelope. The
+        # helper protocol emits each envelope once, so first-wins is exact.
         for entry in _iter_envelopes(result):
             etype = entry.get("type")
             if etype == "models":
                 data = entry.get("data")
-                if isinstance(data, list):
+                if all_models is None and isinstance(data, list):
                     all_models = data
             elif etype == "schema":
                 model, data = entry.get("model"), entry.get("data")
-                if model and isinstance(data, list):
+                if model and model not in schemas and isinstance(data, list):
                     schemas[model] = data
             elif etype == "error":
                 model = entry.get("model")
@@ -155,6 +156,15 @@ class SchemaExtractor:
             # Exit 0 but no models envelope: truncated or malformed output.
             logger.error(
                 "Schema helper emitted no model list — %s",
+                result.stderr.strip() or "(no stderr)",
+            )
+            return None
+        if errored and set(all_models) <= errored:
+            # Every model errored (e.g. a framework-config default turned
+            # non-JSON-serializable): treat as failure, not an empty success
+            # that would be cached silently.
+            logger.error(
+                "Schema helper errored on every model — %s",
                 result.stderr.strip() or "(no stderr)",
             )
             return None
@@ -333,15 +343,22 @@ class SchemaExtractor:
         a reset_cache() mid-run is not committed.
         """
         with self._cond:
+            waited = False
             while True:
                 cached = self._preprocess_schemas.get(action)
                 if cached is not None:
                     return cached
                 if action not in self._preprocess_loading:
+                    if waited:
+                        # The extraction we waited for failed; fail this
+                        # request too instead of serially re-running the
+                        # subprocess behind it (N waiters would mean N x 60s).
+                        return None
                     self._preprocess_loading.add(action)
                     gen = self._preprocess_gen
                     break
                 # Another thread is extracting this action; wait for it.
+                waited = True
                 self._cond.wait()
         raw: list[dict] | None = None
         try:
