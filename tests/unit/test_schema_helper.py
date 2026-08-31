@@ -7,10 +7,13 @@ with the real parser on every reflected config class, the degraded-mode
 dispatch and signal, and the module's import side-effect hygiene.
 """
 
+import contextlib
 import json
+import logging
 import subprocess
 import sys
 from dataclasses import dataclass, fields
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -76,6 +79,20 @@ class TestFallbackParser:
         doc = "S.\n\nArgs:\n        a: aa\n\n    Note: see the paper.\n\n        b: bb"
         helps = helper._fallback_docstring_helps(doc)
         assert helps.get("b") == "bb"
+
+    def test_deeper_entries_survive_adjacent_note(self):
+        # Same, without a blank line after the note paragraph — entry-like
+        # deeper lines end the note instead of being swallowed as its text.
+        doc = "S.\n\nArgs:\n        a: aa\n\n    Note: see the paper.\n        b: bb\n        c: cc\n"
+        helps = helper._fallback_docstring_helps(doc)
+        assert helps.get("b") == "bb"
+        assert helps.get("c") == "cc"
+
+    def test_empty_inline_description_with_long_text(self):
+        # No boundary newline when the entry line carries no inline text;
+        # docstring_parser returns the long text alone.
+        doc = "S.\n\nArgs:\n    a:\n        long only\n"
+        assert helper._fallback_docstring_helps(doc) == {"a": "long only"}
 
     def test_multiparagraph_entry_blanking_rules(self):
         # docstring_parser joins the entry line (short) and the deeper lines
@@ -174,13 +191,19 @@ class TestParserParity:
             import model  # noqa: F401  triggers @register_model_config discovery
             from utils.core import MODEL_CONFIGS, get_supported_models
 
-            model_names = get_supported_models()
-            model_classes = [MODEL_CONFIGS.get(name) for name in model_names]
+            model_classes = []
+            for name in get_supported_models():
+                # Trainer without a config class — supported in production
+                # (_emit_models skips it); parity skips it too.
+                with contextlib.suppress(KeyError):
+                    model_classes.append(MODEL_CONFIGS.get(name))
         except ImportError as e:
             # Trainer modules import torch, which torch-less-but-parser-having
             # environments (web, docs) lack; parity over models needs it.
             pytest.skip(f"training stack unavailable: {e}")
         from utils import config as cfg
+
+        assert model_classes  # empty means discovery itself failed
 
         classes = [
             getattr(cfg, name)
@@ -193,7 +216,7 @@ class TestParserParity:
                 "RunDataConfig",
             )
         ] + model_classes
-        assert len(classes) == 6 + len(model_names)
+        assert len(classes) == 6 + len(model_classes)
 
         for cls in classes:
             reference = helper._parse_docstring_helps(cls)
@@ -208,3 +231,92 @@ class TestParserParity:
             assert set(fallback) <= set(reference) | {f.name for f in fields(cls)}, (
                 cls.__name__
             )
+
+
+class TestExtractorRobustness:
+    """schema_extractor must survive hostile helper stdout and crashes.
+
+    Its modules import with web/backend on sys.path (their own top-level
+    ``from config import ...`` layout), hence the path-shimmed fixture.
+    """
+
+    @pytest.fixture
+    def extractor(self):
+        backend_dir = str(
+            Path(__file__).resolve().parent.parent.parent / "web" / "backend"
+        )
+        saved = list(sys.path)
+        sys.path.insert(0, backend_dir)
+        try:
+            import services.schema_extractor as mod
+
+            return mod, mod.SchemaExtractor(env_manager=None)
+        finally:
+            sys.path[:] = saved
+
+    @staticmethod
+    def _fake_run_result(stdout: str, returncode: int = 0):
+        class _Result:
+            pass
+
+        r = _Result()
+        r.stdout = stdout
+        r.stderr = ""
+        r.returncode = returncode
+        return r
+
+    def test_stdout_noise_without_type_key_is_ignored(self, extractor, monkeypatch):
+        # A dependency printing bare JSON (dict without "type", or a scalar)
+        # during the helper's imports must not raise out of _extract.
+        sx = extractor[1]
+        noise = '{"step": 1}\n123\nnull\n'
+        good = (
+            '{"type": "models", "data": ["M"]}\n'
+            '{"type": "schema", "model": "M", "data": []}\n'
+        )
+        monkeypatch.setattr(
+            "subprocess.run", lambda *a, **k: self._fake_run_result(noise + good)
+        )
+        sx.list_models()
+        assert sx._models == ["M"]
+        assert sx._loaded is True
+
+    def test_extract_crash_does_not_wedge_loading(self, extractor, monkeypatch):
+        # If _extract raises anyway, _loading must reset so later callers do
+        # not block forever on cond.wait().
+        sx = extractor[1]
+        calls = []
+
+        def boom(*a, **k):
+            calls.append(1)
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(sx, "_extract", boom)
+        sx.list_models()  # must return, not hang
+        sx.list_models()  # and stay responsive
+        assert len(calls) == 2
+
+    def test_preprocess_helper_crash_returns_none(self, extractor, monkeypatch):
+        # Exit != 0 is a failure even when the degraded marker was printed
+        # before the crash; get_preprocess_schema surfaces KeyError.
+        sx = extractor[1]
+        out = '{"type": "meta", "degraded": true}\n'
+        monkeypatch.setattr(
+            "subprocess.run", lambda *a, **k: self._fake_run_result(out, returncode=1)
+        )
+        with pytest.raises(KeyError):
+            sx.get_preprocess_schema("process")
+
+    def test_degraded_marker_logs_warning(self, extractor, monkeypatch, caplog):
+        sx = extractor[1]
+        out = (
+            '{"type": "meta", "degraded": true}\n'
+            '{"type": "preprocess_schema", "action": "process", "data": []}\n'
+        )
+        monkeypatch.setattr(
+            "subprocess.run", lambda *a, **k: self._fake_run_result(out)
+        )
+        with caplog.at_level(logging.WARNING, logger=extractor[0].__name__):
+            groups = sx.get_preprocess_schema("process")
+        assert groups == []
+        assert any("docstring_parser" in r.message for r in caplog.records)

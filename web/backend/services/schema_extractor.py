@@ -20,6 +20,24 @@ logger = logging.getLogger(__name__)
 HELPER_SCRIPT = str(PROJECT_ROOT / "web" / "backend" / "services" / "_schema_helper.py")
 
 
+def _maybe_warn_degraded(entry: object) -> None:
+    """Log once per helper run that the fallback docstring parser is in use.
+
+    Every pixi environment ships docstring-parser, so degraded mode means the
+    resolved environment is a conda env or custom interpreter lacking it.
+    Tolerates non-dict JSON lines (scalars json.loads happily returns).
+    """
+    if (
+        isinstance(entry, dict)
+        and entry.get("type") == "meta"
+        and entry.get("degraded")
+    ):
+        logger.warning(
+            "Schema helper environment lacks docstring_parser (conda/custom "
+            "interpreter?); schema helps fall back to the built-in parser"
+        )
+
+
 def _parse_group(data: dict) -> ParamGroup:
     """Parse a raw parameter group dict into a ParamGroup model.
 
@@ -123,19 +141,19 @@ class SchemaExtractor:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            if entry["type"] == "models":
+            # .get dispatch: a dependency may print bare JSON (no "type" key)
+            # to stdout during the helper's imports; subscripts here would
+            # raise out of _extract and wedge _loading forever.
+            etype = entry.get("type") if isinstance(entry, dict) else None
+            if etype == "models":
                 all_models = entry["data"]
                 saw_models = True
-            elif entry["type"] == "schema":
+            elif etype == "schema":
                 schemas[entry["model"]] = entry["data"]
-            elif entry["type"] == "error":
+            elif etype == "error":
                 errored.add(entry["model"])
-            elif entry.get("type") == "meta" and entry.get("degraded"):
-                logger.warning(
-                    "Schema helper runs without docstring_parser "
-                    "(fallback parser in use); install it in the default "
-                    "environment for full docstring coverage"
-                )
+            else:
+                _maybe_warn_degraded(entry)
         if not saw_models:
             # Exit 0 but no models envelope: truncated or malformed output.
             logger.error(
@@ -160,7 +178,13 @@ class SchemaExtractor:
                     self._cond.wait()
                 return
             self._loading = True
-        result = self._extract()
+        try:
+            result = self._extract()
+        except Exception:
+            # Never leave _loading stuck True: every later call would block
+            # on cond.wait() forever (schemas API, registry refresh, dispatch).
+            logger.exception("Schema extraction crashed")
+            result = None
         with self._cond:
             if result is not None:
                 # Atomic replacement: readers always see a complete container.
@@ -286,6 +310,15 @@ class SchemaExtractor:
             return None
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             return None
+        if result.returncode != 0:
+            # A crashed run is a failure, not degraded-mode success (the
+            # helper prints its degraded marker before crash-prone imports).
+            logger.error(
+                "Preprocess schema helper exited %d — %s",
+                result.returncode,
+                result.stderr.strip() or "(no stderr)",
+            )
+            return None
         for line in result.stdout.strip().split("\n"):
             if not line:
                 continue
@@ -293,18 +326,15 @@ class SchemaExtractor:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(entry, dict):
+                continue
             if (
                 entry.get("type") == "preprocess_schema"
                 and entry.get("action") == action
             ):
                 raw = entry["data"]
                 break
-            if entry.get("type") == "meta" and entry.get("degraded"):
-                logger.warning(
-                    "Schema helper runs without docstring_parser "
-                    "(fallback parser in use); install it in the default "
-                    "environment for full docstring coverage"
-                )
+            _maybe_warn_degraded(entry)
         if raw is not None:
             self._preprocess_schemas[action] = raw
         return raw

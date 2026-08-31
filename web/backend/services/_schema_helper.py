@@ -18,9 +18,10 @@ import sys
 import typing
 from dataclasses import MISSING, fields
 
-# docstring-parser is declared only at workspace level, so environments built
-# with ``no-default-feature`` (dhg-gpu / dhg-cpu) and custom interpreters lack
-# it. Schema reflection must still run there — hence the fallback parser.
+# Every pixi environment declares docstring-parser (workspace level plus the
+# dhg feature); the remaining package-less audiences are wizard-configured
+# conda/custom interpreters. Schema reflection must still run there — hence
+# the fallback parser.
 try:
     from docstring_parser import parse as _parse_docstring
 except ImportError:
@@ -120,13 +121,18 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
             if _ENTRY_STOP_RE.match(stripped):
                 # Skip the Note:/Returns:-style paragraph and resume the
                 # section instead of dropping entries documented after it.
-                # Only its immediately-indented lines belong to the note; a
-                # blank line ends it so following entries stay parseable.
+                # Only its immediately-indented non-entry lines belong to the
+                # note; blank lines and entry-like lines end it so following
+                # entries stay parseable.
                 note_indent = len(line) - len(line.lstrip())
                 i += 1
                 while i < len(lines):
                     s = lines[i].strip()
-                    if s and (len(lines[i]) - len(lines[i].lstrip())) > note_indent:
+                    if (
+                        s
+                        and (len(lines[i]) - len(lines[i].lstrip())) > note_indent
+                        and not _PARAM_RE.match(s)
+                    ):
                         i += 1
                     else:
                         break
@@ -167,7 +173,10 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
                 i += 1
             text = short
             if long_lines:
-                text += "\n" + "\n".join(long_lines)
+                # Empty inline descriptions carry no boundary newline —
+                # docstring_parser returns the long text alone.
+                long_text = "\n".join(long_lines)
+                text = short + "\n" + long_text if short else long_text
             if text:
                 helps[name] = text
     return helps
@@ -230,11 +239,15 @@ def _emit_models():
     from utils.core import MODEL_CONFIGS, get_supported_models
 
     # Fixed framework groups, in display order: (group_name, RunConfig node, dataclass).
+    # Reflected once — every model's schema embeds the same immutable groups.
     framework_groups = [
-        ("general", "general", GeneralConfig),
-        ("compile", "compile", CompileConfig),
-        ("early_stopping", "early_stopping", EarlyStoppingConfig),
-        ("data", "data", RunDataConfig),
+        reflect_group(name, node, cls)
+        for name, node, cls in (
+            ("general", "general", GeneralConfig),
+            ("compile", "compile", CompileConfig),
+            ("early_stopping", "early_stopping", EarlyStoppingConfig),
+            ("data", "data", RunDataConfig),
+        )
     ]
 
     models = get_supported_models()
@@ -244,10 +257,7 @@ def _emit_models():
             model_cls = MODEL_CONFIGS.get(model_name)
             if model_cls is None:
                 continue
-            groups = [
-                reflect_group(name, node, cls) for name, node, cls in framework_groups
-            ]
-            groups.append(reflect_group(model_name, "model", model_cls))
+            groups = [*framework_groups, reflect_group(model_name, "model", model_cls)]
             print(json.dumps({"type": "schema", "model": model_name, "data": groups}))
         except Exception as e:
             print(json.dumps({"type": "error", "model": model_name, "error": str(e)}))
