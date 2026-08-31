@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from config import PROJECT_ROOT
 from schemas import ModelSchemaResponse, ParamField, ParamGroup
 
+from services._schema_helper import DEGRADED_MARKER
 from services.python_env import EnvironmentNotConfigured
 
 logger = logging.getLogger(__name__)
@@ -21,18 +22,14 @@ logger = logging.getLogger(__name__)
 HELPER_SCRIPT = str(PROJECT_ROOT / "web" / "backend" / "services" / "_schema_helper.py")
 
 
-def _maybe_warn_degraded(entry: object) -> None:
-    """Log once per helper run that the fallback docstring parser is in use.
+def _warn_if_degraded(result: subprocess.CompletedProcess) -> None:
+    """Log when the helper ran on its fallback docstring parser.
 
-    Every pixi environment ships docstring-parser, so degraded mode means the
-    resolved environment is a conda env or custom interpreter lacking it.
-    Tolerates non-dict JSON lines (scalars json.loads happily returns).
+    The helper signals this on stderr (DEGRADED_MARKER); checking it once
+    here, after the returncode gate, keeps stdout a pure data channel and
+    frees envelope consumers from ordering concerns.
     """
-    if (
-        isinstance(entry, dict)
-        and entry.get("type") == "meta"
-        and entry.get("degraded")
-    ):
+    if DEGRADED_MARKER in result.stderr:
         logger.warning(
             "Schema helper environment lacks docstring_parser (conda/custom "
             "interpreter?); schema helps fall back to the built-in parser"
@@ -103,6 +100,12 @@ class SchemaExtractor:
         self._models: list[str] = []
         self._schemas: dict[str, list[dict]] = {}
         self._preprocess_schemas: dict[str, list[dict] | None] = {}
+        # Single-flight + staleness guard for the lazy per-action preprocess
+        # extractions (all under _cond): loading tracks in-flight actions so
+        # concurrent misses share one subprocess; gen invalidates results a
+        # reset_cache() raced past.
+        self._preprocess_loading: set[str] = set()
+        self._preprocess_gen = 0
         self._loaded: bool = False
         self._loading: bool = False
         self._cond = threading.Condition()
@@ -128,8 +131,7 @@ class SchemaExtractor:
         result = self._run_helper_subprocess([], "Model")
         if result is None:
             return None
-        all_models: list[str] = []
-        saw_models = False
+        all_models: list[str] | None = None
         errored: set[str] = set()
         schemas: dict[str, list[dict]] = {}
         # .get payload guards: dependencies may print bare JSON to stdout
@@ -141,7 +143,6 @@ class SchemaExtractor:
                 data = entry.get("data")
                 if isinstance(data, list):
                     all_models = data
-                    saw_models = True
             elif etype == "schema":
                 model, data = entry.get("model"), entry.get("data")
                 if model and isinstance(data, list):
@@ -150,9 +151,7 @@ class SchemaExtractor:
                 model = entry.get("model")
                 if model:
                     errored.add(model)
-            else:
-                _maybe_warn_degraded(entry)
-        if not saw_models:
+        if all_models is None:
             # Exit 0 but no models envelope: truncated or malformed output.
             logger.error(
                 "Schema helper emitted no model list — %s",
@@ -192,6 +191,7 @@ class SchemaExtractor:
                 result.stderr.strip() or "(no stderr)",
             )
             return None
+        _warn_if_degraded(result)
         return result
 
     def _run_helper(self) -> None:
@@ -240,6 +240,10 @@ class SchemaExtractor:
                 self._cond.wait()
             self._loaded = False
             self._preprocess_schemas.clear()
+            # Invalidate in-flight preprocess extractions too: they may be
+            # mid-subprocess right now and would otherwise commit their
+            # pre-refresh result after this clear.
+            self._preprocess_gen += 1
 
     def list_models(self) -> list[str]:
         """Return the list of available model names.
@@ -324,35 +328,44 @@ class SchemaExtractor:
 
         Per-action and lazy (runs on first request for that action), unlike the
         eager model helper. Returns None on missing env / subprocess failure so
-        callers can raise KeyError.
+        callers can raise KeyError. Single-flight per action: concurrent misses
+        share one subprocess, and a result whose generation was invalidated by
+        a reset_cache() mid-run is not committed.
         """
-        # Only a successful extraction is cached; a None result (missing env /
-        # subprocess failure) is not, so the next call retries instead of
-        # raising KeyError forever until restart.
-        cached = self._preprocess_schemas.get(action)
-        if cached is not None:
-            return cached
-        result = self._run_helper_subprocess(["preprocess", action], "Preprocess")
-        if result is None:
-            return None
-        raw: list[dict] | None = None
-        # The helper prints its degraded marker before the schema envelope;
-        # checking other entry types first keeps the warning working regardless
-        # of position, then the matching envelope ends the scan.
-        for entry in _iter_envelopes(result):
-            if (
-                entry.get("type") == "preprocess_schema"
-                and entry.get("action") == action
-            ):
-                data = entry.get("data")
-                if isinstance(data, list):
-                    raw = data
+        with self._cond:
+            while True:
+                cached = self._preprocess_schemas.get(action)
+                if cached is not None:
+                    return cached
+                if action not in self._preprocess_loading:
+                    self._preprocess_loading.add(action)
+                    gen = self._preprocess_gen
                     break
-            else:
-                _maybe_warn_degraded(entry)
-        if raw is not None:
-            self._preprocess_schemas[action] = raw
-        return raw
+                # Another thread is extracting this action; wait for it.
+                self._cond.wait()
+        raw: list[dict] | None = None
+        try:
+            result = self._run_helper_subprocess(["preprocess", action], "Preprocess")
+            if result is not None:
+                for entry in _iter_envelopes(result):
+                    if (
+                        entry.get("type") == "preprocess_schema"
+                        and entry.get("action") == action
+                    ):
+                        data = entry.get("data")
+                        if isinstance(data, list):
+                            raw = data
+                            break
+            return raw
+        finally:
+            # Only a successful, still-current extraction is cached; a None
+            # result is not, so the next call retries instead of raising
+            # KeyError forever until restart.
+            with self._cond:
+                self._preprocess_loading.discard(action)
+                if raw is not None and gen == self._preprocess_gen:
+                    self._preprocess_schemas[action] = raw
+                self._cond.notify_all()
 
     def get_preprocess_schema(self, action: str) -> list[ParamGroup]:
         """Return the parameter schema for a preprocess action (download/process).

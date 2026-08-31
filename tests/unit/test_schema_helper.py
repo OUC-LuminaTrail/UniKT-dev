@@ -8,10 +8,10 @@ dispatch and signal, and the module's import side-effect hygiene.
 """
 
 import contextlib
-import json
 import logging
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import ClassVar
@@ -46,10 +46,12 @@ class TestFallbackParser:
         assert helper._fallback_docstring_helps(doc) == {"a": "typed help."}
 
     def test_typed_entry_nested_parens(self):
-        # One nesting level inside the type annotation must not break the
-        # entry match (docstring_parser parses 'tuple(int, int)' fine).
+        # Parenthesis nesting in the type annotation must not break the
+        # entry match (docstring_parser parses these fine).
         doc = "S.\n\nArgs:\n    bins (tuple(int, int)): bin edges.\n"
         assert helper._fallback_docstring_helps(doc) == {"bins": "bin edges."}
+        deeper = "S.\n\nArgs:\n    m (Dict(str, List(int))): the mapping help.\n"
+        assert helper._fallback_docstring_helps(deeper) == {"m": "the mapping help."}
 
     def test_section_aliases(self):
         # docstring_parser accepts these Google-style aliases; the fallback
@@ -93,6 +95,23 @@ class TestFallbackParser:
         # docstring_parser returns the long text alone.
         doc = "S.\n\nArgs:\n    a:\n        long only\n"
         assert helper._fallback_docstring_helps(doc) == {"a": "long only"}
+
+    def test_tab_indented_continuation_joins_description(self):
+        # Tabs count their full width so a tab-indented continuation line is
+        # consumed as description text, not dropped.
+        doc = "S.\n\nArgs:\n    a: short\n\tlong tab line\n"
+        assert helper._fallback_docstring_helps(doc) == {"a": "short\nlong tab line"}
+
+    def test_note_example_line_does_not_clobber_real_entry(self):
+        # A param-like line inside a Note: example ("lr: 0.001 works best")
+        # terminates the note and looks like an entry — first entry wins, so
+        # the real lr help survives (docstring_parser keeps it too).
+        doc = (
+            "S.\n\nArgs:\n    lr: Learning rate.\n\n"
+            "    Note: from the paper's grid:\n        lr: 0.001 works best\n"
+        )
+        helps = helper._fallback_docstring_helps(doc)
+        assert helps.get("lr") == "Learning rate."
 
     def test_multiparagraph_entry_blanking_rules(self):
         # docstring_parser joins the entry line (short) and the deeper lines
@@ -143,19 +162,18 @@ class TestDegradedMode:
         cls = _cls_with_doc("S.\n\nArgs:\n    x: help x.\n")
         assert helper._parse_docstring_helps(cls) == {"x": "stub value"}
 
-    def test_degraded_marker_emitted_on_stdout(self, monkeypatch, capsys):
-        # The marker rides the stdout envelope protocol (stderr is discarded
-        # by schema_extractor on success paths).
+    def test_degraded_marker_emitted_on_stderr(self, monkeypatch, capsys):
+        # The marker is a stderr sentinel so stdout stays a pure envelope
+        # channel; schema_extractor checks it once after the returncode gate.
         monkeypatch.setattr(helper, "_parse_docstring", None)
         helper._emit_degraded_marker()
-        out = capsys.readouterr().out.strip()
-        assert json.loads(out) == {"type": "meta", "degraded": True}
+        assert helper.DEGRADED_MARKER in capsys.readouterr().err
 
     def test_no_marker_when_parser_installed(self, capsys):
         if helper._parse_docstring is None:
             pytest.skip("docstring_parser not installed in this environment")
         helper._emit_degraded_marker()
-        assert capsys.readouterr().out == ""
+        assert capsys.readouterr().err == ""
 
 
 class TestImportHygiene:
@@ -258,9 +276,9 @@ class TestExtractorRobustness:
             sys.path[:] = saved
 
     @staticmethod
-    def _fake_run_result(stdout: str, returncode: int = 0):
+    def _fake_run_result(stdout: str, returncode: int = 0, stderr: str = ""):
         return subprocess.CompletedProcess(
-            args=[], returncode=returncode, stdout=stdout, stderr=""
+            args=[], returncode=returncode, stdout=stdout, stderr=stderr
         )
 
     def test_stdout_noise_without_type_key_is_ignored(self, extractor, monkeypatch):
@@ -307,14 +325,65 @@ class TestExtractorRobustness:
 
     def test_degraded_marker_logs_warning(self, extractor, monkeypatch, caplog):
         sx = extractor[1]
-        out = (
-            '{"type": "meta", "degraded": true}\n'
-            '{"type": "preprocess_schema", "action": "process", "data": []}\n'
-        )
+        out = '{"type": "preprocess_schema", "action": "process", "data": []}\n'
         monkeypatch.setattr(
-            "subprocess.run", lambda *a, **k: self._fake_run_result(out)
+            "subprocess.run",
+            lambda *a, **k: self._fake_run_result(
+                out, stderr=helper.DEGRADED_MARKER + "\n"
+            ),
         )
         with caplog.at_level(logging.WARNING, logger=extractor[0].__name__):
             groups = sx.get_preprocess_schema("process")
         assert groups == []
         assert any("docstring_parser" in r.message for r in caplog.records)
+
+    def test_preprocess_cache_not_poisoned_by_reset_race(self, extractor, monkeypatch):
+        # A reset_cache() that lands mid-extraction must invalidate the
+        # in-flight result: the stale schema is not committed.
+        sx = extractor[1]
+        started = threading.Event()
+        release = threading.Event()
+        good = '{"type": "preprocess_schema", "action": "process", "data": []}\n'
+
+        def slow_run(*a, **k):
+            started.set()
+            release.wait(timeout=10)
+            return self._fake_run_result(good)
+
+        monkeypatch.setattr("subprocess.run", slow_run)
+        result_box = {}
+
+        def extract():
+            result_box["groups"] = sx.get_preprocess_schema("process")
+
+        t = threading.Thread(target=extract)
+        t.start()
+        assert started.wait(timeout=10)
+        sx.reset_cache()  # invalidate while the subprocess is "running"
+        release.set()
+        t.join(timeout=10)
+        # Extraction returned data but the cache must not hold the stale
+        # pre-reset result (a fresh extraction would be required instead).
+        assert sx._preprocess_schemas.get("process") is None
+
+    def test_preprocess_single_flight(self, extractor, monkeypatch):
+        # Concurrent misses for one action share a single subprocess.
+        sx = extractor[1]
+        calls = []
+        good = '{"type": "preprocess_schema", "action": "process", "data": []}\n'
+
+        def counting_run(*a, **k):
+            calls.append(1)
+            return self._fake_run_result(good)
+
+        monkeypatch.setattr("subprocess.run", counting_run)
+        threads = [
+            threading.Thread(target=lambda: sx.get_preprocess_schema("process"))
+            for _ in range(4)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+        assert sx._preprocess_schemas.get("process") == []
+        assert len(calls) == 1

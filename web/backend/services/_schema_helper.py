@@ -17,6 +17,7 @@ import re
 import sys
 import typing
 from dataclasses import MISSING, fields
+from pathlib import Path
 
 # Every pixi environment declares docstring-parser (workspace level plus the
 # dhg feature); the remaining package-less audiences are wizard-configured
@@ -34,7 +35,10 @@ _SECTION_RE = re.compile(r"^(Args|Arguments|Attributes|Parameters|Params):$")
 _ENTRY_STOP_RE = re.compile(
     r"^(Note|Notes|Returns|Raises|Examples?|Yields|Warnings?|See Also|References):"
 )
-_PARAM_RE = re.compile(r"^(\w+)(?:\s*\((?:[^()]|\([^()]*\))*\))?\s*:\s*(.*)$")
+# Typed entries are ``name (type): desc`` — the type group spans any
+# parenthesis content without a colon (nesting depth is irrelevant because
+# the colon terminates it).
+_PARAM_RE = re.compile(r"^(\w+)(?:\s*\([^:]*\))?\s*:\s*(.*)$")
 
 
 def _base_type(tp):
@@ -106,7 +110,8 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
     lines = doc.splitlines()
 
     def indent(idx):
-        line = lines[idx]
+        # expandtabs so tab-indented continuation lines count their full width
+        line = lines[idx].expandtabs()
         return len(line) - len(line.lstrip())
 
     i = 0
@@ -178,7 +183,9 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
                 # docstring_parser returns the long text alone.
                 long_text = "\n".join(long_lines)
                 text = short + "\n" + long_text if short else long_text
-            if text:
+            if text and name not in helps:
+                # First entry wins: a param-like line inside a Note: example
+                # ("lr: 0.001 works best") must not clobber the real entry.
                 helps[name] = text
     return helps
 
@@ -218,14 +225,16 @@ def reflect_group(group_name, node, cls, only=None, skip=None):
     return {"group_name": group_name, "node": node, "params": params}
 
 
-def _emit_degraded_marker():
-    """Emit the degraded-mode envelope when running on the fallback parser.
+# Single stderr line signaling fallback-parser mode; schema_extractor checks
+# it after the returncode gate so stdout stays a pure data channel and the
+# signal cannot depend on envelope ordering.
+DEGRADED_MARKER = "schema-helper-degraded: docstring_parser unavailable"
 
-    Goes to stdout (the envelope channel schema_extractor consumes) — stderr
-    is discarded on every success path there, so this is the only signal.
-    """
+
+def _emit_degraded_marker():
+    """Signal degraded mode on stderr when running on the fallback parser."""
     if _parse_docstring is None:
-        print(json.dumps({"type": "meta", "degraded": True}))
+        print(DEGRADED_MARKER, file=sys.stderr)
 
 
 def _emit_models():
@@ -312,10 +321,11 @@ def _emit_preprocess(action: str):
 
 
 if __name__ == "__main__":
-    # Runs as a subprocess with cwd=PROJECT_ROOT (schema_extractor); make the
-    # repo importable. Kept out of module scope so importing the helper (e.g.
-    # from pytest) cannot prepend a literal "." to the host's sys.path.
-    sys.path.insert(0, ".")
+    # Make the repo importable regardless of the caller's cwd (matches
+    # PROJECT_ROOT's own derivation in web/backend/config.py). Kept out of
+    # module scope so importing the helper (e.g. from pytest) cannot touch
+    # the host's sys.path.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
     mode = sys.argv[1] if len(sys.argv) > 1 else "models"
     if mode == "preprocess":
         _emit_preprocess(sys.argv[2] if len(sys.argv) > 2 else "")
