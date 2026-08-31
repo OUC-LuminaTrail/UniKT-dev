@@ -28,13 +28,14 @@ try:
 except ImportError:
     _parse_docstring = None
 
-_SECTION_RE = re.compile(r"^(Args|Attributes):$")
-# Other Google-style sections that terminate an Args/Attributes block even
-# when indented like an entry (e.g. a trailing "Note:" paragraph).
+_SECTION_RE = re.compile(r"^(Args|Arguments|Attributes|Parameters|Params):$")
+# Other Google-style sections that may appear indented like an entry inside
+# an Args/Attributes block (e.g. a trailing "Note:" paragraph); the block
+# resumes after their paragraph instead of ending.
 _ENTRY_STOP_RE = re.compile(
     r"^(Note|Notes|Returns|Raises|Examples?|Yields|Warnings?|See Also|References):"
 )
-_PARAM_RE = re.compile(r"^(\w+)(?:\s*\([^)]*\))?\s*:\s*(.*)$")
+_PARAM_RE = re.compile(r"^(\w+)(?:\s*\((?:[^()]|\([^()]*\))*\))?\s*:\s*(.*)$")
 
 
 def _base_type(tp):
@@ -95,8 +96,10 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
     """Extract ``{name: description}`` from Google-style Args/Attributes sections.
 
     Covers the entry forms used in this repo: ``name: desc`` and
-    ``name (type): desc`` with deeper-indented continuation lines joined by
-    newlines, matching docstring_parser's Google-style output.
+    ``name (type): desc`` (one nesting level of parentheses) with
+    deeper-indented continuation lines joined by newlines, matching
+    docstring_parser's Google-style output. Blank lines inside a description
+    are dropped when a continuation follows, as docstring_parser does.
     """
     helps: dict[str, str] = {}
     lines = doc.splitlines()
@@ -115,7 +118,17 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
             if not line[0].isspace():
                 break  # section ended (section header or summary text)
             if _ENTRY_STOP_RE.match(stripped):
-                break
+                # Skip the Note:/Returns:-style paragraph and resume the
+                # section instead of dropping entries documented after it.
+                note_indent = len(line) - len(line.lstrip())
+                i += 1
+                while i < len(lines):
+                    s = lines[i].strip()
+                    if not s or (len(lines[i]) - len(lines[i].lstrip())) > note_indent:
+                        i += 1
+                    else:
+                        break
+                continue
             m = _PARAM_RE.match(stripped)
             if m is None:
                 i += 1
@@ -126,7 +139,20 @@ def _fallback_docstring_helps(doc: str) -> dict[str, str]:
             while i < len(lines):
                 cont = lines[i]
                 s = cont.strip()
-                if not s or (len(cont) - len(cont.lstrip())) <= base_indent:
+                if not s:
+                    # Blank line: keep consuming only if a deeper-indented
+                    # continuation paragraph follows (multi-paragraph entry).
+                    j = i + 1
+                    while j < len(lines) and not lines[j].strip():
+                        j += 1
+                    if (
+                        j < len(lines)
+                        and (len(lines[j]) - len(lines[j].lstrip())) > base_indent
+                    ):
+                        i = j
+                        continue
+                    break
+                if (len(cont) - len(cont.lstrip())) <= base_indent:
                     break
                 parts.append(s)
                 i += 1
@@ -249,6 +275,11 @@ def _emit_preprocess(action: str):
 
 
 if __name__ == "__main__":
+    if _parse_docstring is None:
+        print(
+            "schema helper: docstring_parser not installed, using fallback parser",
+            file=sys.stderr,
+        )
     mode = sys.argv[1] if len(sys.argv) > 1 else "models"
     if mode == "preprocess":
         _emit_preprocess(sys.argv[2] if len(sys.argv) > 2 else "")

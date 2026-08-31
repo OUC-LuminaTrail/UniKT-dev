@@ -97,6 +97,7 @@ seaborn = ">=0.13.2,<0.14"
 matplotlib = ">=3.10.8,<4"
 [feature.dhg.pypi-dependencies]
 dhg = "==0.9.*"
+docstring-parser = "==0.18.0"
 jsonargparse = ">=4.49,<5"
 pyg_lib = ">=0.4.0,<0.5"
 torch-scatter = "==2.1.1"
