@@ -45,7 +45,7 @@ class GCN(nn.Module):
 class AttentionScoreQcWeight(nn.Module):
     """问题-概念联合权重：attention = (Q·K^T)(Q_c·K_c^T)，缩放后逐元素相乘。"""
 
-    def __init__(self, hidden_size, dropout_p=0.0):
+    def __init__(self, hidden_size):
         super().__init__()
         self.hidden_size = hidden_size
         self.linear_q1 = nn.Linear(hidden_size, hidden_size)
@@ -67,7 +67,7 @@ class AttentionScoreQcWeight(nn.Module):
 class AttentionScoreCausal(nn.Module):
     """因果注意力分数（标准 softmax）。"""
 
-    def __init__(self, hidden_size, dropout_p=0.0):
+    def __init__(self, hidden_size):
         super().__init__()
         self.hidden_size = hidden_size
         self.softmax = nn.Softmax(dim=-1)
@@ -90,16 +90,14 @@ class AttentionScoreCausal(nn.Module):
 
 
 class AttentionScoreTrivial(nn.Module):
-    """平凡注意力分数：1 - sigmoid(score)，再 softmax。含可学习缩放 a/b。"""
+    """平凡注意力分数：1 - sigmoid(score)，再 softmax。"""
 
-    def __init__(self, hidden_size, dropout_p=0.0):
+    def __init__(self, hidden_size):
         super().__init__()
         self.hidden_size = hidden_size
         self.softmax = nn.Softmax(dim=-1)
         self.linear_q = nn.Linear(hidden_size, hidden_size)
         self.linear_k = nn.Linear(hidden_size, hidden_size)
-        self.a = nn.Parameter(torch.FloatTensor([10]))
-        self.b = nn.Parameter(torch.FloatTensor([0.1]))
 
     def forward(self, q, k, attn_mask, key_padding_mask, qc_score):
         q = self.linear_q(q)
@@ -120,14 +118,14 @@ class AttentionScoreTrivial(nn.Module):
 class DisentangleCausal(nn.Module):
     """因果/平凡解耦：对每个 (query, key) 用 Gumbel-softmax 二选一分配权重。"""
 
-    def __init__(self, hidden_size, seq_len, tau=1, is_hard=True, dropout_p=0):
+    def __init__(self, hidden_size, tau=1, is_hard=True):
         super().__init__()
         self.tau = tau
         self.is_hard = is_hard
-        self.causal_att = AttentionScoreCausal(hidden_size, dropout_p)
-        self.trivial_att = AttentionScoreTrivial(hidden_size, dropout_p)
-        self.qc_causal = AttentionScoreQcWeight(hidden_size, dropout_p)
-        self.qc_trivial = AttentionScoreQcWeight(hidden_size, dropout_p)
+        self.causal_att = AttentionScoreCausal(hidden_size)
+        self.trivial_att = AttentionScoreTrivial(hidden_size)
+        self.qc_causal = AttentionScoreQcWeight(hidden_size)
+        self.qc_trivial = AttentionScoreQcWeight(hidden_size)
 
     def forward(
         self, q_state, x_state, attn_mask, key_padding_mask, ques_state, conc_state
@@ -251,7 +249,6 @@ class CIKT(nn.Module):
         self.d_model = d_model
         self.length = int(seq_len)
         self.seq_len = int(seq_len) - 1  # response window length
-        self.num_difficulty_levels = num_difficulty_levels
 
         # static masks / adjacency
         fixed_edge = self._build_fixed_edge(self.length)
@@ -282,10 +279,8 @@ class CIKT(nn.Module):
         )
         self.disentanglement = DisentangleCausal(
             hidden_size=d_model,
-            seq_len=self.seq_len,
             tau=1,
             is_hard=True,
-            dropout_p=0,
         )
         self.encoder_embedding = EncoderEmbedding(
             q_num=num_questions, concept_num=num_concepts, d_model=d_model
@@ -321,21 +316,10 @@ class CIKT(nn.Module):
         adj[all_src, all_tgt] = 1.0
         return adj
 
-    def _zero_lstm_states(self, batch_size, device, dtype):
+    def _zero_lstm_states(self, num_layers, batch_size, device, dtype):
         """构造 LSTM 的零初始 (h_0, c_0)，形状 ``[num_layers, B, d]``。"""
         h = torch.zeros(
-            self.x_encoder_num_layers,
-            batch_size,
-            self.d_model,
-            device=device,
-            dtype=dtype,
-        )
-        c = torch.zeros_like(h)
-        return h, c
-
-    def _zero_q_states(self, batch_size, device, dtype):
-        h = torch.zeros(
-            self.q_encoder_num_layers,
+            num_layers,
             batch_size,
             self.d_model,
             device=device,
@@ -352,7 +336,9 @@ class CIKT(nn.Module):
         device, dtype = embed_masked.device, embed_masked.dtype
         seq_len = self.seq_len
         x = embed_masked.reshape(batch_size * seq_len, seq_len, self.d_model)
-        h0, c0 = self._zero_lstm_states(batch_size * seq_len, device, dtype)
+        h0, c0 = self._zero_lstm_states(
+            self.x_encoder_num_layers, batch_size * seq_len, device, dtype
+        )
         x_state, _ = self.rnn(x, (h0, c0))
         x_state = x_state.view(batch_size, seq_len, seq_len, self.d_model)
         x_state = x_state * self.att_mask_num.unsqueeze(0).unsqueeze(-1)
@@ -414,10 +400,16 @@ class CIKT(nn.Module):
 
         # Attention / disentanglement
         q_state, _ = self.rnn_q(
-            q_embed, self._zero_q_states(batch_size, q_embed.device, q_embed.dtype)
+            q_embed,
+            self._zero_lstm_states(
+                self.q_encoder_num_layers, batch_size, q_embed.device, q_embed.dtype
+            ),
         )
         x_state, _ = self.rnn(
-            x_embed, self._zero_lstm_states(batch_size, x_embed.device, x_embed.dtype)
+            x_embed,
+            self._zero_lstm_states(
+                self.x_encoder_num_layers, batch_size, x_embed.device, x_embed.dtype
+            ),
         )
         causal_mask, trivial_mask = self.disentanglement(
             q_state=q_state,
