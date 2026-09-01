@@ -61,7 +61,7 @@ def cikt_collate_fn(
     if deterministic:
         idx = torch.zeros(c.shape, dtype=torch.long)
     else:
-        rand = torch.rand(c.shape, generator=None)
+        rand = torch.rand(c.shape)
         idx = (rand * count.float()).long()
     idx = idx.clamp(min=0, max=concept_question_table.size(1) - 1)
     row = concept_question_table[c]  # [B, L, K]
