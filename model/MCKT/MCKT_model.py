@@ -1,7 +1,7 @@
 """MCKT model.
 
-This is a local port of the reference implementation at:
-/Users/wsy/project/kt_contrastive_diffusion_repos/MCKT/model.py
+This module contains the project's local port of the MCKT reference
+implementation.
 """
 
 import math
