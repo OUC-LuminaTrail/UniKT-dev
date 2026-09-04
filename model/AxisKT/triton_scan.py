@@ -20,8 +20,36 @@ scan with identical semantics.
 """
 
 import torch
-import triton
-import triton.language as tl
+
+try:
+    import triton
+    import triton.language as tl
+except ImportError:
+    # CPU-only installs (torch built without CUDA) ship no triton. Keep the
+    # module importable so the serial CPU fallback stays reachable; the
+    # kernel definitions below become plain functions that are never
+    # launched, and the stubs are inert whenever the real package exists.
+    class _TritonStub:
+        @staticmethod
+        def jit(fn=None, **_):
+            return fn if fn is not None else (lambda f: f)
+
+        @staticmethod
+        def cdiv(a, b):
+            return -(-a // b)
+
+        @staticmethod
+        def next_power_of_2(n):
+            return 1 << max(n - 1, 0).bit_length()
+
+    class _ConstexprStub:
+        pass
+
+    class _TLStub:
+        constexpr = _ConstexprStub
+
+    triton = _TritonStub()
+    tl = _TLStub()
 
 # Below this length the single-program kernels are used; they also anchor
 # the exact bitwise outputs the golden tests rely on.
