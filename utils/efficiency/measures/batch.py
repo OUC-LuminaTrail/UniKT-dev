@@ -26,7 +26,11 @@ def _first_tensor(batch) -> torch.Tensor | None:
 
 def _count_scored(forward, device) -> int:
     """``numel`` of the forward's aligned 1D ``y_label``, synchronized."""
-    with torch.inference_mode():
+    # no_grad (not inference_mode): this is usually the session's first forward,
+    # and models with lazily built seq-len constants (AKT family) cache them
+    # here. Tensors created under inference_mode are rejected by autograd in
+    # the later grad-enabled FLOPs/train stages; no_grad tensors are not.
+    with torch.no_grad():
         out = forward()
         n = int(out["y_label"].numel())
     synchronize(device)
