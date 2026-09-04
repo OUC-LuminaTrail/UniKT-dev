@@ -104,3 +104,41 @@ class TestCountScored:
         target = _StubTarget(torch.zeros(64), torch.zeros(8))
         assert count_valid_interactions(target, "b") == 64
         assert count_test_predictions(target, "b") == 8
+
+
+class _LazyCacheTarget:
+    """Duck-typed target around a module that caches a constant on first forward.
+
+    The cached tensor feeds a grad-tracked multiplication, reproducing the
+    AKT-family lazy-constant pattern (e.g. FlucKT's Kerple bias).
+    """
+
+    def __init__(self) -> None:
+        self.device = torch.device("cpu")
+        self.weight = torch.nn.Parameter(torch.ones(3))
+        self.cached = None
+
+    def forward(self, batch):
+        x = batch
+        if self.cached is None:
+            self.cached = torch.arange(3, dtype=x.dtype, device=x.device)
+        return {"y_label": ((x * self.weight) * self.cached).reshape(-1)}
+
+
+class TestCountScoredCacheSafety:
+    def test_counting_forward_keeps_lazy_caches_autograd_compatible(self):
+        """The setup counting forward must not create inference-tensor caches.
+
+        It is usually the session's first forward, so lazily built constants
+        are cached here and reused by the grad-enabled FLOPs/train stages;
+        inference tensors would be rejected there.
+        """
+        target = _LazyCacheTarget()
+        batch = torch.randn(2, 3)
+        assert count_valid_interactions(target, batch) == 6
+        assert target.cached is not None
+        assert not target.cached.is_inference()
+
+        out = target.forward(batch)
+        out["y_label"].sum().backward()
+        assert target.weight.grad is not None
