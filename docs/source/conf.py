@@ -49,7 +49,6 @@ autodoc_mock_imports = [
     "scipy",
     "sklearn",
     "torch_geometric",
-    "dhg",
     "mamba_ssm",
     "causal_conv1d",
     "xlstm",

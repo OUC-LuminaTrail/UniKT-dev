@@ -19,8 +19,8 @@ import typing
 from dataclasses import MISSING, fields
 from pathlib import Path
 
-# Every pixi environment declares docstring-parser (workspace level plus the
-# dhg feature); the remaining package-less audiences are wizard-configured
+# Every pixi environment declares docstring-parser at workspace level; the
+# remaining package-less audiences are wizard-configured
 # conda/custom interpreters. Schema reflection must still run there — hence
 # the fallback parser. Exception, not just ImportError: a corrupt install
 # (SyntaxError) must degrade to the fallback too, and since schema_extractor

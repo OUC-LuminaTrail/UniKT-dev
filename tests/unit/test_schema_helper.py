@@ -1,10 +1,10 @@
 """Tests for the schema reflection helper's docstring-help extraction.
 
 Covers the Google-style fallback parser used when ``docstring_parser`` is
-absent (conda / custom-interpreter environments; the dhg pixi feature
-declares the package but the fallback stays as the safety net), its parity
-with the real parser on every reflected config class, the degraded-mode
-dispatch and signal, and the module's import side-effect hygiene.
+absent (conda / custom-interpreter environments without the package), its
+parity with the real parser on every reflected config class, the
+degraded-mode dispatch and signal, and the module's import side-effect
+hygiene.
 """
 
 import contextlib

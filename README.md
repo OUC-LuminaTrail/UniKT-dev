@@ -59,8 +59,6 @@ The default environment uses **CUDA 12.8 · Python 3.12 · PyTorch 2.10**. Enter
 pixi shell -e cpu      # CPU-only
 pixi shell -e mamba    # Mamba-based models
 pixi shell -e xlstm    # xLSTM-based models
-pixi shell -e dhg-gpu  # DHG-based models on CUDA 11.7
-pixi shell -e dhg-cpu  # DHG-based models on CPU
 ```
 
 </details>

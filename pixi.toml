@@ -4,7 +4,6 @@ name = "UniKT"
 platforms = [
   "linux-64",
   { name = "gpu", platform = "linux-64", cuda = "12.8", glibc = "2.38" },
-  { name = "dhg-gpu", platform = "linux-64", cuda = "11.7", glibc = "2.38" },
 ]
 requires-pixi = "0.72*"
 license = "MIT"
@@ -81,47 +80,6 @@ polars = { version = ">=1.39.3,<2", extras = ["rt64"] }
 extra-index-urls = ["https://download.pytorch.org/whl/cpu"]
 find-links = [{ url = "https://data.pyg.org/whl/torch-2.10.0+cpu.html" }]
 
-[feature.dhg]
-platforms = ["linux-64", "dhg-gpu"]
-[feature.dhg.dependencies]
-python = "3.10.*"
-optuna = ">=4.6.0,<5"
-rich = ">=13.0"
-scikit-learn = ">=1.7.2,<2"
-pandas = ">=2.3.3,<3"
-pyarrow = ">=12.0.1,<13"
-python-dotenv = ">=1.2.1,<2"
-ruff = ">=0.15,<0.16"
-pytest = ">=9.0.2,<10"
-seaborn = ">=0.13.2,<0.14"
-matplotlib = ">=3.10.8,<4"
-[feature.dhg.pypi-dependencies]
-dhg = "==0.9.*"
-docstring-parser = "==0.18.0"
-jsonargparse = ">=4.49,<5"
-pyg_lib = ">=0.4.0,<0.5"
-torch-scatter = "==2.1.1"
-torch-geometric = ">=2.7.0, <3"
-polars = { version = ">=1.38.1, <2", extras = ["rt64"] }
-
-[feature.dhg-gpu]
-platforms = ["dhg-gpu"]
-[feature.dhg-gpu.dependencies]
-cuda-version = "11.7.*"
-[feature.dhg-gpu.pypi-dependencies]
-torch = "==1.13.1+cu117"
-[feature.dhg-gpu.pypi-options]
-extra-index-urls = ["https://download.pytorch.org/whl/cu117"]
-find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cu117.html" }]
-
-[feature.dhg-cpu]
-platforms = ["linux-64"]
-[feature.dhg-cpu.pypi-dependencies]
-torch = "==1.13.1"
-[feature.dhg-cpu.pypi-options]
-extra-index-urls = ["https://download.pytorch.org/whl/cpu"]
-find-links = [{ url = "https://data.pyg.org/whl/torch-1.13.1+cpu.html" }]
-
 [feature.web.pypi-dependencies]
 fastapi = ">=0.115.0"
 uvicorn = { version = ">=0.39.0", extras = ["standard"] }
@@ -158,8 +116,6 @@ docs-fmt-check = { cmd = "python scripts/fmt-code-blocks.py source --check", cwd
 docs-linkcheck = { cmd = "sphinx-build -b linkcheck source _linkcheck", cwd = "docs", description = "Check external links" }
 
 [environments]
-dhg-cpu = { features = ["common", "dhg", "dhg-cpu"], no-default-feature = true }
-dhg-gpu = { features = ["common", "dhg", "dhg-gpu"], no-default-feature = true }
 cpu = { features = ["common", "base", "cpu"] }
 mamba = { features = ["common", "base", "gpu", "mamba"] }
 xlstm = { features = ["common", "base", "gpu", "xlstm"] }
