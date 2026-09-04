@@ -1,29 +1,14 @@
-"""AxisKT: private KC scans with a stacked causal-conv global encoder.
-
-The global encoder is a stack of ``n_blocks`` causal depthwise-separable conv
-blocks whose dilation grows as ``conv_dilation_base**i``; the rest of the
-model is the same question-level KT pipeline.
-
-Ablation: ``use_global`` toggles the global causal dilated-conv branch
-(:meth:`AxisKT._global_history_states`), ``use_local`` toggles the local per-KC
-affine recursion branch (:meth:`AxisKT._local_pre_states`), and
-``use_forgetting`` toggles only the local time-decay transition. An ablated
-branch is skipped entirely in the forward pass and feeds all-zero features to
-the readout, so its parameters never receive a gradient and stay inert; the
-architecture, parameter count, and shared pathway (event embeddings, IRT head)
-are unchanged, isolating each branch's contribution.
-"""
+"""AxisKT: private KC scans with a stacked causal-conv global encoder."""
 
 from collections import namedtuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import nn
 
 from model.AxisKT.triton_scan import segmented_scalar_affine_exclusive_scan
 
-# Question-derived tensors computed once per forward and shared across the
-# sub-methods that would otherwise re-gather them.
 _QuestionFeatures = namedtuple(
     "_QuestionFeatures",
     [
@@ -35,14 +20,7 @@ _QuestionFeatures = namedtuple(
 
 
 class GlobalConvBlock(nn.Module):
-    """Causal depthwise-separable conv block with a residual shell.
-
-    A left-padded depthwise conv mixes the last ``kernel_size`` positions per
-    channel in parallel, a pointwise conv mixes channels, and the residual
-    shell applies normalization and dropout. Fully parallel across time (no
-    sequential scan) and O(T) memory; stacking blocks with growing dilation
-    widens the receptive field.
-    """
+    """Causal depthwise-separable conv block with a residual shell."""
 
     def __init__(
         self,
@@ -67,22 +45,21 @@ class GlobalConvBlock(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         residual = x
         y = x.transpose(1, 2)  # [B, d, N]
-        y = torch.nn.functional.pad(y, (self.pad, 0))
+        y = F.pad(y, (self.pad, 0))
         y = self.depthwise(y)
         y = self.pointwise(y)
-        y = torch.nn.functional.gelu(y).transpose(1, 2)  # [B, N, d]
+        y = F.gelu(y).transpose(1, 2)  # [B, N, d]
         return self.norm(residual + self.dropout(y))
 
 
 class AxisKT(nn.Module):
     """Question-level KT with decoupled per-KC storage and global interaction.
 
-    Readout concatenates ``[global_state, local_pre_state, event_embedding]``.
-    ``use_global`` / ``use_local`` ablate the global dilated-conv branch and
-    the local affine-recursion branch respectively. ``use_forgetting=False``
-    keeps the local per-KC writes and scan but replaces the learned temporal
-    decay with an identity transition. An ablated branch emits all-zero
-    features of the same shape, keeping the rest of the model intact.
+    The readout concatenates ``[global_state, local_pre_state,
+    event_embedding]``. ``use_global`` / ``use_local`` ablate the global
+    conv branch / the local scan branch (an ablated branch emits all-zero
+    features and receives no gradient); ``use_forgetting=False`` keeps the
+    local writes and scan but uses an identity temporal transition.
     """
 
     def __init__(
@@ -108,11 +85,6 @@ class AxisKT(nn.Module):
         self.num_skills = int(data_metadata["num_skills"])
         self.hidden_dim = hidden_dim
         self.max_gap_bins = max_gap_bins
-        # Ablation switches. ``use_global=False`` removes the stacked causal
-        # dilated-conv branch, ``use_local=False`` removes the per-KC affine
-        # recursion branch, and ``use_forgetting=False`` keeps the local branch
-        # but makes its temporal transition an identity. The first two together
-        # leave only the shared event embedding + IRT readout.
         self.use_global = bool(use_global)
         self.use_local = bool(use_local)
         self.use_forgetting = bool(use_forgetting)
@@ -127,8 +99,8 @@ class AxisKT(nn.Module):
         self.register_buffer("question_skill_ids", skill_ids, persistent=True)
         self.register_buffer("question_skill_mask", skill_mask, persistent=True)
 
-        # Intrinsic width of the per-question embedding. ``0`` drops the
-        # pathway, leaving question identity to ``question_diff`` and the KC side.
+        # ``question_embed_dim`` 0 drops the pathway entirely; below full width
+        # a shared projection lifts the embedding back to ``hidden_dim``.
         if question_embed_dim is None:
             question_embed_dim = hidden_dim
         if question_embed_dim < 0:
@@ -138,8 +110,6 @@ class AxisKT(nn.Module):
             self.question_embed_proj = None
         else:
             self.question_embed = nn.Embedding(self.num_questions, question_embed_dim)
-            # Below full width a shared projection lifts the rows back to
-            # ``hidden_dim``; at full width the projection is skipped.
             self.question_embed_proj = (
                 None
                 if question_embed_dim == hidden_dim
@@ -155,9 +125,8 @@ class AxisKT(nn.Module):
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
 
-        # Scalar per-dimension transition: the gap-modulated decay forgets and
-        # the event-conditioned write updates; the segmented scan keeps one
-        # private state per KC.
+        # Scalar per-dimension transition: gap-modulated decay (forgetting) and
+        # event-conditioned write, one private state per KC.
         self.local_write = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
         self.local_decay = nn.Linear(hidden_dim, hidden_dim)
@@ -179,20 +148,16 @@ class AxisKT(nn.Module):
             nn.Dropout(dropout),
         )
         self.global_norm = nn.LayerNorm(hidden_dim)
-        # IRT prediction head: logit = a·(θ−β), where θ is read from the
-        # 3-way readout features by ``ability_head`` and β is the shared
-        # ``question_diff`` of the predicted (next) question. Zero-initialized
-        # so the model starts at chance (logit 0); the head is a pure
-        # 2PL-style IRT decomposition, interpretable as ability minus
-        # difficulty scaled by the learned discrimination ``a``.
+        # IRT head: logit = a·(θ−β) with θ from ``ability_head`` over the
+        # readout features and β from ``question_diff`` of the next question;
+        # zero-initialized so training starts at chance (logit 0).
         self.ability_head = nn.Linear(3 * hidden_dim, 1)
         nn.init.zeros_(self.ability_head.weight)
         nn.init.zeros_(self.ability_head.bias)
         self.irt_disc = nn.Parameter(torch.tensor(1.0))
 
         nn.init.zeros_(self.question_diff.weight)
-        zeroed_layers = [self.local_write, self.local_readout]
-        for layer in zeroed_layers:
+        for layer in (self.local_write, self.local_readout):
             nn.init.zeros_(layer.weight)
             nn.init.zeros_(layer.bias)
         nn.init.zeros_(self.local_decay.weight)
@@ -218,15 +183,7 @@ class AxisKT(nn.Module):
         return vector
 
     def _resolve_question_features(self, questions: torch.Tensor) -> _QuestionFeatures:
-        """Gather the question-derived tensors once for reuse across forward.
-
-        ``question_skill_ids[questions]`` and the ``_question_vector``
-        projection are each needed in several sub-methods; computing them here
-        and threading the result avoids repeating the gathers. The per-KC
-        skill embedding is not materialized: ``_event_embeddings`` pools it
-        over the packed occurrences and the readout consumes the packed
-        per-occurrence embedding already gathered in the local branch.
-        """
+        """Gather the question-derived tensors shared across the forward."""
         skill_ids = self.question_skill_ids[questions]
         return _QuestionFeatures(
             skill_ids=skill_ids,
@@ -244,31 +201,25 @@ class AxisKT(nn.Module):
     ) -> torch.Tensor:
         """Question-conditioned readout directly in packed space.
 
-        Each occurrence carries the private state of one KC of one position;
-        the score combines that state, the KC embedding, and the containing
-        question's vector, and a softmax over the occurrences of the same
-        position weights the states before summing. The (b, s) groups are
-        reduced with ``scatter_reduce`` over the packed position ids, so the
-        unpacked [B, S, K, H] layout (and its scatter) is never materialized.
+        Each occurrence is scored from its private KC state, the KC embedding,
+        and the containing question's vector; a softmax over the occurrences
+        of a position weights the states before summing, reduced with
+        ``scatter_reduce`` over the packed position ids.
         """
         h = self.hidden_dim
         weight = self.local_readout.weight
         w_local = weight[:, :h]
         w_skill = weight[:, h : 2 * h]
         w_question = weight[:, 2 * h :]
-        # Scalar per-feature projections; gathering the projected score avoids
-        # a [B, P, H] gather of ``question_vector``.
-        question_proj = torch.nn.functional.linear(question_vector, w_question).squeeze(
-            -1
-        )
+        question_proj = F.linear(question_vector, w_question).squeeze(-1)
         scores = (
-            torch.nn.functional.linear(packed_state, w_local).squeeze(-1)
-            + torch.nn.functional.linear(packed_skill_embedding, w_skill).squeeze(-1)
+            F.linear(packed_state, w_local).squeeze(-1)
+            + F.linear(packed_skill_embedding, w_skill).squeeze(-1)
             + question_proj.gather(1, packed_pos)
             + self.local_readout.bias
         )
-        # Padded occurrences of a row are invalid; exclude them so they cannot
-        # join the group of the position their padding slot maps to.
+        # Padded occurrences are invalid; keep them out of their position's
+        # softmax group.
         scores = scores.masked_fill(~packed_valid, torch.finfo(scores.dtype).min)
         seg_max = torch.scatter_reduce(
             torch.zeros_like(scores),
@@ -308,10 +259,8 @@ class AxisKT(nn.Module):
         """Pack valid KC occurrences of each row in skill-major order.
 
         Returns the packed skill ids, validity mask, and original position of
-        every occurrence, plus the permutation that maps the flattened
-        [S, K] grid into the packed layout. Shared by the local scan and the
-        event-embedding pooling, so the [B, S, K] grid is gathered once per
-        use instead of materialized as [B, S, K, hidden].
+        every occurrence, plus the permutation mapping the flattened [S, K]
+        grid into the packed layout.
         """
         batch_size, seq_len = questions.shape
         occurrence_mask = skill_mask & mask.unsqueeze(-1)
@@ -370,8 +319,7 @@ class AxisKT(nn.Module):
             order,
         ) = self._pack_kc_positions(questions, mask, skill_ids, skill_mask, kc_order)
 
-        # Real elapsed seconds (or position indices when unavailable); only
-        # differences within a sequence matter.
+        # Only within-sequence time differences matter.
         times = times.reshape(batch_size, seq_len, 1).expand(
             batch_size, seq_len, max_skills
         )
@@ -406,13 +354,10 @@ class AxisKT(nn.Module):
         """Run the gap/decay/write pipeline and the segmented scan.
 
         Returns each occurrence's exclusive scan state — the KC memory
-        accumulated through that KC's previous occurrence, decayed between
-        past practices only — together with the shared packed tensors, so the
-        readout and the event pooling can reuse one packing pass and one
-        skill-embedding gather. The occurrence's own transition decay is not
-        applied to its own readout (it composes only into later reads of the
-        same KC), so the timestamp of the interaction being predicted never
-        enters its prediction.
+        accumulated through that KC's previous occurrences only — together
+        with the shared packed tensors. The occurrence's own decay composes
+        only into later reads of the same KC, so the timestamp of the
+        interaction being predicted never enters its prediction.
         """
         if packed is None:
             skill_ids = (
@@ -467,16 +412,13 @@ class AxisKT(nn.Module):
             + self.answer_embed(packed_response)
         )
         if self.use_forgetting:
-            # The decay only takes one of max_gap_bins rows, so it enters the
-            # scan as a codebook plus per-position codes instead of a full
-            # [B, N, H] matrix; the kernel neutralizes invalid positions.
             decay_table = torch.exp(
-                -torch.nn.functional.softplus(self.local_decay(self.gap_embed.weight))
+                -F.softplus(self.local_decay(self.gap_embed.weight))
             )
             decay_codes = gap_bucket
         else:
-            # Preserve the local writes and per-KC segmentation while removing
-            # only the temporal forgetting transition for a clean ablation.
+            # Identity transition: keep local writes and per-KC segmentation,
+            # drop only the temporal forgetting.
             decay_table = torch.ones(
                 1,
                 self.hidden_dim,
@@ -484,9 +426,6 @@ class AxisKT(nn.Module):
                 dtype=skill_embedding.dtype,
             )
             decay_codes = torch.zeros_like(gap_bucket)
-        # The initial state only depends on the skill id, and the packed
-        # segment ids are exactly those skill ids, so it enters the scan as a
-        # per-skill codebook addressed by the segment ids.
         init_table = torch.tanh(self.local_init(self.skill_embed.weight))
         bias = torch.tanh(self.local_write(local_input)).unsqueeze(-1)
 
@@ -576,12 +515,9 @@ class AxisKT(nn.Module):
     ) -> torch.Tensor:
         """Per-position event embedding with packed-occurrence KC pooling.
 
-        The per-KC skill and change embeddings are gathered only for the
-        packed occurrences and reduced over each position's group with
-        ``scatter_reduce``, so no [B, S, K, hidden] tensor is materialized.
-        Without ``mask`` every position is treated as valid (all-of-batch
-        pooling, used by direct calls); with it, masked positions pool to
-        zero, which the global branch zeroes out anyway.
+        The per-KC skill and change embeddings are pooled over each
+        position's valid occurrences. Without ``mask`` every position is
+        treated as valid; with it, masked positions pool to zero.
         """
         if q_features is None:
             q_features = self._resolve_question_features(questions)
@@ -745,7 +681,6 @@ class AxisKT(nn.Module):
                 self.local_readout.bias,
             )
         else:
-            # One packing pass and one embedding gather shared by both branches.
             packed = self._pack_kc_occurrences(
                 questions,
                 responses,

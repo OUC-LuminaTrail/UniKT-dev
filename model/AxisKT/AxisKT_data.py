@@ -51,8 +51,7 @@ class AxisKTDataset(Dataset):
         )
         self.kc_order = torch.argsort(sort_key, dim=1, stable=True)
         self.kc_valid_counts = flat_valid.sum(dim=1)
-        # Inverse permutation over the full flat slot domain, precomputed so
-        # the fused inference readout needs no per-forward scatter chain.
+        # Inverse permutation of kc_order over the full flat slot domain.
         kc_inverse = torch.empty_like(self.kc_order)
         kc_inverse.scatter_(
             1,
@@ -79,14 +78,10 @@ class AxisKTDataset(Dataset):
 def axiskt_packed_collate_fn(batch):
     """Stack dense inputs and trim precomputed orders to the batch width.
 
-    The returned 7-tuple adds ``valid_idx``: the row-major indices of the
-    adjacent-pair valid mask ``mask[:, :-1] & mask[:, 1:]`` flattened over
-    ``[B, S-1]``, computed on the CPU at collate time. The forward pass
-    gathers logits/labels at these indices instead of running
-    ``torch.masked_select``, which would trigger a ``nonzero`` GPU->CPU sync
-    on every forward; both select the same elements in the same order, so
-    the extracted tensors are bitwise identical. ``kc_inverse`` keeps the
-    full flat slot width — the fused readout indexes it by (position, slot).
+    The returned 7-tuple appends ``valid_idx``: row-major indices of the
+    adjacent-pair mask ``mask[:, :-1] & mask[:, 1:]`` flattened over
+    ``[B, S-1]``. ``kc_inverse`` keeps the full flat slot width — the fused
+    readout indexes it by (position, slot).
     """
     dense_columns = [torch.stack(column) for column in zip(*(row[:4] for row in batch))]
     packed_length = max(int(row[6]) for row in batch)
@@ -136,6 +131,28 @@ def derive_max_gap_bins(time_seqs: np.ndarray) -> int:
     return max(2, int(math.floor(math.log2(max_span))) + 2)
 
 
+def build_axiskt_model(rc, data_src: DataSource, extra: dict):
+    """Build the AxisKT module from a run config and prepared extras."""
+    from model.AxisKT.AxisKT_model import AxisKT
+
+    m = rc.model
+    return AxisKT(
+        data_metadata=data_src.get_metadata(),
+        question_skill_ids=extra["question_skill_ids"],
+        question_skill_mask=extra["question_skill_mask"],
+        hidden_dim=m.hidden_dim,
+        n_blocks=m.n_blocks,
+        max_gap_bins=int(extra["max_gap_bins"]),
+        dropout=m.dropout,
+        conv_kernel_size=m.conv_kernel_size,
+        conv_dilation_base=m.conv_dilation_base,
+        question_embed_dim=None if m.question_embed_dim < 0 else m.question_embed_dim,
+        use_global=m.use_global,
+        use_local=m.use_local,
+        use_forgetting=getattr(m, "use_forgetting", True),
+    )
+
+
 class AxisKTModelData(QuestionModelData):
     """Prepare original question sequences and a separate question-KC view."""
 
@@ -153,9 +170,8 @@ class AxisKTModelData(QuestionModelData):
 
         questions, responses, masks, user_id_sequence = self.load_sequence_data()
         times = self._build_time_sequences()
-        # One real student id per split row: rows are subsequences
-        # (sequence_id), and user_id_sequence is zero-padded beyond the mask,
-        # so take each row's first valid position.
+        # Rows are subsequences, and user_id_sequence is zero-padded beyond
+        # the mask; each row's first valid position carries its user id.
         user_ids = user_id_sequence[np.arange(len(masks)), masks.argmax(axis=1)]
         train_data, val_data, test_data = self.split_kfold_data(
             questions, responses, times, masks, user_ids, fold_idx=fold_idx
@@ -177,8 +193,6 @@ class AxisKTModelData(QuestionModelData):
                 "question_skill_ids": question_skill_ids,
                 "question_skill_mask": question_skill_mask,
                 "max_gap_bins": max_gap_bins,
-                # Real student ids aligned with each split's dataset rows
-                # (the trailing element appended to each split tuple above).
                 "user_ids": {
                     "train": train_data[4],
                     "val": val_data[4],
@@ -190,12 +204,10 @@ class AxisKTModelData(QuestionModelData):
     def _build_time_sequences(self) -> np.ndarray:
         """Return per-position interaction times in seconds (float64).
 
-        Real timestamps are used when the split data carries a ``timestamp``
-        column (milliseconds converted to seconds). ``assistments09`` stores
-        ``order_id`` there instead of wall-clock time, so its
-        ``ms_first_response`` dwell times are accumulated like the original
-        HawkesKT implementation. Sequences without a usable timestamp fall
-        back to position indices.
+        A ``timestamp`` column (milliseconds) is used when present;
+        ``assistments09`` stores ``order_id`` there instead, so its
+        ``ms_first_response`` dwell times are accumulated. Sequences without
+        a usable timestamp fall back to position indices.
         """
         q_data = self.data_src.get_split_question_sequence_data()
         num_users = q_data["sequence_id"].n_unique()
@@ -233,7 +245,8 @@ class AxisKTModelData(QuestionModelData):
 __all__ = [
     "AxisKTDataset",
     "AxisKTModelData",
+    "axiskt_packed_collate_fn",
+    "build_axiskt_model",
     "build_question_skill_table",
     "derive_max_gap_bins",
-    "axiskt_packed_collate_fn",
 ]

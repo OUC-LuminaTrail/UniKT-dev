@@ -1,12 +1,10 @@
-"""Generate the AxisKT dedup-equivalence golden snapshot.
+"""Generate the AxisKT golden-equivalence snapshot.
 
-Captures the forward output and backward gradients of a fixed model state on a
-fixed input. The dedup refactor must reproduce these bit-for-bit, so this
-snapshot is the equivalence oracle for ``tests/unit/model/test_axiskt_dedup.py``.
-
-AxisKT requires CUDA, so the snapshot is captured on the default GPU device;
-all tensors are saved on CPU and moved back by the test. Regenerate only after
-an intentional numerical change::
+Captures the forward output and backward gradients of a fixed model state
+on a fixed input; refactors must reproduce the logits bit-for-bit. AxisKT
+requires CUDA, so the snapshot is captured on the default GPU device and
+saved on CPU (the test moves it back to CUDA). Regenerate only after an
+intentional numerical change::
 
     pixi run python tests/fixtures/generate_axiskt_dedup_golden.py
 """

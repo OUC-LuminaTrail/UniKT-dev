@@ -385,10 +385,9 @@ def test_fused_inference_matches_training_readout_path():
 
 
 def test_target_answer_does_not_leak_into_its_prediction():
-    device = DEVICE
-    model = _build_model(device)
-    questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 0, 2]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -402,18 +401,17 @@ def test_target_answer_does_not_leak_into_its_prediction():
 
 
 def test_target_timestamp_does_not_leak_into_its_prediction():
-    device = DEVICE
-    model = _activate_head(_build_model(device))
+    model = _activate_head(_build_model(DEVICE))
     with torch.no_grad():
         model.gap_embed.weight.zero_()
         model.gap_embed.weight[1, 0] = 2.0
         model.local_decay.weight.zero_()
         model.local_decay.bias.zero_()
         model.local_decay.weight[:, 0] = 1.0
-    questions = torch.tensor([[0, 1, 0, 0]], device=device)
-    responses = torch.tensor([[1, 0, 1, 1]], device=device)
+    questions = torch.tensor([[0, 1, 0, 0]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 1]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
-    times = torch.tensor([[0.0, 1.0, 2.0, 3.0]], device=device)
+    times = torch.tensor([[0.0, 1.0, 2.0, 3.0]], device=DEVICE)
 
     baseline = model(questions, responses, times, mask)
     changed_times = times.clone()
@@ -427,10 +425,9 @@ def test_target_timestamp_does_not_leak_into_its_prediction():
 
 
 def test_forward_backward_has_finite_gradients():
-    device = DEVICE
-    model = _build_model(device).train()
-    questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
+    model = _build_model(DEVICE).train()
+    questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -445,10 +442,9 @@ def test_forward_backward_has_finite_gradients():
 
 
 def test_encoder_forward_shape_and_finite():
-    device = DEVICE
-    model = _build_model(device)
-    questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0]], device=device)
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 0, 2]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -459,12 +455,11 @@ def test_encoder_forward_shape_and_finite():
 
 
 def test_encoder_forward_handles_padding():
-    # Trailing padding must not introduce NaN/Inf, nor move valid predictions out of range.
-    device = DEVICE
-    model = _build_model(device)
-    questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0]], device=device)
-    mask = torch.tensor([[True, True, False, False]], device=device)
+    # Trailing padding must not introduce NaN/Inf.
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 0, 2]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 0]], device=DEVICE)
+    mask = torch.tensor([[True, True, False, False]], device=DEVICE)
     times = _position_times(questions)
 
     logits = model(questions, responses, times, mask)
@@ -473,30 +468,11 @@ def test_encoder_forward_handles_padding():
     assert torch.isfinite(logits).all()
 
 
-def test_encoder_backward_has_finite_gradients():
-    device = DEVICE
-    model = _build_model(device).train()
-    questions = torch.tensor([[0, 1, 0, 2], [1, 2, 1, 0]], device=device)
-    responses = torch.tensor([[1, 0, 1, 0], [0, 1, 1, 0]], device=device)
-    mask = torch.ones_like(questions, dtype=torch.bool)
-    times = _position_times(questions)
-
-    loss = model(questions, responses, times, mask)[:, :-1].square().mean()
-    loss.backward()
-
-    gradients = [
-        parameter.grad for parameter in model.parameters() if parameter.grad is not None
-    ]
-    assert gradients
-    assert all(torch.isfinite(gradient).all() for gradient in gradients)
-
-
 def test_encoder_does_not_leak_future_response():
     # Output positions 0,1 predict responses at positions 1,2; changing the answer at position 2 must not affect earlier predictions.
-    device = DEVICE
-    model = _activate_head(_build_model(device))
-    questions = torch.tensor([[0, 1, 0, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1, 1]], device=device)
+    model = _activate_head(_build_model(DEVICE))
+    questions = torch.tensor([[0, 1, 0, 2]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1, 1]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)
     times = _position_times(questions)
 
@@ -511,22 +487,21 @@ def test_encoder_does_not_leak_future_response():
 
 
 def test_global_encoder_state_is_truncation_invariant():
-    # The blocks carry no key-padding mask: they rely on padding being trailing,
-    # so a valid position's state must not depend on how much padding follows.
-    # Breaking this (left padding, or a non-causal block) invalidates the design.
-    device = DEVICE
-    model = _build_model(device)
-    questions = torch.tensor([[0, 1, 2]], device=device)
-    responses = torch.tensor([[1, 0, 1]], device=device)
+    # The blocks carry no key-padding mask: they rely on padding being
+    # trailing, so a valid position's state must not depend on how much
+    # padding follows.
+    model = _build_model(DEVICE)
+    questions = torch.tensor([[0, 1, 2]], device=DEVICE)
+    responses = torch.tensor([[1, 0, 1]], device=DEVICE)
 
     event = model._event_embeddings(questions)
     short = model._global_history_states(
         event, responses, torch.ones_like(questions, dtype=torch.bool)
     )
 
-    padded_questions = torch.tensor([[0, 1, 2, 1, 0]], device=device)
-    padded_responses = torch.tensor([[1, 0, 1, 1, 0]], device=device)
-    padded_mask = torch.tensor([[True, True, True, False, False]], device=device)
+    padded_questions = torch.tensor([[0, 1, 2, 1, 0]], device=DEVICE)
+    padded_responses = torch.tensor([[1, 0, 1, 1, 0]], device=DEVICE)
+    padded_mask = torch.tensor([[True, True, True, False, False]], device=DEVICE)
     padded_event = model._event_embeddings(padded_questions)
     padded = model._global_history_states(padded_event, padded_responses, padded_mask)
 

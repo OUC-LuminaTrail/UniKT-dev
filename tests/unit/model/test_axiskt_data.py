@@ -241,8 +241,7 @@ def test_prepare_data_reports_real_user_ids_per_split_row():
     np.testing.assert_array_equal(extra["user_ids"]["val"], [7, 7])
     np.testing.assert_array_equal(extra["user_ids"]["test"], [9])
 
-    # The val slice is compressed: row indices 0/1 are subsequences of the
-    # same student (user 7), whose real id is what the analyzer must emit.
+    # The compressed val slice still carries the real student id per row.
     wrapped = _UserAwareAxisKTDataset(val_data, extra["user_ids"]["val"])
     assert len(wrapped) == 2
     assert [wrapped[i][-1] for i in range(len(wrapped))] == [7, 7]

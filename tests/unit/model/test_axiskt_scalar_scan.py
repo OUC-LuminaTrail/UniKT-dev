@@ -1,19 +1,11 @@
 """Tests for the 1x1 (scalar) Triton segmented scan in AxisKT.
 
-Semantics of the scalar kernels (``_fwd_kernel_scalar`` /
-``_bwd_adj_kernel_scalar`` / ``_bwd_dinit_kernel_scalar``):
-
-- exclusive: the output at position ``n`` is the state *before* applying the
-  position's operator;
-- segment heads (row start, after an invalid position, or a new segment id)
-  reset the carry to the identity, so a head outputs its own initial state;
-- the initial state is used per position (``carry @ init_n + carry_bias``),
-  not only at segment heads;
-- invalid positions output zero and break the segment run.
-
-The pure-PyTorch ``_scalar_scan_reference`` mirrors these semantics, so
-``torch.autograd`` covers its backward pass; the Triton results are checked
-against it both forward and backward.
+Pinned semantics: exclusive (the output at position ``n`` is the state
+before ``n``'s operator), segment heads reset the carry to the identity,
+the initial state applies at every position, and invalid positions output
+zero and break the segment run. The pure-PyTorch ``_scalar_scan_reference``
+mirrors these semantics with full autograd coverage, so the Triton results
+are checked against it both forward and backward.
 """
 
 import pytest
@@ -853,9 +845,8 @@ def test_post_multiply_coded_tables_match_explicit_transition(length):
 def _force_chunked(monkeypatch, block_n, num_warps=4):
     """Pin every scan mode to the three-pass chunked pipeline.
 
-    ``_pick_chunk_config`` treats the legacy single-program kernels as one
-    candidate alongside the chunked tile shapes, so without this pin a
-    long-sequence test may never execute the chunked kernels.
+    Without this pin the autotuner may pick the legacy single-program
+    kernels, so a long-sequence test may never execute the chunked kernels.
     """
     from model.AxisKT import triton_scan as ts
 

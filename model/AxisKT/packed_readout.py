@@ -1,18 +1,8 @@
 """Fused packed-space readout and event construction for inference.
 
-Replaces the aten ``scatter_reduce`` chain (segment softmax with amax/sum
-scatters, weighted sum scatter, event-embedding pooling, question projection,
-and final event assembly) with one Triton kernel per (batch, position) program.
-Each program gathers the K occurrences of its position through the inverse of
-the KC packing order, so the per-occurrence score/weight tensors and pooled
-event intermediates are never materialized.
-
-Positions whose occurrences are all invalid pool to zero here, while the aten
-chain leaves the unpooled sum of invalid-slot embeddings there; the difference
-never reaches the logits because masked positions are zeroed downstream.
-
-Inference-only: the training path keeps the aten implementation, so gradient
-semantics are untouched.
+One Triton kernel per (batch, position) replaces the aten ``scatter_reduce``
+chain of the training path; inference-only, so gradient semantics are
+untouched.
 """
 
 import torch
@@ -44,7 +34,7 @@ def _readout_event_kernel(
     BLOCK_H: tl.constexpr,
 ):
     """One program per (batch row, position): fused segment-softmax readout
-    plus construction of the pooled per-position event embedding."""
+    plus pooled event-embedding construction."""
     pid_b = tl.program_id(0)
     pid_s = tl.program_id(1)
     k_offs = tl.arange(0, BLOCK_K)
@@ -52,9 +42,8 @@ def _readout_event_kernel(
     k_mask = k_offs < K
     h_mask = h_offs < H
 
-    # Packed index of each (position, slot) occurrence and its validity. An
-    # invalid slot's index may fall outside the trimmed packed width, so it is
-    # clamped before any load; the load mask keeps its values unused.
+    # An invalid slot's packed index may fall outside the trimmed packed
+    # width; clamp before any load (the load mask keeps its values unused).
     flat = pid_b * S * K + pid_s * K + k_offs
     kv = tl.load(valid_ptr + flat, mask=k_mask, other=0) != 0
     j = tl.load(inv_ptr + flat, mask=k_mask, other=0).to(tl.int32)
@@ -119,13 +108,11 @@ def fused_readout_event(
         question_diff_weight: Question-difficulty embedding table, [Q, 1].
         slot_valid: Occurrence validity over the flat [B, S*K] slot domain.
         kc_inverse: Inverse of the packing permutation over the same flat
-            domain: flat slot -> packed index, [B, S*K]. Entries pointing
-            past the trimmed packed width belong to invalid slots and are
-            clamped away by the kernel.
+            domain: flat slot -> packed index, [B, S*K].
         max_skills: K, the flattened KC width per position.
-        weight: Row vector of ``local_readout``, [1, 3H]; its first H entries
-            multiply the state, the next H the skill embedding, and the final
-            H the question vector.
+        weight: Row vector of ``local_readout``, [1, 3H]: first H entries
+            multiply the state, next H the skill embedding, final H the
+            question vector.
         bias: The scalar readout bias kept on the device.
 
     Returns:
@@ -140,8 +127,8 @@ def fused_readout_event(
     if slot_valid.ndim != 2 or slot_valid.shape[1] != seq_len * max_skills:
         raise ValueError("slot_valid must have shape [B, S*K]")
 
-    # One pooled allocation for the two [B, S, H] outputs; each slice is
-    # contiguous so the kernel's compact [B, S, H] offsets stay valid.
+    # One pooled allocation for the two [B, S, H] outputs; each slice stays
+    # contiguous.
     n_out = batch * seq_len * hidden
     pool = torch.empty(2 * n_out, device=device, dtype=torch.float32)
     readout = pool[:n_out].view(batch, seq_len, hidden)

@@ -1,13 +1,9 @@
-"""Equivalence regression for the AxisKT dedup refactor.
+"""Golden-snapshot equivalence regression for AxisKT.
 
-The refactor threads precomputed question-derived tensors (the
-``question_skill_ids`` gather, ``skill_embed`` / ``skill_change`` lookups, and
-the ``_question_vector`` projection) through the forward pass instead of
-re-gathering and re-embedding them inside each sub-method. It must not change
-the forward output or any backward gradient.
-
-The oracle is the golden snapshot produced by
-``tests/fixtures/generate_axiskt_dedup_golden.py``, captured before the refactor.
+The snapshot is produced by
+``tests/fixtures/generate_axiskt_dedup_golden.py`` on a fixed model state
+and input; the forward output must match bit-for-bit and every backward
+gradient to float noise.
 """
 
 from pathlib import Path
@@ -31,8 +27,7 @@ _FIXTURE_PATH = (
 
 @pytest.fixture(scope="module")
 def golden():
-    # Trusted local fixture authored by the generator script in this repo.
-    # The snapshot is stored on CPU (see the generator) and moved to CUDA here.
+    # Local fixture authored by the generator script in this repo.
     return torch.load(_FIXTURE_PATH, weights_only=False, map_location="cpu")
 
 
@@ -104,11 +99,10 @@ def test_forward_dedups_question_derived_lookups(golden):
         golden["mask"].to(DEVICE),
     )
 
-    # skill_embed: one packed-stream gather shared by the event pooling, the
-    # scan input, and the readout. Pre-refactor this was 3, then 2 with
-    # per-branch packing, 1 since forward packs once for all consumers.
+    # One packed-stream gather shared by the event pooling, the scan input,
+    # and the readout.
     assert counts["skill_embed"] == 1
     if model.question_embed is not None:
-        # question_embed: shared question vector (event + readout + static) +
-        # the packed question stream. Pre-refactor this was 4.
+        # Shared question vector (event + readout + static) plus the packed
+        # question stream.
         assert counts["question_embed"] == 2

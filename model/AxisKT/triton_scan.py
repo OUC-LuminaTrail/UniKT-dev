@@ -2,53 +2,29 @@
 
 Each position carries a scalar operator ``a`` and bias ``b``; the scan
 returns the state before that operator is applied, resetting at segment
-boundaries.
+boundaries and treating invalid positions as the identity. Operators and
+initial states come dense or coded (codebook plus per-position codes).
 
-Two CUDA paths share the same semantics:
-
-- Single-program kernels: one program per batch row, vectorised over the
-  hidden channels, running a sequential exclusive scan along the sequence.
-  Used for short sequences where kernel-launch latency dominates.
-- Chunked kernels: the sequence is split into ``BLOCK_N`` chunks. Pass 1
-  scans each (batch, chunk) tile in parallel for the tile-local end carry
-  and any-head flag; pass 2 propagates carries across chunks (a tiny
-  sequential scan of length ``num_chunks``); pass 3 rescans each tile,
-  composing the incoming carry ``P`` into positions whose segment run
-  crosses the tile start. Parallelism grows from ``B`` to
-  ``B * ceil(N / BLOCK_N)`` programs.
-
-The operator values ``a`` and the initial states come either dense or in
-coded form: a small ``[num_codes, H]`` codebook plus per-position ``[B, N]``
-integer codes. Coded mode lets callers whose decay rows / initial states only
-take a handful of distinct rows skip materializing the full tensors; invalid
-positions ignore their operator and act as the identity either way.
-
-All three passes are parameterised by ``MODE`` so the backward kernels map
-onto the same affine scan: the adjoint reverse scan is the scan of
-``(a_eff, g)`` in reversed order where ``a_eff = 0`` cuts the chain (with a
-zero initial state the exclusive output is the adjoint itself), and
+Short sequences run one program per batch row; long sequences use a
+three-pass chunked pipeline (tile-local scan, carry prefix across chunks,
+corrected rescan). All passes are parameterised by ``MODE`` so the backward
+kernels map onto the same scan: the adjoint reverse scan is the scan of
+``(a_eff, g)`` in reversed order with ``a_eff = 0`` cutting the chain, and
 ``d init`` is the multiplicative special case (zero bias, ``init = g``).
-
-``d matrix`` / ``d bias`` match PyTorch autograd only while ``initial_state``
-is constant within a segment, which holds because it is derived from the
-segment id. ``d init`` is exact per position (``prefix_i * g_i``) regardless.
-
-CPU inputs fall back to a pure-PyTorch serial scan with identical semantics
-and full autograd coverage.
-
-The optional post-multiply output folds ``a_i * h_i`` into the scan. Its
-backward reconstructs the exclusive state from the preceding post-transition
-state and bias, avoiding both the dense operator expansion and a saved
-exclusive-state tensor.
+``d matrix`` / ``d bias`` match autograd only while ``initial_state`` is
+constant within a segment, which holds since it is derived from the segment
+id. The optional ``post_multiply`` output folds ``a_i * h_i`` into the scan;
+its backward reconstructs the exclusive state from the preceding
+post-transition state and bias. CPU inputs fall back to a serial PyTorch
+scan with identical semantics.
 """
 
 import torch
 import triton
 import triton.language as tl
 
-# Below this length the chunked pipeline cannot amortise its launch overhead;
-# the single-program kernels also preserve the exact bitwise outputs that the
-# golden tests anchor on.
+# Below this length the single-program kernels are used; they also anchor
+# the exact bitwise outputs the golden tests rely on.
 _CHUNKED_MIN_LENGTH = 128
 
 
@@ -387,11 +363,8 @@ def _chunk_pass1_kernel(
 ):
     """Tile-local scan: end carry plus an any-head flag per tile.
 
-    The carry resets to the identity at segment heads exactly like the
-    single-program kernel, so ``fa/fb`` is the operator composed from the
-    last head (or tile start) to the tile end. MODE 1 encodes the chain cut
-    directly in ``a_eff = 0`` (no head flag needed); MODE 2 skips the bias
-    entirely (multiplicative scan).
+    MODE 1 encodes the chain cut directly in ``a_eff = 0``; MODE 2 skips the
+    bias entirely (multiplicative scan).
     """
     pid_b = tl.program_id(0)
     pid_c = tl.program_id(1)
@@ -546,9 +519,8 @@ def _chunk_pass3_fwd_kernel(
     """Rescan a tile emitting the corrected exclusive outputs.
 
     A position whose segment run crosses the tile start composes the
-    incoming carry ``P`` before its tile-local carry:
-    ``lca * (Pa * init + Pb) + lcb``; any head at or before the position
-    severs the incoming carry and the tile-local value stands alone.
+    incoming carry ``P`` before its tile-local carry; any head at or before
+    the position severs the incoming carry.
     """
     pid_b = tl.program_id(0)
     pid_c = tl.program_id(1)
@@ -656,9 +628,8 @@ def _chunk_pass3_adj_kernel(
     """Reverse rescan of a tile emitting ``d matrix`` / ``d bias``.
 
     The exclusive carry is the adjoint of everything strictly after the
-    position; tiles whose chain continues across the (right) boundary add
-    the incoming ``P.b`` component. ``same`` at the position itself gates
-    whether the adjoint is used at all.
+    position; tiles whose chain continues across the boundary add the
+    incoming ``P.b`` component.
     """
     pid_b = tl.program_id(0)
     pid_c = tl.program_id(1)
@@ -874,10 +845,8 @@ def _chunk_candidates():
 def _matrix_args(tensors, extras):
     """Resolve operator inputs (dense or coded) for a kernel launch.
 
-    Coded mode replaces the dense matrix with a codebook lookup; the matrix
-    pointer then only serves as a placeholder (never dereferenced under
-    ``CODED=True``) and the strides fall back to the contiguous ``[B, N, H]``
-    layout shared with the ``d matrix`` / ``d init`` outputs.
+    In coded mode the matrix pointer is a placeholder (never dereferenced
+    under ``CODED=True``).
     """
     matrix, bias, seg = tensors[0], tensors[1], tensors[2]
     table = extras.get("matrix_table")
@@ -892,8 +861,7 @@ def _matrix_args(tensors, extras):
 def _init_args(extras, bias, seg):
     """Resolve initial-state inputs (dense or coded) for a kernel launch.
 
-    Same placeholder convention as ``_matrix_args``: in coded mode the dense
-    init pointer is never dereferenced under ``INIT_CODED=True``.
+    Same placeholder convention as ``_matrix_args``.
     """
     init = extras.get("init")
     table = extras.get("init_table")
@@ -993,12 +961,7 @@ def _launch_legacy(mode, tensors, extras):
 
 
 def _launch_chunked(mode, tensors, extras, block_n, num_warps):
-    """Dispatch the three-pass pipeline for a MODE.
-
-    ``tensors`` is ``(matrix, bias, seg, valid, out1, out2)`` (``matrix`` may
-    be ``None`` in coded mode); ``extras`` carries the mode-specific side
-    tensors (``init`` / ``g`` / ``h``) plus the coded-operator payload.
-    """
+    """Dispatch the three-pass pipeline for a MODE."""
     bias, seg, valid, out1, out2 = (
         tensors[1],
         tensors[2],
@@ -1013,10 +976,8 @@ def _launch_chunked(mode, tensors, extras, block_n, num_warps):
     stride_row = heads * length
 
     # The per-chunk carry buffers must be separate allocations, never views
-    # into one pooled buffer: under torch.compile these launches are captured
-    # into the inductor graph, whose memory planning mishandles aliased views
-    # passed across user triton kernels — later passes then read garbage
-    # carries and fault with a CUDA illegal memory access.
+    # into one pooled buffer (torch.compile's memory planning cannot handle
+    # aliased views across user triton kernels).
     n_f = batch * n_chunks * heads
     fa = torch.empty(n_f, device=bias.device)
     pa = torch.empty(n_f, device=bias.device)
@@ -1145,12 +1106,9 @@ def _launch_scan(mode, tensors, extras, config):
 
 
 def _pick_chunk_config(mode, tensors, extras, length, heads):
-    """Autotune the launch config once per (device, mode, batch, length, heads).
-
-    ``None`` (legacy single-program) is a candidate alongside the chunked
-    tile shapes. Batch and length are bucketed (power-of-two length,
-    16-wide batch) because the packed length varies per training batch; the
-    chosen tile shape stays valid across a bucket.
+    """Autotune the launch config once per (device, mode, batch, length,
+    heads). ``None`` selects the single-program kernels; batch and length are
+    bucketed because the packed length varies per training batch.
     """
     key = (
         torch.cuda.current_device(),
@@ -1165,8 +1123,7 @@ def _pick_chunk_config(mode, tensors, extras, length, heads):
     )
     if key in _chunk_cfg_cache:
         return _chunk_cfg_cache[key]
-    # Raise the GPU clocks before timing so candidate order cannot bias the
-    # ranking.
+    # Raise the GPU clocks before timing.
     warm = torch.empty(256 * 1024 * 1024 // 4, device="cuda")
     for _ in range(40):
         warm.mul_(1.0000001)
@@ -1184,11 +1141,8 @@ def _pick_chunk_config(mode, tensors, extras, length, heads):
 
 
 def _time_config(mode, tensors, extras, config, iters=30):
-    """Amortised wall time per scan run for a candidate config.
-
-    Iterations are enqueued back-to-back so launch latency overlaps with GPU
-    execution; a per-iteration sync would over-penalise the multi-kernel
-    chunked path. Best of two rounds guards against clock-speed noise.
+    """Amortised wall time per scan run; iterations are enqueued back-to-
+    back so launch latency overlaps with GPU execution. Best of two rounds.
     """
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)

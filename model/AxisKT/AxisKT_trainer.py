@@ -18,17 +18,14 @@ class AxisKTConfig(ModelConfig):
     Args:
         hidden_dim: Shared event, local-state, and encoder dimension.
         n_blocks: Number of global conv encoder blocks.
-        conv_kernel_size: Causal-conv kernel size. Each block mixes the last
-            ``kernel_size`` positions; the receptive field grows with dilation
-            across blocks.
+        conv_kernel_size: Causal-conv kernel size; each block mixes the
+            last ``kernel_size`` positions.
         conv_dilation_base: Dilation base per block; block ``i`` uses
-            ``base**i``. 2 gives exponential receptive-field growth (TCN
-            style), 1 gives uniform.
-        question_embed_dim: Intrinsic width of the per-question embedding; -1
-            (default) means ``hidden_dim`` and 0 removes the pathway, leaving
-            question identity to the ``question_diff`` scalar and the KC side.
-            Widths below ``hidden_dim`` are lifted back by a shared projection,
-            cutting per-question parameters to ``num_questions * dim``.
+            ``base**i``.
+        question_embed_dim: Intrinsic width of the per-question embedding;
+            -1 (default) means ``hidden_dim``, 0 removes the pathway, and
+            smaller widths are lifted back to ``hidden_dim`` by a shared
+            projection.
         use_global: Ablate the global causal dilated-conv branch. ``False``
             skips the stacked conv encoder and feeds zero global features to
             the readout; the branch parameters then stay inert.
@@ -44,11 +41,8 @@ class AxisKTConfig(ModelConfig):
         weight_decay: Adam weight decay.
         batch_size: Training batch size.
         max_clip_grad_norm: Maximum gradient clipping norm.
-        amp: Enable bf16 autocast for the forward pass. The matmul-heavy
-            encoder and Linear layers run in bfloat16; backward is
-            autograd-managed, and the custom triton scan keeps fp32 internally.
-            Local to AxisKT for quick checking, not the framework-level
-            precision node. Off by default.
+        amp: Enable bf16 autocast for the forward pass; the Triton scan
+            keeps fp32 internally. Off by default.
     """
 
     hidden_dim: int = field(
@@ -106,32 +100,15 @@ class AxisKTTrainer(BaseTrainer):
         from model.AxisKT.AxisKT_data import (
             AxisKTModelData,
             axiskt_packed_collate_fn,
+            build_axiskt_model,
         )
-        from model.AxisKT.AxisKT_model import AxisKT
 
         model_data = AxisKTModelData(data_src)
         train_data, val_data, test_data, extra = model_data.prepare_data(rc)
 
         m = rc.model
-        max_gap_bins = int(extra["max_gap_bins"])
         logger.info("Initializing AxisKT model...")
-        model = AxisKT(
-            data_metadata=data_src.get_metadata(),
-            question_skill_ids=extra["question_skill_ids"],
-            question_skill_mask=extra["question_skill_mask"],
-            hidden_dim=m.hidden_dim,
-            n_blocks=m.n_blocks,
-            max_gap_bins=max_gap_bins,
-            dropout=m.dropout,
-            conv_kernel_size=m.conv_kernel_size,
-            conv_dilation_base=m.conv_dilation_base,
-            question_embed_dim=(
-                None if m.question_embed_dim < 0 else m.question_embed_dim
-            ),
-            use_global=m.use_global,
-            use_local=m.use_local,
-            use_forgetting=getattr(m, "use_forgetting", True),
-        )
+        model = build_axiskt_model(rc, data_src, extra)
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
@@ -175,10 +152,6 @@ class AxisKTTrainer(BaseTrainer):
             )
         if use_amp:
             logits_full = logits_full.float()
-        # Next-item extraction at the CPU-precomputed valid indices (row-major
-        # over the flattened [B, S-1] grid). Equivalent to
-        # ``_extract_valid_predictions``'s masked_select — same elements, same
-        # order, bitwise identical — but gathers instead of syncing the GPU.
         logits = logits_full[:, :-1].flatten()[valid_idx]
         labels = responses.float()[:, 1:].flatten()[valid_idx]
         logits, labels = self._handle_empty_batch(logits, labels)

@@ -1,28 +1,16 @@
-"""AxisKT Case Analyzer.
+"""AxisKT case analyzer.
 
-Provides inference-only capabilities for AxisKT case analysis. The knowledge
-state of AxisKT is the per-KC private state of the local affine-recursion
-branch: each skill owns an exclusive-scan state that only its own events
-update. The analyzer captures those states during the forward pass (by
-temporarily wrapping :meth:`AxisKT._scan_states` and hooking the
-``local_write`` module — the shared pipeline both execution paths use,
-mirroring the memory-probe adapters).
-
-Per-skill mastery is not the readout's attention projection (that moves
-*against* mastery: the model attends more to recently-missed KCs); it is the
-mean over every question covering the skill of the model's IRT head applied
-to ``[per-KC standing state, question event embedding]`` — without the
-global conv state, which changes at every column and would make a frozen
-skill's curve wiggle (sawtooth). Averaging over all associated questions
-(instead of a single probe question) cancels per-question noise. A wrong
-answer then lowers mastery and a correct answer raises it, matching the
-model's behavior.
+The knowledge state is the local branch's per-KC private scan state,
+captured by wrapping :meth:`AxisKT._scan_states` and hooking ``local_write``
+— the shared pipeline of both execution paths. Per-skill mastery is the
+mean over every question covering the skill of the IRT head applied to
+``[per-KC standing state, question event embedding]`` (the global conv
+state is excluded: it changes at every column, so including it would make
+a frozen skill's mastery curve wiggle between its own events).
 
 Alignment convention: row ``r`` of the collected DataFrame predicts
-``response[r + 1]``; the exported knowledge state is the state standing
-*after* event ``r + 1`` (i.e. after events ``<= r + 1``) — the post-event
-per-skill mastery the heatmap displays (the state that produced the
-prediction is the previous column).
+``response[r + 1]``; the exported knowledge state is the post-event state
+after events ``<= r + 1``.
 """
 
 from typing import Any
@@ -36,8 +24,12 @@ from utils.core import get_logger, register_analyzer
 from utils.data_process import DataSource
 from utils.training.runtime_components import RuntimeComponents
 
-from .AxisKT_data import AxisKTDataset, AxisKTModelData, axiskt_packed_collate_fn
-from .AxisKT_model import AxisKT
+from .AxisKT_data import (
+    AxisKTDataset,
+    AxisKTModelData,
+    axiskt_packed_collate_fn,
+    build_axiskt_model,
+)
 
 logger = get_logger(__name__)
 
@@ -45,12 +37,9 @@ logger = get_logger(__name__)
 class _UserAwareAxisKTDataset(Dataset):
     """AxisKTDataset wrapper that annotates each row with its user id.
 
-    Split rows are subsequences (``sequence_id``), not users, and the split
-    compresses each fold's rows — so the dataset index is not a user id.
-    ``user_ids`` carries the real student id per row (from the parquet's
-    ``user`` column, split-aligned in :meth:`AxisKTModelData.prepare_data`).
-    The extra trailing element is transparent to
-    :func:`axiskt_packed_collate_fn`.
+    Split rows are subsequences, not users, so the dataset index is not a
+    user id; ``user_ids`` carries the real student id per row. The extra
+    trailing element is transparent to :func:`axiskt_packed_collate_fn`.
     """
 
     def __init__(self, dataset: AxisKTDataset, user_ids: np.ndarray):
@@ -74,18 +63,6 @@ def _analyzer_collate_fn(batch):
 class AxisKTAnalyzer(BaseCaseAnalyzer):
     """AxisKT-specific case analyzer for inference and visualization."""
 
-    def __init__(self, rc, data_src: DataSource, checkpoint_path: str, **kwargs):
-        """Initialize AxisKT analyzer.
-
-        Args:
-            rc: RunConfig (OmegaConf DictConfig)
-            data_src: Data source instance
-            checkpoint_path: Path to model checkpoint
-            **kwargs: Forwarded to ``BaseCaseAnalyzer`` (sink, device,
-                batch_size).
-        """
-        super().__init__(rc, data_src, checkpoint_path, **kwargs)
-
     def build_components(self, rc, data_src: DataSource) -> RuntimeComponents:
         """Assemble the AxisKT model and user-annotated val dataset."""
         model_data = AxisKTModelData(data_src)
@@ -100,25 +77,7 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
         # readout over all associated questions.
         self._skill_questions = self._build_skill_questions()
 
-        m = rc.model
-        model = AxisKT(
-            data_metadata=data_src.get_metadata(),
-            question_skill_ids=extra["question_skill_ids"],
-            question_skill_mask=extra["question_skill_mask"],
-            hidden_dim=m.hidden_dim,
-            n_blocks=m.n_blocks,
-            max_gap_bins=int(extra["max_gap_bins"]),
-            dropout=m.dropout,
-            conv_kernel_size=m.conv_kernel_size,
-            conv_dilation_base=m.conv_dilation_base,
-            question_embed_dim=(
-                None if m.question_embed_dim < 0 else m.question_embed_dim
-            ),
-            use_global=m.use_global,
-            use_local=m.use_local,
-            # Older archived run configs predate this ablation flag.
-            use_forgetting=getattr(m, "use_forgetting", True),
-        )
+        model = build_axiskt_model(rc, data_src, extra)
 
         val_dataset = _UserAwareAxisKTDataset(val_data, extra["user_ids"]["val"])
         return RuntimeComponents(
@@ -176,14 +135,9 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Run the model forward, capturing per-KC states and features.
 
-        Captures the packed per-KC scan outputs (local pre-states and the
-        occurrence layout) by wrapping :meth:`AxisKT._scan_states` — the
-        shared pipeline both the training scatter chain and the fused
-        no-grad inference path go through — plus the local write ``bias``
-        via a forward hook on ``local_write``. The patches are installed
-        only around this call and removed in a ``finally`` block, so the
-        analyzer never mutates the model's methods outside the forward
-        pass.
+        Wraps :meth:`AxisKT._scan_states` (the shared pipeline of both
+        execution paths) and hooks ``local_write``; the patches are scoped
+        to this call and removed in a ``finally`` block.
         """
         captured: dict[str, torch.Tensor] = {}
         model = self.model
@@ -246,14 +200,11 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
 
         Returns:
             Tensor [B, S, num_skills] in [0, 1]: ``mastery[b, t, k]`` is the
-            mean over every question covering skill ``k`` of the model's IRT
-            head applied to ``[standing state of k after events <= t,
-            question event embedding]``. The global conv state is excluded:
-            it changes at every column, so including it would make a frozen
-            skill's curve wiggle (sawtooth) between its own events. Columns
-            before a skill's first occurrence use the skill's learned initial
-            state, so every cell is a model prediction (NaN only when the
-            local branch is ablated).
+            mean over every question covering skill ``k`` of the IRT head
+            applied to ``[standing state of k after events <= t, question
+            event embedding]`` (global term excluded). Columns before a
+            skill's first occurrence use its learned initial state; NaN
+            only when the local branch is ablated.
         """
         model = self.model
         device = self.device_
@@ -274,10 +225,8 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
         packed_skill = captured["packed_skill"]
         packed_pos = captured["packed_pos"]
         packed_valid = captured["packed_valid"]
-        # Post-write standing state: the scan state after the event, before
-        # the gap decay of the next occurrence. The packed state captured
-        # from the readout is the decayed pre-state; adding the write bias
-        # (tanh of the captured linear output) yields the standing state.
+        # Standing state = captured pre-state + the write bias (tanh of the
+        # captured linear output).
         standing = captured["packed_state"] + torch.tanh(captured["local_write_out"])
         # Per-skill initial state (the exclusive scan's segment start) for
         # columns before the skill's first occurrence.
@@ -296,12 +245,9 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
             b_idx, p_idx = occ.nonzero(as_tuple=True)
             positions = packed_pos[b_idx, p_idx]
 
-            # Per-column standing state of skill k: scatter the post-write
-            # states at their occurrence positions, then forward-fill along
-            # time (cummax of the last occurrence position per row). Columns
-            # before the first occurrence carry the skill's learned initial
-            # state (the exclusive scan's segment start), so every cell is a
-            # model prediction — never NaN.
+            # Per-column standing state: scatter the post-write states at
+            # their occurrence positions, then forward-fill along time;
+            # columns before the first occurrence keep the initial state.
             state = torch.full((batch_size, seq_len, h), float("nan"), device=device)
             state[b_idx, positions] = standing[b_idx, p_idx]
             marker = torch.where(
@@ -320,17 +266,14 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
                 init_k,
             )
 
-            # The head is linear, so theta splits as W_s . s + W_e . e + b:
-            # the per-column part comes only from the skill's standing state,
-            # and the per-question embedding logit differs per question.
-            # (The W_g . g global term is deliberately dropped: see the
-            # docstring.)
+            # Linear head: theta splits as W_s·s + W_e·e + b; the global
+            # term is dropped (see the docstring).
             base = torch.nn.functional.linear(state, w[h : 2 * h].view(1, h)).squeeze(
                 -1
             )
 
-            # Question event embeddings and difficulties for skill k; the
-            # skill embedding is k's own, as in the model's event encoder.
+            # Event embedding per question of skill k, using k's own skill
+            # embedding as in the model's event encoder.
             skill_k = torch.tensor(k, device=device)
             emb_k = (
                 model._question_vector(q_ids)
@@ -343,8 +286,7 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
                 + bias
             )  # [Q_k]
 
-            # Mean P(correct) over the skill's questions, chunked to bound
-            # the [B, S, Q_k] working memory.
+            # Mean P(correct) over the skill's questions.
             chunk = 256
             mean_parts = []
             for start in range(0, q_ids.numel(), chunk):
@@ -370,33 +312,23 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
         """
         users, questions, responses, times, mask, kc_order, _, _ = batch_data
 
-        batch_size, seq_len = questions.shape
-        # Valid positions are the S-grid counterparts of the adjacent-pair
-        # mask the collate fn used: pair (t, t+1) -> position t+1, which is
-        # where ``y_hat``/``y_label`` rows live. The per-column mastery is
-        # indexed by "after events <= t", so the knowledge state for the row
-        # predicting response[t+1] is mastery at position t+1 — the state
-        # standing after the event (post-event mastery, as displayed by the
-        # heatmap).
+        seq_len = questions.shape[1]
+        # Row r predicts response[r + 1]; its knowledge state is the
+        # post-event mastery at position t+1 (the state after events <= t+1).
         masks_bool = mask.bool()
         adjacent = masks_bool[:, :-1] & masks_bool[:, 1:]
         valid_pair = adjacent.view(-1).nonzero(as_tuple=True)[0]
         row_idx = valid_pair // (seq_len - 1)
         t = valid_pair % (seq_len - 1)
-        flat_s = row_idx * seq_len + t + 1  # the predicted event
-        # Post-event knowledge state: mastery at position t+1 (the state
-        # after events <= t+1, i.e. after the row's own event). This is the
-        # state the heatmap displays per skill occurrence; the column after
-        # the last valid pair is in range because mastery spans 0..S-1.
-        flat_t = row_idx * seq_len + t + 1
+        flat = row_idx * seq_len + t + 1
 
-        question_ids_flat = questions.view(-1)[flat_s].cpu().numpy()
+        question_ids_flat = questions.view(-1)[flat].cpu().numpy()
         user_ids_flat = users[row_idx].cpu().numpy()
 
         knowledge_states = outputs["knowledge_states"]
         num_skills = knowledge_states.shape[-1]
         knowledge_states_flat = (
-            knowledge_states.view(-1, num_skills)[flat_t].cpu().numpy()
+            knowledge_states.view(-1, num_skills)[flat].cpu().numpy()
         )
 
         return {
@@ -406,22 +338,14 @@ class AxisKTAnalyzer(BaseCaseAnalyzer):
             "labels": outputs["y_label"].cpu().numpy(),
             "predictions": outputs["y_predict"].cpu().numpy(),
             "logits": outputs["y_hat"].cpu().numpy(),
-            "mask": masks_bool.view(-1)[flat_s].cpu().numpy(),
+            "mask": masks_bool.view(-1)[flat].cpu().numpy(),
             "knowledge_states": knowledge_states_flat,
         }
 
     def _get_all_skills_for_questions(
         self, question_ids: np.ndarray
     ) -> list[list[int]]:
-        """Get all skills for each question, returning as list of lists.
-
-        Args:
-            question_ids: Array of question IDs
-
-        Returns:
-            List of lists, where each inner list contains all skill IDs for
-            that question. Returns [0] if no skills found.
-        """
+        """Get all skills for each question; ``[0]`` if none found."""
         skills_list = []
         for q_id in question_ids:
             slots = np.where(self.question_skill_mask_np[q_id])[0]
