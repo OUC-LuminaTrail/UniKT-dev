@@ -77,13 +77,6 @@ git clone https://github.com/OUC-LuminaTrail/kt-exp-graph.git
 cd kt-exp-graph
 
 # 激活 GPU 环境（CUDA 12.8, Python 3.12, PyTorch 2.10）
-pixi shell
-
-# 或使用 CPU 环境
-pixi shell -e cpu
-
-# 或使用 DHG 环境（用于 HGIKT 模型）
-pixi shell -e dhg-gpu
 
 # 或使用 Mamba 环境（用于基于 Mamba 的模型）
 pixi shell -e mamba
@@ -128,26 +121,6 @@ pip install pyg_lib==0.6.0 torch-scatter==2.1.2 torch-geometric==2.7.0 \
     -f https://data.pyg.org/whl/torch-2.10.0+cpu.html
 
 # 安装核心依赖
-conda install -c conda-forge optuna scikit-learn pandas pyarrow python-dotenv ruff pytest polars seaborn matplotlib -y
-pip install swanlab
-```
-
-#### DHG 环境（用于 HGIKT 模型）
-
-```bash
-# 创建环境（需要 Python 3.10）
-conda create -n ktexp-dhg python=3.10
-conda activate ktexp-dhg
-
-# 安装 PyTorch（CUDA 11.7）
-pip install torch==1.13.1 --index-url https://download.pytorch.org/whl/cu117
-
-# 安装 PyTorch Geometric 依赖
-pip install "pyg_lib>=0.4.0,<0.5" torch-scatter==2.1.1 "torch-geometric>=2.7.0,<3" \
-    -f https://data.pyg.org/whl/torch-1.13.1+cu117.html
-
-# 安装 DHG 和其他依赖
-pip install "dhg==0.9.*"
 conda install -c conda-forge optuna scikit-learn pandas pyarrow python-dotenv ruff pytest polars seaborn matplotlib -y
 pip install swanlab
 ```

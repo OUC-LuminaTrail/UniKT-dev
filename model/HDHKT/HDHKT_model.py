@@ -2,11 +2,10 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from dhg.nn import HGNNConv
 from torch.nn import functional as F
 from torch_geometric.nn import HGTConv, Linear
 
-from ..layers import GeneralInteraction, HistoryRecap
+from ..layers import GeneralInteraction, HGNNConv, HistoryRecap, Hypergraph
 
 
 class HeteroGNN(nn.Module):
@@ -85,9 +84,9 @@ class HeteroGNN(nn.Module):
 
 
 class HyperGNN(nn.Module):
-    """基于dhg框架的超图神经网络
+    """双层 HGNN 超图神经网络
 
-    使用dhg.nn.HGNNConv实现双层超图卷积，支持加权超图。
+    使用 ``model.layers.hypergraph.HGNNConv`` 实现双层超图卷积，支持加权超图。
 
     数学公式：
         X' = σ(D_v^{-1/2} H W_e D_e^{-1} H^T D_v^{-1/2} X Θ)
@@ -123,12 +122,12 @@ class HyperGNN(nn.Module):
             n_hid, n_class, bias=True, use_bn=False, drop_rate=dropout, is_last=True
         )
 
-    def forward(self, x: torch.Tensor, hg: Any) -> torch.Tensor:  # dhg.Hypergraph
+    def forward(self, x: torch.Tensor, hg: Hypergraph) -> torch.Tensor:
         """前向传播。
 
         Args:
             x: 输入特征矩阵 [num_vertices, in_ch]
-            hg: dhg.Hypergraph 超图
+            hg: 超图结构
 
         Returns:
             输出特征矩阵 [num_vertices, n_class]
@@ -318,7 +317,7 @@ class HDHKT(nn.Module):
     def _compute_graph_outputs(
         self,
         hetero_graph: Any,
-        hypergraph: Any,
+        hypergraph: Hypergraph,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Run the graph backbone.
 
@@ -345,7 +344,7 @@ class HDHKT(nn.Module):
     def _cached_graph_outputs(
         self,
         hetero_graph: Any,
-        hypergraph: Any,
+        hypergraph: Hypergraph,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Return cached eval-mode graph outputs, computing once per graph pair."""
         key = (id(hetero_graph), id(hypergraph))
@@ -368,7 +367,7 @@ class HDHKT(nn.Module):
         user_response: torch.Tensor,  # [B, S]
         user_mask: torch.Tensor,  # [B, S]
         hetero_graph: Any,  # HeteroData
-        hypergraph: Any,  # dhg.Hypergraph
+        hypergraph: Hypergraph,
         skill_ids_per_question: torch.Tensor,  # [Q, K_max] (padding_index = num_skills)
         return_states: bool = False,
     ) -> torch.Tensor:  # [B, S]

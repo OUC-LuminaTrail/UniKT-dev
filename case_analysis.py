@@ -78,7 +78,7 @@ def cmd_inference(args):
     model_name = rc.experiment.model_name
     dataset_name = rc.data.dataset
 
-    seed_everything(rc.general.seed, deterministic=not rc.general.no_deterministic)
+    seed_everything(rc.general.seed, deterministic=rc.general.deterministic)
 
     if model_name not in ANALYZERS:
         sys.exit(

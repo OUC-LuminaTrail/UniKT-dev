@@ -5,6 +5,7 @@ from torch.utils.data.dataset import Dataset
 from typing_extensions import override
 
 from model.HDHKT.skill_index import build_skill_index_table
+from model.layers.hypergraph import Hypergraph
 from utils.core import get_logger
 from utils.data_process import DataSource
 from utils.model_data import QuestionModelData
@@ -178,19 +179,16 @@ class HDHKTModelData(QuestionModelData):
             num_difficulty_clusters: 难度聚类数量，默认为3
 
         返回:
-            tuple: (hypergraph, edge_weights)
-                - hypergraph: DHG框架的超图对象
-                - edge_weights: 超边权重列表，与超图的超边顺序对应
+            Hypergraph: 难度加权超图（超边权重为簇内题目平均难度）
 
         示例:
             # 构建难度加权的技能超图
-            hg, weights = model_data.build_difficulty_weighted_hypergraph(
+            hg = model_data.build_difficulty_weighted_hypergraph(
                 ('question', 'has', 'skill'),
                 num_difficulty_clusters=3
             )
         """
         import numpy as np
-        from dhg import Hypergraph
         from sklearn.cluster import KMeans
         from tqdm import tqdm
 
