@@ -1,0 +1,3 @@
+# Golden snapshots are test fixtures consumed by the unit tests, not model
+# checkpoints — re-include them despite the root "*.pt" rule.
+!*.pt
