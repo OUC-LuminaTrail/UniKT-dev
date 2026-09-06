@@ -21,17 +21,23 @@ class HDHKTConfig(ModelConfig):
     Args:
         hidden_dim: Hidden layer dimension.
         n_hop: Number of GNN hops.
-        heads: Number of attention heads.
-        lstm_layers: Number of LSTM layers.
-        history_neighbour: History neighbor count.
-        att_bound: Attention bound.
-        num_difficulty_clusters: Number of difficulty clusters for weighted hypergraph.
         epochs: Number of training epochs.
         learning_rate: Learning rate for optimizer.
-        lr_decay: Learning rate decay factor per epoch.
         dropout: Dropout rate.
         weight_decay: Weight decay (L2 regularization) for optimizer.
         batch_size: Batch size for training.
+        use_information_bottleneck: Enable the cross-channel graph bottleneck.
+        ib_private_weight: Weight of private reconstruction plus vCLUB.
+        ib_common_weight: Weight of cross-channel common reconstruction.
+        ib_align_weight: Weight of symmetric common-posterior alignment.
+        ib_route_weight: Weight of information-guided router distillation.
+        ib_club_fit_weight: Weight used to fit the vCLUB conditionals.
+        ib_rate_capacity: Per-code information budget in nats per dimension.
+        ib_rate_dual_init: Initial non-negative rate-constraint multiplier.
+        ib_rate_dual_lr: Projected dual-ascent learning rate.
+        ib_negative_samples: Relation non-neighbours sampled per question.
+        ib_route_temperature: Temperature of the information routing target.
+        ib_max_questions: Maximum graph roots used by auxiliary losses per batch.
     """
 
     hidden_dim: int = field(
@@ -42,11 +48,6 @@ class HDHKTConfig(ModelConfig):
         default=4,
         metadata={"optuna": {"type": "int", "low": 2, "high": 6}},
     )
-    heads: int = 1
-    lstm_layers: int = 1
-    history_neighbour: int = 5
-    att_bound: float = 0.1
-    num_difficulty_clusters: int = 5
     epochs: int = 120
     learning_rate: float = field(
         default=0.0003,
@@ -54,7 +55,6 @@ class HDHKTConfig(ModelConfig):
             "optuna": {"type": "float", "low": 0.00001, "high": 0.001, "log": True}
         },
     )
-    lr_decay: float | None = None
     dropout: float = field(
         default=0.25,
         metadata={"optuna": {"type": "float", "low": 0.0, "high": 0.5}},
@@ -69,6 +69,18 @@ class HDHKTConfig(ModelConfig):
         default=64,
         metadata={"optuna": {"type": "categorical", "choices": [32, 64, 128]}},
     )
+    use_information_bottleneck: bool = True
+    ib_private_weight: float = 0.05
+    ib_common_weight: float = 0.05
+    ib_align_weight: float = 0.01
+    ib_route_weight: float = 0.01
+    ib_club_fit_weight: float = 0.05
+    ib_rate_capacity: float = 0.25
+    ib_rate_dual_init: float = 0.001
+    ib_rate_dual_lr: float = 0.01
+    ib_negative_samples: int = 8
+    ib_route_temperature: float = 0.5
+    ib_max_questions: int = 256
 
 
 @register_trainer("HDHKT")
@@ -106,23 +118,25 @@ class HDHKTTrainer(BaseTrainer):
             hetero_metadata=self.hetero_graph.metadata(),
             hidden_dim=m.hidden_dim,
             n_hop=m.n_hop,
-            heads=m.heads,
-            lstm_layers=m.lstm_layers,
             dropout=m.dropout,
-            history_neighbour=m.history_neighbour,
-            att_bound=m.att_bound,
+            num_hyperedges=self.hypergraph.num_e,
+            use_information_bottleneck=m.use_information_bottleneck,
+            ib_negative_samples=m.ib_negative_samples,
+            ib_route_temperature=m.ib_route_temperature,
+            ib_max_questions=m.ib_max_questions,
         )
+
+        self._ib_rate_capacity = m.ib_rate_capacity
+        self._ib_rate_dual_lr = m.ib_rate_dual_lr
+        self._ib_rate_duals = {
+            name: float(m.ib_rate_dual_init)
+            for name in ("rate_p1", "rate_p2", "rate_c1", "rate_c2")
+        }
 
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
             model.parameters(), lr=m.learning_rate, weight_decay=m.weight_decay
         )
-
-        lr_scheduler = None
-        if m.lr_decay:
-            lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(
-                optimizer, gamma=m.lr_decay
-            )
 
         device = (
             torch.device(rc.general.device) if rc.general.device else self._try_gpu()
@@ -137,7 +151,6 @@ class HDHKTTrainer(BaseTrainer):
             model=model,
             optimizer=optimizer,
             loss_fn=loss_fn,
-            lr_scheduler=lr_scheduler,
             train_data=train_dataset,
             val_data=val_dataset,
             test_data=test_dataset,
@@ -160,13 +173,14 @@ class HDHKTTrainer(BaseTrainer):
         mask = self._move_tensor_to_device(mask)
 
         # Model output at step t predicts the label at step t+1
-        y_hat_full = self.model(
+        y_hat_full, auxiliary = self.model(
             sequence,
             response,
             mask,
             self.hetero_graph,
             self.hypergraph,
             self.skill_ids_per_question,
+            return_auxiliary=True,
         )  # [B, S]
 
         y_hat, y_label, _ = self._extract_valid_predictions(y_hat_full, response, mask)
@@ -175,10 +189,43 @@ class HDHKTTrainer(BaseTrainer):
 
         y_predict = self._generate_binary_predictions(y_hat, threshold=0.0)
 
-        return {
+        result = {
             "y_hat": y_hat,
             "y_label": y_label,
             "y_predict": y_predict,
             "y_score": y_hat,
             "y_prob": torch.sigmoid(y_hat),
         }
+        result.update({f"_ib_{name}": value for name, value in auxiliary.items()})
+        return result
+
+    def _compute_loss(self, outputs: dict) -> torch.Tensor:
+        """Combine next-response BCE with training-only CCGIB objectives."""
+        loss = super()._compute_loss(outputs)
+        if "_ib_private_loss" not in outputs:
+            return loss
+
+        m = self.run_config.model
+        loss = loss + m.ib_private_weight * outputs["_ib_private_loss"]
+        loss = loss + m.ib_common_weight * outputs["_ib_common_loss"]
+        loss = loss + m.ib_align_weight * outputs["_ib_align_loss"]
+        loss = loss + m.ib_route_weight * outputs["_ib_route_loss"]
+        loss = loss + m.ib_club_fit_weight * outputs["_ib_club_fit_loss"]
+
+        # A primal-dual update (completed after the optimizer step below)
+        # enforces an explicit average information-rate budget in nats/dim.
+        for name, dual in self._ib_rate_duals.items():
+            loss = loss + (outputs[f"_ib_{name}"] - self._ib_rate_capacity) * dual
+        return loss
+
+    def compute_train_step(self, batch_data):
+        output, loss = super().compute_train_step(batch_data)
+        if "_ib_rate_p1" in output:
+            for name, dual in self._ib_rate_duals.items():
+                violation = (
+                    output[f"_ib_{name}"].detach().item() - self._ib_rate_capacity
+                )
+                self._ib_rate_duals[name] = max(
+                    0.0, dual + self._ib_rate_dual_lr * violation
+                )
+        return output, loss

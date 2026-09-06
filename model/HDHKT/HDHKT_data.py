@@ -74,7 +74,7 @@ class HDHKTModelData(QuestionModelData):
 
         skill_hypergraph = self.build_difficulty_weighted_hypergraph(
             ("question", "has", "skill"),
-            num_difficulty_clusters=rc.model.num_difficulty_clusters,
+            num_difficulty_clusters=5,
         )
 
         logger.debug(

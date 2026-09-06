@@ -67,11 +67,12 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             hetero_metadata=hetero_graph.metadata(),
             hidden_dim=m.hidden_dim,
             n_hop=m.n_hop,
-            heads=m.heads,
-            lstm_layers=m.lstm_layers,
             dropout=m.dropout,
-            history_neighbour=m.history_neighbour,
-            att_bound=m.att_bound,
+            num_hyperedges=hypergraph.num_e,
+            use_information_bottleneck=m.use_information_bottleneck,
+            ib_negative_samples=m.ib_negative_samples,
+            ib_route_temperature=m.ib_route_temperature,
+            ib_max_questions=m.ib_max_questions,
         )
 
         self.hetero_graph = hetero_graph
