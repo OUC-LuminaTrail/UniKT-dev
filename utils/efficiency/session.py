@@ -21,7 +21,11 @@ from utils.core import (
 
 from .device import reclaim_memory
 from .environment import ResourceSampler, collect_environment
-from .measures.batch import batch_size_of, count_valid_interactions, to_device
+from .measures.batch import (
+    batch_size_of,
+    count_valid_interactions_split,
+    to_device,
+)
 from .report import EfficiencyReport
 from .stages.base import EfficiencyStage, StageContext
 from .target import TrainerBenchmarkAdapter
@@ -79,11 +83,25 @@ class EfficiencySession:
         # DataLoader IPC noise.
         sample_batch = to_device(next(iter(self.target.train_data)), device)
         batch_size = batch_size_of(sample_batch)
-        valid_tokens = count_valid_interactions(self.target, sample_batch)
         seq_len = getattr(self.rc.data, "max_seq_len", None)
+
+        # Throughput numerators use the per-batch average over a full train-split
+        # pass, not the prefetched batch's count: the sum over all batches is
+        # invariant to the loader's shuffle order, so the average depends only on
+        # the dataset and the model's data granularity. The counting forwards
+        # also warm lazily built seq-len constants (AKT family) under no_grad;
+        # timing loops still reuse sample_batch — the uniform-input override
+        # pins every batch to the same padded shape, so its per-step cost
+        # represents any batch.
+        valid_tokens_total, valid_tokens_batches = count_valid_interactions_split(
+            self.target, self.target.train_data
+        )
+        valid_tokens = valid_tokens_total / valid_tokens_batches
         logger.info(
             f"[Setup] batch_size={batch_size} seq_len={seq_len} "
-            f"valid_tokens={valid_tokens}"
+            f"valid_tokens={valid_tokens:.1f}/batch "
+            f"(split mean: {valid_tokens_total} over "
+            f"{valid_tokens_batches} batches)"
         )
 
         ctx = StageContext(
@@ -96,6 +114,8 @@ class EfficiencySession:
             cfg=self.cfg,
             environment=environment,
             output_dir=self.output_dir,
+            valid_tokens_total=valid_tokens_total,
+            valid_tokens_batches=valid_tokens_batches,
         )
 
         sampler = ResourceSampler(device, self.cfg.general.resource_sample_interval)

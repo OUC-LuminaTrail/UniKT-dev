@@ -39,11 +39,15 @@ class StageContext:
     device: torch.device
     sample_batch: Any
     batch_size: int
-    valid_tokens: int
+    valid_tokens: float
     seq_len: int | None
     cfg: Any
     environment: EnvironmentInfo
     output_dir: Path | None = None
+    # Provenance for ``valid_tokens`` when it is a full-split mean: total valid
+    # interactions and the batch count the mean divides.
+    valid_tokens_total: int = 0
+    valid_tokens_batches: int = 0
 
     @property
     def general(self) -> Any:
@@ -101,3 +105,8 @@ class EfficiencyStage(ABC):
             table.add_row(
                 "GPU peak (reserved)", f"{result.gpu_peak_reserved_mib:,.0f} MiB"
             )
+
+
+def format_valid_tokens(mean: float, total: int, batches: int) -> str:
+    """Render a throughput numerator with its full-split provenance."""
+    return f"{mean:,.1f} (split mean: {total:,} over {batches} batches)"

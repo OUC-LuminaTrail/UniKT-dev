@@ -94,7 +94,7 @@ class _FakeTarget:
         return {"y_label": torch.zeros(6)}
 
 
-def _make_session(tmp_path, modes: str) -> EfficiencySession:
+def _make_session(tmp_path, modes: str, target=None) -> EfficiencySession:
     # eff_cfg must be a real dataclass: session serialization runs it through
     # ``config_to_dict`` → ``asdict``, which rejects SimpleNamespace.
     @dataclass
@@ -114,7 +114,7 @@ def _make_session(tmp_path, modes: str) -> EfficiencySession:
         general=SimpleNamespace(seed=42),
     )
     return EfficiencySession(
-        target=_FakeTarget(), rc=rc, eff_cfg=_EffCfg(), output_dir=tmp_path
+        target=target or _FakeTarget(), rc=rc, eff_cfg=_EffCfg(), output_dir=tmp_path
     )
 
 
@@ -166,3 +166,86 @@ class TestStageFailureIsolation:
         report = _make_session(tmp_path, "utest_ok_stage").run()
         assert report.errors == {}
         assert report.results == {"utest_ok_stage": {"ok": True}}
+
+
+@pytest.fixture
+def ctx_capture_stage(registry_snapshot):
+    """A stage capturing the StageContext fields the session feeds it."""
+    captured: dict = {}
+
+    @register_efficiency_stage("utest_capture_stage")
+    class _CaptureStage(_FakeStage):
+        priority = 5
+
+        def run(self, ctx):
+            captured.update(
+                valid_tokens=ctx.valid_tokens,
+                total=ctx.valid_tokens_total,
+                batches=ctx.valid_tokens_batches,
+            )
+            return {"ok": True}
+
+    return captured
+
+
+class TestSplitThroughputNumerator:
+    """The throughput numerator must be a full-split mean with provenance."""
+
+    def test_ctx_carries_split_mean_and_provenance(self, ctx_capture_stage, tmp_path):
+        # _FakeTarget yields one batch whose forward scores 6 tokens: the split
+        # mean equals the single batch's count, but arrives with provenance.
+        report = _make_session(tmp_path, "utest_capture_stage").run()
+        assert report.results == {"utest_capture_stage": {"ok": True}}
+        assert ctx_capture_stage["valid_tokens"] == pytest.approx(6.0)
+        assert ctx_capture_stage["total"] == 6
+        assert ctx_capture_stage["batches"] == 1
+
+    def test_mean_averages_over_all_batches(self, ctx_capture_stage, tmp_path):
+        class _TwoBatchTarget(_FakeTarget):
+            """Loader yields two batches scoring 6 and 3 valid tokens."""
+
+            @property
+            def train_data(self):
+                return [
+                    {
+                        "n": 6,
+                        "questions": torch.zeros(2, 3, dtype=torch.long),
+                    },
+                    {
+                        "n": 3,
+                        "questions": torch.zeros(2, 3, dtype=torch.long),
+                    },
+                ]
+
+            def forward(self, batch):
+                return {"y_label": torch.zeros(batch["n"])}
+
+        report = _make_session(
+            tmp_path, "utest_capture_stage", target=_TwoBatchTarget()
+        ).run()
+        assert report.results == {"utest_capture_stage": {"ok": True}}
+        assert ctx_capture_stage["valid_tokens"] == pytest.approx(4.5)  # (6+3)/2
+        assert ctx_capture_stage["total"] == 9
+        assert ctx_capture_stage["batches"] == 2
+
+    def test_failing_split_pass_aborts_the_session(self, ctx_capture_stage, tmp_path):
+        """A broken loader during the full pass is a setup failure, not a
+        silent fallback: it must propagate and abort the run."""
+
+        class _BoomOnSecondAccessTarget(_FakeTarget):
+            """Prefetch works; the split pass's loader access raises."""
+
+            def __init__(self):
+                super().__init__()
+                self._accesses = 0
+
+            @property
+            def train_data(self):
+                self._accesses += 1
+                if self._accesses > 1:
+                    raise RuntimeError("split pass boom")
+                return [{"questions": torch.zeros(2, 3, dtype=torch.long)}]
+
+        target = _BoomOnSecondAccessTarget()
+        with pytest.raises(RuntimeError, match="split pass boom"):
+            _make_session(tmp_path, "utest_capture_stage", target=target).run()

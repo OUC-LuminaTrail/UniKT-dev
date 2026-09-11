@@ -11,6 +11,7 @@ from utils.efficiency.measures.batch import (
     batch_size_of,
     count_test_predictions,
     count_valid_interactions,
+    count_valid_interactions_split,
     to_device,
 )
 
@@ -104,6 +105,42 @@ class TestCountScored:
         target = _StubTarget(torch.zeros(64), torch.zeros(8))
         assert count_valid_interactions(target, "b") == 64
         assert count_test_predictions(target, "b") == 8
+
+
+class _SplitStubTarget:
+    """Duck-typed target whose per-batch ``y_label`` size is batch-dependent."""
+
+    def __init__(self, sizes: list[int]) -> None:
+        self.device = torch.device("cpu")
+        self.model = torch.nn.Linear(1, 1)
+        self._sizes = sizes
+        self.forward_calls = 0
+
+    def forward(self, batch):
+        self.forward_calls += 1
+        return {"y_label": torch.zeros(self._sizes[batch])}
+
+
+class TestCountValidInteractionsSplit:
+    def test_totals_and_batch_count_over_loader(self):
+        target = _SplitStubTarget([10, 20, 30])
+        total, batches = count_valid_interactions_split(target, [0, 1, 2])
+        assert total == 60
+        assert batches == 3
+        assert target.forward_calls == 3
+
+    def test_total_is_invariant_to_batch_order(self):
+        # Shuffle-order invariance is the point of the split count: reordering
+        # the loader changes which batch is first, never the sum.
+        assert count_valid_interactions_split(
+            _SplitStubTarget([10, 20, 30]), [2, 0, 1]
+        ) == (
+            60,
+            3,
+        )
+
+    def test_empty_loader_returns_zero_total_and_count(self):
+        assert count_valid_interactions_split(_SplitStubTarget([]), []) == (0, 0)
 
 
 class _LazyCacheTarget:

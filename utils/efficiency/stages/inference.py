@@ -11,7 +11,7 @@ from ..measures.timing import (
     LatencyMetricsBase,
     benchmark_forward_loop,
 )
-from .base import EfficiencyStage, StageContext
+from .base import EfficiencyStage, StageContext, format_valid_tokens
 
 logger = get_logger(__name__)
 
@@ -23,7 +23,9 @@ class InferenceMetrics(LatencyMetricsBase):
     iters: int = 0
     repeats: int = 0
     batch_size: int = 0
-    valid_tokens_per_batch: int = 0
+    valid_tokens_per_batch: float = 0.0
+    valid_tokens_total: int = 0
+    valid_tokens_batches: int = 0
     throughput_interactions_per_sec: float = 0.0
     ns_per_interaction: float = 0.0
 
@@ -40,7 +42,9 @@ def benchmark_inference(
     target,
     sample_batch,
     batch_size: int,
-    valid_tokens: int,
+    valid_tokens: float,
+    valid_tokens_total: int,
+    valid_tokens_batches: int,
     warmup_iters: int,
     iters: int,
     repeats: int,
@@ -50,7 +54,10 @@ def benchmark_inference(
 
     Reuses the prefetched ``sample_batch`` to avoid DataLoader IPC noise; a CUDA
     Event per iteration reads elapsed_time after ``end.synchronize()``, covering
-    host launch through kernel completion.
+    host launch through kernel completion. ``valid_tokens`` is the per-batch
+    average over a full train-split pass (shuffle-order invariant); the timing
+    batch stays representative because the uniform-input override pins every
+    batch to the same padded shape.
     """
     # Explicit so the exported benchmark keeps its eval-mode contract even for
     # targets whose forward does not enforce it.
@@ -86,6 +93,8 @@ def benchmark_inference(
         repeats=repeats,
         batch_size=batch_size,
         valid_tokens_per_batch=valid_tokens,
+        valid_tokens_total=valid_tokens_total,
+        valid_tokens_batches=valid_tokens_batches,
         throughput_interactions_per_sec=throughput,
         ns_per_interaction=ns_per,
         **LatencyMetricsBase.stats_kwargs(stats),
@@ -108,6 +117,8 @@ class InferenceStage(EfficiencyStage):
             ctx.sample_batch,
             ctx.batch_size,
             ctx.valid_tokens,
+            ctx.valid_tokens_total,
+            ctx.valid_tokens_batches,
             ctx.general.warmup_iters,
             cfg.iters,
             cfg.repeats,
@@ -119,7 +130,14 @@ class InferenceStage(EfficiencyStage):
         """Render inference latency/throughput as a Rich table."""
         table = cls.make_kv_table("Inference")
         table.add_row("Iterations", f"{result.iters} x {result.repeats}")
-        table.add_row("Valid tokens / batch", f"{result.valid_tokens_per_batch:,}")
+        table.add_row(
+            "Valid tokens / batch",
+            format_valid_tokens(
+                result.valid_tokens_per_batch,
+                result.valid_tokens_total,
+                result.valid_tokens_batches,
+            ),
+        )
         cls.add_latency_rows(table, result)
         table.add_row(
             "Throughput (sustained)",

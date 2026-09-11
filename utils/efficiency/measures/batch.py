@@ -26,10 +26,11 @@ def _first_tensor(batch) -> torch.Tensor | None:
 
 def _count_scored(forward, device) -> int:
     """``numel`` of the forward's aligned 1D ``y_label``, synchronized."""
-    # no_grad (not inference_mode): this is usually the session's first forward,
-    # and models with lazily built seq-len constants (AKT family) cache them
-    # here. Tensors created under inference_mode are rejected by autograd in
-    # the later grad-enabled FLOPs/train stages; no_grad tensors are not.
+    # no_grad (not inference_mode): counting forwards may be a model's first
+    # execution, and models with lazily built seq-len constants (AKT family)
+    # cache them here. Tensors created under inference_mode are rejected by
+    # autograd in the later grad-enabled FLOPs/train stages; no_grad tensors
+    # are not.
     with torch.no_grad():
         out = forward()
         n = int(out["y_label"].numel())
@@ -46,6 +47,24 @@ def count_valid_interactions(target, sample_batch) -> int:
     ``_compute_loss`` actually consumes.
     """
     return _count_scored(lambda: target.forward(sample_batch), target.device)
+
+
+def count_valid_interactions_split(target, loader) -> tuple[int, int]:
+    """Total valid interactions across one full pass of ``loader``.
+
+    Sums :func:`count_valid_interactions` over every batch and returns
+    ``(total, batch_count)``. A full-pass sum is invariant to the loader's
+    shuffle order, so dividing ``total`` by ``batch_count`` yields a per-batch
+    average that depends only on the dataset and the model's data granularity
+    (question- vs skill-level), not on which batch a shuffled loader happens to
+    yield first.
+    """
+    total = 0
+    batches = 0
+    for batch in loader:
+        total += count_valid_interactions(target, to_device(batch, target.device))
+        batches += 1
+    return total, batches
 
 
 def count_test_predictions(target, sample_batch) -> int:
