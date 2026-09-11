@@ -76,6 +76,24 @@ def test_default_question_embed_dim_matches_hidden_dim():
     assert model.question_embed.weight.shape == (3, 16)
 
 
+def test_oversized_question_embedding_folds_to_full_width():
+    torch.manual_seed(0)
+    hidden_dim = 16
+    requested_dim = 24
+    source_embedding = torch.randn(3, requested_dim)
+    projection = torch.randn(hidden_dim, requested_dim)
+    expected = torch.nn.functional.linear(source_embedding, projection)
+    model = AxisKT(**_dim_kwargs(hidden_dim), question_embed_dim=requested_dim).eval()
+
+    assert model.question_embed.weight.shape == (3, hidden_dim)
+    assert model.question_embed_proj is None
+    with torch.no_grad():
+        model.question_embed.weight.copy_(expected)
+        actual = model._question_vector(torch.tensor([[0, 1, 2]])).squeeze(0)
+
+    torch.testing.assert_close(actual, expected)
+
+
 @pytest.mark.parametrize("dim", [4, 8])
 def test_low_dim_question_embed_shrinks_per_question_parameters(dim):
     full = AxisKT(**_dim_kwargs())
@@ -143,11 +161,31 @@ def test_negative_question_embed_dim_is_rejected():
         AxisKT(**_dim_kwargs(), question_embed_dim=-2)
 
 
+def test_direct_decay_logits_match_dense_embedding_linear_table():
+    torch.manual_seed(0)
+    model = AxisKT(**_dim_kwargs()).to(DEVICE)
+    gap_embedding = torch.randn(model.max_gap_bins, model.hidden_dim, device=DEVICE)
+    decay_weight = torch.randn(model.hidden_dim, model.hidden_dim, device=DEVICE)
+    decay_bias = torch.randn(model.hidden_dim, device=DEVICE)
+    factored_logits = torch.nn.functional.linear(
+        gap_embedding, decay_weight, decay_bias
+    )
+
+    with torch.no_grad():
+        model.local_decay_logits.copy_(factored_logits)
+    actual = torch.exp(-torch.nn.functional.softplus(model.local_decay_logits))
+    expected = torch.exp(-torch.nn.functional.softplus(factored_logits))
+
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    assert model.local_decay_logits.numel() == (model.max_gap_bins * model.hidden_dim)
+    assert not hasattr(model, "gap_embed")
+    assert not hasattr(model, "local_decay")
+
+
 def test_local_readout_initializes_as_masked_mean():
     model = _build_model(DEVICE, activate_private_writes=False)
     with torch.no_grad():
         model.local_readout.weight.zero_()
-        model.local_readout.bias.zero_()
     B, P, H = 2, 5, model.hidden_dim
     packed_state = torch.randn(B, P, H, device=DEVICE)
     skill_embedding = torch.randn(B, P, H, device=DEVICE)
@@ -183,7 +221,6 @@ def test_local_readout_can_weight_kcs_conditionally():
 
     with torch.no_grad():
         model.local_readout.weight.zero_()
-        model.local_readout.bias.zero_()
         model.local_readout.weight[0, 0] = 8.0
 
     actual = model._packed_question_conditioned_readout(
@@ -198,7 +235,6 @@ def test_local_readout_matches_cat_linear_reference():
     model = _build_model(DEVICE, activate_private_writes=False)
     with torch.no_grad():
         model.local_readout.weight.normal_(0.0, 0.5)
-        model.local_readout.bias.normal_(0.0, 0.5)
 
     B, N, K, H = 2, 3, 2, model.hidden_dim
     local_state = torch.randn(B, N, K, H, device=DEVICE)
@@ -225,9 +261,11 @@ def test_local_readout_matches_cat_linear_reference():
         packed_state, packed_skill, packed_pos, packed_valid, question_vector
     )
 
-    # Reference: cat -> Linear(3H, 1) then the same masked-softmax readout.
-    weight = model.local_readout.weight
-    bias = model.local_readout.bias
+    # Group-constant question and bias terms do not affect the softmax.
+    weight = torch.cat(
+        [model.local_readout.weight, torch.randn(1, H, device=DEVICE)], dim=1
+    )
+    bias = torch.randn(1, device=DEVICE)
     question_embedding = question_vector.unsqueeze(-2).expand_as(local_state)
     score_input = torch.cat((local_state, skill_embedding, question_embedding), dim=-1)
     scores = torch.nn.functional.linear(score_input, weight, bias).squeeze(-1)
@@ -292,11 +330,8 @@ def test_other_kc_response_does_not_change_private_state():
 def test_own_gap_does_not_decay_own_read_state():
     model = _build_model(DEVICE)
     with torch.no_grad():
-        model.gap_embed.weight.zero_()
-        model.gap_embed.weight[1, 0] = 2.0
-        model.local_decay.weight.zero_()
-        model.local_decay.bias.zero_()
-        model.local_decay.weight[:, 0] = 1.0
+        model.local_decay_logits.zero_()
+        model.local_decay_logits[1].fill_(2.0)
     questions = torch.tensor([[0, 1, 0]], device=DEVICE)
     responses = torch.tensor([[1, 0, 1]], device=DEVICE)
     mask = torch.ones_like(responses, dtype=torch.bool)
@@ -312,11 +347,8 @@ def test_own_gap_does_not_decay_own_read_state():
 def test_past_gap_composes_into_later_kc_read_states():
     model = _build_model(DEVICE)
     with torch.no_grad():
-        model.gap_embed.weight.zero_()
-        model.gap_embed.weight[1, 0] = 2.0
-        model.local_decay.weight.zero_()
-        model.local_decay.bias.zero_()
-        model.local_decay.weight[:, 0] = 1.0
+        model.local_decay_logits.zero_()
+        model.local_decay_logits[1].fill_(2.0)
     questions = torch.tensor([[0, 1, 0, 0]], device=DEVICE)
     responses = torch.tensor([[1, 0, 1, 1]], device=DEVICE)
     mask = torch.ones_like(responses, dtype=torch.bool)
@@ -364,7 +396,6 @@ def test_fused_inference_matches_training_readout_path():
     model = _activate_head(_build_model(DEVICE)).eval()
     with torch.no_grad():
         model.local_readout.weight.normal_(0.0, 0.2)
-        model.local_readout.bias.normal_(0.0, 0.2)
         model.question_diff.weight.normal_(0.0, 0.2)
     questions = torch.tensor([[0, 2, 1, 2, 0, 1], [2, 0, 2, 1, 0, 0]], device=DEVICE)
     responses = torch.tensor([[1, 0, 1, 1, 0, 1], [0, 1, 0, 1, 1, 0]], device=DEVICE)
@@ -403,11 +434,8 @@ def test_target_answer_does_not_leak_into_its_prediction():
 def test_target_timestamp_does_not_leak_into_its_prediction():
     model = _activate_head(_build_model(DEVICE))
     with torch.no_grad():
-        model.gap_embed.weight.zero_()
-        model.gap_embed.weight[1, 0] = 2.0
-        model.local_decay.weight.zero_()
-        model.local_decay.bias.zero_()
-        model.local_decay.weight[:, 0] = 1.0
+        model.local_decay_logits.zero_()
+        model.local_decay_logits[1].fill_(2.0)
     questions = torch.tensor([[0, 1, 0, 0]], device=DEVICE)
     responses = torch.tensor([[1, 0, 1, 1]], device=DEVICE)
     mask = torch.ones_like(questions, dtype=torch.bool)

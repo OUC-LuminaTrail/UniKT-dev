@@ -25,7 +25,7 @@ class AxisKTConfig(ModelConfig):
         question_embed_dim: Intrinsic width of the per-question embedding;
             -1 (default) means ``hidden_dim``, 0 removes the pathway, and
             smaller widths are lifted back to ``hidden_dim`` by a shared
-            projection.
+            projection. Values above ``hidden_dim`` are capped.
         use_global: Ablate the global causal dilated-conv branch. ``False``
             skips the stacked conv encoder and feeds zero global features to
             the readout; the branch parameters then stay inert.
