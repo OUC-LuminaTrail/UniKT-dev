@@ -110,6 +110,8 @@ class TestBenchmarkTraining:
             _BATCH,
             batch_size=4,
             valid_tokens=8,
+            valid_tokens_total=16,
+            valid_tokens_batches=2,
             warmup_iters=1,
             iters=2,
             device=torch.device("cpu"),
@@ -120,6 +122,8 @@ class TestBenchmarkTraining:
         assert metrics.iters == 2
         assert metrics.batch_size == 4
         assert metrics.valid_tokens_per_batch == 8
+        assert metrics.valid_tokens_total == 16
+        assert metrics.valid_tokens_batches == 2
         assert metrics.wall_time_s > 0
         assert metrics.gpu_peak_allocated_mib is None
 
@@ -130,6 +134,8 @@ class TestBenchmarkTraining:
             _BATCH,
             batch_size=4,
             valid_tokens=8,
+            valid_tokens_total=16,
+            valid_tokens_batches=2,
             warmup_iters=1,
             iters=2,
             device=torch.device("cpu"),
@@ -153,6 +159,8 @@ class TestBenchmarkTraining:
             _BATCH,
             batch_size=4,
             valid_tokens=8,
+            valid_tokens_total=8,
+            valid_tokens_batches=1,
             warmup_iters=0,
             iters=1,
             device=torch.device("cpu"),

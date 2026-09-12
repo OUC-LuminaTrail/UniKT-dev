@@ -46,7 +46,10 @@ class WindowlateMetrics(LatencyMetricsBase):
     train_batch_size: int = 0
     test_batch_size: int = 0
     predictions_per_batch: int = 0
-    train_path_tokens_per_batch: int = 0
+    # Per-batch average over a full train-split pass when known (float); the
+    # amortization ratio uses it only as a numerator scale, so the wider type
+    # changes no computed value.
+    train_path_tokens_per_batch: float = 0.0
     amortization_ratio: float = 0.0
     throughput_predictions_per_sec: float = 0.0
     us_per_prediction: float = 0.0
@@ -66,7 +69,7 @@ def benchmark_windowlate(
     train_batch_size: int,
     test_batch_size: int,
     predictions: int,
-    train_tokens: int,
+    train_tokens: float,
     warmup_iters: int,
     iters: int,
     repeats: int,
@@ -211,7 +214,7 @@ class WindowlateStage(EfficiencyStage):
         )
         table.add_row("Predictions / batch", f"{result.predictions_per_batch:,}")
         table.add_row(
-            "Train-path tokens / batch", f"{result.train_path_tokens_per_batch:,}"
+            "Train-path tokens / batch", f"{result.train_path_tokens_per_batch:,.1f}"
         )
         table.add_row(
             "Amortization vs train path",
