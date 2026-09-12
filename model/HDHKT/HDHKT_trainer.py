@@ -27,16 +27,11 @@ class HDHKTConfig(ModelConfig):
         weight_decay: Weight decay (L2 regularization) for optimizer.
         batch_size: Batch size for training.
         use_information_bottleneck: Enable the cross-channel graph bottleneck.
-        ib_private_weight: Weight of private reconstruction plus vCLUB.
-        ib_common_weight: Weight of cross-channel common reconstruction.
-        ib_align_weight: Weight of symmetric common-posterior alignment.
-        ib_route_weight: Weight of information-guided router distillation.
+        ib_private_weight: Weight of the two private reconstruction losses.
+        ib_club_weight: Weight of the two non-negative vCLUB penalties.
+        ib_common_weight: Weight of the dual-path, dual-relation common reconstruction.
         ib_club_fit_weight: Weight used to fit the vCLUB conditionals.
-        ib_rate_capacity: Per-code information budget in nats per dimension.
-        ib_rate_dual_init: Initial non-negative rate-constraint multiplier.
-        ib_rate_dual_lr: Projected dual-ascent learning rate.
         ib_negative_samples: Relation non-neighbours sampled per question.
-        ib_route_temperature: Temperature of the information routing target.
         ib_max_questions: Maximum graph roots used by auxiliary losses per batch.
     """
 
@@ -71,15 +66,10 @@ class HDHKTConfig(ModelConfig):
     )
     use_information_bottleneck: bool = True
     ib_private_weight: float = 0.05
+    ib_club_weight: float = 0.05
     ib_common_weight: float = 0.05
-    ib_align_weight: float = 0.01
-    ib_route_weight: float = 0.01
     ib_club_fit_weight: float = 0.05
-    ib_rate_capacity: float = 0.25
-    ib_rate_dual_init: float = 0.001
-    ib_rate_dual_lr: float = 0.01
     ib_negative_samples: int = 8
-    ib_route_temperature: float = 0.5
     ib_max_questions: int = 256
 
 
@@ -122,16 +112,8 @@ class HDHKTTrainer(BaseTrainer):
             num_hyperedges=self.hypergraph.num_e,
             use_information_bottleneck=m.use_information_bottleneck,
             ib_negative_samples=m.ib_negative_samples,
-            ib_route_temperature=m.ib_route_temperature,
             ib_max_questions=m.ib_max_questions,
         )
-
-        self._ib_rate_capacity = m.ib_rate_capacity
-        self._ib_rate_dual_lr = m.ib_rate_dual_lr
-        self._ib_rate_duals = {
-            name: float(m.ib_rate_dual_init)
-            for name in ("rate_p1", "rate_p2", "rate_c1", "rate_c2")
-        }
 
         loss_fn = torch.nn.BCEWithLogitsLoss()
         optimizer = torch.optim.Adam(
@@ -207,25 +189,7 @@ class HDHKTTrainer(BaseTrainer):
 
         m = self.run_config.model
         loss = loss + m.ib_private_weight * outputs["_ib_private_loss"]
+        loss = loss + m.ib_club_weight * outputs["_ib_club_loss"]
         loss = loss + m.ib_common_weight * outputs["_ib_common_loss"]
-        loss = loss + m.ib_align_weight * outputs["_ib_align_loss"]
-        loss = loss + m.ib_route_weight * outputs["_ib_route_loss"]
         loss = loss + m.ib_club_fit_weight * outputs["_ib_club_fit_loss"]
-
-        # A primal-dual update (completed after the optimizer step below)
-        # enforces an explicit average information-rate budget in nats/dim.
-        for name, dual in self._ib_rate_duals.items():
-            loss = loss + (outputs[f"_ib_{name}"] - self._ib_rate_capacity) * dual
         return loss
-
-    def compute_train_step(self, batch_data):
-        output, loss = super().compute_train_step(batch_data)
-        if "_ib_rate_p1" in output:
-            for name, dual in self._ib_rate_duals.items():
-                violation = (
-                    output[f"_ib_{name}"].detach().item() - self._ib_rate_capacity
-                )
-                self._ib_rate_duals[name] = max(
-                    0.0, dual + self._ib_rate_dual_lr * violation
-                )
-        return output, loss

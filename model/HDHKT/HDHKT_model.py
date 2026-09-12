@@ -139,30 +139,15 @@ class HyperGNN(nn.Module):
         return x2
 
 
-class VariationalBottleneck(nn.Module):
-    """Diagonal-Gaussian stochastic encoder used by the graph bottlenecks."""
+class ChannelEncoder(nn.Module):
+    """Deterministic projection for a private or common graph channel."""
 
     def __init__(self, dim: int) -> None:
         super().__init__()
-        self.to_stats = nn.Linear(dim, dim * 2)
+        self.projection = nn.Linear(dim, dim)
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        mean, logvar = self.to_stats(x).chunk(2, dim=-1)
-        # Keep the stochastic code numerically stable and bounded away from an
-        # effectively deterministic continuous channel.
-        logvar = logvar.clamp(min=-8.0, max=8.0)
-        if self.training:
-            code = mean + torch.exp(0.5 * logvar) * torch.randn_like(mean)
-        else:
-            code = mean
-        return code, mean, logvar
-
-    @staticmethod
-    def rate_per_dimension(mean: torch.Tensor, logvar: torch.Tensor) -> torch.Tensor:
-        """Return KL(q(z|x) || N(0, I)) in nats per latent dimension."""
-        return 0.5 * (mean.square() + logvar.exp() - logvar - 1.0).mean(dim=-1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.projection(x)
 
 
 class GaussianConditional(nn.Module):
@@ -392,11 +377,14 @@ class MoEFusion(nn.Module):
 
 
 class InformationBottleneckMoE(nn.Module):
-    """Cross-channel information bottleneck deeply coupled to the MoE.
+    """Three-code cross-channel information bottleneck coupled to the MoE.
 
-    HGT and HGNN outputs are decomposed into private and common stochastic
-    codes. Neither the experts nor the router receives a raw GNN output, so the
-    mixture cannot bypass the bottleneck.
+    HGT and HGNN outputs produce two private codes and one semantic common
+    code. The common code has two deterministic conditional paths through one
+    shared encoder. During training the MoE consumes an equal path-mixture
+    sample; during evaluation it consumes the path mean. Neither the experts
+    nor the router receives a raw GNN output, so the mixture cannot bypass the
+    bottleneck.
     """
 
     def __init__(
@@ -407,27 +395,25 @@ class InformationBottleneckMoE(nn.Module):
         *,
         dropout: float,
         negative_samples: int,
-        route_temperature: float,
     ) -> None:
         super().__init__()
         if negative_samples <= 0:
             raise ValueError("negative_samples must be positive")
-        if route_temperature <= 0:
-            raise ValueError("route_temperature must be positive")
         self.negative_samples = negative_samples
-        self.route_temperature = route_temperature
 
-        self.private1 = VariationalBottleneck(dim)
-        self.private2 = VariationalBottleneck(dim)
-        self.common1 = VariationalBottleneck(dim)
-        self.common2 = VariationalBottleneck(dim)
+        self.private1 = ChannelEncoder(dim)
+        self.private2 = ChannelEncoder(dim)
+        # A single shared module parameterizes both conditional paths of the
+        # same semantic common variable C.
+        self.common = ChannelEncoder(dim)
 
-        # Private codes reconstruct their own fixed relation; common codes
-        # reconstruct the paired opposite relation.
+        # Private codes reconstruct their own fixed relation.  The two
+        # conditional paths of C share relation decoders and each reconstructs
+        # both fixed relations, matching the CCGIB consistency objective.
         self.private1_decoder = SparseRelationDecoder(dim, num_skills)
         self.private2_decoder = SparseRelationDecoder(dim, num_hyperedges)
-        self.common1_cross_decoder = SparseRelationDecoder(dim, num_hyperedges)
-        self.common2_cross_decoder = SparseRelationDecoder(dim, num_skills)
+        self.common_skill_decoder = SparseRelationDecoder(dim, num_skills)
+        self.common_hyperedge_decoder = SparseRelationDecoder(dim, num_hyperedges)
 
         self.private1_from_view2 = GaussianConditional(dim)
         self.private2_from_view1 = GaussianConditional(dim)
@@ -439,32 +425,14 @@ class InformationBottleneckMoE(nn.Module):
             nn.Linear(dim, dim), nn.GELU(), nn.Dropout(dropout)
         )
         self.shared_expert = nn.Sequential(
-            nn.Linear(dim * 4, dim), nn.GELU(), nn.Dropout(dropout)
+            nn.Linear(dim, dim), nn.GELU(), nn.Dropout(dropout)
         )
         self.router = nn.Sequential(
-            nn.Linear(dim * 4 + 4, dim),
+            nn.Linear(dim * 3, dim),
             nn.Tanh(),
             nn.Linear(dim, 3),
         )
         self.norm = nn.LayerNorm(dim)
-
-    @staticmethod
-    def _symmetric_gaussian_kl(
-        mean1: torch.Tensor,
-        logvar1: torch.Tensor,
-        mean2: torch.Tensor,
-        logvar2: torch.Tensor,
-    ) -> torch.Tensor:
-        var1 = logvar1.exp()
-        var2 = logvar2.exp()
-        squared_mean_difference = (mean1 - mean2).square()
-        kl12 = 0.5 * (
-            logvar2 - logvar1 + (var1 + squared_mean_difference) / var2 - 1.0
-        ).mean(dim=-1)
-        kl21 = 0.5 * (
-            logvar1 - logvar2 + (var2 + squared_mean_difference) / var1 - 1.0
-        ).mean(dim=-1)
-        return 0.5 * (kl12 + kl21)
 
     @staticmethod
     def _deranged_indices(size: int, device: torch.device) -> torch.Tensor:
@@ -504,24 +472,17 @@ class InformationBottleneckMoE(nn.Module):
         self,
         p1: torch.Tensor,
         p2: torch.Tensor,
-        c1: torch.Tensor,
-        c2: torch.Tensor,
-        logvars: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+        common: torch.Tensor,
+    ) -> torch.Tensor:
         e1 = self.expert1(p1)
         e2 = self.expert2(p2)
-        shared_input = torch.cat([c1, c2, c1 * c2, (c1 - c2).abs()], dim=-1)
-        ec = self.shared_expert(shared_input)
+        ec = self.shared_expert(common)
 
-        uncertainty = torch.cat(
-            [logvar.exp().mean(dim=-1, keepdim=True) for logvar in logvars],
-            dim=-1,
-        )
-        router_input = torch.cat([p1, p2, c1, c2, uncertainty], dim=-1)
+        router_input = torch.cat([p1, p2, common], dim=-1)
         weights = F.softmax(self.router(router_input), dim=-1)
         experts = torch.stack([e1, e2, ec], dim=1)
         fused = torch.sum(experts * weights.unsqueeze(-1), dim=1)
-        return self.norm(fused), weights
+        return self.norm(fused)
 
     def forward(
         self,
@@ -532,18 +493,21 @@ class InformationBottleneckMoE(nn.Module):
         question_hyperedge_edges: torch.Tensor | None = None,
         source_ids: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        p1, p1_mean, p1_logvar = self.private1(view1)
-        p2, p2_mean, p2_logvar = self.private2(view2)
-        c1, c1_mean, c1_logvar = self.common1(view1)
-        c2, c2_mean, c2_logvar = self.common2(view2)
+        p1 = self.private1(view1)
+        p2 = self.private2(view2)
+        c1 = self.common(view1)
+        c2 = self.common(view2)
 
-        fused, route_weights = self._fuse(
-            p1,
-            p2,
-            c1,
-            c2,
-            (p1_logvar, p2_logvar, c1_logvar, c2_logvar),
-        )
+        if self.training:
+            # A Bernoulli selector gives an unbiased sample of the two-path
+            # common objective, independently per question.
+            choose_view1 = torch.rand(view1.size(0), 1, device=view1.device) < 0.5
+            common = torch.where(choose_view1, c1, c2)
+        else:
+            # Deterministic inference uses the equal-weight path mean.
+            common = 0.5 * (c1 + c2)
+
+        fused = self._fuse(p1, p2, common)
         if (
             not self.training
             or source_ids is None
@@ -569,15 +533,18 @@ class InformationBottleneckMoE(nn.Module):
             source_ids,
             negative_samples=self.negative_samples,
         )
-        c1_cross_reconstruction = self.common1_cross_decoder(
-            c1,
-            question_hyperedge_edges,
+        # Since ``common`` is an exact mixture sample, these two decoder calls
+        # are an unbiased Monte Carlo estimate of the average reconstruction
+        # objective over both conditional paths.
+        common_skill_reconstruction = self.common_skill_decoder(
+            common,
+            question_skill_edges,
             source_ids,
             negative_samples=self.negative_samples,
         )
-        c2_cross_reconstruction = self.common2_cross_decoder(
-            c2,
-            question_skill_edges,
+        common_hyperedge_reconstruction = self.common_hyperedge_decoder(
+            common,
+            question_hyperedge_edges,
             source_ids,
             negative_samples=self.negative_samples,
         )
@@ -589,55 +556,13 @@ class InformationBottleneckMoE(nn.Module):
             view1[source_ids], selected_p2, self.private2_from_view1
         )
 
-        rate_p1 = VariationalBottleneck.rate_per_dimension(
-            p1_mean[source_ids], p1_logvar[source_ids]
-        )
-        rate_p2 = VariationalBottleneck.rate_per_dimension(
-            p2_mean[source_ids], p2_logvar[source_ids]
-        )
-        rate_c1 = VariationalBottleneck.rate_per_dimension(
-            c1_mean[source_ids], c1_logvar[source_ids]
-        )
-        rate_c2 = VariationalBottleneck.rate_per_dimension(
-            c2_mean[source_ids], c2_logvar[source_ids]
-        )
-        align = self._symmetric_gaussian_kl(
-            c1_mean[source_ids],
-            c1_logvar[source_ids],
-            c2_mean[source_ids],
-            c2_logvar[source_ids],
-        )
-
-        private1_utility = -p1_reconstruction - club21 - rate_p1
-        private2_utility = -p2_reconstruction - club12 - rate_p2
-        common_utility = -0.5 * (
-            c1_cross_reconstruction + c2_cross_reconstruction + rate_c1 + rate_c2
-        )
-        common_utility = common_utility - align
-        utilities = torch.stack(
-            [private1_utility, private2_utility, common_utility], dim=-1
-        )
-        information_route = F.softmax(
-            utilities.detach() / self.route_temperature, dim=-1
-        )
-        selected_route = route_weights[source_ids].clamp_min(1e-8)
-        route_loss = F.kl_div(
-            selected_route.log(), information_route, reduction="batchmean"
-        )
-
         auxiliary = {
-            "private_loss": p1_reconstruction.mean()
-            + p2_reconstruction.mean()
-            + club21.mean().clamp_min(0.0)
-            + club12.mean().clamp_min(0.0),
-            "common_loss": (c1_cross_reconstruction + c2_cross_reconstruction).mean(),
-            "align_loss": align.mean(),
-            "route_loss": route_loss,
+            "private_loss": p1_reconstruction.mean() + p2_reconstruction.mean(),
+            "club_loss": club21.mean().clamp_min(0.0) + club12.mean().clamp_min(0.0),
+            "common_loss": (
+                common_skill_reconstruction + common_hyperedge_reconstruction
+            ).mean(),
             "club_fit_loss": club21_fit + club12_fit,
-            "rate_p1": rate_p1.mean(),
-            "rate_p2": rate_p2.mean(),
-            "rate_c1": rate_c1.mean(),
-            "rate_c2": rate_c2.mean(),
         }
         return fused, auxiliary
 
@@ -682,7 +607,6 @@ class HDHKT(nn.Module):
         num_hyperedges: int,
         use_information_bottleneck: bool = True,
         ib_negative_samples: int = 8,
-        ib_route_temperature: float = 0.5,
         ib_max_questions: int = 256,
         **kwargs: Any,
     ) -> None:
@@ -745,7 +669,6 @@ class HDHKT(nn.Module):
                 num_hyperedges=num_hyperedges,
                 dropout=self.dropout,
                 negative_samples=ib_negative_samples,
-                route_temperature=ib_route_temperature,
             )
         else:
             self.fuse = MoEFusion(dim=self.hidden_dim, dropout=self.dropout)

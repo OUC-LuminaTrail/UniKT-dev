@@ -71,7 +71,6 @@ class HDHKTAnalyzer(BaseCaseAnalyzer):
             num_hyperedges=hypergraph.num_e,
             use_information_bottleneck=m.use_information_bottleneck,
             ib_negative_samples=m.ib_negative_samples,
-            ib_route_temperature=m.ib_route_temperature,
             ib_max_questions=m.ib_max_questions,
         )
 
