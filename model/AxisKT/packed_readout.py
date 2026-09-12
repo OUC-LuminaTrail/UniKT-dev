@@ -24,8 +24,6 @@ def _readout_event_kernel(
     event_ptr,
     wl_ptr,
     ws_ptr,
-    wq_ptr,
-    bias_ptr,
     S,
     K,
     P,
@@ -57,12 +55,9 @@ def _readout_event_kernel(
 
     wl = tl.load(wl_ptr + h_offs, mask=h_mask, other=0.0)
     ws = tl.load(ws_ptr + h_offs, mask=h_mask, other=0.0)
-    wq = tl.load(wq_ptr + h_offs, mask=h_mask, other=0.0)
     q_off = (pid_b * S + pid_s) * H + h_offs
     question = tl.load(question_ptr + q_off, mask=h_mask, other=0.0)
-    qp = tl.sum(question * wq, 0)
-    bias = tl.load(bias_ptr)
-    score = tl.sum(state * wl[None, :], 1) + tl.sum(sk * ws[None, :], 1) + qp + bias
+    score = tl.sum(state * wl[None, :], 1) + tl.sum(sk * ws[None, :], 1)
     score = tl.where(kv, score, float("-inf"))
 
     m = tl.max(score, 0)
@@ -95,7 +90,6 @@ def fused_readout_event(
     kc_inverse: torch.Tensor,
     max_skills: int,
     weight: torch.Tensor,
-    bias: torch.Tensor,
 ) -> tuple[torch.Tensor, ...]:
     """Run the fused readout and event-construction kernel.
 
@@ -110,10 +104,8 @@ def fused_readout_event(
         kc_inverse: Inverse of the packing permutation over the same flat
             domain: flat slot -> packed index, [B, S*K].
         max_skills: K, the flattened KC width per position.
-        weight: Row vector of ``local_readout``, [1, 3H]: first H entries
-            multiply the state, next H the skill embedding, final H the
-            question vector.
-        bias: The scalar readout bias kept on the device.
+        weight: Row vector of ``local_readout``, [1, 2H]: first H entries
+            multiply the state and the final H multiply the skill embedding.
 
     Returns:
         (readout [B, S, H], event_embedding [B, S, H]).
@@ -148,9 +140,7 @@ def fused_readout_event(
         readout,
         event,
         weight[:, :hidden].reshape(-1),
-        weight[:, hidden : 2 * hidden].reshape(-1),
-        weight[:, 2 * hidden :].reshape(-1),
-        bias,
+        weight[:, hidden:].reshape(-1),
         seq_len,
         max_skills,
         packed_len,

@@ -99,12 +99,12 @@ class AxisKT(nn.Module):
         self.register_buffer("question_skill_ids", skill_ids, persistent=True)
         self.register_buffer("question_skill_mask", skill_mask, persistent=True)
 
-        # ``question_embed_dim`` 0 drops the pathway entirely; below full width
-        # a shared projection lifts the embedding back to ``hidden_dim``.
+        # Cap the intrinsic question-embedding width at ``hidden_dim``.
         if question_embed_dim is None:
             question_embed_dim = hidden_dim
         if question_embed_dim < 0:
             raise ValueError("question_embed_dim must be non-negative")
+        question_embed_dim = min(question_embed_dim, hidden_dim)
         if question_embed_dim == 0:
             self.question_embed = None
             self.question_embed_proj = None
@@ -119,7 +119,6 @@ class AxisKT(nn.Module):
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
         )
         self.answer_embed = nn.Embedding(2, hidden_dim)
-        self.gap_embed = nn.Embedding(max_gap_bins, hidden_dim)
         self.question_diff = nn.Embedding(self.num_questions, 1)
         self.skill_change = nn.Embedding(
             self.num_skills + 1, hidden_dim, padding_idx=self.num_skills
@@ -129,8 +128,12 @@ class AxisKT(nn.Module):
         # event-conditioned write, one private state per KC.
         self.local_write = nn.Linear(hidden_dim, hidden_dim)
         self.local_init = nn.Linear(hidden_dim, hidden_dim)
-        self.local_decay = nn.Linear(hidden_dim, hidden_dim)
-        self.local_readout = nn.Linear(3 * hidden_dim, 1)
+        # Learned per-gap, per-state-dimension decay logits.
+        self.local_decay_logits = nn.Parameter(
+            torch.full((max_gap_bins, hidden_dim), -4.0)
+        )
+        # Per-KC softmax scores use local-state and skill features.
+        self.local_readout = nn.Linear(2 * hidden_dim, 1, bias=False)
         self.global_blocks = nn.ModuleList(
             GlobalConvBlock(
                 d_model=hidden_dim,
@@ -157,18 +160,17 @@ class AxisKT(nn.Module):
         self.irt_disc = nn.Parameter(torch.tensor(1.0))
 
         nn.init.zeros_(self.question_diff.weight)
-        for layer in (self.local_write, self.local_readout):
-            nn.init.zeros_(layer.weight)
-            nn.init.zeros_(layer.bias)
-        nn.init.zeros_(self.local_decay.weight)
-        nn.init.constant_(self.local_decay.bias, -4.0)
+        nn.init.zeros_(self.local_write.weight)
+        nn.init.zeros_(self.local_write.bias)
+        nn.init.zeros_(self.local_readout.weight)
 
     def _question_vector(self, questions: torch.Tensor) -> torch.Tensor:
         """Return the per-question vector at ``hidden_dim`` width.
 
         ``question_embed_dim`` sets the intrinsic width: 0 removes the pathway
         (zeros), a value below ``hidden_dim`` is lifted by a shared projection,
-        and ``hidden_dim`` uses the embedding directly.
+        and values at or above ``hidden_dim`` use a full-width embedding
+        directly.
         """
         if self.question_embed is None:
             return torch.zeros(
@@ -201,23 +203,18 @@ class AxisKT(nn.Module):
     ) -> torch.Tensor:
         """Question-conditioned readout directly in packed space.
 
-        Each occurrence is scored from its private KC state, the KC embedding,
-        and the containing question's vector; a softmax over the occurrences
-        of a position weights the states before summing, reduced with
-        ``scatter_reduce`` over the packed position ids.
+        Each occurrence is scored from its private KC state and KC embedding;
+        a softmax over the occurrences of a position weights the states before
+        summing, reduced with ``scatter_reduce`` over the packed position ids.
+        ``question_vector`` supplies the output shape.
         """
         h = self.hidden_dim
         weight = self.local_readout.weight
         w_local = weight[:, :h]
-        w_skill = weight[:, h : 2 * h]
-        w_question = weight[:, 2 * h :]
-        question_proj = F.linear(question_vector, w_question).squeeze(-1)
-        scores = (
-            F.linear(packed_state, w_local).squeeze(-1)
-            + F.linear(packed_skill_embedding, w_skill).squeeze(-1)
-            + question_proj.gather(1, packed_pos)
-            + self.local_readout.bias
-        )
+        w_skill = weight[:, h:]
+        scores = F.linear(packed_state, w_local).squeeze(-1) + F.linear(
+            packed_skill_embedding, w_skill
+        ).squeeze(-1)
         # Padded occurrences are invalid; keep them out of their position's
         # softmax group.
         scores = scores.masked_fill(~packed_valid, torch.finfo(scores.dtype).min)
@@ -412,9 +409,7 @@ class AxisKT(nn.Module):
             + self.answer_embed(packed_response)
         )
         if self.use_forgetting:
-            decay_table = torch.exp(
-                -F.softplus(self.local_decay(self.gap_embed.weight))
-            )
+            decay_table = torch.exp(-F.softplus(self.local_decay_logits))
             decay_codes = gap_bucket
         else:
             # Identity transition: keep local writes and per-KC segmentation,
@@ -678,7 +673,6 @@ class AxisKT(nn.Module):
                 kc_inverse,
                 self.question_skill_ids.size(1),
                 self.local_readout.weight,
-                self.local_readout.bias,
             )
         else:
             packed = self._pack_kc_occurrences(
