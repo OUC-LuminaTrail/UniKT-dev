@@ -66,7 +66,7 @@ class HDHKTConfig(ModelConfig):
     )
     use_information_bottleneck: bool = True
     ib_private_weight: float = 0.05
-    ib_club_weight: float = 0.05
+    ib_club_weight: float = 0.25
     ib_common_weight: float = 0.05
     ib_club_fit_weight: float = 0.05
     ib_negative_samples: int = 8
